@@ -74,7 +74,7 @@ Key interaction rules worth keeping:
 | ROM Manager | separate remembered OS window; full virtualized DAT list, 1G1R preferences, fixdat/CSV, safe copy/rebuild (loose or deterministic ZIP sets), persistent scan cache | now |
 | Settings: NES page | region, mapper/header info, deterministic RAM | now |
 | Settings: Advanced | core id, log level, state format | now |
-| Per-game properties | Tools → Game properties…: timing region and header mapper overrides per game, saved as `<stem>.game` and applied on the next load | now |
+| Per-game properties | Tools → Game properties…: timing region, per-port controller devices and header mapper overrides per game, saved as `<stem>.game` and applied on the next load | now |
 | NetPlay / Achievements | separate milestones | later |
 
 ## Platforms

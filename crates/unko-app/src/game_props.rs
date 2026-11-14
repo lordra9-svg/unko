@@ -1,4 +1,4 @@
-//! Per-game property overrides (region and mapper).
+//! Per-game property overrides (region, controller ports and mapper).
 //!
 //! Stored next to the game's other save data as `<stem>.game`, so the file
 //! survives moving the library and stays keyed by the ROM name. A missing or
@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::Path;
 
-use unko_core::Region;
+use unko_core::{PortDevice, Region};
 
 /// Overrides that apply to one game.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -16,13 +16,20 @@ pub struct GameProperties {
     pub region: Option<Region>,
     /// Mapper number; `None` uses the iNES/NES 2.0 header.
     pub mapper: Option<u16>,
+    /// Controller device on port 1; `None` uses the global setting.
+    pub port1: Option<PortDevice>,
+    /// Controller device on port 2; `None` uses the global setting.
+    pub port2: Option<PortDevice>,
 }
 
 impl GameProperties {
     /// Whether no override is set.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.region.is_none() && self.mapper.is_none()
+        self.region.is_none()
+            && self.mapper.is_none()
+            && self.port1.is_none()
+            && self.port2.is_none()
     }
 
     /// Loads overrides from `path`; an unreadable or absent file is empty.
@@ -57,7 +64,11 @@ impl GameProperties {
         let mapper = self
             .mapper
             .map_or_else(|| "header".to_string(), |mapper| mapper.to_string());
-        format!("# Unko per-game properties\nregion={region}\nmapper={mapper}\n")
+        let port1 = self.port1.map_or("global", PortDevice::name);
+        let port2 = self.port2.map_or("global", PortDevice::name);
+        format!(
+            "# Unko per-game properties\nregion={region}\nmapper={mapper}\nport1={port1}\nport2={port2}\n"
+        )
     }
 
     /// Parses the on-disk key/value form, ignoring unknown keys and comments.
@@ -76,6 +87,8 @@ impl GameProperties {
             match key.trim() {
                 "region" => properties.region = region_from_key(value),
                 "mapper" => properties.mapper = parse_mapper(value),
+                "port1" => properties.port1 = parse_port(value),
+                "port2" => properties.port2 = parse_port(value),
                 _ => {}
             }
         }
@@ -88,6 +101,28 @@ fn parse_mapper(value: &str) -> Option<u16> {
         return None;
     }
     value.parse::<u16>().ok().filter(|mapper| *mapper <= 0x0FFF)
+}
+
+fn parse_port(value: &str) -> Option<PortDevice> {
+    let value = value.trim().to_ascii_lowercase();
+    if matches!(value.as_str(), "global" | "auto" | "none" | "-") {
+        return None;
+    }
+    [
+        PortDevice::Gamepad,
+        PortDevice::Zapper,
+        PortDevice::Paddle,
+        PortDevice::PowerPad,
+        PortDevice::FamilyTrainer,
+        PortDevice::FamilyKeyboard,
+        PortDevice::SuborKeyboard,
+        PortDevice::FourScore,
+        PortDevice::Microphone,
+        PortDevice::Tape,
+        PortDevice::MiraclePiano,
+    ]
+    .into_iter()
+    .find(|device| device.name() == value)
 }
 
 fn region_key(region: Region) -> &'static str {
@@ -145,6 +180,8 @@ mod tests {
         let properties = GameProperties {
             region: Some(Region::Pal),
             mapper: Some(5),
+            port1: Some(PortDevice::Zapper),
+            port2: Some(PortDevice::FourScore),
         };
         assert_eq!(GameProperties::from_text(&properties.to_text()), properties);
         assert!(GameProperties::from_text("region=global\nmapper=header\n").is_empty());
@@ -152,7 +189,7 @@ mod tests {
             GameProperties::from_text("region=dendy\nmapper=header\n"),
             GameProperties {
                 region: Some(Region::Dendy),
-                mapper: None
+                ..GameProperties::default()
             }
         );
     }
@@ -169,6 +206,7 @@ mod tests {
         let properties = GameProperties {
             region: Some(Region::Ntsc),
             mapper: Some(4),
+            ..GameProperties::default()
         };
         properties.save(&path).expect("save");
         assert_eq!(GameProperties::load(&path), properties);

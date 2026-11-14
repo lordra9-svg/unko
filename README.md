@@ -150,8 +150,8 @@ per-game profiles and keyboard shortcuts are configurable in Settings.
 and `.rar`; dropping a ROM or archive on the window opens it and adds its
 folder to the library.
 
-Tools → **Game properties…** overrides the timing region and the header mapper
-for one game. The override is stored as `<stem>.game` in the save folder and
+Tools → **Game properties…** overrides the timing region, the controller
+ports and the header mapper for one game. The override is stored as `<stem>.game` in the save folder and
 applies on the next load; **Save and reload** applies it immediately (or
 launch with `--properties`). Mapper
 overrides rewrite the iNES/NES 2.0 header, so a mislabelled dump can boot

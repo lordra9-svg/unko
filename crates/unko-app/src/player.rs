@@ -287,13 +287,15 @@ impl Player {
 
         // The shell re-applies the selected devices every frame; set the
         // initial pair here so the first frame already has the right devices.
-        // The Four Score adapter occupies both ports.
-        let (device1, device2) = if settings.port1_device == PortDevice::FourScore
-            || settings.port2_device == PortDevice::FourScore
+        // Per-game overrides win over the global ports. The Four Score adapter
+        // occupies both ports.
+        let port1 = properties.port1.unwrap_or(settings.port1_device);
+        let port2 = properties.port2.unwrap_or(settings.port2_device);
+        let (device1, device2) = if port1 == PortDevice::FourScore || port2 == PortDevice::FourScore
         {
             (PortDevice::FourScore, PortDevice::FourScore)
         } else {
-            (settings.port1_device, settings.port2_device)
+            (port1, port2)
         };
         core.set_port_device(0, device1);
         core.set_port_device(1, device2);
@@ -1570,8 +1572,8 @@ mod tests {
             "mapper 4095 must not load without the override"
         );
         let properties = GameProperties {
-            region: None,
             mapper: Some(0),
+            ..GameProperties::default()
         };
         let player = Player::start_with(&entry, &settings, properties).expect("override loads");
         assert!(player.title.contains("bad-header"));

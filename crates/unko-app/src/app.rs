@@ -98,6 +98,43 @@ impl ControllerAction {
     }
 }
 
+const PORT_DEVICES: [PortDevice; 11] = [
+    PortDevice::Gamepad,
+    PortDevice::Zapper,
+    PortDevice::Paddle,
+    PortDevice::PowerPad,
+    PortDevice::FamilyTrainer,
+    PortDevice::FamilyKeyboard,
+    PortDevice::SuborKeyboard,
+    PortDevice::FourScore,
+    PortDevice::Microphone,
+    PortDevice::Tape,
+    PortDevice::MiraclePiano,
+];
+
+fn port_device_label(device: PortDevice) -> &'static str {
+    match device {
+        PortDevice::Gamepad => "Gamepad",
+        PortDevice::Zapper => "Zapper",
+        PortDevice::Paddle => "Paddle",
+        PortDevice::PowerPad => "Power Pad",
+        PortDevice::FamilyTrainer => "Family Trainer",
+        PortDevice::FamilyKeyboard => "Family BASIC keyboard",
+        PortDevice::SuborKeyboard => "Subor keyboard",
+        PortDevice::FourScore => "Four Score",
+        PortDevice::Microphone => "Microphone",
+        PortDevice::Tape => "Data recorder",
+        PortDevice::MiraclePiano => "Miracle Piano",
+    }
+}
+
+fn port_text(override_port: Option<PortDevice>, global: PortDevice) -> String {
+    override_port.map_or_else(
+        || format!("Use global ({})", port_device_label(global)),
+        |device| port_device_label(device).to_string(),
+    )
+}
+
 fn region_name(region: Region) -> &'static str {
     match region {
         Region::Auto => "Auto",
@@ -2594,6 +2631,8 @@ impl App {
         let mut open = self.game_props_open;
         let mut properties = self.game_props;
         let global = self.settings.region;
+        let global_port1 = self.settings.port1_device;
+        let global_port2 = self.settings.port2_device;
         let mut save = false;
         let mut reload = false;
         egui::Window::new("Game properties")
@@ -2632,6 +2671,44 @@ impl App {
                                         Some(Region::Dendy),
                                         "Dendy",
                                     );
+                                });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Port 1 device");
+                            egui::ComboBox::from_id_salt("game-props-port1")
+                                .selected_text(port_text(properties.port1, global_port1))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut properties.port1,
+                                        None,
+                                        format!("Use global ({})", port_device_label(global_port1)),
+                                    );
+                                    for device in PORT_DEVICES {
+                                        ui.selectable_value(
+                                            &mut properties.port1,
+                                            Some(device),
+                                            port_device_label(device),
+                                        );
+                                    }
+                                });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Port 2 device");
+                            egui::ComboBox::from_id_salt("game-props-port2")
+                                .selected_text(port_text(properties.port2, global_port2))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut properties.port2,
+                                        None,
+                                        format!("Use global ({})", port_device_label(global_port2)),
+                                    );
+                                    for device in PORT_DEVICES {
+                                        ui.selectable_value(
+                                            &mut properties.port2,
+                                            Some(device),
+                                            port_device_label(device),
+                                        );
+                                    }
                                 });
                         });
                         ui.add_space(6.0);
@@ -2887,8 +2964,8 @@ impl eframe::App for App {
         }
 
         if let Some(player) = &mut self.player {
-            let port1 = self.settings.port1_device;
-            let port2 = self.settings.port2_device;
+            let port1 = self.game_props.port1.unwrap_or(self.settings.port1_device);
+            let port2 = self.game_props.port2.unwrap_or(self.settings.port2_device);
             // The Four Score adapter occupies both ports.
             let (device1, device2) =
                 if port1 == PortDevice::FourScore || port2 == PortDevice::FourScore {
