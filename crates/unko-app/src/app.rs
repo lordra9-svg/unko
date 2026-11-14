@@ -1642,7 +1642,7 @@ impl App {
         let mut layout_reset = false;
 
         let mut body = |ui: &mut egui::Ui| {
-            egui::ScrollArea::both()
+            egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.horizontal_top(|ui| {
