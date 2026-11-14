@@ -129,6 +129,9 @@ PAL APU singles in PAL mode, `dma_4016_read` and `5-branch_delays_irq`.
   `n163_soundram`, `n163_soundram_init`, `fme7acktest`, `fme7ramtest`.
   The archive covers `exram`, `mmc5test`, `mmc5test_v2`, `MMC1_A12` and
   `m22chrbankingtest`; those load but have no machine-readable result.
+  Holy Mapperel: **28/42 variants pass `0000`**; the MMC1 CHR-RAM variants
+  report `0003` and MMC2/FME-7/TxSROM do not complete (see the dated entry in
+  `docs/accuracy-status.md`).
 - **Input**: `allpads`, `dma_sync_test_v2`, `PaddleTest3`, `vaus`,
   `vaus-test`, `read_joy3`, `Zap Ruder`, `spadtest-nes`, `mset`, `mict`,
   `Telling LYs?`, `ctrltest`, `raw pack2`, zapper tests,

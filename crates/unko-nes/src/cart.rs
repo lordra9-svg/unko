@@ -1876,6 +1876,8 @@ pub struct Mmc1 {
     prg_bank: u8,
     four_screen: bool,
     battery: bool,
+    /// The board mounts CHR-RAM (SNROM-style PRG-RAM gating).
+    chr_ram: bool,
     /// CPU cycle supplied for the pending write.
     cpu_cycle: u64,
     /// Cycle of the previous serial write (`u64::MAX` = none).
@@ -1932,6 +1934,7 @@ impl Mmc1 {
             prg_bank: 0,
             four_screen: header.four_screen,
             battery: header.battery,
+            chr_ram: header.chr_size == 0,
             cpu_cycle: 0,
             last_write_cycle: u64::MAX,
             prg_window: 0,
@@ -2019,6 +2022,13 @@ impl Mmc1 {
         }
     }
 
+    /// SNROM deselects PRG-RAM through `$A000` bit 4 (the CHR register's
+    /// high bit); SOROM/SUROM keep using `$E000` bit 4 as the PRG bank bit.
+    fn prg_ram_disabled(&self) -> bool {
+        let snrom = self.chr_ram && self.prg.len() <= 0x40000;
+        self.prg_bank & 0x10 != 0 || (snrom && self.chr0 & 0x10 != 0)
+    }
+
     fn write_register(&mut self, address: u16, value: u8) {
         match address & 0xE000 {
             0x8000 => self.control = value & 0x1F,
@@ -2035,8 +2045,7 @@ impl Mapper for Mmc1 {
             return 0;
         }
         if address < 0x8000 {
-            // `$E000` bit 4 deselects the PRG-RAM; the window then floats.
-            if self.prg_bank & 0x10 != 0 {
+            if self.prg_ram_disabled() {
                 return 0xFF;
             }
             let offset = usize::from(address - 0x6000);
@@ -2051,7 +2060,7 @@ impl Mapper for Mmc1 {
 
     fn prg_write(&mut self, address: u16, value: u8) {
         if address < 0x8000 {
-            if address >= 0x6000 && !self.prg_ram.is_empty() && self.prg_bank & 0x10 == 0 {
+            if address >= 0x6000 && !self.prg_ram.is_empty() && !self.prg_ram_disabled() {
                 let offset = usize::from(address - 0x6000) % self.prg_ram.len();
                 self.prg_ram[offset] = value;
             }
@@ -21278,6 +21287,8 @@ pub struct Mmc3 {
     bank_data: [u8; 8],
     mirroring: Mirroring,
     ram_enabled: bool,
+    /// `$A001` bit 6: PRG-RAM writes are ignored (reads stay mapped).
+    ram_write_protect: bool,
     irq_latch: u8,
     irq_counter: u8,
     irq_reload: bool,
@@ -21338,6 +21349,7 @@ impl Mmc3 {
             prg_mask: usize::MAX,
             mirroring: header.mirroring,
             ram_enabled: true,
+            ram_write_protect: false,
             irq_latch: 0,
             irq_counter: 0,
             irq_reload: false,
@@ -21454,8 +21466,9 @@ impl Mapper for Mmc3 {
             return 0;
         }
         if address < 0x8000 {
-            // `$A001` bit 7 gates *writes* only; PRG-RAM reads stay mapped.
-            if self.prg_ram.is_empty() {
+            // `$A001` bit 7 removes the chip from the bus, so a disabled
+            // PRG-RAM returns open bus (modelled as zero here).
+            if !self.ram_enabled || self.prg_ram.is_empty() {
                 return 0;
             }
             return self.prg_ram[usize::from(address - 0x6000) % self.prg_ram.len()];
@@ -21467,7 +21480,11 @@ impl Mapper for Mmc3 {
 
     fn prg_write(&mut self, address: u16, value: u8) {
         if address < 0x8000 {
-            if address >= 0x6000 && self.ram_enabled && !self.prg_ram.is_empty() {
+            if address >= 0x6000
+                && self.ram_enabled
+                && !self.ram_write_protect
+                && !self.prg_ram.is_empty()
+            {
                 let offset = usize::from(address - 0x6000) % self.prg_ram.len();
                 self.prg_ram[offset] = value;
             }
@@ -21500,7 +21517,10 @@ impl Mapper for Mmc3 {
                     Mirroring::Vertical
                 }
             }
-            0xA001 => self.ram_enabled = value & 0x80 != 0,
+            0xA001 => {
+                self.ram_enabled = value & 0x80 != 0;
+                self.ram_write_protect = value & 0x40 != 0;
+            }
             0xC000 => self.irq_latch = value,
             0xC001 => {
                 // $C001 raises the counter above 127 immediately; on the
@@ -39158,6 +39178,25 @@ mod tests {
     }
 
     #[test]
+    fn mmc3_prg_ram_read_only_mode() {
+        let rom = synth_banked(4, 128, 128);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        // $A001 bit 6 makes PRG-RAM read-only while bit 7 keeps it mapped.
+        cart.cpu_write(0xA001, 0xC0);
+        cart.cpu_write(0x6000, 0x5A);
+        assert_eq!(cart.cpu_read(0x6000), 0x00, "write must be ignored");
+        // Clearing the protect bit restores writes without touching the data.
+        cart.cpu_write(0xA001, 0x80);
+        cart.cpu_write(0x6000, 0x5A);
+        assert_eq!(cart.cpu_read(0x6000), 0x5A);
+        // Disabling the chip removes it from the bus for reads and writes.
+        cart.cpu_write(0xA001, 0x00);
+        cart.cpu_write(0x6001, 0xA5);
+        assert_eq!(cart.cpu_read(0x6000), 0x00);
+        assert_eq!(cart.cpu_read(0x6001), 0x00);
+    }
+
+    #[test]
     fn multibank_334_prg_register() {
         // 128 KiB PRG (4 x 32 KiB), 128 KiB CHR.
         let rom = synth_banked(334, 128, 128);
@@ -40754,24 +40793,24 @@ mod tests {
     }
 
     #[test]
-    fn mmc1_e000_bit4_disables_prg_ram() {
-        // 128 KiB PRG, CHR-RAM: MMC1 with an 8 KiB PRG-RAM window.
+    fn mmc1_snrom_a000_bit4_disables_prg_ram() {
+        // 128 KiB PRG, CHR-RAM: SNROM uses the CHR register's bit 4.
         let rom = synth_banked(1, 128, 0);
         let mut cart = Cartridge::from_ines(&rom).expect("cart");
         cart.cpu_write(0x6000, 0x5A);
         assert_eq!(cart.cpu_read(0x6000), 0x5A);
-        // Serial-write $10 to $E000: five LSB-first writes with bit 0.
-        for value in [0u8, 0, 0, 0, 1] {
-            cart.cpu_write(0xE000, value);
-        }
-        // Bit 4 deselects the RAM, so the window floats.
+        mmc1_serial(&mut cart, 0xA000, 0x10);
+        // The RAM is deselected, so the window floats.
         assert_eq!(cart.cpu_read(0x6000), 0xFF);
         cart.cpu_write(0x6000, 0x99);
         assert_eq!(cart.cpu_read(0x6000), 0xFF);
-        // Clear the bit again.
-        for value in [0u8, 0, 0, 0, 0] {
-            cart.cpu_write(0xE000, value);
-        }
+        // Clearing bit 4 restores the old contents.
+        mmc1_serial(&mut cart, 0xA000, 0x00);
+        assert_eq!(cart.cpu_read(0x6000), 0x5A);
+        // MMC1B/C protection: $E000 bit 4 also disables the RAM.
+        mmc1_serial(&mut cart, 0xE000, 0x10);
+        assert_eq!(cart.cpu_read(0x6000), 0xFF);
+        mmc1_serial(&mut cart, 0xE000, 0x0F);
         assert_eq!(cart.cpu_read(0x6000), 0x5A);
     }
 

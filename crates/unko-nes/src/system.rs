@@ -1041,7 +1041,7 @@ impl System {
     #[cfg(feature = "save-states")]
     pub fn save_state(&self) -> Result<Vec<u8>, String> {
         let mut out = Vec::new();
-        out.extend_from_slice(b"UNKOST09");
+        out.extend_from_slice(b"UNKOST10");
         out.extend_from_slice(&self.cart.fingerprint().to_le_bytes());
         let mut cart_state = Vec::new();
         self.cart.save_state(&mut cart_state)?;
@@ -1084,7 +1084,7 @@ impl System {
     /// Restores a state produced by [`System::save_state`].
     #[cfg(feature = "save-states")]
     pub fn load_state(&mut self, data: &[u8]) -> Result<(), String> {
-        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST09" {
+        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST10" {
             return Err("not an Unko state (bad magic/version)".into());
         }
         let fingerprint = u64::from_le_bytes(
@@ -1328,6 +1328,16 @@ impl System {
     #[must_use]
     pub fn read_ram(&self, address: u16) -> u8 {
         self.peek(address)
+    }
+
+    /// Reads a byte from the PPU's 4 KiB VRAM without side effects.
+    ///
+    /// The address is masked to 12 bits, so `$2000-$2FFF` maps directly to
+    /// the four nametables. Mirroring is not applied; a test harness that
+    /// wants the first nametable reads `$2000`.
+    #[must_use]
+    pub fn vram_peek(&self, address: u16) -> u8 {
+        self.ppu.vram[usize::from(address & 0x0FFF)]
     }
 
     /// Side-effect-free read for the debugger.

@@ -29,6 +29,19 @@ None in AccuracyCoin. All non-DRAW rows pass.
 - `FDS-4023-Test` and `FDS-Audio-Registers` are display-only dumps with no
   pass/fail line; their register dumps are captured but have no oracle yet.
 
+### Holy Mapperel (2026-11-14)
+
+28 of 42 variants pass with `0000` after the MMC3 `$A001` read-only mode and
+MMC1 SNROM `$A000.4` fixes. Open items:
+
+- **MMC1 CHR-RAM (8 variants, `0003`)** — `mmc1_test_one_chr_window` fails
+  both 4 KiB windows. `Mmc1::chr_offset` banks the cartridge buffer, but the
+  PPU owns a linear 8 KiB CHR-RAM buffer and `chr_ram_map()` is not
+  implemented for the board, so the tag writes are not bank-relative.
+- **MMC2 (9/10), FME-7 (69), TxSROM (118)** — the board test produces a
+  uniform frame at 900-2400 frames; the suite never prints a result. Likely
+  the CHR-latch (`$FD/$FE`) or IRQ-window startup path, not yet triaged.
+
 ### NESdev screen-suite status (2026-11-14)
 
 Both previously open public failures now pass:

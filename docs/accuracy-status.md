@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **505 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **506 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -74,9 +74,10 @@ passes with the alternate selector. The selector is exposed as
 **146/146 non-DRAW**, and the 20/120-frame library audit is unchanged
 (3,898/6,490 rendering).
 
-Because `Mmc3` and the PPU gained serialized A12 state, the save-state magic is
-now **`UNKOST09`**; `UNKOST06` states are rejected by the normal bad-magic
-check. See `docs/accuracy-divergences.md` for the two open MMC3 failures.
+Because `Mmc3` gained serialized PRG-RAM protection state, the save-state magic
+is now **`UNKOST10`**; `UNKOST09` and older states are rejected by the normal
+bad-magic check. See `docs/accuracy-divergences.md` for the open mapper-suite
+items.
 
 ## A1 — 6502
 
@@ -1452,6 +1453,26 @@ still saw the previous arrangement. `System` now syncs mirroring on every
 cartridge write. The watchdog IRQ remains an open A6 item; its period and
 acknowledgement timing are still hardware-research topics, so it is not
 approximated.
+
+### Holy Mapperel board matrix (2026-11-14)
+
+Ran all 42 Holy Mapperel variants in the RustyNES tree (900 frames each,
+reading the result line from VRAM). **28 report `0000` (pass).** The matrix
+found two real bugs, both fixed:
+
+- MMC3 `$A001`: bit 6 is the PRG-RAM read-only mode and bit 7 removes the chip
+  from the bus. Holy Mapperel's `2xxx` WRAM code and the read/write protection
+  checks now pass.
+- MMC1 SNROM: `$A000` bit 4 disables PRG-RAM on CHR-RAM boards with at most
+  256 KiB PRG, while `$E000` bit 4 remains the MMC1B/C protection bit. The
+  `4xxx`/`1xxx` codes clear.
+
+Remaining from the matrix:
+
+- Eight MMC1 CHR-RAM variants report `0003`: the 4 KiB CHR-window tag test
+  fails in both windows.
+- MMC2 (9/10), FME-7 (69) and TxSROM (118) display no result at 900-2400
+  frames, so their board tests do not complete.
 
 ## A5 — AccuracyCoin (runner complete, accuracy work ongoing)
 
