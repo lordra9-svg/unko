@@ -326,13 +326,12 @@ impl App {
             self.controller_last = pad;
             return;
         }
-        let start = pressed & unko_core::InputState::START != 0;
         let chord = pad.is_pressed(unko_core::InputState::START | unko_core::InputState::SELECT)
             && !self
                 .controller_last
                 .is_pressed(unko_core::InputState::START | unko_core::InputState::SELECT);
         let paused = self.player.as_ref().is_some_and(|player| player.paused);
-        if chord || (start && (self.player.is_none() || paused)) {
+        if chord {
             if let Some(player) = &mut self.player {
                 if !player.paused {
                     player.toggle_pause();
@@ -4300,8 +4299,8 @@ fn controllers_tab(
     ui.label(
         RichText::new(
             "Controller navigation: D-pad selects in the library, A plays, B clears, \
-             Start opens the menu and Select toggles grid/list. Start+Select opens the \
-             pause menu while a game is running.",
+             Select toggles grid/list, and Start+Select opens the menu (it also pauses \
+             a running game).",
         )
         .weak()
         .small(),

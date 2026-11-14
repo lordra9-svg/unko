@@ -134,10 +134,10 @@ dropdown and **Restore default controls**. Explicit port choices override the
 gamepad matrix for that port.
 
 A connected gamepad can navigate the UI: D-pad selects in the library, A plays
-the selected game, B clears the selection, Start opens the controller menu and
-Select toggles grid/list. While a game is running, Start+Select pauses it and
-opens the menu (Resume/Pause, Stop, Open ROM, Settings, ROM Manager, Rescan,
-view toggle, Quit).
+the selected game, B clears the selection, Select toggles grid/list, and
+**Start+Select** opens the controller menu (and pauses a running game). The
+menu covers Resume/Pause, Stop, Open ROM, Settings, ROM Manager, Rescan, view
+toggle and Quit. Start and Select alone stay with the game when one is running.
 
 Every OS window starts at its built-in default geometry on first use. The app
 does not resize windows automatically; after you move or resize one, its
