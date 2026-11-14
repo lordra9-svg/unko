@@ -97,6 +97,14 @@ impl ControllerAction {
     }
 }
 
+fn controller_chord(pad: unko_core::InputState, previous: unko_core::InputState) -> bool {
+    let both = |state: unko_core::InputState| {
+        state.is_pressed(unko_core::InputState::START)
+            && state.is_pressed(unko_core::InputState::SELECT)
+    };
+    both(pad) && !both(previous)
+}
+
 /// Application state.
 pub struct App {
     settings: Settings,
@@ -326,10 +334,7 @@ impl App {
             self.controller_last = pad;
             return;
         }
-        let chord = pad.is_pressed(unko_core::InputState::START | unko_core::InputState::SELECT)
-            && !self
-                .controller_last
-                .is_pressed(unko_core::InputState::START | unko_core::InputState::SELECT);
+        let chord = controller_chord(pad, self.controller_last);
         let paused = self.player.as_ref().is_some_and(|player| player.paused);
         if chord {
             if let Some(player) = &mut self.player {
@@ -346,7 +351,7 @@ impl App {
             if repeat {
                 self.move_library_selection(direction);
                 self.controller_repeat =
-                    now + Duration::from_millis(if pressed != 0 { 340 } else { 110 });
+                    now + Duration::from_millis(if pressed != 0 { 200 } else { 80 });
             }
             if pressed & unko_core::InputState::A != 0 {
                 self.play_selected();
@@ -4797,5 +4802,38 @@ mod tests {
         // "@" is row 1, half 0, third key -> bit 1, plus the 2 key and shift.
         assert_eq!(keys[1] & (1 << 1), 1 << 1);
         assert_eq!(keys[7] & (1 << 4), 1 << 4, "LSHIFT is held");
+    }
+}
+
+#[cfg(test)]
+mod controller_chord_tests {
+    use super::controller_chord;
+    use unko_core::InputState;
+
+    #[test]
+    fn only_start_and_select_together_open_the_menu() {
+        let none = InputState::empty();
+        assert!(!controller_chord(
+            InputState::from_bits(InputState::START),
+            none
+        ));
+        assert!(!controller_chord(
+            InputState::from_bits(InputState::SELECT),
+            none
+        ));
+        assert!(!controller_chord(
+            InputState::from_bits(InputState::A),
+            none
+        ));
+        let both = InputState::from_bits(InputState::START | InputState::SELECT);
+        assert!(controller_chord(both, none));
+        assert!(!controller_chord(
+            both,
+            InputState::from_bits(InputState::START | InputState::SELECT)
+        ));
+        assert!(!controller_chord(
+            InputState::from_bits(InputState::START | InputState::SELECT | InputState::A),
+            InputState::from_bits(InputState::START | InputState::SELECT)
+        ));
     }
 }
