@@ -1642,44 +1642,48 @@ impl App {
         let mut layout_reset = false;
 
         let mut body = |ui: &mut egui::Ui| {
-            ui.horizontal_top(|ui| {
-                ui.set_min_width(140.0);
-                ui.vertical(|ui| {
-                    for entry in Tab::ALL {
-                        if ui.selectable_label(tab == entry, entry.label()).clicked() {
-                            tab = entry;
-                        }
-                    }
+            egui::ScrollArea::both()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.horizontal_top(|ui| {
+                        ui.set_min_width(140.0);
+                        ui.vertical(|ui| {
+                            for entry in Tab::ALL {
+                                if ui.selectable_label(tab == entry, entry.label()).clicked() {
+                                    tab = entry;
+                                }
+                            }
+                        });
+                        ui.separator();
+                        ui.vertical(|ui| {
+                            ui.set_min_width(560.0);
+                            match tab {
+                                Tab::General => {
+                                    reset_requested =
+                                        general_tab(ui, &mut settings, ctx, &mut layout_reset);
+                                }
+                                Tab::Interface => interface_tab(ui, &mut settings),
+                                Tab::Graphics => graphics_tab(ui, &mut settings, ctx),
+                                Tab::Audio => audio_tab(
+                                    ui,
+                                    &mut settings,
+                                    self.audio.as_ref(),
+                                    self.audio_error.as_deref(),
+                                ),
+                                Tab::Controllers => controllers_tab(
+                                    ui,
+                                    &mut settings,
+                                    gamepads.as_mut(),
+                                    gamepad_error.as_deref(),
+                                    &mut hotkey_capture,
+                                ),
+                                Tab::Paths => paths_tab(ui, &mut settings),
+                                Tab::Nes => nes_tab(ui, &mut settings, selected_entry.as_ref()),
+                                Tab::Advanced => advanced_tab(ui, &mut settings),
+                            }
+                        });
+                    });
                 });
-                ui.separator();
-                ui.vertical(|ui| {
-                    ui.set_min_width(560.0);
-                    match tab {
-                        Tab::General => {
-                            reset_requested =
-                                general_tab(ui, &mut settings, ctx, &mut layout_reset);
-                        }
-                        Tab::Interface => interface_tab(ui, &mut settings),
-                        Tab::Graphics => graphics_tab(ui, &mut settings, ctx),
-                        Tab::Audio => audio_tab(
-                            ui,
-                            &mut settings,
-                            self.audio.as_ref(),
-                            self.audio_error.as_deref(),
-                        ),
-                        Tab::Controllers => controllers_tab(
-                            ui,
-                            &mut settings,
-                            gamepads.as_mut(),
-                            gamepad_error.as_deref(),
-                            &mut hotkey_capture,
-                        ),
-                        Tab::Paths => paths_tab(ui, &mut settings),
-                        Tab::Nes => nes_tab(ui, &mut settings, selected_entry.as_ref()),
-                        Tab::Advanced => advanced_tab(ui, &mut settings),
-                    }
-                });
-            });
         };
 
         if embedded {
