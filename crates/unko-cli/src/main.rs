@@ -697,6 +697,50 @@ fn run() -> Result<(), Box<dyn Error>> {
                 mid_state.len()
             );
         }
+        "text" => {
+            let path = args.next().ok_or_else(usage)?;
+            let mut frames = 300u32;
+            let mut bios: Option<String> = None;
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--frames" => {
+                        frames = args
+                            .next()
+                            .ok_or("--frames needs a number")?
+                            .parse()
+                            .map_err(|_| "--frames needs a number")?;
+                    }
+                    "--bios" => bios = Some(args.next().ok_or("--bios needs a path")?),
+                    other => return Err(format!("unknown option {other}").into()),
+                }
+            }
+            let entries = unko_rom::probe_path(Path::new(&path))?;
+            let entry = entries.first().ok_or("no playable image in the path")?;
+            let rom = unko_rom::load(entry)?;
+            let mut system = if entry.is_fds() {
+                let bios = bios.ok_or("FDS images need --bios PATH")?;
+                let bios = fs::read(bios)?;
+                unko_nes::System::from_fds(&rom, &bios).map_err(|err| err.to_string())?
+            } else {
+                unko_nes::System::from_ines(&rom).map_err(|err| err.to_string())?
+            };
+            for _ in 0..frames {
+                system.run_frame();
+            }
+            for row in 0..30u16 {
+                let line: String = (0..32u16)
+                    .map(|column| {
+                        let tile = system.vram_peek(0x2000 + row * 32 + column);
+                        match tile {
+                            0 => ' ',
+                            0x20..=0x7E => char::from(tile),
+                            _ => '?',
+                        }
+                    })
+                    .collect();
+                println!("{}", line.trim_end());
+            }
+        }
         "trace" => {
             let path = args.next().ok_or_else(usage)?;
             let mut frames = 600u32;
@@ -1172,6 +1216,7 @@ fn usage() -> String {
   unko run <rom|archive> [--frames N] [--out frame.ppm] [--sram save.sav] [--press-start] [--core ID] [--bios PATH]
           [--device1 NAME] [--device2 NAME] [--paddle N] [--paddle-fire]
           [--filter raw|composite|crt] [--palette canonical|consumer|rgb|mono|vivid|soft|pal|studio]
+  unko text <rom|archive> [--frames N] [--bios PATH]
   unko verify <rom|archive> [frames]
   unko trace <rom|archive> [--frames N] [--core ID] [--out trace.txt] [--no-state] [--bios PATH] [--press-start N] [--audio-dir DIR]
   unko diff <a.trace> <b.trace> [--skip N] [--video]

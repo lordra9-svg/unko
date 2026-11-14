@@ -118,7 +118,11 @@ cargo build --release
 cargo run -p unko-cli -- scan roms
 cargo run -p unko-cli -- info "roms/.../game.zip"
 cargo run -p unko-cli -- run "roms/.../game.zip" --frames 120 --out shot.ppm
+cargo run -p unko-cli -- text "roms/.../test.nes" --frames 600
 ```
+
+`text` prints the nametable as ASCII, which is how the test-ROM suites in
+`docs/test-rom-inventory.md` are scored.
 
 ROMs may be loose `.nes` files or inside `.zip`, `.7z`, or `.rar` archives;
 the CLI and GUI use the same reader. `scan` reports the library and mapper

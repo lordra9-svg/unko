@@ -256,6 +256,22 @@ match; frame-boundary alignment is within ±1 cycle (previously ±5).
   window, including shared mapper CHR), `PATH.oam`, `PATH.vram` and `PATH.ram`
   after the last frame. Useful for comparing a port against the oracle.
 
+## Test-ROM verdicts
+
+`unko text <rom|archive> [--frames N] [--bios PATH]` runs the image headless
+and prints the first nametable as text: tile 0 becomes a space, printable
+tiles become their ASCII character, everything else is `?`. Suites that print
+with the standard ASCII-ordered font can then be scored from a script:
+
+```
+unko text refs/rustynes/tests/roms/blargg/mmc3_test/5-MMC3.nes --frames 600
+...
+ Passed
+```
+
+FDS images need `--bios PATH`. Holy Mapperel uses a custom font, but its
+result digits still decode (`DETAILED TEST RESULT: 0000`).
+
 Manifests and traces are local artifacts (they derive from game content) and
 are never committed.
 
