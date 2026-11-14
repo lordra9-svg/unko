@@ -54,6 +54,21 @@ alternate framebuffer font):
   `cpu_exec_space_ppuio` (screen-only CPU dummy-fetch residual).
 - **171 without a machine-readable verdict**
 
+Reproducible text-verdict run (2026-11-14, `unko text`, 600 frames, all 341
+images): **145 print Pass**, **11 print Fail**, **185 print no ASCII
+verdict** (custom fonts, audio-only or input-gated). All 11 failures are
+configuration-dependent:
+
+- the three MMC3 rows (`5.MMC3_rev_A`, `6-MMC3_alt`, `6-MMC6`) pass with
+  `--mmc3-alt`;
+- the seven PAL APU singles pass with `--region pal` (all ten PAL APU images
+  pass in PAL mode);
+- `read_joy3/count_errors` needs a controller script.
+
+No unexpected failure remains. The difference from the 157/13/171 probe above
+is methodological: `unko text` only scores suites that print with the standard
+ASCII font.
+
 The x0000 `apu_test_1..10` write-coincidence tests and the two previously open
 blargg failures (`dma_4016_read`, `5-branch_delays_irq`) now pass.
 

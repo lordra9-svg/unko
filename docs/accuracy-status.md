@@ -1475,6 +1475,16 @@ Remaining from the matrix:
 - MMC2 (9/10), FME-7 (69) and TxSROM (118) display no result at 900-2400
   frames, so their board tests do not complete.
 
+### Reproducible public-suite run (2026-11-14)
+
+`unko text` over all 341 images in the RustyNES test tree at 600 frames:
+**145 print Pass**, **11 print Fail**, **185 print no ASCII verdict**. Every
+failure is configuration-dependent: the three MMC3 revision rows pass with
+`--mmc3-alt`, the seven PAL APU singles pass with `--region pal`, and
+`read_joy3/count_errors` needs a controller script. No unexpected failure
+remains. The earlier 157/13/171 probe counted suites with custom fonts; the
+text reader only scores the standard ASCII font.
+
 ## A5 — AccuracyCoin (runner complete, accuracy work ongoing)
 
 - `src/accuracycoin.rs` implements a real battery runner:

@@ -701,6 +701,8 @@ fn run() -> Result<(), Box<dyn Error>> {
             let path = args.next().ok_or_else(usage)?;
             let mut frames = 300u32;
             let mut bios: Option<String> = None;
+            let mut region = unko_nes::Region::Ntsc;
+            let mut mmc3_alternate = false;
             while let Some(flag) = args.next() {
                 match flag.as_str() {
                     "--frames" => {
@@ -711,6 +713,18 @@ fn run() -> Result<(), Box<dyn Error>> {
                             .map_err(|_| "--frames needs a number")?;
                     }
                     "--bios" => bios = Some(args.next().ok_or("--bios needs a path")?),
+                    "--region" => {
+                        region = match args
+                            .next()
+                            .ok_or("--region needs ntsc, pal or dendy")?
+                            .as_str()
+                        {
+                            "pal" => unko_nes::Region::Pal,
+                            "dendy" => unko_nes::Region::Dendy,
+                            _ => unko_nes::Region::Ntsc,
+                        };
+                    }
+                    "--mmc3-alt" => mmc3_alternate = true,
                     other => return Err(format!("unknown option {other}").into()),
                 }
             }
@@ -724,6 +738,8 @@ fn run() -> Result<(), Box<dyn Error>> {
             } else {
                 unko_nes::System::from_ines(&rom).map_err(|err| err.to_string())?
             };
+            system.set_region(region);
+            system.set_mmc3_alternate(mmc3_alternate);
             for _ in 0..frames {
                 system.run_frame();
             }
@@ -1216,7 +1232,7 @@ fn usage() -> String {
   unko run <rom|archive> [--frames N] [--out frame.ppm] [--sram save.sav] [--press-start] [--core ID] [--bios PATH]
           [--device1 NAME] [--device2 NAME] [--paddle N] [--paddle-fire]
           [--filter raw|composite|crt] [--palette canonical|consumer|rgb|mono|vivid|soft|pal|studio]
-  unko text <rom|archive> [--frames N] [--bios PATH]
+  unko text <rom|archive> [--frames N] [--bios PATH] [--region ntsc|pal|dendy] [--mmc3-alt]
   unko verify <rom|archive> [frames]
   unko trace <rom|archive> [--frames N] [--core ID] [--out trace.txt] [--no-state] [--bios PATH] [--press-start N] [--audio-dir DIR]
   unko diff <a.trace> <b.trace> [--skip N] [--video]

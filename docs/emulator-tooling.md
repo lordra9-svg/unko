@@ -269,7 +269,9 @@ unko text refs/rustynes/tests/roms/blargg/mmc3_test/5-MMC3.nes --frames 600
  Passed
 ```
 
-FDS images need `--bios PATH`. Holy Mapperel uses a custom font, but its
+FDS images need `--bios PATH`. `--region ntsc|pal|dendy` and
+`--mmc3-alt` select the timing and MMC3 revision needed by the PAL APU and
+MMC3 revision suites. Holy Mapperel uses a custom font, but its
 result digits still decode (`DETAILED TEST RESULT: 0000`).
 
 Manifests and traces are local artifacts (they derive from game content) and
