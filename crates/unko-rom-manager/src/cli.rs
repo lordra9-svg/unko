@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! unko-rom-manager --dat DAT --input ROMS [--1g1r] [--fixdat FIX.xml]
-//!                  [--csv REPORT.csv] [--copy OUT] [--zip]
+//!                  [--csv REPORT.csv] [--copy OUT] [--zip] [--cache FILE]
 //!                  [--regions USA,Europe] [--languages En] [--all]
 //! ```
 
@@ -34,6 +34,7 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut languages = vec!["En".to_string()];
     let mut include_bios = false;
     let mut zip_sets = false;
+    let mut cache = None;
 
     let mut args = args;
     while let Some(arg) = args.next() {
@@ -65,11 +66,12 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
             }
             "--all" => include_bios = true,
             "--zip" => zip_sets = true,
+            "--cache" => cache = args.next().map(PathBuf::from),
             "-h" | "--help" => {
                 println!(
                     "usage: unko-rom-manager --dat DAT --input ROMS [options]\n\
                      \n\
-                     options: --1g1r --fixdat FILE --csv FILE --copy DIR --zip\n\
+                     options: --1g1r --fixdat FILE --csv FILE --copy DIR --zip --cache FILE\n\
                      \x20        --regions USA,Europe,World,Japan --languages En --all\n\
                      \n\
                      --copy writes loose files; --zip writes one archive per game."
@@ -82,7 +84,10 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
 
     let dat = dat.ok_or("--dat is required")?;
     let input = input.ok_or("--input is required")?;
-    let options = ScanOptions::default();
+    let options = ScanOptions {
+        cache,
+        ..ScanOptions::default()
+    };
     let mut last = 0usize;
     let mut progress = |stats: &ScanProgress| {
         let count = stats.files + stats.members;

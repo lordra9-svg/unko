@@ -23,6 +23,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod cache;
 pub mod catalog;
 pub mod cli;
 pub mod dat;
@@ -35,6 +36,7 @@ pub mod scan;
 use std::fmt;
 use std::path::Path;
 
+pub use cache::ScanCache;
 pub use catalog::{Catalog, GameMatch, Match, MatchReport, MatchStatus, RomRef, Summary};
 pub use dat::{parse_dat_path, parse_dat_str, Dat, DatRom, Game};
 pub use hash::{hash_bytes, Hashes};

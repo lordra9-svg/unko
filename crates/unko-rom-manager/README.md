@@ -17,6 +17,8 @@ Rust project or used through the `unko-app` ROM Manager window.
 - Fixdat and CSV reports.
 - Safe copy/rebuild with per-file hash verification.
 - Deterministic ZIP output (`--zip`): one archive per game, fixed timestamps.
+- Persistent hash cache (`--cache FILE`): unchanged files and ZIP members are
+  reused by size and modification time instead of being read and hashed again.
 
 ## Usage
 
@@ -44,7 +46,7 @@ The crate also ships `unko-rom-manager`, a small headless CLI:
 ```sh
 cargo run -p unko-rom-manager -- \
   --dat "No-Intro.dat" --input roms --1g1r \
-  --fixdat missing.xml --csv report.csv --copy rebuilt
+  --fixdat missing.xml --csv report.csv --copy rebuilt --cache scan.tsv
 # Add --zip to write one deterministic archive per game instead of loose files
 ```
 
@@ -52,5 +54,5 @@ cargo run -p unko-rom-manager -- \
 
 ZIP is the only archive format read today. Rebuilt sets can be written as
 deterministic ZIPs (not TorrentZip/RVZSTD), 7z/RAR/CHD input, ROM patching,
-DAT download/update and a persistent hash cache are future work.
+DAT download/update are future work.
 The rebuild operation only copies; it never deletes or moves source files.

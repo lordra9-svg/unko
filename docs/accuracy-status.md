@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **506 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **508 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -1470,7 +1470,8 @@ found two real bugs, both fixed:
 Remaining from the matrix:
 
 - Eight MMC1 CHR-RAM variants report `0003`: the 4 KiB CHR-window tag test
-  fails in both windows.
+  fails in both windows. With only 8 KiB of CHR-RAM this may be expected on
+  hardware; it is unverified without a capture.
 - MMC2 (9/10), FME-7 (69) and TxSROM (118) display no result at 900-2400
   frames, so their board tests do not complete.
 

@@ -35,9 +35,10 @@ None in AccuracyCoin. All non-DRAW rows pass.
 MMC1 SNROM `$A000.4` fixes. Open items:
 
 - **MMC1 CHR-RAM (8 variants, `0003`)** — `mmc1_test_one_chr_window` fails
-  both 4 KiB windows. `Mmc1::chr_offset` banks the cartridge buffer, but the
-  PPU owns a linear 8 KiB CHR-RAM buffer and `chr_ram_map()` is not
-  implemented for the board, so the tag writes are not bank-relative.
+  both 4 KiB windows. An 8 KiB CHR-RAM board cannot hold the distinct bank
+  tags the test writes, so this may be expected on SNROM rather than an
+  emulator bug; it is tracked as **unverified** until a hardware capture or
+  the test's own notes settle it.
 - **MMC2 (9/10), FME-7 (69), TxSROM (118)** — the board test produces a
   uniform frame at 900-2400 frames; the suite never prints a result. Likely
   the CHR-latch (`$FD/$FE`) or IRQ-window startup path, not yet triaged.

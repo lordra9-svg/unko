@@ -76,8 +76,9 @@ that matters for a playable library:
 - Deterministic ZIP output: one archive per game, entries in DAT order with a
   fixed timestamp, so rebuilds are byte-identical. Loose files remain the
   default.
-- TorrentZip/RVZSTD, 7z/RAR/CHD, patching, DAT download and a persistent cache
-  remain future work.
+- Persistent hash cache keyed by path, size and modification time, so repeated
+  audits only hash changed files and ZIP members.
+- TorrentZip/RVZSTD, 7z/RAR/CHD, patching and DAT download remain future work.
 
 The app exposes this as a **ROM Manager** window; the same library is usable
 without the app. The design follows the project rule used for the NES core:

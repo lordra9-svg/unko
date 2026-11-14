@@ -24,6 +24,7 @@ pub struct RomManager {
     dat_input: String,
     source: PathBuf,
     output: PathBuf,
+    cache: PathBuf,
     region_order: String,
     language_order: String,
     one_g1r: bool,
@@ -54,6 +55,7 @@ impl RomManager {
             dat_input: String::new(),
             source,
             output: save_dir.join("rom-manager").join("rebuilt"),
+            cache: save_dir.join("rom-manager").join("scan-cache.tsv"),
             region_order: "USA,Europe,World,Japan".into(),
             language_order: "En".into(),
             one_g1r: true,
@@ -445,7 +447,10 @@ impl RomManager {
         }
         let dats = self.dat_paths.clone();
         let source = self.source.clone();
-        let options = ScanOptions::default();
+        let options = ScanOptions {
+            cache: Some(self.cache.clone()),
+            ..ScanOptions::default()
+        };
         let progress = Arc::clone(&self.progress);
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);

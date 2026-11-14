@@ -7,6 +7,7 @@ use std::time::UNIX_EPOCH;
 
 use zip::ZipArchive;
 
+use crate::cache::ScanCache;
 use crate::hash::{hash_bytes, Hashes};
 use crate::{Error, Result};
 
@@ -25,6 +26,8 @@ pub struct ScanOptions {
     pub extensions: Vec<String>,
     /// Read members inside ZIP archives.
     pub include_archives: bool,
+    /// Optional persistent hash cache.
+    pub cache: Option<PathBuf>,
 }
 
 impl Default for ScanOptions {
@@ -33,6 +36,7 @@ impl Default for ScanOptions {
             max_depth: 8,
             extensions: DEFAULT_EXTENSIONS.iter().map(|ext| (*ext).into()).collect(),
             include_archives: true,
+            cache: None,
         }
     }
 }
@@ -65,6 +69,8 @@ pub struct ScanProgress {
     pub bytes: u64,
     /// Path currently being read.
     pub current: String,
+    /// Entries reused from the hash cache.
+    pub cache_hits: usize,
 }
 
 /// Where a scanned ROM came from.
@@ -161,7 +167,14 @@ pub fn scan_path(
 ) -> Result<(Vec<ScannedRom>, ScanProgress)> {
     let mut roms = Vec::new();
     let mut stats = ScanProgress::default();
-    walk(root, options, &mut roms, &mut stats, 0, progress)?;
+    let mut cache = options.cache.as_ref().map(|path| ScanCache::load(path));
+    walk(
+        root, options, &mut roms, &mut stats, 0, progress, &mut cache,
+    )?;
+    if let Some(cache) = &mut cache {
+        stats.cache_hits = cache.hits();
+        let _ = cache.save();
+    }
     Ok((roms, stats))
 }
 
@@ -172,6 +185,7 @@ fn walk(
     stats: &mut ScanProgress,
     depth: usize,
     progress: &mut dyn FnMut(&ScanProgress),
+    cache: &mut Option<ScanCache>,
 ) -> Result<()> {
     if depth > options.max_depth {
         return Ok(());
@@ -191,7 +205,7 @@ fn walk(
             continue;
         }
         if file_type.is_dir() {
-            walk(&path, options, out, stats, depth + 1, progress)?;
+            walk(&path, options, out, stats, depth + 1, progress, cache)?;
             continue;
         }
         if !file_type.is_file() {
@@ -206,7 +220,7 @@ fn walk(
             .unwrap_or_default()
             .to_ascii_lowercase();
         if options.include_archives && extension == "zip" {
-            scan_zip(&path, options, out, stats, progress)?;
+            scan_zip(&path, options, out, stats, progress, cache)?;
             continue;
         }
         if extension == "7z" || extension == "rar" {
@@ -217,26 +231,42 @@ fn walk(
         if !options.accepts(&path) {
             continue;
         }
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                stats.current = format!("{}: {err}", path.display());
-                progress(stats);
-                continue;
-            }
-        };
         let file_name = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string());
-        let hashes = hash_bytes(&bytes);
-        stats.bytes += bytes.len() as u64;
+        let metadata = fs::metadata(&path).ok();
+        let size = metadata.as_ref().map_or(0, fs::Metadata::len);
+        let modified = modified_secs(&path);
+        let key = path.to_string_lossy().into_owned();
+        let cached = cache
+            .as_mut()
+            .and_then(|cache| cache.lookup(&key, size, modified));
+        let (hashes, headerless) = if let Some(cached) = cached {
+            cached
+        } else {
+            let bytes = match fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    stats.current = format!("{}: {err}", path.display());
+                    progress(stats);
+                    continue;
+                }
+            };
+            let hashes = hash_bytes(&bytes);
+            let headerless = headerless_hashes(&bytes, &extension);
+            stats.bytes += bytes.len() as u64;
+            if let Some(cache) = cache.as_mut() {
+                cache.store(key, hashes.size, modified, hashes, headerless);
+            }
+            (hashes, headerless)
+        };
         out.push(ScannedRom {
             origin: Origin::File(path.clone()),
             file_name,
             hashes,
-            headerless: headerless_hashes(&bytes, &extension),
-            modified: modified_secs(&path),
+            headerless,
+            modified,
         });
     }
     Ok(())
@@ -248,6 +278,7 @@ fn scan_zip(
     out: &mut Vec<ScannedRom>,
     stats: &mut ScanProgress,
     progress: &mut dyn FnMut(&ScanProgress),
+    cache: &mut Option<ScanCache>,
 ) -> Result<()> {
     let file = match File::open(archive) {
         Ok(file) => file,
@@ -285,18 +316,33 @@ fn scan_zip(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| name.clone());
-        let mut bytes = Vec::with_capacity(member.size() as usize);
-        if member.read_to_end(&mut bytes).is_err() {
-            continue;
-        }
         let extension = member_path
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or_default()
             .to_ascii_lowercase();
-        let hashes = hash_bytes(&bytes);
-        stats.members += 1;
-        stats.bytes += bytes.len() as u64;
+        let size = member.size();
+        let key = format!("{}::{index}::{name}", archive.display());
+        let cached = cache
+            .as_mut()
+            .and_then(|cache| cache.lookup(&key, size, modified));
+        let (hashes, headerless) = if let Some(cached) = cached {
+            stats.members += 1;
+            cached
+        } else {
+            let mut bytes = Vec::with_capacity(size as usize);
+            if member.read_to_end(&mut bytes).is_err() {
+                continue;
+            }
+            let hashes = hash_bytes(&bytes);
+            let headerless = headerless_hashes(&bytes, &extension);
+            stats.members += 1;
+            stats.bytes += bytes.len() as u64;
+            if let Some(cache) = cache.as_mut() {
+                cache.store(key, hashes.size, modified, hashes, headerless);
+            }
+            (hashes, headerless)
+        };
         stats.current = format!("{}/{}", archive.display(), name);
         progress(stats);
         out.push(ScannedRom {
@@ -307,7 +353,7 @@ fn scan_zip(
             },
             file_name,
             hashes,
-            headerless: headerless_hashes(&bytes, &extension),
+            headerless,
             modified,
         });
     }
@@ -375,6 +421,35 @@ mod tests {
             .find(|rom| rom.file_name == "inside.nes")
             .expect("zip");
         assert_eq!(packed.headerless.expect("headerless").size, 7);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_reuses_unchanged_files_and_misses_after_a_change() {
+        let dir = std::env::temp_dir().join(format!("unko-rm-cache-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("dir");
+        let rom = dir.join("game.nes");
+        fs::write(&rom, b"NES\x1apayload").expect("write");
+        let cache = dir.join("cache.tsv");
+        let options = ScanOptions {
+            cache: Some(cache.clone()),
+            ..ScanOptions::default()
+        };
+        let mut progress = |_: &ScanProgress| {};
+
+        let (first, stats) = scan_path(&dir, &options, &mut progress).expect("first");
+        assert_eq!(stats.cache_hits, 0);
+        let (second, stats) = scan_path(&dir, &options, &mut progress).expect("second");
+        assert_eq!(stats.cache_hits, 1);
+        assert_eq!(first[0].hashes, second[0].hashes);
+        assert_eq!(first[0].headerless, second[0].headerless);
+
+        // A size change invalidates the entry even within the same second.
+        fs::write(&rom, b"NES\x1apayload plus more").expect("rewrite");
+        let (third, stats) = scan_path(&dir, &options, &mut progress).expect("third");
+        assert_eq!(stats.cache_hits, 0);
+        assert_ne!(first[0].hashes, third[0].hashes);
         let _ = fs::remove_dir_all(&dir);
     }
 }

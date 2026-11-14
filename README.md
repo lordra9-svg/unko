@@ -34,7 +34,7 @@ verified against the public reference suites:
 - `ppu_vbl_nmi` **12/12**, `ppu_sprites` **19/19**, blargg APU/DMC **13/13**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **506 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **508 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **136 pass / 12 fail / 115 visual-or-input-only** (5 PAL APU failures pass when PAL timing is selected)
 - RustyNES test tree: **157 pass / 13 fail / 171 visual-or-input-only** (164 / 6 with PAL APU in PAL mode)
 
@@ -56,7 +56,7 @@ Compatibility from the local licensed 7,101-image NES audit:
 |---|---:|
 | Workspace crates | 8 |
 | First-party Rust lines | ~76,700 |
-| Workspace tests | 506 pass, 0 failed |
+| Workspace tests | 508 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 
@@ -181,8 +181,8 @@ audits a ROM folder against one or more Logiqx XML/No-Intro DATs, shows
 complete/partial/missing games (the full list, virtualized for large DATs),
 selects a 1G1R set, exports fixdats/CSV and safely copies matched ROMs to an
 output folder. A **ZIP sets** toggle writes one deterministic archive per
-game instead of loose files. Its position and size are remembered in
-`unko.conf`; the
+game instead of loose files, and a persistent scan cache skips unchanged
+files on later audits. Its position and size are remembered in `unko.conf`; the
 default size is used the first time. It is backed by the standalone `unko-rom-manager` crate, which has no
 dependency on the NES core or the shell.
 
