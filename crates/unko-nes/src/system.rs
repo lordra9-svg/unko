@@ -1285,6 +1285,13 @@ impl System {
         }
     }
 
+    fn sync_mirroring(&mut self) {
+        let mirroring = self.cart.mirroring();
+        if self.ppu.mirroring != mirroring {
+            self.ppu.mirroring = mirroring;
+        }
+    }
+
     fn sync_cartridge(&mut self) {
         // CHR-ROM is copied once per frame; mid-frame bank switches are an A4
         // follow-up. CHR-RAM is owned by the PPU because games upload tiles to
@@ -1298,10 +1305,7 @@ impl System {
         } else {
             self.ppu.set_chr_ram_map(self.cart.chr_ram_map());
         }
-        let mirroring = self.cart.mirroring();
-        if self.ppu.mirroring != mirroring {
-            self.ppu.mirroring = mirroring;
-        }
+        self.sync_mirroring();
         self.ppu
             .set_rom_nametable_banks(self.cart.rom_nametable_banks());
         self.ppu
@@ -2130,6 +2134,10 @@ impl CpuBus for System {
                 }
                 self.cart.set_cpu_cycle(self.cycle_count);
                 self.cart.cpu_write(address, value);
+                // FDS $4025 (and the equivalent board windows) change the
+                // nametable arrangement mid-frame; hardware applies it to the
+                // next PPU access, so it cannot wait for the per-frame sync.
+                self.sync_mirroring();
                 if self.cart.chr_mapping_write(address) {
                     self.refresh_chr();
                 }
@@ -2351,6 +2359,36 @@ mod tests {
             peak = peak.max(system.cart.audio_mix().abs());
         }
         assert!(peak > 0.01, "FDS audio did not reach the mixer: {peak}");
+    }
+
+    #[test]
+    fn fds_mirroring_register_applies_immediately() {
+        let mut bios = vec![0xEAu8; 0x2000];
+        bios[0x1FFC] = 0x00;
+        bios[0x1FFD] = 0xE0;
+        let disk = vec![0u8; 65500];
+        let mut system = System::from_fds(&disk, &bios).expect("fds");
+        CpuBus::write(&mut system, 0x4023, 0x83);
+        // $4025.D3=1 selects the V arrangement (two screens side by side).
+        CpuBus::write(&mut system, 0x4025, 0x2E);
+        assert_eq!(system.cart.mirroring(), Mirroring::Horizontal);
+        assert_eq!(
+            system.ppu.mirroring,
+            Mirroring::Horizontal,
+            "the PPU must see the new arrangement before the next frame"
+        );
+        assert_eq!(system.cart.cpu_read_io(0x4030) & 0x08, 0x08);
+        // $4025.D3=0 selects the H arrangement.
+        CpuBus::write(&mut system, 0x4025, 0x26);
+        assert_eq!(system.cart.mirroring(), Mirroring::Vertical);
+        assert_eq!(system.ppu.mirroring, Mirroring::Vertical);
+        assert_eq!(system.cart.cpu_read_io(0x4030) & 0x08, 0x00);
+        // Disabling the disk registers resets $4025 to $06 (D3=0).
+        CpuBus::write(&mut system, 0x4025, 0x2E);
+        CpuBus::write(&mut system, 0x4023, 0x82);
+        assert_eq!(system.cart.mirroring(), Mirroring::Vertical);
+        assert_eq!(system.ppu.mirroring, Mirroring::Vertical);
+        assert_eq!(system.cart.cpu_read_io(0x4030) & 0x08, 0x00);
     }
 
     #[test]

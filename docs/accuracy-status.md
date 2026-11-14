@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **504 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **505 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -1432,6 +1432,26 @@ contract as the RustyNES oracle.
   games that toggle CHR tables mid-line.
 - AxROM titles that depend on exact PPU timing (e.g. Battletoads) do not boot yet.
 - The accuracy core does not implement save states and supports NTSC only.
+
+### FDS hardware test suites (2026-11-14)
+
+Ran the released FDS test images against the `rp2c33a-01a` BIOS
+(`refs/bios/disksys.rom`):
+
+| Suite | Result |
+|---|---|
+| `fdsirqtests.fds` V7 | **21/21 pass** (every row prints `O`) |
+| `FDS-Mirroring-Test` v1.1 | **3/3 pass** (`$4025.D3 W`, `$4030.D3 R`, `$4023.D0=0`) |
+| `FDS-4023-Test` v1.0 | display-only: `$4020-$409F` dump captured, no pass/fail line |
+| `FDS-Audio-Registers` v1.2 | display-only: `$4090-$4097` dump captured |
+| `FDS-4030D1-Addr` v1.0 | **gap**: `$4030.D1` DRAM-refresh watchdog IRQ is not modelled, so the address fields print `XXXX`; hardware shows `67FF`/`6E25` |
+
+The mirroring suite exposed a real bug: `$4025.D3` was only copied to the PPU
+by the once-per-frame cartridge sync, so a nametable check in the same frame
+still saw the previous arrangement. `System` now syncs mirroring on every
+cartridge write. The watchdog IRQ remains an open A6 item; its period and
+acknowledgement timing are still hardware-research topics, so it is not
+approximated.
 
 ## A5 — AccuracyCoin (runner complete, accuracy work ongoing)
 

@@ -18,6 +18,17 @@ image. "ErrorCode N" below is the ROM's `value >> 2` index; the CLI reports
 
 None in AccuracyCoin. All non-DRAW rows pass.
 
+### FDS (2026-11-14)
+
+- **`$4030.D1` DRAM-refresh watchdog IRQ** — not modelled. `FDS-4030D1-Addr`
+  prints `XXXX`; a Sharp Twin Famicom capture shows the return addresses
+  `67FF` and `6E25`. The IRQ period and its relationship to the
+  acknowledgement delay are still research topics, so no approximation is
+  shipped. Responsible module: `cart.rs` (`Fds::status_4030`, `$4023` write
+  path).
+- `FDS-4023-Test` and `FDS-Audio-Registers` are display-only dumps with no
+  pass/fail line; their register dumps are captured but have no oracle yet.
+
 ### NESdev screen-suite status (2026-11-14)
 
 Both previously open public failures now pass:

@@ -34,7 +34,7 @@ verified against the public reference suites:
 - `ppu_vbl_nmi` **12/12**, `ppu_sprites` **19/19**, blargg APU/DMC **13/13**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **504 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **505 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **136 pass / 12 fail / 115 visual-or-input-only** (5 PAL APU failures pass when PAL timing is selected)
 - RustyNES test tree: **157 pass / 13 fail / 171 visual-or-input-only** (164 / 6 with PAL APU in PAL mode)
 
@@ -49,6 +49,19 @@ Compatibility from the local licensed 7,101-image NES audit:
 | Rendering at 20 frames | 3,898 |
 | Rendering at 120 frames | 6,490 |
 | Distinct mapper IDs in the set | 285 |
+
+### Project stats
+
+| Metric | Value |
+|---|---:|
+| Workspace crates | 8 |
+| First-party Rust lines | ~76,700 |
+| Workspace tests | 505 pass, 0 failed |
+| AccuracyCoin non-DRAW rows | 146 / 146 |
+| Licensed library images scanned | 7,101 |
+
+Numbers are from the local checkout on 2026-11-14; the test and
+accuracy figures are re-measured on every CI run or release audit.
 
 Only mapper 308 (NTDEC Batman) does not draw headless without Start input.
 "Rendering" in that audit is a boot smoke signal, not a completion claim; the

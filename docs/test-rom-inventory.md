@@ -118,10 +118,11 @@ PAL APU singles in PAL mode, `dma_4016_read` and `5-branch_delays_irq`.
 
 ### NESdev suites not yet run to a verdict
 
-- **FDS**: `FdsIrqTests`, `FDS-Mirroring-Test`, `FDS-4023-Test`,
-  `FDS-Audio-Registers`, `FDS-4030D1-Addr`. The BIOS is available locally;
-  these suites are data-blocked because the `.fds` test images themselves are
-  not in the local drop.
+- **FDS**: `FdsIrqTests` **21/21 pass**, `FDS-Mirroring-Test` **3/3 pass**,
+  `FDS-4023-Test` and `FDS-Audio-Registers` are display-only dumps,
+  `FDS-4030D1-Addr` needs the `$4030.D1` DRAM-refresh watchdog IRQ (not
+  modelled). The images were fetched from their public releases for this run;
+  they are not committed. See the dated entry in `docs/accuracy-status.md`.
 - **Mapper-specific**: `BNTest`, `bxrom_512k_test`, `Holy Mapperel`,
   `mmc3bigchrram`, `mmc3irqtest`, `mmc5ramsize`, `mmc1atest`, `test28`,
   `vrc24test`, `vrc6test`, `serom`, NES 2.0 submapper tests 2/3/7/34,
