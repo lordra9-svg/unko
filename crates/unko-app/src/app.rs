@@ -1982,6 +1982,8 @@ impl App {
 
     fn devices_frame(&mut self, ctx: &egui::Context, embedded: bool) {
         let names = self.gamepads.as_ref().map(Gamepads::names);
+        let empty_names = [None, None, None, None];
+        let pad_names = names.as_ref().unwrap_or(&empty_names);
         let connected = self.gamepads.as_ref().map_or(0, Gamepads::connected);
         let gamepad_error = self.gamepad_error.clone();
         let mut settings = self.settings.clone();
@@ -2006,9 +2008,19 @@ impl App {
                 } else {
                     settings.port2_device
                 };
+                let input = if port == 0 {
+                    settings.port1_input
+                } else {
+                    settings.port2_input
+                };
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut settings.port_disabled[port], "Disabled");
-                    ui.label(format!("Port {}: {}", port + 1, device_label(device)));
+                    ui.label(format!(
+                        "Port {}: {} — {}",
+                        port + 1,
+                        port_input_description(input, pad_names),
+                        device_label(device)
+                    ));
                 });
             }
             if settings.port1_device == PortDevice::Microphone
@@ -2080,8 +2092,11 @@ impl App {
             ui.add_space(10.0);
             ui.separator();
             ui.heading("Sources");
-            ui.label("Keyboard and touch: player 1 (unless port 1 is disabled).");
-            ui.label("Gamepads: routed through the matrix above.");
+            ui.label(
+                "Auto: keyboard/touch on player 1 plus the gamepad matrix. \
+                 Explicit Connected choices take precedence.",
+            );
+            ui.label("Gamepads: routed through the matrix above when Connected is Auto.");
             ui.label("Zapper, paddle, Power Pad and Family BASIC use the port's device.");
             ui.add_space(10.0);
             ui.separator();
@@ -3746,6 +3761,28 @@ fn controllers_tab(
 ) {
     ui.heading("Controllers");
     ui.add_space(8.0);
+    let empty_names = [None, None, None, None];
+    let pad_names = gamepads
+        .as_ref()
+        .map_or(empty_names, |gamepads| gamepads.names());
+    if pad_names.iter().flatten().next().is_some() {
+        let detected: Vec<String> = pad_names
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, name)| name.as_ref().map(|name| format!("{}: {name}", slot + 1)))
+            .collect();
+        ui.label(
+            RichText::new(format!("Detected gamepads: {}", detected.join("  ·  ")))
+                .weak()
+                .small(),
+        );
+    } else if gamepad_error.is_none() {
+        ui.label(
+            RichText::new("No SDL3 gamepads detected yet.")
+                .weak()
+                .small(),
+        );
+    }
     if let Some(err) = gamepad_error {
         ui.colored_label(
             Color32::from_rgb(0xE0, 0x80, 0x60),
@@ -3779,13 +3816,13 @@ fn controllers_tab(
     let old_port2 = settings.port2_input;
     ui.horizontal(|ui| {
         ui.label("Port 1 connected");
-        port_input_combo(ui, "port1-input", &mut settings.port1_input);
+        port_input_combo(ui, "port1-input", &mut settings.port1_input, &pad_names);
         ui.label("Protocol");
         device_combo(ui, "port1-device", &mut settings.port1_device);
     });
     ui.horizontal(|ui| {
         ui.label("Port 2 connected");
-        port_input_combo(ui, "port2-input", &mut settings.port2_input);
+        port_input_combo(ui, "port2-input", &mut settings.port2_input, &pad_names);
         ui.label("Protocol");
         device_combo(ui, "port2-device", &mut settings.port2_device);
     });
@@ -3857,7 +3894,13 @@ fn controllers_tab(
                 });
         }
         ui.add_space(8.0);
-        ui.label("NES port 1 (keyboard)");
+        ui.label(
+            RichText::new(format!(
+                "NES port 1 — {}",
+                port_input_description(settings.port1_input, &pad_names)
+            ))
+            .strong(),
+        );
         ui.add_space(4.0);
         egui::Grid::new("controller-map")
             .num_columns(3)
@@ -3967,9 +4010,28 @@ fn controllers_tab(
 }
 
 /// Human label for a controller-port device.
-fn port_input_combo(ui: &mut egui::Ui, id: &str, input: &mut PortInput) {
+fn port_input_description(input: PortInput, names: &[Option<String>; 4]) -> String {
+    match input {
+        PortInput::Auto => "Auto (keyboard + gamepads)".into(),
+        PortInput::None => "None".into(),
+        PortInput::Keyboard => "Keyboard".into(),
+        PortInput::Gamepad(slot) => match names.get(slot).and_then(|name| name.as_ref()) {
+            Some(name) => format!("Gamepad {} — {name}", slot + 1),
+            None => format!("Gamepad {}", slot + 1),
+        },
+        PortInput::MouseZapper => "Mouse (Zapper)".into(),
+        PortInput::MousePaddle => "Mouse (Paddle)".into(),
+    }
+}
+
+fn port_input_combo(
+    ui: &mut egui::Ui,
+    id: &str,
+    input: &mut PortInput,
+    names: &[Option<String>; 4],
+) {
     egui::ComboBox::from_id_salt(id)
-        .selected_text(input.label())
+        .selected_text(port_input_description(*input, names))
         .show_ui(ui, |ui| {
             for option in [
                 PortInput::Auto,
@@ -3982,7 +4044,7 @@ fn port_input_combo(ui: &mut egui::Ui, id: &str, input: &mut PortInput) {
                 PortInput::MouseZapper,
                 PortInput::MousePaddle,
             ] {
-                ui.selectable_value(input, option, option.label());
+                ui.selectable_value(input, option, port_input_description(option, names));
             }
         });
 }

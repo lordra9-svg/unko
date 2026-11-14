@@ -357,7 +357,7 @@ impl PortInput {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Auto => "Auto (legacy routing)",
+            Self::Auto => "Auto (keyboard + gamepads)",
             Self::None => "None",
             Self::Keyboard => "Keyboard",
             Self::Gamepad(0) => "Gamepad 1",
