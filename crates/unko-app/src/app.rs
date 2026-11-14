@@ -66,6 +66,37 @@ impl Tab {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ControllerAction {
+    Resume,
+    Pause,
+    Stop,
+    PlaySelected,
+    OpenRom,
+    Settings,
+    RomManager,
+    Rescan,
+    ToggleView,
+    Quit,
+}
+
+impl ControllerAction {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Resume => "Resume game",
+            Self::Pause => "Pause game",
+            Self::Stop => "Stop game",
+            Self::PlaySelected => "Play selected",
+            Self::OpenRom => "Open ROM…",
+            Self::Settings => "Settings…",
+            Self::RomManager => "ROM Manager…",
+            Self::Rescan => "Rescan library",
+            Self::ToggleView => "Toggle grid/list",
+            Self::Quit => "Quit Unko",
+        }
+    }
+}
+
 /// Application state.
 pub struct App {
     settings: Settings,
@@ -103,6 +134,11 @@ pub struct App {
     datach_code: String,
     confirm_reset: bool,
     rom_manager: RomManager,
+    controller_last: unko_core::InputState,
+    controller_repeat: Instant,
+    controller_menu_open: bool,
+    controller_menu_index: usize,
+    controller_scroll: bool,
     settings_window_shown: bool,
     devices_window_shown: bool,
     cheats_window_shown: bool,
@@ -213,6 +249,11 @@ impl App {
             datach_code: String::new(),
             confirm_reset: false,
             rom_manager,
+            controller_last: unko_core::InputState::empty(),
+            controller_repeat: Instant::now(),
+            controller_menu_open: false,
+            controller_menu_index: 0,
+            controller_scroll: false,
             settings_window_shown: false,
             devices_window_shown: false,
             cheats_window_shown: false,
@@ -235,6 +276,236 @@ impl App {
             }
         }
         app
+    }
+
+    fn handle_controller_ui(&mut self, ctx: &egui::Context, pad: unko_core::InputState) {
+        let pressed = pad.bits() & !self.controller_last.bits();
+        let now = Instant::now();
+        let direction = pad.bits()
+            & (unko_core::InputState::UP
+                | unko_core::InputState::DOWN
+                | unko_core::InputState::LEFT
+                | unko_core::InputState::RIGHT);
+        let repeat = direction != 0 && (pressed & direction != 0 || now >= self.controller_repeat);
+        if self.controller_menu_open {
+            let actions = self.controller_actions();
+            if !actions.is_empty() {
+                if repeat {
+                    let down = pad.is_pressed(unko_core::InputState::DOWN)
+                        || pad.is_pressed(unko_core::InputState::RIGHT);
+                    let up = pad.is_pressed(unko_core::InputState::UP)
+                        || pad.is_pressed(unko_core::InputState::LEFT);
+                    if up {
+                        self.controller_menu_index = self.controller_menu_index.saturating_sub(1);
+                    } else if down {
+                        self.controller_menu_index =
+                            (self.controller_menu_index + 1).min(actions.len() - 1);
+                    }
+                    self.controller_repeat =
+                        now + Duration::from_millis(if pressed != 0 { 340 } else { 110 });
+                }
+                if pressed & unko_core::InputState::A != 0 {
+                    let action = actions[self.controller_menu_index.min(actions.len() - 1)];
+                    self.controller_menu_open = false;
+                    self.run_controller_action(ctx, action);
+                } else if pressed & (unko_core::InputState::B | unko_core::InputState::START) != 0 {
+                    self.controller_menu_open = false;
+                }
+            }
+            self.controller_last = pad;
+            return;
+        }
+        let blocked = self.settings_open
+            || self.devices_open
+            || self.cheats_open
+            || self.about_open
+            || self.open_rom_open
+            || self.confirm_reset
+            || self.rom_manager.open;
+        if blocked {
+            self.controller_last = pad;
+            return;
+        }
+        let start = pressed & unko_core::InputState::START != 0;
+        let chord = pad.is_pressed(unko_core::InputState::START | unko_core::InputState::SELECT)
+            && !self
+                .controller_last
+                .is_pressed(unko_core::InputState::START | unko_core::InputState::SELECT);
+        let paused = self.player.as_ref().is_some_and(|player| player.paused);
+        if chord || (start && (self.player.is_none() || paused)) {
+            if let Some(player) = &mut self.player {
+                if !player.paused {
+                    player.toggle_pause();
+                }
+            }
+            self.controller_menu_open = true;
+            self.controller_menu_index = 0;
+            self.controller_last = pad;
+            return;
+        }
+        if self.player.is_none() {
+            if repeat {
+                self.move_library_selection(direction);
+                self.controller_repeat =
+                    now + Duration::from_millis(if pressed != 0 { 340 } else { 110 });
+            }
+            if pressed & unko_core::InputState::A != 0 {
+                self.play_selected();
+            }
+            if pressed & unko_core::InputState::B != 0 {
+                self.selected = None;
+            }
+            if pressed & unko_core::InputState::SELECT != 0 {
+                self.settings.grid_view = !self.settings.grid_view;
+                let _ = self.settings.save(&Settings::path());
+            }
+        } else if paused && pressed & unko_core::InputState::A != 0 {
+            if let Some(player) = &mut self.player {
+                player.toggle_pause();
+            }
+        }
+        self.controller_last = pad;
+    }
+
+    fn move_library_selection(&mut self, direction: u16) {
+        let indices = self.filtered();
+        if indices.is_empty() {
+            return;
+        }
+        let columns = if self.settings.grid_view {
+            self.settings.grid_columns.clamp(1, 8) as usize
+        } else {
+            1
+        };
+        let position = self
+            .selected
+            .and_then(|selected| indices.iter().position(|index| *index == selected));
+        let next = match (direction, position) {
+            (unko_core::InputState::UP, Some(position)) => position.saturating_sub(columns),
+            (unko_core::InputState::DOWN, Some(position)) => {
+                (position + columns).min(indices.len() - 1)
+            }
+            (unko_core::InputState::LEFT, Some(position)) => position.saturating_sub(1),
+            (unko_core::InputState::RIGHT, Some(position)) => (position + 1).min(indices.len() - 1),
+            (unko_core::InputState::UP, None) => indices.len() - 1,
+            (_, None) => 0,
+            _ => return,
+        };
+        self.selected = Some(indices[next]);
+        self.controller_scroll = true;
+    }
+
+    fn play_selected(&mut self) {
+        let indices = self.filtered();
+        if indices.is_empty() {
+            return;
+        }
+        let index = self
+            .selected
+            .filter(|selected| indices.contains(selected))
+            .unwrap_or(indices[0]);
+        self.selected = Some(index);
+        self.pending_play = Some(self.library[index].clone());
+    }
+
+    fn controller_actions(&self) -> Vec<ControllerAction> {
+        let mut actions = Vec::new();
+        if let Some(player) = &self.player {
+            actions.push(if player.paused {
+                ControllerAction::Resume
+            } else {
+                ControllerAction::Pause
+            });
+            actions.push(ControllerAction::Stop);
+        } else {
+            actions.push(ControllerAction::PlaySelected);
+        }
+        actions.extend([
+            ControllerAction::OpenRom,
+            ControllerAction::Settings,
+            ControllerAction::RomManager,
+            ControllerAction::Rescan,
+            ControllerAction::ToggleView,
+            ControllerAction::Quit,
+        ]);
+        actions
+    }
+
+    fn run_controller_action(&mut self, ctx: &egui::Context, action: ControllerAction) {
+        match action {
+            ControllerAction::Resume => {
+                if let Some(player) = &mut self.player {
+                    if player.paused {
+                        player.toggle_pause();
+                    }
+                }
+            }
+            ControllerAction::Pause => {
+                if let Some(player) = &mut self.player {
+                    player.toggle_pause();
+                }
+            }
+            ControllerAction::Stop => {
+                self.stop_game();
+            }
+            ControllerAction::PlaySelected => {
+                self.play_selected();
+            }
+            ControllerAction::OpenRom => {
+                self.open_rom_open = true;
+            }
+            ControllerAction::Settings => {
+                self.settings_open = true;
+                self.tab = Tab::General;
+            }
+            ControllerAction::RomManager => {
+                self.rom_manager.request_focus();
+            }
+            ControllerAction::Rescan => {
+                self.scan();
+            }
+            ControllerAction::ToggleView => {
+                self.settings.grid_view = !self.settings.grid_view;
+                let _ = self.settings.save(&Settings::path());
+            }
+            ControllerAction::Quit => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+
+    fn controller_menu(&mut self, ctx: &egui::Context) {
+        if !self.controller_menu_open {
+            return;
+        }
+        let actions = self.controller_actions();
+        let mut chosen = None;
+        egui::Window::new("Controller menu")
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .collapsible(false)
+            .resizable(false)
+            .movable(false)
+            .show(ctx, |ui| {
+                ui.heading("Menu");
+                for (index, action) in actions.iter().enumerate() {
+                    if ui
+                        .selectable_label(self.controller_menu_index == index, action.label())
+                        .clicked()
+                    {
+                        chosen = Some(*action);
+                    }
+                }
+                ui.separator();
+                ui.label(
+                    RichText::new("D-pad move · A select · B close")
+                        .weak()
+                        .small(),
+                );
+            });
+        if let Some(action) = chosen {
+            self.controller_menu_open = false;
+            self.run_controller_action(ctx, action);
+        }
     }
 
     fn scan(&mut self) {
@@ -1312,6 +1583,7 @@ impl App {
                         self.settings.rom_dir.display()
                     ));
                 });
+                self.controller_scroll = false;
                 return;
             }
 
@@ -1320,6 +1592,7 @@ impl App {
             } else {
                 self.table(ui, &indices);
             }
+            self.controller_scroll = false;
         });
     }
 
@@ -1403,6 +1676,9 @@ impl App {
                     if response.double_clicked() {
                         self.pending_play = Some(entry.clone());
                     }
+                    if selected && self.controller_scroll {
+                        response.scroll_to_me(Some(egui::Align::Center));
+                    }
                     response.context_menu(|ui| {
                         if ui.button("Play").clicked() {
                             self.pending_play = Some(entry.clone());
@@ -1477,6 +1753,9 @@ impl App {
                         }
                         if response.double_clicked() {
                             self.pending_play = Some(entry.clone());
+                        }
+                        if selected && self.controller_scroll {
+                            response.scroll_to_me(Some(egui::Align::Center));
                         }
                         response.context_menu(|ui| {
                             if ui.button("Play").clicked() {
@@ -2363,6 +2642,12 @@ impl eframe::App for App {
         } else {
             [unko_core::InputState::empty(); 4]
         };
+        let ui_pad = self
+            .gamepads
+            .as_ref()
+            .and_then(|gamepads| gamepads.names().iter().position(Option::is_some))
+            .map_or(unko_core::InputState::empty(), |slot| polled[slot]);
+        self.handle_controller_ui(ctx, ui_pad);
         let mut routed = [unko_core::InputState::empty(); 4];
         let mut keyboard_ports = [false; 4];
         let mut explicit_slots = [false; 4];
@@ -2536,6 +2821,7 @@ impl eframe::App for App {
         self.devices_window(ctx);
         self.cheats_window(ctx);
         self.rom_manager_window(ctx);
+        self.controller_menu(ctx);
         self.about_window(ctx);
         self.open_rom_window(ctx);
         self.reset_confirmation(ctx);
@@ -4007,6 +4293,15 @@ fn controllers_tab(
     ui.label(
         RichText::new(
             "Device changes apply immediately. Zapper and paddle follow the mouse inside the viewport.",
+        )
+        .weak()
+        .small(),
+    );
+    ui.label(
+        RichText::new(
+            "Controller navigation: D-pad selects in the library, A plays, B clears, \
+             Start opens the menu and Select toggles grid/list. Start+Select opens the \
+             pause menu while a game is running.",
         )
         .weak()
         .small(),

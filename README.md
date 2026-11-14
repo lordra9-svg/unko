@@ -133,6 +133,12 @@ Keyboard, Gamepad 1-4, Mouse (Zapper) or Mouse (Paddle), plus the NES protocol
 dropdown and **Restore default controls**. Explicit port choices override the
 gamepad matrix for that port.
 
+A connected gamepad can navigate the UI: D-pad selects in the library, A plays
+the selected game, B clears the selection, Start opens the controller menu and
+Select toggles grid/list. While a game is running, Start+Select pauses it and
+opens the menu (Resume/Pause, Stop, Open ROM, Settings, ROM Manager, Rescan,
+view toggle, Quit).
+
 Every OS window starts at its built-in default geometry on first use. The app
 does not resize windows automatically; after you move or resize one, its
 position and size are remembered in `unko.conf` (`layout_main`,

@@ -64,6 +64,7 @@ Key interaction rules worth keeping:
 | MenuBar: Help | About | now |
 | ToolBar | Open (picker, archive-aware), Refresh, Play/Pause, Stop, Reset, Fullscreen, Shot, Config | now |
 | Library drop target | drop a ROM/archive to open it and add its folder; drop a folder to add it as a root | now |
+| Controller UI | D-pad/A/B/Start/Select library navigation; Start controller menu; Start+Select pause menu while playing | now |
 | RenderWidget | `egui` texture viewport, aspect-correct | now |
 | Settings: General/Interface | theme, pause on focus loss, confirm stop, detachable windows, reset-all | now |
 | Settings: Graphics | filter, palette + `.pal` import, aspect, integer scale, supersampling, GPU output shaders (scanlines/LCD/CRT/NTSC Budget/Premium, brightness/sharpness), window presets | now |
