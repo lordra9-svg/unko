@@ -24,9 +24,9 @@ Compatibility, local licensed 7,101-image NES library:
 | Loaded (mapper implemented) | 7,073 | 99.6% |
 | Unsupported mapper IDs | 0 | 0.0% |
 | Load/run failures (truncated images) | 28 | 0.39% |
-| Rendering at 20 frames | 3,898 | 54.9% of scanned |
-| Rendering at 120 frames | 6,490 | 91.4% of scanned |
-| Rendering at 240 frames | 6,417 | 90.4% of scanned |
+| Rendering at 20 frames | 3,897 | 54.9% of scanned |
+| Rendering at 120 frames | 6,497 | 91.5% of scanned |
+| Rendering at 240 frames | 6,425 | 90.5% of scanned |
 
 Only mapper 308 (NTDEC Batman) does not draw headless at 120 or 240 frames
 without Start input. The 240-frame count is lower than 120 because the exact
@@ -72,7 +72,7 @@ passes with the alternate selector. The selector is exposed as
 `Settings -> Advanced -> Alternate MMC3 IRQ revision` (and
 `Core::set_mmc3_alternate`). AccuracyCoin remains
 **146/146 non-DRAW**, and the 20/120-frame library audit is unchanged
-(3,898/6,490 rendering).
+(3,897/6,497 rendering).
 
 Because `Mmc3` gained serialized PRG-RAM protection state, the save-state magic
 is now **`UNKOST10`**; `UNKOST09` and older states are rejected by the normal
@@ -405,11 +405,11 @@ Chrono Trigger and Batman render their title screens; Auto-Upturn and Chess
 Academy render at 300 frames).
 
 Full-library mapper audit (7,101 images, 20 frames, four 2,000-entry batches):
-7,073 loaded (99.6%), 3,898 rendering (54.9%), 3,175 blank (44.7%), 0
+7,073 loaded (99.6%), 3,897 rendering (54.9%), 3,176 blank (44.7%), 0
 unsupported (0.0%) and 28 load/run failures (0.39%). The batched totals
 reproduce the single-pass numbers exactly. No mapper IDs remain unsupported.
-A 120-frame pass renders 6,490 with 583 blank; a 240-frame pass renders
-6,417 with 656 blank. The 240 total is slightly lower because several
+A 120-frame pass renders 6,497 with 576 blank; a 240-frame pass renders
+6,425 with 648 blank. The 240 total is slightly lower because several
 hundred games sit on a fade or transition frame at that exact sample;
 across both passes every loaded image renders except mapper 308 (NTDEC
 Batman), which waits for Start. The 120-frame pass adds 2,592 rendering

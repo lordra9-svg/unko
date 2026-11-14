@@ -47,9 +47,9 @@ BIOS**; it never bundles the BIOS. FDS write-mode changes are persisted to
 - **7,073 of 7,101** images in the local licensed library load (99.6%).
 - **0 unsupported mapper IDs**; the remaining 28 are truncated dumps.
 - **285 distinct mapper IDs** appear in the library.
-- 20-frame smoke audit: **3,898 rendering / 3,175 blank**.
-- 120-frame audit: **6,490 rendering / 583 blank**.
-- 240-frame audit: **6,417 rendering / 656 blank**.
+- 20-frame smoke audit: **3,897 rendering / 3,176 blank**.
+- 120-frame audit: **6,497 rendering / 576 blank**.
+- 240-frame audit: **6,425 rendering / 648 blank**.
 
 “Rendering” means the final sampled frame was not a single uniform colour; it
 is not a completion claim. Per-mapper counts and the remaining long-tail work

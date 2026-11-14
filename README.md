@@ -46,8 +46,8 @@ Compatibility from the local licensed 7,101-image NES audit:
 | Loaded (mapper implemented) | 7,073 (**99.6%**) |
 | Unsupported mapper IDs | **0** |
 | Load/run failures | 28 (all truncated dumps) |
-| Rendering at 20 frames | 3,898 |
-| Rendering at 120 frames | 6,490 |
+| Rendering at 20 frames | 3,897 |
+| Rendering at 120 frames | 6,497 |
 | Distinct mapper IDs in the set | 285 |
 
 ### Project stats
