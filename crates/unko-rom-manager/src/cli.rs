@@ -2,15 +2,15 @@
 //!
 //! ```text
 //! unko-rom-manager --dat DAT --input ROMS [--1g1r] [--fixdat FIX.xml]
-//!                  [--csv REPORT.csv] [--copy OUT] [--regions USA,Europe]
-//!                  [--languages En] [--all]
+//!                  [--csv REPORT.csv] [--copy OUT] [--zip]
+//!                  [--regions USA,Europe] [--languages En] [--all]
 //! ```
 
 use std::path::PathBuf;
 
 use crate::{
-    audit, rebuild, summary_line, write_csv, write_fixdat, OneGameOneRom, RebuildOptions,
-    ScanOptions, ScanProgress,
+    audit, rebuild, summary_line, write_csv, write_fixdat, OneGameOneRom, OutputFormat,
+    RebuildOptions, ScanOptions, ScanProgress,
 };
 
 /// Runs the headless ROM manager with command-line arguments.
@@ -33,6 +33,7 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
     ];
     let mut languages = vec!["En".to_string()];
     let mut include_bios = false;
+    let mut zip_sets = false;
 
     let mut args = args;
     while let Some(arg) = args.next() {
@@ -63,12 +64,15 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
                     .collect();
             }
             "--all" => include_bios = true,
+            "--zip" => zip_sets = true,
             "-h" | "--help" => {
                 println!(
                     "usage: unko-rom-manager --dat DAT --input ROMS [options]\n\
                      \n\
-                     options: --1g1r --fixdat FILE --csv FILE --copy DIR\n\
-                     \x20        --regions USA,Europe,World,Japan --languages En --all"
+                     options: --1g1r --fixdat FILE --csv FILE --copy DIR --zip\n\
+                     \x20        --regions USA,Europe,World,Japan --languages En --all\n\
+                     \n\
+                     --copy writes loose files; --zip writes one archive per game."
                 );
                 return Ok(());
             }
@@ -129,12 +133,18 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
             &selected,
             &RebuildOptions {
                 output: output.clone(),
+                format: if zip_sets {
+                    OutputFormat::Zip
+                } else {
+                    OutputFormat::Loose
+                },
                 ..RebuildOptions::default()
             },
         );
         println!(
-            "copy: {} written, {} skipped, {} errors -> {}",
+            "copy: {} written, {} archives, {} skipped, {} errors -> {}",
             result.written,
+            result.archives,
             result.skipped,
             result.errors.len(),
             output.display()

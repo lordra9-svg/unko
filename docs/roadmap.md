@@ -48,9 +48,10 @@ The main effort is now the reference-parity accuracy core. Details in
       commercial `.fds` title to its licence screen and game title. Remaining
       FDS work: byte-identical
       audio parity. MMC5 now covers the full CHR range (the extended-attribute
-      path carries physical offsets, so >256 KiB CHR works). Remaining overall:
-      the Datach peripheral and the small six-image ASIC tail (triage in
-      `docs/mapper-audit.md`). VRC6 expansion audio (two
+      path carries physical offsets, so >256 KiB CHR works). The Datach board
+      (157) and the previously open six-image ASIC tail are implemented; the
+      remaining hardware-dependent checks are tracked in
+      `docs/mapper-audit.md`. VRC6 expansion audio (two
       pulses + sawtooth), Sunsoft 5B / YM2149 (three tones + noise + envelope)
       Namco 163 (up to eight wave channels, shared $40-$7F sound RAM), MMC5
       (two pulses + PCM DAC) and the VRC7/YM2413 two-operator FM engine are
@@ -73,8 +74,11 @@ The main effort is now the reference-parity accuracy core. Details in
       NTSC-only odd-frame skip), with unit-test verification. An **NSF/NSFE
       parser and player** builds a synthetic NROM image with a player stub
       (INIT once, PLAY from the NMI) and is covered by header, image-layout and
-      init/play unit tests. Remaining: FDS/VS, expansion audio, additional
-      peripherals and validation against real PAL/NSF content.
+      init/play unit tests. Expansion audio (VRC6, Sunsoft 5B, Namco 163,
+      MMC5 and VRC7) is implemented and unit-tested. Remaining: VS. System /
+      PlayChoice-10 (blocked on ROMs and palette/security data), FDS audio
+      parity, Miracle Piano MIDI replies, the Famicom 3D glasses and mouse,
+      and validation against real PAL/NSF content.
 - [ ] **A7** differential harness, hardware captures, performance pass.
       The differential harness is complete: per-frame RGBA, audio and
       palette-independent geometry hashes are compared against RustyNES, and

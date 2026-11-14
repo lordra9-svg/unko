@@ -39,7 +39,7 @@ pub use catalog::{Catalog, GameMatch, Match, MatchReport, MatchStatus, RomRef, S
 pub use dat::{parse_dat_path, parse_dat_str, Dat, DatRom, Game};
 pub use hash::{hash_bytes, Hashes};
 pub use one_g1r::{parse_tags, OneGameOneRom, Tags};
-pub use rebuild::{rebuild, RebuildOptions, RebuildReport};
+pub use rebuild::{rebuild, OutputFormat, RebuildOptions, RebuildReport};
 pub use report::{summary_line, write_csv, write_fixdat};
 pub use scan::{scan_path, Origin, ScanOptions, ScanProgress, ScannedRom};
 

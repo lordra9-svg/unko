@@ -20,6 +20,7 @@ fn parse_args() -> Args {
             "--rom" => parsed.rom = args.next().map(PathBuf::from),
             "--settings" => parsed.settings = true,
             "--debug" => parsed.debug = true,
+            "--properties" => parsed.properties = true,
             "--portable" => parsed.portable = true,
             "--print-data-dir" => parsed.print_data_dir = true,
             "--rom-manager" => parsed.rom_manager = true,
@@ -35,6 +36,7 @@ fn parse_args() -> Args {
                 println!(
                     "Unko — desktop frontend\n\n\
                      usage: unko-app [--roms DIR] [--rom PATH] [--settings] [--debug]\n\
+                     \x20      [--properties]\n\
                      \x20      [--portable | --data-dir DIR] [--print-data-dir]\n\
                      \x20      [--rom-manager] [--dat FILE]...\n\n\
                      Keyboard: arrows = D-pad, X = A, Z = B, Enter = Start,\n\

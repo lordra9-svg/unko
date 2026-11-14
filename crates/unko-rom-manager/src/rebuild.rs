@@ -1,10 +1,27 @@
 //! Safe copy/rebuild of matched ROMs into an output folder.
 
+use std::collections::HashSet;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, DateTime, ZipWriter};
 
 use crate::catalog::{MatchReport, MatchStatus};
 use crate::hash::hash_bytes;
+use crate::scan::ScannedRom;
+
+/// How rebuilt sets are written.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OutputFormat {
+    /// Loose files, one folder per game unless [`RebuildOptions::per_game`]
+    /// is off.
+    #[default]
+    Loose,
+    /// One deterministic ZIP per selected game (`<game>.zip`).
+    Zip,
+}
 
 /// Rebuild behaviour.
 #[derive(Debug, Clone)]
@@ -19,6 +36,8 @@ pub struct RebuildOptions {
     pub only_complete: bool,
     /// Verify each written file against the DAT entry.
     pub verify: bool,
+    /// Write loose files or one ZIP archive per game.
+    pub format: OutputFormat,
 }
 
 impl Default for RebuildOptions {
@@ -29,6 +48,7 @@ impl Default for RebuildOptions {
             overwrite: false,
             only_complete: true,
             verify: true,
+            format: OutputFormat::Loose,
         }
     }
 }
@@ -36,8 +56,10 @@ impl Default for RebuildOptions {
 /// Result of a rebuild.
 #[derive(Debug, Clone, Default)]
 pub struct RebuildReport {
-    /// Files written.
+    /// Files written (loose files or archive members).
     pub written: usize,
+    /// ZIP archives written.
+    pub archives: usize,
     /// Files skipped because they already existed or were not matched.
     pub skipped: usize,
     /// Per-file errors.
@@ -45,6 +67,10 @@ pub struct RebuildReport {
 }
 
 /// Copies the matched ROMs of `selected` games into `options.output`.
+///
+/// With [`OutputFormat::Zip`] each game becomes one archive named after the
+/// game. Archive entries are stored in DAT order with a fixed timestamp and
+/// mode, so rebuilding the same set twice produces byte-identical archives.
 #[must_use]
 pub fn rebuild(
     report: &MatchReport,
@@ -67,88 +93,185 @@ pub fn rebuild(
             result.skipped += game.roms.len();
             continue;
         }
-        let directory = if options.per_game {
-            options.output.join(sanitize(&game.name))
-        } else {
-            options.output.clone()
+        let mut entries = match prepare_game(report, game_index, options, &mut result.errors) {
+            Some(entries) => entries,
+            None => {
+                result.skipped += game.roms.len();
+                continue;
+            }
         };
-        if let Err(err) = fs::create_dir_all(&directory) {
-            result
-                .errors
-                .push(format!("create {}: {err}", directory.display()));
+        if entries.is_empty() {
             continue;
         }
-        for (rom_index, rom) in game.roms.iter().enumerate() {
-            let Some(flat) = report.flat_index(game_index, rom_index) else {
-                result.skipped += 1;
-                continue;
-            };
-            let Some(matched) = report.rom_match.get(flat).and_then(|entry| *entry) else {
-                result.skipped += 1;
-                continue;
-            };
-            let Some(scanned) = report.scanned.get(matched.scanned) else {
-                result.skipped += 1;
-                continue;
-            };
-            let bytes = match scanned.load_for(matched.headerless) {
-                Ok(bytes) => bytes,
-                Err(err) => {
-                    result.errors.push(err.to_string());
-                    continue;
-                }
-            };
-            let destination = directory.join(sanitize(&rom.name));
-            if destination.exists() && !options.overwrite {
-                result.skipped += 1;
-                continue;
+        match options.format {
+            OutputFormat::Loose => {
+                write_loose(&mut result, options, &game.name, &mut entries);
             }
-            let mut mismatched = None;
-            if options.verify {
-                let hashes = hash_bytes(&bytes);
-                if hashes.size != rom.size {
-                    mismatched = Some(format!(
-                        "{}: size {} does not match DAT size {}",
-                        scanned.origin.display(),
-                        hashes.size,
-                        rom.size
-                    ));
-                } else if let Some(expected) = rom.sha1 {
-                    if hashes.sha1 != expected {
-                        mismatched = Some(format!(
-                            "{}: SHA-1 does not match the DAT",
-                            scanned.origin.display()
-                        ));
-                    }
-                } else if let Some(expected) = rom.crc {
-                    if hashes.crc != expected {
-                        mismatched = Some(format!(
-                            "{}: CRC-32 does not match the DAT",
-                            scanned.origin.display()
-                        ));
-                    }
-                } else if let Some(expected) = rom.md5 {
-                    if hashes.md5 != expected {
-                        mismatched = Some(format!(
-                            "{}: MD5 does not match the DAT",
-                            scanned.origin.display()
-                        ));
-                    }
-                }
-            }
-            if let Some(error) = mismatched {
-                result.errors.push(error);
-                continue;
-            }
-            match fs::write(&destination, bytes) {
-                Ok(()) => result.written += 1,
-                Err(err) => result
-                    .errors
-                    .push(format!("write {}: {err}", destination.display())),
+            OutputFormat::Zip => {
+                write_archive(&mut result, options, &game.name, &entries);
             }
         }
     }
     result
+}
+
+/// Loads and verifies every ROM for one game.
+///
+/// Returns `None` when a ROM is unmatched, unreadable or fails verification;
+/// the reason is pushed to `errors` and the caller records the skip.
+fn prepare_game(
+    report: &MatchReport,
+    game_index: usize,
+    options: &RebuildOptions,
+    errors: &mut Vec<String>,
+) -> Option<Vec<(String, Vec<u8>)>> {
+    let game = report.dat.games.get(game_index)?;
+    let mut entries = Vec::with_capacity(game.roms.len());
+    for (rom_index, rom) in game.roms.iter().enumerate() {
+        let flat = report.flat_index(game_index, rom_index)?;
+        let matched = report.rom_match.get(flat).and_then(|entry| *entry)?;
+        let scanned = report.scanned.get(matched.scanned)?;
+        let bytes = match scanned.load_for(matched.headerless) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                errors.push(err.to_string());
+                return None;
+            }
+        };
+        if options.verify {
+            if let Some(error) = verify_rom(rom, &bytes, scanned) {
+                errors.push(error);
+                return None;
+            }
+        }
+        entries.push((sanitize(&rom.name), bytes));
+    }
+    Some(entries)
+}
+
+fn verify_rom(rom: &crate::dat::DatRom, bytes: &[u8], scanned: &ScannedRom) -> Option<String> {
+    let hashes = hash_bytes(bytes);
+    if hashes.size != rom.size {
+        return Some(format!(
+            "{}: size {} does not match DAT size {}",
+            scanned.origin.display(),
+            hashes.size,
+            rom.size
+        ));
+    }
+    if let Some(expected) = rom.sha1 {
+        if hashes.sha1 != expected {
+            return Some(format!(
+                "{}: SHA-1 does not match the DAT",
+                scanned.origin.display()
+            ));
+        }
+    } else if let Some(expected) = rom.crc {
+        if hashes.crc != expected {
+            return Some(format!(
+                "{}: CRC-32 does not match the DAT",
+                scanned.origin.display()
+            ));
+        }
+    } else if let Some(expected) = rom.md5 {
+        if hashes.md5 != expected {
+            return Some(format!(
+                "{}: MD5 does not match the DAT",
+                scanned.origin.display()
+            ));
+        }
+    }
+    None
+}
+
+fn write_loose(
+    result: &mut RebuildReport,
+    options: &RebuildOptions,
+    game: &str,
+    entries: &mut Vec<(String, Vec<u8>)>,
+) {
+    let directory = if options.per_game {
+        options.output.join(sanitize(game))
+    } else {
+        options.output.clone()
+    };
+    if let Err(err) = fs::create_dir_all(&directory) {
+        result
+            .errors
+            .push(format!("create {}: {err}", directory.display()));
+        return;
+    }
+    for (name, bytes) in entries.drain(..) {
+        let destination = directory.join(&name);
+        if destination.exists() && !options.overwrite {
+            result.skipped += 1;
+            continue;
+        }
+        match fs::write(&destination, bytes) {
+            Ok(()) => result.written += 1,
+            Err(err) => result
+                .errors
+                .push(format!("write {}: {err}", destination.display())),
+        }
+    }
+}
+
+fn write_archive(
+    result: &mut RebuildReport,
+    options: &RebuildOptions,
+    game: &str,
+    entries: &[(String, Vec<u8>)],
+) {
+    let destination = options.output.join(format!("{}.zip", sanitize(game)));
+    if destination.exists() && !options.overwrite {
+        result.skipped += entries.len();
+        return;
+    }
+    match archive(destination.as_path(), entries) {
+        Ok(()) => {
+            result.written += entries.len();
+            result.archives += 1;
+        }
+        Err(err) => result.errors.push(err),
+    }
+}
+
+fn archive(destination: &Path, entries: &[(String, Vec<u8>)]) -> Result<(), String> {
+    let part = destination.with_extension("zip.part");
+    let result = write_archive_file(&part, entries);
+    match result {
+        Ok(()) => fs::rename(&part, destination)
+            .map_err(|err| format!("rename {}: {err}", destination.display())),
+        Err(err) => {
+            let _ = fs::remove_file(&part);
+            Err(err)
+        }
+    }
+}
+
+fn write_archive_file(part: &Path, entries: &[(String, Vec<u8>)]) -> Result<(), String> {
+    let file = fs::File::create(part).map_err(|err| format!("create {}: {err}", part.display()))?;
+    let mut writer = ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Deflated)
+        .last_modified_time(DateTime::default())
+        .unix_permissions(0o644);
+    let mut names = HashSet::with_capacity(entries.len());
+    for (name, bytes) in entries {
+        if !names.insert(name.as_str()) {
+            return Err(format!("{name}: duplicate entry in the game"));
+        }
+        writer
+            .start_file(name.as_str(), options)
+            .map_err(|err| format!("{}: {err}", part.display()))?;
+        writer
+            .write_all(bytes)
+            .map_err(|err| format!("{}: {err}", part.display()))?;
+    }
+    writer
+        .finish()
+        .map(|_| ())
+        .map_err(|err| format!("{}: {err}", part.display()))
 }
 
 fn sanitize(name: &str) -> String {
@@ -183,32 +306,63 @@ mod tests {
     use crate::dat::parse_dat_str;
     use crate::hash::hash_bytes;
     use crate::scan::{Origin, ScannedRom};
+    use std::io::Read;
 
-    #[test]
-    fn copies_and_verifies_matched_files() {
+    fn fixture() -> (MatchReport, std::path::PathBuf) {
         let payload = b"rom bytes";
+        let second = b"second rom";
         let hashes = hash_bytes(payload);
+        let second_hashes = hash_bytes(second);
         let dat = parse_dat_str(&format!(
             r#"<datafile><header><name>T</name></header>
-              <game name="Game (USA)" id="1"><rom name="Game (USA).bin" size="{}" crc="{:08x}" sha1="{}"/></game>
+              <game name="Game (USA)" id="1">
+                <rom name="Game (USA).bin" size="{}" crc="{:08x}" sha1="{}"/>
+                <rom name="Game (USA) (Track 2).bin" size="{}" crc="{:08x}" sha1="{}"/>
+              </game>
             </datafile>"#,
             hashes.size,
             hashes.crc,
-            hashes.sha1_hex()
+            hashes.sha1_hex(),
+            second_hashes.size,
+            second_hashes.crc,
+            second_hashes.sha1_hex()
         ))
         .expect("dat");
-        let output = std::env::temp_dir().join(format!("unko-rebuild-{}", std::process::id()));
+        let output = std::env::temp_dir().join(format!(
+            "unko-rebuild-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |time| time.as_nanos())
+        ));
         let _ = fs::remove_dir_all(&output);
         fs::create_dir_all(&output).expect("dir");
         let source = output.join("source.bin");
         fs::write(&source, payload).expect("source");
-        let report = Catalog::new(dat).match_all(vec![ScannedRom {
-            origin: Origin::File(source),
-            file_name: "source.bin".into(),
-            hashes,
-            headerless: None,
-            modified: None,
-        }]);
+        let source2 = output.join("source2.bin");
+        fs::write(&source2, second).expect("source2");
+        let report = Catalog::new(dat).match_all(vec![
+            ScannedRom {
+                origin: Origin::File(source),
+                file_name: "source.bin".into(),
+                hashes,
+                headerless: None,
+                modified: None,
+            },
+            ScannedRom {
+                origin: Origin::File(source2),
+                file_name: "source2.bin".into(),
+                hashes: second_hashes,
+                headerless: None,
+                modified: None,
+            },
+        ]);
+        (report, output)
+    }
+
+    #[test]
+    fn copies_and_verifies_matched_files() {
+        let (report, output) = fixture();
         let result = rebuild(
             &report,
             &[0],
@@ -218,12 +372,91 @@ mod tests {
                 ..RebuildOptions::default()
             },
         );
-        assert_eq!(result.written, 1);
+        assert_eq!(result.written, 2);
         assert!(result.errors.is_empty());
         assert_eq!(
             fs::read(output.join("Game (USA)").join("Game (USA).bin")).expect("read"),
-            payload
+            b"rom bytes"
         );
+        let _ = fs::remove_dir_all(&output);
+    }
+
+    #[test]
+    fn writes_one_verified_zip_per_game() {
+        let (report, output) = fixture();
+        let result = rebuild(
+            &report,
+            &[0],
+            &RebuildOptions {
+                output: output.clone(),
+                overwrite: true,
+                format: OutputFormat::Zip,
+                ..RebuildOptions::default()
+            },
+        );
+        assert_eq!(result.archives, 1);
+        assert_eq!(result.written, 2);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let file = fs::File::open(output.join("Game (USA).zip")).expect("archive");
+        let mut archive = zip::ZipArchive::new(file).expect("zip");
+        assert_eq!(archive.len(), 2);
+        {
+            let mut first = archive.by_index(0).expect("member");
+            assert_eq!(first.name().expect("name"), "Game (USA).bin");
+            let mut bytes = Vec::new();
+            first.read_to_end(&mut bytes).expect("read member");
+            assert_eq!(bytes, b"rom bytes");
+        }
+        let second = archive.by_index(1).expect("member");
+        assert_eq!(second.name().expect("name"), "Game (USA) (Track 2).bin");
+        let _ = fs::remove_dir_all(&output);
+    }
+
+    #[test]
+    fn zip_output_is_deterministic() {
+        let (report, output) = fixture();
+        let first = output.join("first");
+        let second = output.join("second");
+        for destination in [&first, &second] {
+            let result = rebuild(
+                &report,
+                &[0],
+                &RebuildOptions {
+                    output: destination.clone(),
+                    overwrite: true,
+                    format: OutputFormat::Zip,
+                    ..RebuildOptions::default()
+                },
+            );
+            assert_eq!(result.archives, 1);
+        }
+        assert_eq!(
+            fs::read(first.join("Game (USA).zip")).expect("first"),
+            fs::read(second.join("Game (USA).zip")).expect("second")
+        );
+        let _ = fs::remove_dir_all(&output);
+    }
+
+    #[test]
+    fn zip_skips_existing_archive_without_overwrite() {
+        let (report, output) = fixture();
+        let options = RebuildOptions {
+            output: output.clone(),
+            overwrite: true,
+            format: OutputFormat::Zip,
+            ..RebuildOptions::default()
+        };
+        assert_eq!(rebuild(&report, &[0], &options).archives, 1);
+        let again = rebuild(
+            &report,
+            &[0],
+            &RebuildOptions {
+                overwrite: false,
+                ..options
+            },
+        );
+        assert_eq!(again.archives, 0);
+        assert_eq!(again.skipped, 2);
         let _ = fs::remove_dir_all(&output);
     }
 }

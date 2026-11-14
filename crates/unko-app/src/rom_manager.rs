@@ -8,7 +8,8 @@ use std::thread;
 use egui::{Color32, RichText};
 use unko_rom_manager::{
     parse_dat_path, rebuild, scan_path, summary_line, write_csv, write_fixdat, Catalog,
-    MatchReport, MatchStatus, OneGameOneRom, RebuildOptions, ScanOptions, ScanProgress,
+    MatchReport, MatchStatus, OneGameOneRom, OutputFormat, RebuildOptions, ScanOptions,
+    ScanProgress,
 };
 
 type Job = std::result::Result<Vec<MatchReport>, String>;
@@ -27,6 +28,7 @@ pub struct RomManager {
     language_order: String,
     one_g1r: bool,
     include_bios: bool,
+    zip_sets: bool,
     prefer_parent: bool,
     prefer_verified: bool,
     prefer_retail: bool,
@@ -56,6 +58,7 @@ impl RomManager {
             language_order: "En".into(),
             one_g1r: true,
             include_bios: false,
+            zip_sets: false,
             prefer_parent: true,
             prefer_verified: true,
             prefer_retail: true,
@@ -233,6 +236,7 @@ impl RomManager {
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.one_g1r, "1G1R selection");
             ui.checkbox(&mut self.include_bios, "Include [BIOS] entries");
+            ui.checkbox(&mut self.zip_sets, "ZIP sets");
         });
         ui.horizontal(|ui| {
             ui.add_enabled_ui(self.one_g1r, |ui| {
@@ -520,12 +524,18 @@ impl RomManager {
             selected,
             &RebuildOptions {
                 output: self.output.clone(),
+                format: if self.zip_sets {
+                    OutputFormat::Zip
+                } else {
+                    OutputFormat::Loose
+                },
                 ..RebuildOptions::default()
             },
         );
         self.status = format!(
-            "Rebuilt {} files ({} skipped, {} errors) into {}",
+            "Rebuilt {} files in {} archives ({} skipped, {} errors) into {}",
             result.written,
+            result.archives,
             result.skipped,
             result.errors.len(),
             self.output.display()

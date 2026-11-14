@@ -11,6 +11,9 @@ system-agnostic interface.
 
 **Repository:** <https://github.com/lordra9-svg/unko>
 
+[![CI](https://github.com/lordra9-svg/unko/actions/workflows/ci.yml/badge.svg)](https://github.com/lordra9-svg/unko/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 ## Status
 
 The shell is usable end-to-end: library scanning, a Dolphin-inspired desktop
@@ -22,14 +25,16 @@ records WAV/PNG/GIF, and verifies determinism. FDS images load with a user-suppl
 (**Settings → Paths → FDS BIOS**), with disk-side selection and persisted
 disk writes. The same UI builds for Windows, macOS, Linux, iOS and Android.
 
-The accuracy core is at milestone **A5** (accuracy gate), verified against the
-public reference suites:
+Milestone **A5** (accuracy gate) is complete; **A6** (breadth: remaining
+peripherals, FDS audio parity and validation) is in progress. The gates are
+verified against the public reference suites:
 
 - `nestest` golden log: **8,980 / 8,980 lines** exact (PC, A/X/Y, SP, P and cycle count)
 - blargg `instr_timing` and `instr_basics`: pass
 - `ppu_vbl_nmi` **12/12**, `ppu_sprites` **19/19**, blargg APU/DMC **13/13**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
+- `cargo test --workspace`: **504 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **136 pass / 12 fail / 115 visual-or-input-only** (5 PAL APU failures pass when PAL timing is selected)
 - RustyNES test tree: **157 pass / 13 fail / 171 visual-or-input-only** (164 / 6 with PAL APU in PAL mode)
 
@@ -128,6 +133,13 @@ per-game profiles and keyboard shortcuts are configurable in Settings.
 and `.rar`; dropping a ROM or archive on the window opens it and adds its
 folder to the library.
 
+Tools → **Game properties…** overrides the timing region and the header mapper
+for one game. The override is stored as `<stem>.game` in the save folder and
+applies on the next load; **Save and reload** applies it immediately (or
+launch with `--properties`). Mapper
+overrides rewrite the iNES/NES 2.0 header, so a mislabelled dump can boot
+without editing the file on disk.
+
 Settings → Controllers has a **Connected** dropdown per port: Auto, None,
 Keyboard, Gamepad 1-4, Mouse (Zapper) or Mouse (Paddle), plus the NES protocol
 dropdown and **Restore default controls**. Explicit port choices override the
@@ -151,7 +163,9 @@ The Tools → ROM Manager window opens as a separate OS window on desktop. It
 audits a ROM folder against one or more Logiqx XML/No-Intro DATs, shows
 complete/partial/missing games (the full list, virtualized for large DATs),
 selects a 1G1R set, exports fixdats/CSV and safely copies matched ROMs to an
-output folder. Its position and size are remembered in `unko.conf`; the
+output folder. A **ZIP sets** toggle writes one deterministic archive per
+game instead of loose files. Its position and size are remembered in
+`unko.conf`; the
 default size is used the first time. It is backed by the standalone `unko-rom-manager` crate, which has no
 dependency on the NES core or the shell.
 
@@ -162,7 +176,7 @@ unko-app --rom-manager --dat "No-Intro NES.dat" --roms /path/to/roms
 # Headless equivalent
 cargo run -p unko-rom-manager -- \
   --dat "No-Intro NES.dat" --input /path/to/roms --1g1r \
-  --fixdat missing.xml --csv report.csv --copy rebuilt
+  --fixdat missing.xml --csv report.csv --copy rebuilt --zip
 ```
 
 The feature comparison of the bundled managers (igir, RomVault, ClrMamePro,

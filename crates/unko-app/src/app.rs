@@ -18,6 +18,7 @@ use unko_core::{
 use crate::audio::AudioOutput;
 use crate::cheats::{self, CheatEntry};
 use crate::debugger::{self, Action};
+use crate::game_props::GameProperties;
 use crate::gamepad::{
     button_name, mapping_from_text, mapping_to_text, Gamepads, NesButton, PadMapping,
 };
@@ -97,6 +98,22 @@ impl ControllerAction {
     }
 }
 
+fn region_name(region: Region) -> &'static str {
+    match region {
+        Region::Auto => "Auto",
+        Region::Ntsc => "NTSC",
+        Region::Pal => "PAL",
+        Region::Dendy => "Dendy",
+    }
+}
+
+fn region_text(override_region: Option<Region>, global: Region) -> String {
+    override_region.map_or_else(
+        || format!("Use global ({})", region_name(global)),
+        |region| region_name(region).to_string(),
+    )
+}
+
 fn controller_chord(pad: unko_core::InputState, previous: unko_core::InputState) -> bool {
     let both = |state: unko_core::InputState| {
         state.is_pressed(unko_core::InputState::START)
@@ -131,8 +148,12 @@ pub struct App {
     active_mapping: PadMapping,
     paused_by_focus: bool,
     debug_on_start: bool,
+    open_props_on_start: bool,
     devices_open: bool,
     cheats_open: bool,
+    game_props_open: bool,
+    game_props: GameProperties,
+    game_props_entry: Option<GameEntry>,
     cheats: Vec<CheatEntry>,
     cheat_code: String,
     cheat_addr: String,
@@ -168,6 +189,8 @@ pub struct Args {
     pub settings: bool,
     /// Open the debugger window when a game starts.
     pub debug: bool,
+    /// Open the game properties window when a game starts.
+    pub properties: bool,
     /// Portable data folder override (`--data-dir`).
     pub data_dir: Option<PathBuf>,
     /// Use the folder beside the executable as the data root.
@@ -246,8 +269,12 @@ impl App {
             active_mapping,
             paused_by_focus: false,
             debug_on_start: args.debug,
+            open_props_on_start: args.properties,
             devices_open: false,
             cheats_open: false,
+            game_props_open: false,
+            game_props: GameProperties::default(),
+            game_props_entry: None,
             cheats: Vec::new(),
             cheat_code: String::new(),
             cheat_addr: String::new(),
@@ -620,8 +647,11 @@ impl App {
         if let Some(audio) = &self.audio {
             settings.sample_rate = audio.sample_rate();
         }
-        match Player::start(&entry, &settings) {
+        let game_props = GameProperties::load(&self.game_props_path(&entry));
+        match Player::start_with(&entry, &settings, game_props) {
             Ok(player) => {
+                self.game_props = game_props;
+                self.game_props_entry = Some(entry.clone());
                 self.active_mapping = if self.settings.per_game_input {
                     let path = self
                         .settings
@@ -634,6 +664,10 @@ impl App {
                     self.settings.pad_mapping
                 };
                 self.set_status(format!("Loaded {} — {}", entry.title, player.core_label()));
+                if self.open_props_on_start {
+                    self.game_props_open = true;
+                    self.open_props_on_start = false;
+                }
                 self.player = Some(player);
                 if let Some(player) = &self.player {
                     let path = self
@@ -1277,6 +1311,16 @@ impl App {
                         .clicked()
                     {
                         self.cheats_open = true;
+                        ui.close_menu();
+                    }
+                    if ui
+                        .add_enabled(
+                            self.game_props_entry.is_some(),
+                            egui::Button::new("Game properties…"),
+                        )
+                        .clicked()
+                    {
+                        self.game_props_open = true;
                         ui.close_menu();
                     }
                     ui.separator();
@@ -2519,6 +2563,135 @@ impl App {
         self.set_status("Reset all settings to defaults");
     }
 
+    fn game_props_path(&self, entry: &GameEntry) -> PathBuf {
+        self.settings
+            .save_dir
+            .join(format!("{}.game", entry.save_stem()))
+    }
+
+    fn save_game_properties(&mut self, entry: &GameEntry) {
+        let path = self.game_props_path(entry);
+        self.status = match self.game_props.save(&path) {
+            Ok(()) => format!("Saved game properties for {}", entry.title),
+            Err(err) => format!("Could not save game properties: {err}"),
+        };
+    }
+
+    fn reload_with_properties(&mut self, entry: &GameEntry) {
+        self.save_game_properties(entry);
+        self.stop_game();
+        self.start_entry(entry.clone());
+    }
+
+    fn game_properties_window(&mut self, ctx: &egui::Context) {
+        if !self.game_props_open {
+            return;
+        }
+        let Some(entry) = self.game_props_entry.clone() else {
+            self.game_props_open = false;
+            return;
+        };
+        let mut open = self.game_props_open;
+        let mut properties = self.game_props;
+        let global = self.settings.region;
+        let mut save = false;
+        let mut reload = false;
+        egui::Window::new("Game properties")
+            .open(&mut open)
+            .default_size([480.0, 320.0])
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label(RichText::new(&entry.title).strong());
+                ui.label(RichText::new(&entry.file_name).small().weak());
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .max_height(220.0)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Region");
+                            egui::ComboBox::from_id_salt("game-props-region")
+                                .selected_text(region_text(properties.region, global))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut properties.region,
+                                        None,
+                                        format!("Use global ({})", region_name(global)),
+                                    );
+                                    ui.selectable_value(
+                                        &mut properties.region,
+                                        Some(Region::Ntsc),
+                                        "NTSC",
+                                    );
+                                    ui.selectable_value(
+                                        &mut properties.region,
+                                        Some(Region::Pal),
+                                        "PAL",
+                                    );
+                                    ui.selectable_value(
+                                        &mut properties.region,
+                                        Some(Region::Dendy),
+                                        "Dendy",
+                                    );
+                                });
+                        });
+                        ui.add_space(6.0);
+                        let mut override_mapper = properties.mapper.is_some();
+                        ui.horizontal(|ui| {
+                            if ui
+                                .checkbox(&mut override_mapper, "Override header mapper")
+                                .changed()
+                            {
+                                properties.mapper = if override_mapper {
+                                    Some(properties.mapper.unwrap_or(0))
+                                } else {
+                                    None
+                                };
+                            }
+                            if let Some(mapper) = &mut properties.mapper {
+                                ui.add(egui::DragValue::new(mapper).range(0..=4095));
+                            }
+                        });
+                        ui.label(
+                            RichText::new(
+                                "The mapper override rewrites the iNES/NES 2.0 header. \
+                                 iNES images accept 0-255; NES 2.0 images accept 0-4095. \
+                                 FDS images are not affected.",
+                            )
+                            .small()
+                            .weak(),
+                        );
+                        ui.label(
+                            RichText::new(
+                                "Overrides are stored next to the game's saves and apply \
+                                 on the next load.",
+                            )
+                            .small()
+                            .weak(),
+                        );
+                    });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Save").clicked() {
+                        save = true;
+                    }
+                    if ui.button("Save and reload").clicked() {
+                        reload = true;
+                    }
+                    if ui.button("Reset").clicked() {
+                        properties = GameProperties::default();
+                        save = true;
+                    }
+                });
+            });
+        self.game_props_open = open;
+        self.game_props = properties;
+        if reload {
+            self.reload_with_properties(&entry);
+        } else if save {
+            self.save_game_properties(&entry);
+        }
+    }
+
     fn about_window(&mut self, ctx: &egui::Context) {
         if !self.about_open {
             return;
@@ -2824,6 +2997,7 @@ impl eframe::App for App {
         self.settings_window(ctx);
         self.devices_window(ctx);
         self.cheats_window(ctx);
+        self.game_properties_window(ctx);
         self.rom_manager_window(ctx);
         self.controller_menu(ctx);
         self.about_window(ctx);

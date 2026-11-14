@@ -11,6 +11,7 @@ use unko_core::{
 
 use crate::audio::AudioOutput;
 use crate::debugger::{Action, DebugView, Debugger};
+use crate::game_props::{apply_mapper_override, GameProperties};
 use crate::library::GameEntry;
 use crate::recording::{RecordModes, Recorder};
 use crate::settings::Settings;
@@ -227,9 +228,22 @@ pub struct Player {
 }
 
 impl Player {
-    /// Loads a ROM and starts a machine.
-    pub fn start(entry: &GameEntry, settings: &Settings) -> Result<Self, String> {
-        let rom = unko_rom::load(entry).map_err(|err| format!("read ROM: {err}"))?;
+    /// Loads a ROM and starts a machine with per-game overrides.
+    ///
+    /// The mapper override rewrites the iNES/NES 2.0 header before loading;
+    /// the region override replaces the global region for this game.
+    pub fn start_with(
+        entry: &GameEntry,
+        settings: &Settings,
+        properties: GameProperties,
+    ) -> Result<Self, String> {
+        let mut rom = unko_rom::load(entry).map_err(|err| format!("read ROM: {err}"))?;
+        if let Some(mapper) = properties.mapper {
+            if entry.is_fds() {
+                return Err("mapper overrides do not apply to FDS images".into());
+            }
+            apply_mapper_override(&mut rom, mapper)?;
+        }
         let mut registry = Registry::new();
         // The accuracy core is the default now that it owns save states.
         registry.register(unko_nes_host::registration());
@@ -242,7 +256,7 @@ impl Player {
         // renamed/colliding entries cannot share battery data.
         let stem = format!("{}-{:016x}", entry.save_stem(), rom_fingerprint(&rom));
         let options = LoadOptions {
-            region: settings.region,
+            region: properties.region.unwrap_or(settings.region),
             sample_rate: settings.sample_rate,
             video_filter: settings.filter,
             palette: settings.palette,
@@ -1495,7 +1509,8 @@ mod tests {
             save_dir: dir.join("saves"),
             ..Settings::default()
         };
-        let mut player = Player::start(&entry, &settings).expect("start");
+        let mut player =
+            Player::start_with(&entry, &settings, GameProperties::default()).expect("start");
 
         let view = player.debug_view().expect("debug view");
         assert_eq!(view.cpu.pc, 0x8000);
@@ -1526,6 +1541,41 @@ mod tests {
         rom[vector] = 0x00;
         rom[vector + 1] = 0x80;
         rom
+    }
+
+    #[test]
+    fn mapper_override_recovers_a_bad_header() {
+        let dir = std::env::temp_dir().join(format!("unko-app-mapper-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("bad-header.nes");
+        let mut rom = minimal_nrom();
+        // NES 2.0 with mapper 4095: the core must reject it until the
+        // per-game override rewrites the header to NROM.
+        rom[6] = (rom[6] & 0x0F) | 0xF0;
+        rom[7] = (rom[7] & 0x0F) | 0xF8;
+        rom[8] = (rom[8] & 0xF0) | 0x0F;
+        std::fs::write(&path, rom).expect("write rom");
+        let entry = crate::library::probe_path(&path)
+            .expect("probe")
+            .into_iter()
+            .next()
+            .expect("entry");
+        let settings = Settings {
+            save_dir: dir.join("saves"),
+            ..Settings::default()
+        };
+        assert!(
+            Player::start_with(&entry, &settings, GameProperties::default()).is_err(),
+            "mapper 4095 must not load without the override"
+        );
+        let properties = GameProperties {
+            region: None,
+            mapper: Some(0),
+        };
+        let player = Player::start_with(&entry, &settings, properties).expect("override loads");
+        assert!(player.title.contains("bad-header"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1614,7 +1664,8 @@ mod tests {
             fds_bios: bios,
             ..Settings::default()
         };
-        let mut player = Player::start(&entries[0], &settings).expect("FDS starts");
+        let mut player = Player::start_with(&entries[0], &settings, GameProperties::default())
+            .expect("FDS starts");
         assert_eq!(player.disk_sides(), 1);
         assert_eq!(player.current_disk_side(), 0);
         player.shutdown();

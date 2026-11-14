@@ -44,11 +44,14 @@ the transports and scanner are already synthetic-tested (see
 
 ## Deferred / out of scope
 
-- NES 2.0 header editor, repair database and IPS/BPS soft-patching (owner
-  deferred the decision). The warning for missing NES 2.0 headers is in.
+- Lua scripting, RetroAchievements, HD packs and netplay: tracked with their
+  blocked/deferred status in the queue above; each needs a dependency that is
+  out of this pass (interpreter sandbox, credentials/network, pack format,
+  rollback transport).
 - Extra sprites / sprite-limit toggle and CPU/PPU overclock.
 - VS. System / PlayChoice-10, including DIPs, coins and RGB PPU palettes.
-- Movies/TAS, Lua, RetroAchievements, HD packs, netplay/run-ahead rollback.
+- NES 2.0 header editor, repair database and IPS/BPS soft-patching (owner
+  deferred the decision). The warning for missing NES 2.0 headers is in.
 
 ## Gates per item
 

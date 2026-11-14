@@ -73,9 +73,11 @@ that matters for a playable library:
 - Fixdat and CSV report output.
 - Safe copy/rebuild of matched ROMs into an output folder, with hash
   verification; no delete or in-place move.
-- ZIP output for extracted sets is not yet implemented; the current rebuild
-  writes loose files. TorrentZip/RVZSTD, 7z/RAR/CHD, patching, DAT download
-  and a persistent cache remain future work.
+- Deterministic ZIP output: one archive per game, entries in DAT order with a
+  fixed timestamp, so rebuilds are byte-identical. Loose files remain the
+  default.
+- TorrentZip/RVZSTD, 7z/RAR/CHD, patching, DAT download and a persistent cache
+  remain future work.
 
 The app exposes this as a **ROM Manager** window; the same library is usable
 without the app. The design follows the project rule used for the NES core:

@@ -71,11 +71,11 @@ Key interaction rules worth keeping:
 | Settings: Audio | sample rate, latency target, resampler quality, output filter, volume/mute, per-channel mixer | now |
 | Settings: Controllers | per-port Connected source (Auto/None/Keyboard/Gamepad 1-4/Mouse Zapper/Paddle), protocol dropdown, rebinding, Restore default controls | now |
 | Settings: Paths | portable data root, ROM dir, save dir, per-system library roots | now |
-| ROM Manager | separate remembered OS window; full virtualized DAT list, 1G1R preferences, fixdat/CSV, safe copy/rebuild | now |
+| ROM Manager | separate remembered OS window; full virtualized DAT list, 1G1R preferences, fixdat/CSV, safe copy/rebuild (loose or deterministic ZIP sets) | now |
 | Settings: NES page | region, mapper/header info, deterministic RAM | now |
 | Settings: Advanced | core id, log level, state format | now |
-| Per-game properties | header/mapper/region overrides | later |
-| NetPlay / Achievements / Debugger | separate milestones | later |
+| Per-game properties | Tools → Game properties…: timing region and header mapper overrides per game, saved as `<stem>.game` and applied on the next load | now |
+| NetPlay / Achievements | separate milestones | later |
 
 ## Platforms
 

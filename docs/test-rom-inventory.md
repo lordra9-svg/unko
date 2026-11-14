@@ -110,7 +110,7 @@ PAL APU singles in PAL mode, `dma_4016_read` and `5-branch_delays_irq`.
 
 | Asset | Needed for | Notes |
 |---|---|---|
-| `disksys.rom` (FDS BIOS) | `fdsirqtests`, FDS mirroring/`$4023`/audio/`$4030` tests, every `.fds` title | A local Myrient archive has the BIOS zip; it is **not** in `test-roms/`, but the desktop app reads it from Settings → Paths |
+| `disksys.rom` (FDS BIOS) | `fdsirqtests`, FDS mirroring/`$4023`/audio/`$4030` tests, every `.fds` title | Present locally at `refs/bios/disksys.rom` (two revisions) and in the Myrient BIOS archive; it is **not** in `test-roms/`, and the desktop app reads it from Settings → Paths |
 | VS. System BIOS/game ROMs + 2C03/2C04/2C05 palette/security data | `characterize-vs`, VS compatibility | Blocked on ROMs and palette dumps |
 | PlayChoice-10 BIOS/ROMs | PC10 compatibility | Blocked on assets |
 | Miracle Piano firmware | MIDI replies | The transport is implemented, but replies need the piano firmware or a real unit |
@@ -119,7 +119,9 @@ PAL APU singles in PAL mode, `dma_4016_read` and `5-branch_delays_irq`.
 ### NESdev suites not yet run to a verdict
 
 - **FDS**: `FdsIrqTests`, `FDS-Mirroring-Test`, `FDS-4023-Test`,
-  `FDS-Audio-Registers`, `FDS-4030D1-Addr` (all need the BIOS).
+  `FDS-Audio-Registers`, `FDS-4030D1-Addr`. The BIOS is available locally;
+  these suites are data-blocked because the `.fds` test images themselves are
+  not in the local drop.
 - **Mapper-specific**: `BNTest`, `bxrom_512k_test`, `Holy Mapperel`,
   `mmc3bigchrram`, `mmc3irqtest`, `mmc5ramsize`, `mmc1atest`, `test28`,
   `vrc24test`, `vrc6test`, `serom`, NES 2.0 submapper tests 2/3/7/34,
