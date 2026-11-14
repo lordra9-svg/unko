@@ -26,7 +26,7 @@ use crate::paths;
 use crate::player::{self, Player};
 use crate::recording::RecordModes;
 use crate::rom_manager::RomManager;
-use crate::settings::{Aspect, HotkeyAction, Settings, ShaderPreset, Theme};
+use crate::settings::{Aspect, HotkeyAction, PortInput, Settings, ShaderPreset, Theme};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -277,6 +277,57 @@ impl App {
     fn set_status(&mut self, message: impl Into<String>) {
         self.status = message.into();
         self.status_until = Some(Instant::now() + Duration::from_secs(6));
+    }
+
+    fn handle_drop(&mut self, files: Vec<egui::DroppedFile>) {
+        let mut directories = Vec::new();
+        let mut first_file = None;
+        for file in files {
+            let Some(path) = file.path else {
+                continue;
+            };
+            if path.is_dir() {
+                directories.push(path);
+            } else if path.is_file() {
+                if let Some(parent) = path.parent() {
+                    directories.push(parent.to_path_buf());
+                }
+                first_file.get_or_insert(path);
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut added = false;
+        for directory in directories {
+            if !seen.insert(directory.clone()) {
+                continue;
+            }
+            if directory == self.settings.rom_dir
+                || self
+                    .settings
+                    .library_roots
+                    .iter()
+                    .any(|root| root.system == "nes" && root.path == directory)
+            {
+                continue;
+            }
+            self.settings
+                .library_roots
+                .push(crate::settings::LibraryRoot {
+                    system: "nes".into(),
+                    path: directory,
+                });
+            added = true;
+        }
+        if added {
+            self.scan();
+        }
+        if let Some(path) = first_file {
+            self.start_game(&path);
+        } else if added {
+            self.set_status("Added dropped folder to the library");
+        } else {
+            self.set_status("Drop a ROM, archive or folder to open it");
+        }
     }
 
     fn start_game(&mut self, path: &Path) {
@@ -2195,6 +2246,7 @@ impl App {
             return;
         }
         let mut open = self.open_rom_open;
+        let mut close = false;
         egui::Window::new("Open ROM")
             .open(&mut open)
             .default_size([480.0, 180.0])
@@ -2204,20 +2256,31 @@ impl App {
                 ui.add(
                     egui::TextEdit::singleline(&mut self.open_rom_text)
                         .desired_width(420.0)
-                        .hint_text("/path/to/game.nes or /path/to/game.zip"),
+                        .hint_text("/path/to/game.nes, .fds, .zip, .7z or .rar"),
                 );
                 ui.horizontal(|ui| {
                     if ui.button("Open").clicked() {
                         let path = PathBuf::from(self.open_rom_text.trim());
                         if path.is_file() {
                             self.start_game(&path);
-                            self.open_rom_open = false;
+                            close = true;
                         } else {
                             self.set_status(format!("Not a file: {}", path.display()));
                         }
                     }
+                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                    if ui.button("Browse…").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("ROM or archive", &["nes", "fds", "zip", "7z", "rar"])
+                            .pick_file()
+                        {
+                            self.open_rom_text = path.display().to_string();
+                            self.start_game(&path);
+                            close = true;
+                        }
+                    }
                     if ui.button("Cancel").clicked() {
-                        self.open_rom_open = false;
+                        close = true;
                     }
                 });
                 ui.label(
@@ -2226,6 +2289,9 @@ impl App {
                         .small(),
                 );
             });
+        if close {
+            open = false;
+        }
         self.open_rom_open = open;
     }
 }
@@ -2233,6 +2299,10 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.rom_manager.poll();
+        let dropped = ctx.input(|input| input.raw.dropped_files.clone());
+        if !dropped.is_empty() {
+            self.handle_drop(dropped);
+        }
         self.shortcuts(ctx);
         self.menu(ctx);
         self.toolbar(ctx);
@@ -2259,27 +2329,58 @@ impl eframe::App for App {
             self.paused_by_focus = false;
         }
 
-        if self.settings.gamepad_enabled {
-            if let Some(gamepads) = &mut self.gamepads {
-                let polled = gamepads.poll(
-                    self.active_mapping,
-                    self.settings.pad_deadzone,
-                    self.settings.turbo_enabled,
-                    self.settings.turbo_hz,
-                );
-                let mut routed = [unko_core::InputState::empty(); 4];
-                for (slot, state) in polled.iter().enumerate() {
-                    if self.settings.pad_disabled[slot] {
-                        continue;
-                    }
-                    let port = usize::from(self.settings.pad_ports[slot].min(3));
-                    routed[port] =
-                        unko_core::InputState::from_bits(routed[port].bits() | state.bits());
-                }
-                self.input_states = routed;
-            }
+        let inputs = [self.settings.port1_input, self.settings.port2_input];
+        let polled = if self.settings.gamepad_enabled {
+            self.gamepads
+                .as_mut()
+                .map_or([unko_core::InputState::empty(); 4], |gamepads| {
+                    gamepads.poll(
+                        self.active_mapping,
+                        self.settings.pad_deadzone,
+                        self.settings.turbo_enabled,
+                        self.settings.turbo_hz,
+                    )
+                })
         } else {
-            self.input_states = [unko_core::InputState::empty(); 4];
+            [unko_core::InputState::empty(); 4]
+        };
+        let mut routed = [unko_core::InputState::empty(); 4];
+        let mut keyboard_ports = [false; 4];
+        let mut explicit_slots = [false; 4];
+        for (port, input) in inputs.iter().enumerate() {
+            match input {
+                PortInput::Auto => keyboard_ports[port] = port == 0,
+                PortInput::None | PortInput::MouseZapper | PortInput::MousePaddle => {}
+                PortInput::Keyboard => keyboard_ports[port] = true,
+                PortInput::Gamepad(slot) => {
+                    let slot = (*slot).min(3);
+                    explicit_slots[slot] = true;
+                    if !self.settings.pad_disabled[slot] {
+                        routed[port] = unko_core::InputState::from_bits(
+                            routed[port].bits() | polled[slot].bits(),
+                        );
+                    }
+                }
+            }
+        }
+        // Auto keeps the legacy gamepad matrix; explicit port choices win.
+        for (slot, state) in polled.iter().enumerate() {
+            if self.settings.pad_disabled[slot] || explicit_slots[slot] {
+                continue;
+            }
+            let port = usize::from(self.settings.pad_ports[slot].min(3));
+            if inputs
+                .get(port)
+                .is_some_and(|input| *input == PortInput::Auto)
+            {
+                routed[port] = unko_core::InputState::from_bits(routed[port].bits() | state.bits());
+            }
+        }
+        self.input_states = routed;
+        let mut enabled = [true; 4];
+        for port in 0..2 {
+            enabled[port] = !self.settings.port_disabled[port] && inputs[port] != PortInput::None;
+            enabled[port + 2] = enabled[port];
         }
         if let Some(audio) = &self.audio {
             let running = self.player.as_ref().is_some_and(|player| {
@@ -2289,18 +2390,17 @@ impl eframe::App for App {
         }
         let detached_windows = self.detached_windows();
         let window_generation = self.window_generation;
-        let port_disabled = self.settings.port_disabled;
         let audio = self.audio.as_mut();
         if let Some(player) = &mut self.player {
             for (port, state) in self.input_states.iter().enumerate() {
                 player.set_gamepad(port, *state);
             }
+            player.set_keyboard_ports(keyboard_ports);
             // The two physical ports gate players 1/2 and, for a Four Score,
             // the extra players 3/4 that ride the same ports.
-            player.set_port_enabled(0, !port_disabled[0]);
-            player.set_port_enabled(1, !port_disabled[1]);
-            player.set_port_enabled(2, !port_disabled[0]);
-            player.set_port_enabled(3, !port_disabled[1]);
+            for (port, enabled) in enabled.iter().enumerate() {
+                player.set_port_enabled(port, *enabled);
+            }
             player.set_microphone(self.microphone);
             player.step(ctx, audio);
         }
@@ -2316,32 +2416,39 @@ impl eframe::App for App {
                     (port1, port2)
                 };
             player.set_port_devices(device1, device2);
-            let zapper_port = if port1 == PortDevice::Zapper {
+            let zapper_port = if enabled[0] && port1 == PortDevice::Zapper {
                 Some(0)
-            } else if port2 == PortDevice::Zapper {
+            } else if enabled[1] && port2 == PortDevice::Zapper {
                 Some(1)
             } else {
                 None
             };
-            let paddle_port = if port1 == PortDevice::Paddle {
+            let paddle_port = if enabled[0] && port1 == PortDevice::Paddle {
                 Some(0)
-            } else if port2 == PortDevice::Paddle {
+            } else if enabled[1] && port2 == PortDevice::Paddle {
                 Some(1)
             } else {
                 None
             };
-            let power_pad_port =
-                if port1 == PortDevice::PowerPad || port1 == PortDevice::FamilyTrainer {
-                    Some(0)
-                } else if port2 == PortDevice::PowerPad || port2 == PortDevice::FamilyTrainer {
-                    Some(1)
-                } else {
-                    None
-                };
-            if port1 == PortDevice::FamilyKeyboard || port2 == PortDevice::FamilyKeyboard {
+            let power_pad_port = if enabled[0]
+                && (port1 == PortDevice::PowerPad || port1 == PortDevice::FamilyTrainer)
+            {
+                Some(0)
+            } else if enabled[1]
+                && (port2 == PortDevice::PowerPad || port2 == PortDevice::FamilyTrainer)
+            {
+                Some(1)
+            } else {
+                None
+            };
+            if enabled[0] && port1 == PortDevice::FamilyKeyboard
+                || enabled[1] && port2 == PortDevice::FamilyKeyboard
+            {
                 player.set_family_keyboard(family_keyboard_matrix(ctx));
             }
-            if port1 == PortDevice::SuborKeyboard || port2 == PortDevice::SuborKeyboard {
+            if enabled[0] && port1 == PortDevice::SuborKeyboard
+                || enabled[1] && port2 == PortDevice::SuborKeyboard
+            {
                 player.set_subor_keyboard(subor_keyboard_matrix(ctx));
             }
             let view = viewport(
@@ -3648,11 +3755,54 @@ fn controllers_tab(
         ui.add_space(8.0);
     }
     ui.horizontal(|ui| {
-        ui.label("Port 1");
+        if ui.button("Restore default controls").clicked() {
+            settings.pad_mapping.reset();
+            settings.hotkeys = crate::settings::Hotkeys::default();
+            settings.port1_input = PortInput::Auto;
+            settings.port2_input = PortInput::Auto;
+            settings.port1_device = PortDevice::Gamepad;
+            settings.port2_device = PortDevice::Gamepad;
+            settings.port_disabled = [false; 2];
+            settings.pad_disabled = [false; 4];
+            settings.pad_ports = [0, 1, 2, 3];
+            settings.pad_deadzone = 12_000;
+            settings.turbo_enabled = false;
+        }
+        ui.label(
+            RichText::new("Defaults: keyboard on port 1, gamepad matrix, standard NES mapping.")
+                .weak()
+                .small(),
+        );
+    });
+    ui.add_space(4.0);
+    let old_port1 = settings.port1_input;
+    let old_port2 = settings.port2_input;
+    ui.horizontal(|ui| {
+        ui.label("Port 1 connected");
+        port_input_combo(ui, "port1-input", &mut settings.port1_input);
+        ui.label("Protocol");
         device_combo(ui, "port1-device", &mut settings.port1_device);
-        ui.label("Port 2");
+    });
+    ui.horizontal(|ui| {
+        ui.label("Port 2 connected");
+        port_input_combo(ui, "port2-input", &mut settings.port2_input);
+        ui.label("Protocol");
         device_combo(ui, "port2-device", &mut settings.port2_device);
     });
+    if settings.port1_input != old_port1 {
+        apply_port_input(settings, 0);
+    }
+    if settings.port2_input != old_port2 {
+        apply_port_input(settings, 1);
+    }
+    ui.label(
+        RichText::new(
+            "Connected chooses the host device; Protocol chooses the NES hardware. \
+             Mouse options set the Zapper/Paddle protocol automatically, and None disables the port.",
+        )
+        .weak()
+        .small(),
+    );
     match (settings.port1_device, settings.port2_device) {
         (PortDevice::FourScore, _) | (_, PortDevice::FourScore) => ui.label(
             RichText::new(
@@ -3817,6 +3967,56 @@ fn controllers_tab(
 }
 
 /// Human label for a controller-port device.
+fn port_input_combo(ui: &mut egui::Ui, id: &str, input: &mut PortInput) {
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(input.label())
+        .show_ui(ui, |ui| {
+            for option in [
+                PortInput::Auto,
+                PortInput::None,
+                PortInput::Keyboard,
+                PortInput::Gamepad(0),
+                PortInput::Gamepad(1),
+                PortInput::Gamepad(2),
+                PortInput::Gamepad(3),
+                PortInput::MouseZapper,
+                PortInput::MousePaddle,
+            ] {
+                ui.selectable_value(input, option, option.label());
+            }
+        });
+}
+
+fn apply_port_input(settings: &mut Settings, port: usize) {
+    let input = if port == 0 {
+        settings.port1_input
+    } else {
+        settings.port2_input
+    };
+    let device = if port == 0 {
+        &mut settings.port1_device
+    } else {
+        &mut settings.port2_device
+    };
+    match input {
+        PortInput::None => settings.port_disabled[port] = true,
+        PortInput::MouseZapper => {
+            settings.port_disabled[port] = false;
+            *device = PortDevice::Zapper;
+        }
+        PortInput::MousePaddle => {
+            settings.port_disabled[port] = false;
+            *device = PortDevice::Paddle;
+        }
+        PortInput::Auto | PortInput::Keyboard | PortInput::Gamepad(_) => {
+            settings.port_disabled[port] = false;
+            if matches!(*device, PortDevice::Zapper | PortDevice::Paddle) {
+                *device = PortDevice::Gamepad;
+            }
+        }
+    }
+}
+
 fn device_label(device: PortDevice) -> &'static str {
     match device {
         PortDevice::Gamepad => "Gamepad",

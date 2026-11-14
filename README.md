@@ -124,6 +124,14 @@ status bar, and one settings window with a category rail. See
 
 Gamepads are hot-plugged through SDL3; bindings, auto-fire, dead zone,
 per-game profiles and keyboard shortcuts are configurable in Settings.
+**Open ROM** has a native file picker and accepts `.nes`, `.fds`, `.zip`, `.7z`
+and `.rar`; dropping a ROM or archive on the window opens it and adds its
+folder to the library.
+
+Settings → Controllers has a **Connected** dropdown per port: Auto, None,
+Keyboard, Gamepad 1-4, Mouse (Zapper) or Mouse (Paddle), plus the NES protocol
+dropdown and **Restore default controls**. Explicit port choices override the
+gamepad matrix for that port.
 
 Every OS window starts at its built-in default geometry on first use. The app
 does not resize windows automatically; after you move or resize one, its

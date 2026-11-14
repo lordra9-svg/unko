@@ -62,12 +62,13 @@ Key interaction rules worth keeping:
 | MenuBar: View | List/Grid, status bar, fullscreen | now |
 | MenuBar: Tools | Settings, Controllers, Graphics, ROM Manager | now |
 | MenuBar: Help | About | now |
-| ToolBar | Open, Refresh, Play/Pause, Stop, Reset, Fullscreen, Shot, Config | now |
+| ToolBar | Open (picker, archive-aware), Refresh, Play/Pause, Stop, Reset, Fullscreen, Shot, Config | now |
+| Library drop target | drop a ROM/archive to open it and add its folder; drop a folder to add it as a root | now |
 | RenderWidget | `egui` texture viewport, aspect-correct | now |
 | Settings: General/Interface | theme, pause on focus loss, confirm stop, detachable windows, reset-all | now |
 | Settings: Graphics | filter, palette + `.pal` import, aspect, integer scale, supersampling, GPU output shaders (scanlines/LCD/CRT/NTSC Budget/Premium, brightness/sharpness), window presets | now |
 | Settings: Audio | sample rate, latency target, resampler quality, output filter, volume/mute, per-channel mixer | now |
-| Settings: Controllers | fixed keyboard map, rebinding UI | partial |
+| Settings: Controllers | per-port Connected source (Auto/None/Keyboard/Gamepad 1-4/Mouse Zapper/Paddle), protocol dropdown, rebinding, Restore default controls | now |
 | Settings: Paths | portable data root, ROM dir, save dir, per-system library roots | now |
 | ROM Manager | separate remembered OS window; full virtualized DAT list, 1G1R preferences, fixdat/CSV, safe copy/rebuild | now |
 | Settings: NES page | region, mapper/header info, deterministic RAM | now |

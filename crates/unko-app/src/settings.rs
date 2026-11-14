@@ -301,6 +301,76 @@ pub struct LibraryRoot {
     pub path: PathBuf,
 }
 
+/// Host input source connected to a controller port.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PortInput {
+    /// Keep the legacy routing (keyboard/touch on port 1, gamepad matrix).
+    #[default]
+    Auto,
+    /// Nothing connected.
+    None,
+    /// Host keyboard, using the fixed NES key map.
+    Keyboard,
+    /// SDL gamepad slot (0-based).
+    Gamepad(usize),
+    /// Host mouse as the Zapper.
+    MouseZapper,
+    /// Host mouse as the Arkanoid paddle.
+    MousePaddle,
+}
+
+impl PortInput {
+    /// Stable configuration name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::None => "none",
+            Self::Keyboard => "keyboard",
+            Self::Gamepad(0) => "gamepad1",
+            Self::Gamepad(1) => "gamepad2",
+            Self::Gamepad(2) => "gamepad3",
+            Self::Gamepad(3) => "gamepad4",
+            Self::Gamepad(_) => "gamepad1",
+            Self::MouseZapper => "mousezapper",
+            Self::MousePaddle => "mousepaddle",
+        }
+    }
+
+    /// Parses a configuration name.
+    #[must_use]
+    pub fn from_name(value: &str) -> Self {
+        match value.trim() {
+            "none" => Self::None,
+            "keyboard" => Self::Keyboard,
+            "gamepad1" | "pad1" => Self::Gamepad(0),
+            "gamepad2" | "pad2" => Self::Gamepad(1),
+            "gamepad3" | "pad3" => Self::Gamepad(2),
+            "gamepad4" | "pad4" => Self::Gamepad(3),
+            "mousezapper" | "mouse-zapper" | "zapper-mouse" => Self::MouseZapper,
+            "mousepaddle" | "mouse-paddle" | "paddle-mouse" => Self::MousePaddle,
+            _ => Self::Auto,
+        }
+    }
+
+    /// Human label for the combo box.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto (legacy routing)",
+            Self::None => "None",
+            Self::Keyboard => "Keyboard",
+            Self::Gamepad(0) => "Gamepad 1",
+            Self::Gamepad(1) => "Gamepad 2",
+            Self::Gamepad(2) => "Gamepad 3",
+            Self::Gamepad(3) => "Gamepad 4",
+            Self::Gamepad(_) => "Gamepad",
+            Self::MouseZapper => "Mouse (Zapper)",
+            Self::MousePaddle => "Mouse (Paddle)",
+        }
+    }
+}
+
 /// UI colour theme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Theme {
@@ -377,6 +447,10 @@ pub struct Settings {
     pub port1_device: PortDevice,
     /// Device attached to controller port 2.
     pub port2_device: PortDevice,
+    /// Host input connected to controller port 1.
+    pub port1_input: PortInput,
+    /// Host input connected to controller port 2.
+    pub port2_input: PortInput,
     /// Colour theme.
     pub theme: Theme,
     /// Pause when the window loses focus.
@@ -484,6 +558,8 @@ impl Default for Settings {
             zapper_port2: false,
             port1_device: PortDevice::Gamepad,
             port2_device: PortDevice::Gamepad,
+            port1_input: PortInput::Auto,
+            port2_input: PortInput::Auto,
             theme: Theme::Dark,
             pause_on_focus_loss: true,
             confirm_stop: false,
@@ -632,6 +708,8 @@ impl Settings {
                     settings.port2_device = PortDevice::from_name(value);
                     explicit_port2 = true;
                 }
+                "port1_input" => settings.port1_input = PortInput::from_name(value),
+                "port2_input" => settings.port2_input = PortInput::from_name(value),
                 "theme" => {
                     settings.theme = if value == "light" {
                         Theme::Light
@@ -802,6 +880,8 @@ palette={}
 custom_palette={}
 port1_device={}
 port2_device={}
+port1_input={}
+port2_input={}
 zapper_port2={}
 theme={}
 pause_on_focus_loss={}
@@ -874,6 +954,8 @@ layout_main={}
             paths::store_relative(&self.custom_palette, &base),
             self.port1_device.name(),
             self.port2_device.name(),
+            self.port1_input.name(),
+            self.port2_input.name(),
             self.port2_device == PortDevice::Zapper,
             match self.theme {
                 Theme::Dark => "dark",
@@ -1247,6 +1329,24 @@ mod tests {
         let text = fs::read_to_string(&path).expect("read");
         assert!(text.contains("port1_device=microphone"));
         assert!(text.contains("port2_device=tape"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn port_inputs_round_trip() {
+        let path = std::env::temp_dir().join("unko-settings-port-input.conf");
+        let settings = Settings {
+            port1_input: PortInput::Keyboard,
+            port2_input: PortInput::Gamepad(2),
+            ..Settings::default()
+        };
+        settings.save(&path).expect("write");
+        let text = fs::read_to_string(&path).expect("read");
+        assert!(text.contains("port1_input=keyboard"));
+        assert!(text.contains("port2_input=gamepad3"));
+        let loaded = Settings::load(&path);
+        assert_eq!(loaded.port1_input, PortInput::Keyboard);
+        assert_eq!(loaded.port2_input, PortInput::Gamepad(2));
         let _ = fs::remove_file(path);
     }
 

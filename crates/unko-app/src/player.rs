@@ -215,6 +215,7 @@ pub struct Player {
     fds_disk: Option<PathBuf>,
     sample_rate: f32,
     gamepad: [InputState; 4],
+    keyboard_ports: [bool; 4],
     touch: InputState,
     recorder: Recorder,
     /// Debugger window state and breakpoints.
@@ -333,6 +334,7 @@ impl Player {
             fast_forward: false,
             sample_rate: settings.sample_rate,
             gamepad: [InputState::empty(); 4],
+            keyboard_ports: [true, false, false, false],
             touch: InputState::empty(),
             recorder: Recorder::default(),
             debug: Debugger::default(),
@@ -874,20 +876,15 @@ impl Player {
                 *state = InputState::empty();
             }
         }
-        let keyboard = if self.port_enabled[0] {
-            keyboard
-        } else {
-            InputState::empty()
-        };
-        let touch = if self.port_enabled[0] {
-            self.touch
-        } else {
-            InputState::empty()
-        };
-        let first = InputState::from_bits(keyboard.bits() | pads[0].bits() | touch.bits());
-        self.last_input[0] = first;
-        self.core.set_input(0, first);
-        for (port, state) in pads.iter().enumerate().skip(1) {
+        for (port, state) in pads.iter_mut().enumerate() {
+            if self.keyboard_ports[port] && self.port_enabled[port] {
+                *state = InputState::from_bits(state.bits() | keyboard.bits());
+            }
+        }
+        if self.port_enabled[0] {
+            pads[0] = InputState::from_bits(pads[0].bits() | self.touch.bits());
+        }
+        for (port, state) in pads.iter().enumerate() {
             self.last_input[port] = *state;
             self.core.set_input(port, *state);
         }
@@ -898,6 +895,11 @@ impl Player {
         if let Some(slot) = self.gamepad.get_mut(port) {
             *slot = state;
         }
+    }
+
+    /// Selects which controller ports receive the host keyboard.
+    pub fn set_keyboard_ports(&mut self, ports: [bool; 4]) {
+        self.keyboard_ports = ports;
     }
 
     /// Sets the touch overlay state (merged into port 1).
