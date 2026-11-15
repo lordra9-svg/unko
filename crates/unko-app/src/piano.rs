@@ -12,6 +12,62 @@ pub const LOW: u8 = 0x24;
 /// Highest piano note (C6).
 pub const HIGH: u8 = 0x54;
 
+/// Computer-key to note mapping, chromatic across the four main rows.
+///
+/// The last key (Space) is only captured while the Devices window is open and
+/// the piano keyboard toggle is on, so it does not also pause the game.
+pub const KEY_NOTES: &[(egui::Key, u8)] = &[
+    (egui::Key::Num1, LOW),
+    (egui::Key::Num2, LOW + 1),
+    (egui::Key::Num3, LOW + 2),
+    (egui::Key::Num4, LOW + 3),
+    (egui::Key::Num5, LOW + 4),
+    (egui::Key::Num6, LOW + 5),
+    (egui::Key::Num7, LOW + 6),
+    (egui::Key::Num8, LOW + 7),
+    (egui::Key::Num9, LOW + 8),
+    (egui::Key::Num0, LOW + 9),
+    (egui::Key::Minus, LOW + 10),
+    (egui::Key::Equals, LOW + 11),
+    (egui::Key::Q, LOW + 12),
+    (egui::Key::W, LOW + 13),
+    (egui::Key::E, LOW + 14),
+    (egui::Key::R, LOW + 15),
+    (egui::Key::T, LOW + 16),
+    (egui::Key::Y, LOW + 17),
+    (egui::Key::U, LOW + 18),
+    (egui::Key::I, LOW + 19),
+    (egui::Key::O, LOW + 20),
+    (egui::Key::P, LOW + 21),
+    (egui::Key::OpenBracket, LOW + 22),
+    (egui::Key::CloseBracket, LOW + 23),
+    (egui::Key::A, LOW + 24),
+    (egui::Key::S, LOW + 25),
+    (egui::Key::D, LOW + 26),
+    (egui::Key::F, LOW + 27),
+    (egui::Key::G, LOW + 28),
+    (egui::Key::H, LOW + 29),
+    (egui::Key::J, LOW + 30),
+    (egui::Key::K, LOW + 31),
+    (egui::Key::L, LOW + 32),
+    (egui::Key::Semicolon, LOW + 33),
+    (egui::Key::Quote, LOW + 34),
+    (egui::Key::Backslash, LOW + 35),
+    (egui::Key::Z, LOW + 36),
+    (egui::Key::X, LOW + 37),
+    (egui::Key::C, LOW + 38),
+    (egui::Key::V, LOW + 39),
+    (egui::Key::B, LOW + 40),
+    (egui::Key::N, LOW + 41),
+    (egui::Key::M, LOW + 42),
+    (egui::Key::Comma, LOW + 43),
+    (egui::Key::Period, LOW + 44),
+    (egui::Key::Slash, LOW + 45),
+    (egui::Key::Backtick, LOW + 46),
+    (egui::Key::F1, LOW + 47),
+    (egui::Key::Space, LOW + 48),
+];
+
 /// Whether a MIDI note is a black key.
 #[must_use]
 pub fn is_black(note: u8) -> bool {
@@ -167,6 +223,20 @@ mod tests {
             key_at(rect, pos2(rect.right() + 1.0, rect.center().y)),
             None
         );
+    }
+
+    #[test]
+    fn keyboard_mapping_is_chromatic_and_unique() {
+        assert_eq!(KEY_NOTES.len(), 49);
+        let notes: Vec<u8> = KEY_NOTES.iter().map(|(_, note)| *note).collect();
+        assert_eq!(notes.first(), Some(&LOW));
+        assert_eq!(notes.last(), Some(&HIGH));
+        let mut seen = std::collections::BTreeSet::new();
+        for note in &notes {
+            assert!(seen.insert(*note), "duplicate note {note}");
+        }
+        let keys: Vec<egui::Key> = KEY_NOTES.iter().map(|(key, _)| *key).collect();
+        assert_eq!(keys.len(), 49);
     }
 
     #[test]

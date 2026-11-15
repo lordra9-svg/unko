@@ -217,6 +217,7 @@ pub struct App {
     cheat_error: Option<String>,
     microphone: bool,
     piano_last: Option<u8>,
+    piano_key_held: [bool; 128],
     microphone_input: Option<MicrophoneInput>,
     microphone_devices: Vec<String>,
     microphone_error: Option<String>,
@@ -379,6 +380,7 @@ impl App {
             cheat_error: None,
             microphone: false,
             piano_last: None,
+            piano_key_held: [false; 128],
             microphone_input: None,
             microphone_devices: Vec::new(),
             microphone_error: None,
@@ -1039,12 +1041,16 @@ impl App {
                 player.advance_frame(ctx);
             }
         }
+        let piano_keyboard_active = self.devices_open
+            && self.settings.piano_keyboard
+            && (self.settings.port1_device == PortDevice::MiraclePiano
+                || self.settings.port2_device == PortDevice::MiraclePiano);
         let (save, load, fullscreen, pause, screenshot, reset) = ctx.input(|i| {
             (
                 i.key_pressed(keys.save),
                 i.key_pressed(keys.load),
                 i.key_pressed(keys.fullscreen),
-                i.key_pressed(keys.pause),
+                i.key_pressed(keys.pause) && !piano_keyboard_active,
                 i.key_pressed(keys.screenshot),
                 i.key_pressed(keys.reset),
             )
@@ -2511,6 +2517,14 @@ impl App {
                         player.set_piano_note(note, false);
                     }
                 }
+                if let Some(player) = &mut self.player {
+                    for (note, held) in self.piano_key_held.iter_mut().enumerate() {
+                        if *held {
+                            player.set_piano_note(note as u8, false);
+                            *held = false;
+                        }
+                    }
+                }
                 let _ = self.settings.save(&Settings::path());
             }
         } else {
@@ -2645,12 +2659,14 @@ impl App {
                 ui.heading("Miracle Piano");
                 ui.label(
                     RichText::new(
-                        "Click or drag the keys. Notes are sent on channel 0; the \
-                         game's controller belongs in the other port.",
+                        "Click or drag the keys, or use the number/QWERTY/ASDFG/ZXCVB \
+                         rows when computer keyboard input is on. Notes are sent on \
+                         channel 0; the game's controller belongs in the other port.",
                     )
                     .weak()
                     .small(),
                 );
+                ui.checkbox(&mut settings.piano_keyboard, "Computer keyboard input");
                 piano_events = crate::piano::keyboard(ui, &mut piano_last);
             }
             ui.add_space(10.0);
@@ -2771,6 +2787,32 @@ impl App {
         if !piano_events.is_empty() {
             if let Some(player) = &mut self.player {
                 for (note, on) in piano_events {
+                    player.set_piano_note(note, on);
+                }
+            }
+        }
+        let piano_selected = settings.port1_device == PortDevice::MiraclePiano
+            || settings.port2_device == PortDevice::MiraclePiano;
+        let mut key_events = Vec::new();
+        if piano_selected && settings.piano_keyboard && !ctx.wants_keyboard_input() {
+            for (key, note) in crate::piano::KEY_NOTES {
+                let down = ctx.input(|input| input.key_down(*key));
+                if down != self.piano_key_held[usize::from(*note)] {
+                    self.piano_key_held[usize::from(*note)] = down;
+                    key_events.push((*note, down));
+                }
+            }
+        } else {
+            for (note, held) in self.piano_key_held.iter_mut().enumerate() {
+                if *held {
+                    *held = false;
+                    key_events.push((note as u8, false));
+                }
+            }
+        }
+        if !key_events.is_empty() {
+            if let Some(player) = &mut self.player {
+                for (note, on) in key_events {
                     player.set_piano_note(note, on);
                 }
             }

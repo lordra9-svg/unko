@@ -207,7 +207,8 @@ between machines; see `docs/platforms.md` for the resolution order and the
   Datach scanner with its internal X24C02 and cartridge X24C01. Settings -> Controllers selects the
   device per port and applies it immediately. Selecting the Miracle Piano
   shows a clickable 49-key keyboard (C2-C6) that sends Note On/Off through the
-  clocked transport. Mapper 188 (Karaoke Studio)
+  clocked transport. A toggle maps the number/QWERTY/ASDFG/ZXCVB rows to the
+  same notes and suppresses the Space pause hotkey while active. Mapper 188 (Karaoke Studio)
   presents its own cartridge microphone: the Devices window shows the same
   microphone checkbox, the A/B bits follow controller port 1, and the ADC
   reads through `$6000-$7FFF`. **Use system microphone** opens the selected

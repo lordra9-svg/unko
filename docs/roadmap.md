@@ -86,7 +86,7 @@ The main effort is now the reference-parity accuracy core. Details in
       to SysEx 4 and SysEx 11 with the documented version/memory-test messages,
       and the **Datach** adapter's external 128-byte X24C01 (Battle Rush) is
       modelled on `$8000-$8003` bit 3 with a 384-byte save. The Devices window
-      adds a clickable 49-key piano keyboard for note input. Remaining:
+      adds a clickable 49-key piano keyboard with optional computer-key input. Remaining:
       VS. System / PlayChoice-10 (blocked on ROMs and palette/security data)
       and validation against real PAL/NSF content. The FDS `$4030.D1`
       DRAM-refresh watchdog matches the hardware capture (`67FF`/`6E25`).

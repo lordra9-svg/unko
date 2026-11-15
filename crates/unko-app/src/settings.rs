@@ -458,6 +458,8 @@ pub struct Settings {
     pub microphone_device: String,
     /// Peak amplitude that asserts the microphone bit.
     pub microphone_threshold: f32,
+    /// Map the computer keyboard to the on-screen Miracle Piano keys.
+    pub piano_keyboard: bool,
     /// Device attached to controller port 1.
     pub port1_device: PortDevice,
     /// Device attached to controller port 2.
@@ -575,6 +577,7 @@ impl Default for Settings {
             microphone_input: false,
             microphone_device: String::new(),
             microphone_threshold: crate::microphone::THRESHOLD,
+            piano_keyboard: false,
             port1_device: PortDevice::Gamepad,
             port2_device: PortDevice::Gamepad,
             port1_input: PortInput::Auto,
@@ -731,6 +734,7 @@ impl Settings {
                         .unwrap_or(crate::microphone::THRESHOLD)
                         .clamp(0.001, 1.0);
                 }
+                "piano_keyboard" => settings.piano_keyboard = parse_bool(value),
                 "port1_device" => settings.port1_device = PortDevice::from_name(value),
                 "port2_device" => {
                     settings.port2_device = PortDevice::from_name(value);
@@ -915,6 +919,7 @@ famicom_3d={}
 microphone_input={}
 microphone_device={}
 microphone_threshold={}
+piano_keyboard={}
 theme={}
 pause_on_focus_loss={}
 confirm_stop={}
@@ -993,6 +998,7 @@ layout_main={}
             self.microphone_input,
             self.microphone_device,
             self.microphone_threshold,
+            self.piano_keyboard,
             match self.theme {
                 Theme::Dark => "dark",
                 Theme::Light => "light",
@@ -1202,6 +1208,7 @@ mod tests {
             microphone_input: true,
             microphone_device: "Test Microphone".into(),
             microphone_threshold: 0.05,
+            piano_keyboard: true,
             ..Settings::default()
         };
         settings.save(&path).expect("writes");

@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **663 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **664 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -196,8 +196,12 @@ The reply bytes are queued on the same polled shift register the piano uses;
 transport now returns to idle after each transmitted byte, so multi-byte
 requests work. The Devices window also draws the 49 keys (C2-C6); pointer
 press/drag calls `Core::set_piano_note`, which queues channel-0 Note On
-(`90 note velocity`) and Note Off (`90 note 00`) messages. Unit tests cover
-the 3-byte note messages, key geometry and black-key hit testing. This follows the message set documented in the NESdev
+(`90 note velocity`) and Note Off (`90 note 00`) messages. An optional
+**Computer keyboard input** toggle maps the number, QWERTY, ASDFG and
+ZXCVB/Backtick/F1/Space rows chromatically to the same notes; Space is
+suppressed as the pause hotkey while that toggle is active, and typing in a
+text field does not play notes. Unit tests cover the 3-byte note messages, key
+geometry, black-key hit testing and the 49-key computer mapping. This follows the message set documented in the NESdev
 reverse-engineering thread and the NESdev wiki transport description; it is
 protocol-level behaviour, not a firmware emulation. Unit tests send both
 requests through the real transport and assert the complete replies, including
