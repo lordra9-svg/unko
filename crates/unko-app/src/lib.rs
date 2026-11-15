@@ -26,6 +26,7 @@ mod library;
 mod movie;
 mod paths;
 mod player;
+mod playtime;
 mod recording;
 mod rom_manager;
 mod settings;

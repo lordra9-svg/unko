@@ -25,6 +25,7 @@ use crate::gamepad::{
 use crate::library::{self, GameEntry};
 use crate::paths;
 use crate::player::{self, Player};
+use crate::playtime::{format_duration, PlayStats};
 use crate::recording::RecordModes;
 use crate::rom_manager::RomManager;
 use crate::settings::{Aspect, HotkeyAction, PortInput, Settings, ShaderPreset, Theme};
@@ -196,6 +197,12 @@ pub struct App {
     game_props_open: bool,
     game_props: GameProperties,
     game_props_entry: Option<GameEntry>,
+    play_stats: PlayStats,
+    /// Library save stem of the running game (play-time key).
+    play_stem: Option<String>,
+    play_tick: Option<Instant>,
+    play_pending: Duration,
+    play_flush: Instant,
     cheats: Vec<CheatEntry>,
     cheat_code: String,
     cheat_addr: String,
@@ -309,6 +316,7 @@ impl App {
             crate::gpu_shader::GpuShader::new(gl)
                 .map(|shader| std::sync::Arc::new(std::sync::Mutex::new(shader)))
         });
+        let play_stats = PlayStats::load(&settings.save_dir.join(PlayStats::FILE_NAME));
         let mut app = Self {
             settings,
             library,
@@ -340,6 +348,11 @@ impl App {
             game_props_open: false,
             game_props: GameProperties::default(),
             game_props_entry: None,
+            play_stats,
+            play_stem: None,
+            play_tick: None,
+            play_pending: Duration::ZERO,
+            play_flush: Instant::now(),
             cheats: Vec::new(),
             cheat_code: String::new(),
             cheat_addr: String::new(),
@@ -735,6 +748,12 @@ impl App {
         let game_props = GameProperties::load(&self.game_props_path(&entry));
         match Player::start_with(&entry, &settings, game_props) {
             Ok(player) => {
+                self.flush_play_stats();
+                self.play_pending = Duration::ZERO;
+                self.play_tick = Some(Instant::now());
+                self.play_stem = Some(entry.save_stem());
+                self.play_stats.begin_session(&entry.save_stem());
+                self.flush_play_stats();
                 self.game_props = game_props;
                 self.game_props_entry = Some(entry.clone());
                 self.active_mapping = if self.settings.per_game_input {
@@ -783,6 +802,8 @@ impl App {
     }
 
     fn stop_game(&mut self) {
+        self.flush_play_stats();
+        self.play_stem = None;
         self.paused_by_focus = false;
         if self.settings.per_game_input {
             if let Some(player) = &self.player {
@@ -825,6 +846,9 @@ impl App {
     }
 
     fn apply_settings(&mut self, ctx: &egui::Context, old: &Settings) {
+        if old.save_dir != self.settings.save_dir {
+            self.play_stats = PlayStats::load(&self.play_stats_path());
+        }
         self.settings.zapper_port2 = self.settings.port2_device == PortDevice::Zapper;
         if let Some(player) = &mut self.player {
             player.set_filter(self.settings.filter);
@@ -1752,13 +1776,14 @@ impl App {
     }
 
     fn table(&mut self, ui: &mut egui::Ui, indices: &[usize]) {
-        const COLUMNS: [(&str, u8, f32); 6] = [
+        const COLUMNS: [(&str, u8, f32); 7] = [
             ("System", 0x01, 0.9),
             ("File", 0x02, 2.0),
             ("Size", 0x04, 0.9),
             ("Region", 0x08, 0.9),
             ("Mapper", 0x10, 1.0),
             ("Modified", 0x20, 1.4),
+            ("Played", 0x40, 0.9),
         ];
         let width = ui.available_width();
         let title_width = (width * 0.28).clamp(180.0, 360.0);
@@ -1861,7 +1886,7 @@ impl App {
                         painter.text(
                             egui::pos2(x, y),
                             Align2::LEFT_CENTER,
-                            column_cell(entry, *bit),
+                            column_cell(entry, *bit, self.play_stats.seconds(&entry.save_stem())),
                             FontId::proportional(12.0),
                             Color32::from_gray(170),
                         );
@@ -1929,10 +1954,14 @@ impl App {
                             rect.left_bottom() + Vec2::new(10.0, -10.0),
                             Align2::LEFT_BOTTOM,
                             format!(
-                                "{} · {} · {}",
+                                "{} · {} · {}{}",
                                 entry.system(),
                                 entry.mapper_label(),
-                                entry.region_label()
+                                entry.region_label(),
+                                match self.play_stats.seconds(&entry.save_stem()) {
+                                    0 => String::new(),
+                                    seconds => format!(" · {}", format_duration(seconds)),
+                                }
                             ),
                             FontId::proportional(10.0),
                             Color32::from_gray(160),
@@ -2059,6 +2088,7 @@ impl App {
         let mut hotkey_capture = self.hotkey_capture.take();
         let mut reset_requested = false;
         let mut layout_reset = false;
+        let mut play_reset = false;
 
         let mut body = |ui: &mut egui::Ui| {
             egui::ScrollArea::vertical()
@@ -2078,8 +2108,14 @@ impl App {
                             ui.set_min_width(560.0);
                             match tab {
                                 Tab::General => {
-                                    reset_requested =
-                                        general_tab(ui, &mut settings, ctx, &mut layout_reset);
+                                    reset_requested = general_tab(
+                                        ui,
+                                        &mut settings,
+                                        ctx,
+                                        &mut layout_reset,
+                                        &self.play_stats,
+                                        &mut play_reset,
+                                    );
                                 }
                                 Tab::Interface => interface_tab(ui, &mut settings),
                                 Tab::Graphics => graphics_tab(ui, &mut settings, ctx),
@@ -2121,6 +2157,10 @@ impl App {
 
         self.gamepads = gamepads;
         self.hotkey_capture = hotkey_capture;
+        if play_reset {
+            self.play_stats = PlayStats::default();
+            self.flush_play_stats();
+        }
         self.tab = tab;
         if settings != self.settings {
             let old = self.settings.clone();
@@ -3168,6 +3208,16 @@ impl App {
         self.netplay_open = open;
     }
 
+    fn play_stats_path(&self) -> PathBuf {
+        self.settings.save_dir.join(PlayStats::FILE_NAME)
+    }
+
+    fn flush_play_stats(&mut self) {
+        if let Err(err) = self.play_stats.save(&self.play_stats_path()) {
+            self.set_status(format!("Play time save failed: {err}"));
+        }
+    }
+
     fn game_props_path(&self, entry: &GameEntry) -> PathBuf {
         self.settings
             .save_dir
@@ -3203,6 +3253,8 @@ impl App {
         let global_port2 = self.settings.port2_device;
         let mut save = false;
         let mut reload = false;
+        let mut reset_play = false;
+        let played = self.play_stats.seconds(&entry.save_stem());
         egui::Window::new("Game properties")
             .open(&mut open)
             .default_size([480.0, 320.0])
@@ -3316,6 +3368,13 @@ impl App {
                     });
                 ui.separator();
                 ui.horizontal(|ui| {
+                    ui.label("Play time");
+                    ui.label(format_duration(played));
+                    if ui.button("Reset play time").clicked() {
+                        reset_play = true;
+                    }
+                });
+                ui.horizontal(|ui| {
                     if ui.button("Save").clicked() {
                         save = true;
                     }
@@ -3330,6 +3389,10 @@ impl App {
             });
         self.game_props_open = open;
         self.game_props = properties;
+        if reset_play {
+            self.play_stats.reset(&entry.save_stem());
+            self.flush_play_stats();
+        }
         if reload {
             self.reload_with_properties(&entry);
         } else if save {
@@ -3418,6 +3481,13 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let play_now = Instant::now();
+        let play_dt = self.play_tick.map_or(Duration::ZERO, |last| {
+            play_now
+                .duration_since(last)
+                .min(Duration::from_millis(250))
+        });
+        self.play_tick = Some(play_now);
         self.rom_manager.poll();
         let dropped = ctx.input(|input| input.raw.dropped_files.clone());
         if !dropped.is_empty() {
@@ -3530,6 +3600,25 @@ impl eframe::App for App {
             }
             player.set_microphone(self.microphone);
             player.step(ctx, audio);
+        }
+
+        // Count wall-clock time only while a game is actually advancing.
+        let running_stem = self
+            .player
+            .as_ref()
+            .filter(|player| !player.paused)
+            .and_then(|_| self.play_stem.clone());
+        if let Some(stem) = running_stem {
+            self.play_pending += play_dt;
+            let whole = self.play_pending.as_secs();
+            if whole > 0 {
+                self.play_pending -= Duration::from_secs(whole);
+                self.play_stats.add_seconds(&stem, whole);
+            }
+        }
+        if self.play_flush.elapsed() >= Duration::from_secs(30) {
+            self.play_flush = Instant::now();
+            self.flush_play_stats();
         }
 
         if let Some(player) = &mut self.player {
@@ -3690,6 +3779,7 @@ impl eframe::App for App {
 impl App {
     /// Stops the audio stream and persists settings when the shell exits.
     fn shutdown(&mut self) {
+        self.flush_play_stats();
         if let Some(player) = &mut self.player {
             player.shutdown();
         }
@@ -4399,6 +4489,8 @@ fn general_tab(
     settings: &mut Settings,
     _ctx: &egui::Context,
     reset_layout: &mut bool,
+    play: &PlayStats,
+    reset_play: &mut bool,
 ) -> bool {
     ui.heading("General");
     ui.add_space(8.0);
@@ -4421,6 +4513,22 @@ fn general_tab(
         ui.radio_value(&mut settings.theme, Theme::Light, "Light");
     });
     ui.add_space(18.0);
+    ui.separator();
+    ui.label("Play time");
+    let summary = if play.is_empty() {
+        "No play time tracked yet.".to_string()
+    } else {
+        format!(
+            "{} tracked across {} game(s)",
+            format_duration(play.total_seconds()),
+            play.len()
+        )
+    };
+    ui.label(RichText::new(summary).weak().small());
+    if ui.button("Clear play-time counters").clicked() {
+        *reset_play = true;
+    }
+    ui.add_space(12.0);
     ui.separator();
     let mut reset = false;
     if ui.button("Reset all settings…").clicked() {
@@ -5539,22 +5647,24 @@ fn advanced_tab(ui: &mut egui::Ui, settings: &mut Settings) {
     );
 }
 
-const LIST_COLUMN_BITS: [(&str, u8); 6] = [
+const LIST_COLUMN_BITS: [(&str, u8); 7] = [
     ("System", 0x01),
     ("File", 0x02),
     ("Size", 0x04),
     ("Region", 0x08),
     ("Mapper", 0x10),
     ("Modified", 0x20),
+    ("Played", 0x40),
 ];
 
-fn column_cell(entry: &crate::library::GameEntry, bit: u8) -> String {
+fn column_cell(entry: &crate::library::GameEntry, bit: u8, played_seconds: u64) -> String {
     match bit {
         0x01 => entry.system().to_string(),
         0x02 => entry.file_name.clone(),
         0x04 => entry.size_label(),
         0x08 => entry.region_label().to_string(),
         0x10 => entry.mapper_label(),
+        0x40 => format_duration(played_seconds),
         _ => modified_label(entry.modified),
     }
 }

@@ -55,7 +55,7 @@ Key interaction rules worth keeping:
 | Title / FileName / FilePath | Title, file name, path | now |
 | Archive members | `.zip` / `.7z` / `.rar` entries read in place | now |
 | Size / Country / ID | Size, region guess, mapper, CRC32 | now |
-| TimePlayed | play-time counter (per game, persisted) | later |
+| TimePlayed | per-game counter in `<save_dir>/playtime.conf`; accumulated only while the game runs (not paused), flushed every 30 s and on stop/exit; showed in the library **Played** column, in grid view and in Game properties, with per-game and global reset | now |
 | Banner / Description / Maker | not applicable yet | — |
 | MenuBar: File | Open ROM, ROM folder, Rescan, Exit | now |
 | MenuBar: Emulation | Play/Pause, Stop, Reset, States, Screenshot, Fullscreen | now |
@@ -66,7 +66,7 @@ Key interaction rules worth keeping:
 | Library drop target | drop a ROM/archive to open it and add its folder; drop a folder to add it as a root | now |
 | Controller UI | D-pad/A/B/Start/Select library navigation; Start controller menu; Start+Select pause menu while playing | now |
 | RenderWidget | `egui` texture viewport, aspect-correct | now |
-| Settings: General/Interface | theme, pause on focus loss, confirm stop, detachable windows, reset-all | now |
+| Settings: General/Interface | theme, pause on focus loss, confirm stop, detachable windows, play-time summary + clear, reset-all | now |
 | Settings: Graphics | filter, palette + `.pal` import, aspect, integer scale, supersampling, GPU output shaders (scanlines/LCD/CRT/NTSC Budget/Premium, brightness/sharpness), window presets | now |
 | Settings: Audio | sample rate, latency target, resampler quality, output filter, volume/mute, per-channel mixer | now |
 | Settings: Controllers | per-port Connected source (Auto/None/Keyboard/Gamepad 1-4/Mouse Zapper/Paddle), protocol dropdown, rebinding, Restore default controls | now |
@@ -74,7 +74,7 @@ Key interaction rules worth keeping:
 | ROM Manager | separate remembered OS window; full virtualized DAT list, 1G1R preferences, fixdat/CSV, safe copy/rebuild (loose, deterministic ZIP or TorrentZip-style sets) with optional verified move, persistent scan cache | now |
 | Settings: NES page | region, mapper/header info, deterministic RAM | now |
 | Settings: Advanced | core id, log level, state format | now |
-| Per-game properties | Tools → Game properties…: timing region, per-port controller devices and header mapper overrides per game, saved as `<stem>.game` and applied on the next load | now |
+| Per-game properties | Tools → Game properties…: timing region, per-port controller devices, header mapper overrides and play time (with reset) per game, saved as `<stem>.game`/`playtime.conf` and applied on the next load | now |
 | NetPlay | Tools → NetPlay…: host/join 2-4 player UDP mesh, player slot, prediction mode, 0-16 frame input delay, UPnP-IGD port mapping, STUN external-IP fallback, UDP hole punching, relay-server/room fallback, state-hash desync detection with automatic chunked state-transfer repair (pause/report/resume) + manual public endpoint, rollback/predicted/depth/hash counters; rewind/movies/run-ahead disabled; LAN two-host harness validates the transports, Internet run needs two networks | now |
 | Achievements | separate milestone (credentials/network) | blocked |
 

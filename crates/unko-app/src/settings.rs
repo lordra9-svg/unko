@@ -494,7 +494,7 @@ pub struct Settings {
     /// Number of columns in the library grid (1..=8).
     pub grid_columns: u32,
     /// Bitmask of visible list columns: 1 system, 2 file, 4 size, 8 region,
-    /// 16 mapper, 32 modified (title is always visible).
+    /// 16 mapper, 32 modified, 64 played (title is always visible).
     pub list_columns: u8,
     /// Additional per-system library roots (stub for multi-system support).
     pub library_roots: Vec<LibraryRoot>,
@@ -582,7 +582,7 @@ impl Default for Settings {
             pad_disabled: [false; 4],
             pad_ports: [0, 1, 2, 3],
             grid_columns: 5,
-            list_columns: 0b11_1111,
+            list_columns: 0b111_1111,
             library_roots: Vec::new(),
             aspect: Aspect::Fit,
             scale: 0,
@@ -754,7 +754,7 @@ impl Settings {
                     settings.grid_columns = value.parse::<u32>().unwrap_or(5).clamp(1, 8)
                 }
                 "list_columns" => {
-                    settings.list_columns = value.parse::<u8>().unwrap_or(0b11_1111) & 0x3F
+                    settings.list_columns = value.parse::<u8>().unwrap_or(0b111_1111) & 0x7F
                 }
                 "aspect" => settings.aspect = Aspect::from_name(value),
                 "scale" => settings.scale = value.parse::<u32>().unwrap_or(0).min(6),
@@ -1266,7 +1266,7 @@ mod tests {
             pad_disabled: [false, true, false, true],
             pad_ports: [2, 0, 3, 1],
             grid_columns: 7,
-            list_columns: 0b10_1010,
+            list_columns: 0b110_1010,
             aspect: Aspect::Pixel87,
             scale: 3,
             supersample: 2,
