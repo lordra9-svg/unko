@@ -28,7 +28,10 @@ use crate::player::{self, Player};
 use crate::recording::RecordModes;
 use crate::rom_manager::RomManager;
 use crate::settings::{Aspect, HotkeyAction, PortInput, Settings, ShaderPreset, Theme};
-use unko_netplay::{PredictionMode, SessionConfig, UdpMesh};
+use unko_netplay::{
+    add_port_mapping, discover, endpoint, external_ip, local_address_toward, MappingProtocol,
+    MappingRequest, PredictionMode, SessionConfig, UdpMesh,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -210,6 +213,10 @@ pub struct App {
     netplay_prediction: PredictionMode,
     netplay_players: u8,
     netplay_slot: u8,
+    netplay_public_endpoint: String,
+    netplay_upnp: bool,
+    netplay_upnp_status: String,
+    netplay_upnp_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     controller_last: unko_core::InputState,
     controller_repeat: Instant,
     controller_menu_open: bool,
@@ -342,6 +349,10 @@ impl App {
             netplay_prediction: PredictionMode::LastInput,
             netplay_players: 2,
             netplay_slot: 1,
+            netplay_public_endpoint: String::new(),
+            netplay_upnp: false,
+            netplay_upnp_status: String::new(),
+            netplay_upnp_rx: None,
             controller_last: unko_core::InputState::empty(),
             controller_repeat: Instant::now(),
             controller_menu_open: false,
@@ -2698,10 +2709,72 @@ impl App {
         }
     }
 
-    fn netplay_window(&mut self, ctx: &egui::Context) {
-        if !self.netplay_open {
+    /// Asks the router for a UDP mapping in a worker thread.
+    ///
+    /// Discovery and SOAP calls can take seconds on a slow router, so the UI
+    /// never blocks: the result arrives through a channel and fills the public
+    /// endpoint field.
+    fn spawn_upnp_mapping(&mut self) {
+        let Ok(port) = self.netplay_local_port.trim().parse::<u16>() else {
+            self.netplay_upnp_status = "Local port must be a number.".into();
+            return;
+        };
+        if self.netplay_upnp_rx.is_some() {
             return;
         }
+        let peer = self
+            .netplay_peer
+            .split(',')
+            .map(str::trim)
+            .find(|peer| !peer.is_empty())
+            .unwrap_or("127.0.0.1:0")
+            .to_string();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.netplay_upnp_rx = Some(rx);
+        self.netplay_upnp_status = "Looking for a UPnP gateway…".into();
+        std::thread::spawn(move || {
+            let local = local_address_toward(&peer);
+            let result = (|| -> Result<String, String> {
+                let device = discover(Duration::from_secs(2)).map_err(|err| err.to_string())?;
+                let ip = external_ip(&device).map_err(|err| err.to_string())?;
+                let request = MappingRequest::new(&local, port, MappingProtocol::Udp);
+                add_port_mapping(&device, &request).map_err(|err| err.to_string())?;
+                Ok(endpoint(&ip, port))
+            })();
+            let _ = tx.send(result);
+        });
+    }
+
+    /// Polls the UPnP worker without blocking the frame.
+    fn poll_upnp(&mut self) {
+        let Some(rx) = self.netplay_upnp_rx.as_ref() else {
+            return;
+        };
+        let outcome = match rx.try_recv() {
+            Ok(result) => Some(result),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Some(Err("UPnP worker stopped".into()))
+            }
+        };
+        if let Some(result) = outcome {
+            self.netplay_upnp_rx = None;
+            match result {
+                Ok(public) => {
+                    self.netplay_upnp_status = format!("Mapped. Public endpoint {public}");
+                    self.netplay_public_endpoint = public;
+                }
+                Err(err) => self.netplay_upnp_status = format!("UPnP failed: {err}"),
+            }
+        }
+    }
+
+    fn netplay_window(&mut self, ctx: &egui::Context) {
+        if !self.netplay_open {
+            self.poll_upnp();
+            return;
+        }
+        self.poll_upnp();
         let mut open = self.netplay_open;
         let active = self
             .player
@@ -2709,7 +2782,7 @@ impl App {
             .is_some_and(crate::player::Player::netplay_active);
         egui::Window::new("NetPlay")
             .open(&mut open)
-            .default_size([520.0, 340.0])
+            .default_size([560.0, 420.0])
             .show(ctx, |ui| {
                 let role_before = self.netplay_host;
                 ui.horizontal(|ui| {
@@ -2766,9 +2839,37 @@ impl App {
                     ui.label("Peers");
                     ui.add_enabled(
                         !active,
-                        egui::TextEdit::singleline(&mut self.netplay_peer).desired_width(330.0),
+                        egui::TextEdit::singleline(&mut self.netplay_peer).desired_width(240.0),
+                    );
+                    ui.label("Public");
+                    ui.add_enabled(
+                        !active,
+                        egui::TextEdit::singleline(&mut self.netplay_public_endpoint)
+                            .hint_text("ip:port")
+                            .desired_width(120.0),
                     );
                 });
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            !active && self.netplay_upnp_rx.is_none(),
+                            egui::Button::new("UPnP mapping"),
+                        )
+                        .clicked()
+                    {
+                        self.spawn_upnp_mapping();
+                    }
+                    ui.add_enabled(
+                        !active,
+                        egui::Checkbox::new(&mut self.netplay_upnp, "Map on start"),
+                    );
+                    if self.netplay_upnp_rx.is_some() {
+                        ui.spinner();
+                    }
+                });
+                if !self.netplay_upnp_status.is_empty() {
+                    ui.label(&self.netplay_upnp_status);
+                }
                 ui.label(
                     RichText::new(
                         "Each player picks a unique slot and lists the other players' \

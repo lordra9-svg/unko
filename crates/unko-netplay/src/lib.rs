@@ -22,12 +22,17 @@ pub mod rollback;
 pub mod session;
 pub mod transport;
 pub mod udp;
+pub mod upnp;
 
 pub use input::{InputFrame, INPUT_MESSAGE_LEN};
 pub use rollback::{RollbackBuffer, StoredFrame};
 pub use session::{PredictionMode, RollbackSession, SessionConfig, SessionStats};
 pub use transport::{channel_pair, ChannelTransport, MeshTransport, Transport};
 pub use udp::{UdpMesh, UdpTransport};
+pub use upnp::{
+    add_port_mapping, delete_port_mapping, discover, endpoint, external_ip, local_address_toward,
+    IgdDevice, MappingRequest, Protocol as MappingProtocol, UpnpError,
+};
 
 /// Stable feature-core id.
 pub const CORE_ID: &str = "unko_netplay";

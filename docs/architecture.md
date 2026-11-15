@@ -104,7 +104,10 @@ keeps a per-peer input history and merges the four-port frame every tick.
 input or neutral) and a fixed input delay applied identically to every player;
 the session reports rollback count, predicted frames and the deepest rollback.
 The app drives it from `Player::step` and exposes a host/join window with
-player/slot selection. NAT traversal remains future work.
+player/slot selection. `upnp` adds a std-only UPnP-IGD client (SSDP discovery,
+device-description fetch, `AddPortMapping`, `GetExternalIPAddress`) used from a
+worker thread, plus a manual public-endpoint field. STUN and hole punching
+remain future work.
 
 `unko-rom-manager` is a separate, non-emulator feature core: DAT auditing,
 1G1R selection, fixdat/CSV reports and safe rebuilding. It has no dependency
