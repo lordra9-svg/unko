@@ -13,7 +13,7 @@ Status: `shipped` · `planned` · `deferred` · `reference-only`
 | Core | `unko-nes` (standalone Rust crate, MIT + documented ISC ares adaptations) |
 | Adapter | `crates/unko-nes-host` (built-in `Core` implementation) |
 | Accuracy bar | reference parity; see `docs/accuracy.md` |
-| Scope | licensed library, FDS, PAL/Dendy, expansion audio, Zapper, Famicom 3D System, Karaoke Studio microphone, NSF, 405 enhanced video |
+| Scope | licensed library, iNES/NES 2.0/UNIF/FDS loading, PAL/Dendy, expansion audio, Zapper, Famicom 3D System, Karaoke Studio microphone, NSF, 405 enhanced video |
 | Status | default and only NES core; 146/146 non-DRAW AccuracyCoin rows; 7,073/7,101 images load (99.6%), 0 unsupported mapper IDs, 28 truncated dumps; 6,490 render by 120 frames |
 
 The former TetaNES compatibility core was retired after the accuracy core

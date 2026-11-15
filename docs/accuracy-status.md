@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **643 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **648 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -124,6 +124,22 @@ tools, not a shutter-glasses timing model; the game still runs at its normal
 60 Hz field rate. Unit tests cover the exact `$4016` bit-1 mapping for both
 eyes, the field-boundary sample, the attachment toggle, the state round trip
 and the anaglyph channel mapping.
+
+## ROM loading — UNIF (2026-11-15)
+
+`unko-rom` now recognises the deprecated UNIF container and converts its
+`Type+Length+Value` chunks to an iNES 1.0 image, so the accuracy core still
+sees only the format it validates. The converter joins `PRG0..PRGF` and
+`CHR0..CHRF` in index order, rejects gaps, applies `MIRR` (horizontal,
+vertical or four-screen), `BATR`, `TVCI` (NTSC/PAL/dual) and `VROR`
+(CHR-RAM), and maps the common Nintendo boards: NROM, UNROM/UOROM, CNROM,
+MMC1 (`S*ROM`), MMC3 (`T*ROM`, `B4`, HKROM), AxROM (`A*ROM`), CPROM, BNROM
+and UNROM-512. Unknown `MAPR` names are rejected instead of guessing a mapper.
+Loose `.unif` files and members of ZIP/7z/RAR archives are discovered, shown in
+the library with mapper/size metadata when available and converted on load.
+Unit tests cover an NROM image with CHR-ROM and vertical mirroring, an MMC1
+board with CHR-RAM and a battery flag, unknown boards, truncated chunks, gapped
+PRG chunks and the probe/load path.
 
 ## Peripherals — Bandai Karaoke Studio (2026-11-15)
 

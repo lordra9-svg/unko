@@ -24,6 +24,8 @@ use std::time::SystemTime;
 
 use zip::ZipArchive;
 
+pub mod unif;
+
 /// Archive container a ROM came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Container {
@@ -233,9 +235,12 @@ pub fn probe_path(path: &Path) -> Result<Vec<RomEntry>, RomError> {
     }
     let extension = extension(path);
     match extension.as_str() {
-        "nes" | "fds" => {
+        "nes" | "fds" | "unif" => {
             let entry = plain_entry(path.to_path_buf()).ok_or_else(|| {
-                RomError::Invalid(format!("{} is not a valid NES/FDS image", path.display()))
+                RomError::Invalid(format!(
+                    "{} is not a valid NES/FDS/UNIF image",
+                    path.display()
+                ))
             })?;
             Ok(vec![entry])
         }
@@ -249,18 +254,25 @@ pub fn probe_path(path: &Path) -> Result<Vec<RomEntry>, RomError> {
 
 /// Reads the bytes for an entry.
 pub fn load(entry: &RomEntry) -> Result<Vec<u8>, RomError> {
-    match &entry.source {
-        Source::File(path) => fs::read(path).map_err(RomError::Io),
+    let bytes = match &entry.source {
+        Source::File(path) => fs::read(path).map_err(RomError::Io)?,
         Source::Archive {
             archive,
             inner,
             index,
         } => match entry.container {
-            Container::Zip => load_zip(archive, inner, *index),
-            Container::SevenZ => load_7z(archive, inner),
-            Container::Rar => load_rar(archive, inner, *index),
-            Container::File => Err(RomError::Invalid("archive source marked as file".into())),
+            Container::Zip => load_zip(archive, inner, *index)?,
+            Container::SevenZ => load_7z(archive, inner)?,
+            Container::Rar => load_rar(archive, inner, *index)?,
+            Container::File => {
+                return Err(RomError::Invalid("archive source marked as file".into()));
+            }
         },
+    };
+    if unif::is_unif(&bytes) {
+        unif::to_ines(&bytes).map_err(RomError::Invalid)
+    } else {
+        Ok(bytes)
     }
 }
 
@@ -286,7 +298,7 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<RomEntry>) {
             }
         } else if file_type.is_file() {
             match extension(&path).as_str() {
-                "nes" | "fds" => {
+                "nes" | "fds" | "unif" => {
                     if let Some(entry) = plain_entry(path) {
                         out.push(entry);
                     }
@@ -359,7 +371,9 @@ fn scan_zip(path: &Path) -> Vec<RomEntry> {
         };
         let name = name.into_owned();
         let member_ext = extension(Path::new(&name));
-        if member.is_dir() || !(member_ext.eq("nes") || member_ext.eq("fds")) {
+        if member.is_dir()
+            || !(member_ext.eq("nes") || member_ext.eq("fds") || member_ext.eq("unif"))
+        {
             continue;
         }
         let mut prefix = [0u8; 16];
@@ -369,6 +383,10 @@ fn scan_zip(path: &Path) -> Vec<RomEntry> {
         };
         let header = if member_ext.eq("fds") {
             None
+        } else if member_ext.eq("unif") {
+            // The 16-byte prefix is only the magic; the whole member is
+            // converted on load. Keep the entry even without metadata.
+            parse_header(&prefix)
         } else {
             let Some(header) = header else {
                 continue; // headerless ZIP images are not playable
@@ -411,7 +429,7 @@ fn scan_7z(path: &Path) -> Vec<RomEntry> {
         .iter()
         .filter(|file| {
             let ext = extension(Path::new(file.name()));
-            !file.is_directory() && (ext.eq("nes") || ext.eq("fds"))
+            !file.is_directory() && (ext.eq("nes") || ext.eq("fds") || ext.eq("unif"))
         })
         .map(|file| {
             let inner = file.name().to_string();
@@ -446,7 +464,7 @@ fn scan_rar(path: &Path) -> Vec<RomEntry> {
         .enumerate()
         .filter(|(_, member)| {
             let ext = extension(Path::new(&member_name(member)));
-            !member.meta.is_directory && (ext.eq("nes") || ext.eq("fds"))
+            !member.meta.is_directory && (ext.eq("nes") || ext.eq("fds") || ext.eq("unif"))
         })
         .map(|(index, member)| {
             let inner = member_name(&member);
@@ -534,6 +552,9 @@ fn system_time_secs(time: SystemTime) -> Option<u64> {
 /// Parses an iNES or NES 2.0 header.
 #[must_use]
 pub fn parse_header(bytes: &[u8]) -> Option<Header> {
+    if bytes.len() >= 4 && &bytes[0..4] == b"UNIF" {
+        return unif::header(bytes);
+    }
     if bytes.len() < 16 || &bytes[0..4] != b"NES\x1a" {
         return None;
     }
@@ -644,6 +665,45 @@ mod tests {
         assert!(header.battery);
         assert!(!header.nes2);
         assert_eq!(header.region, "NTSC");
+    }
+
+    fn unif_chunk(ty: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(8 + data.len());
+        out.extend_from_slice(ty);
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(data);
+        out
+    }
+
+    fn synthetic_unif() -> Vec<u8> {
+        let mut out = vec![0u8; 32];
+        out[..4].copy_from_slice(b"UNIF");
+        out[4..8].copy_from_slice(&7u32.to_le_bytes());
+        out.extend_from_slice(&unif_chunk(b"MAPR", b"NES-NROM-256\0"));
+        out.extend_from_slice(&unif_chunk(b"PRG0", &[0xAA; 0x4000]));
+        out.extend_from_slice(&unif_chunk(b"CHR0", &[0x55; 0x2000]));
+        out.extend_from_slice(&unif_chunk(b"MIRR", &[1]));
+        out
+    }
+
+    #[test]
+    fn probes_and_converts_unif() {
+        let dir = temp_dir("unif");
+        fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("game.unif");
+        fs::write(&path, synthetic_unif()).expect("write");
+        let entries = probe_path(&path).expect("probe");
+        assert_eq!(entries.len(), 1);
+        let header = entries[0].header.expect("header");
+        assert_eq!(header.mapper, 0);
+        assert_eq!(header.prg_kib, 16);
+        assert_eq!(header.chr_kib, 8);
+        let bytes = load(&entries[0]).expect("load");
+        assert_eq!(&bytes[..4], b"NES\x1a");
+        assert_eq!(bytes[4], 1);
+        assert_eq!(bytes[5], 1);
+        assert_eq!(&bytes[16..20], &[0xAA; 4]);
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

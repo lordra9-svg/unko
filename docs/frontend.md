@@ -108,7 +108,7 @@ platform toolchains.
   on Linux/Windows/macOS/wasm. If the app later needs native menus and a
   document-based macOS feel, the `Core` boundary does not change.
 - **No ROM database dependency.** Titles come from file names; metadata comes
-  from the iNES/NES 2.0 header. A game database can be added behind the same
+  from the iNES/NES 2.0 header (UNIF files are converted before loading). A game database can be added behind the same
   library model.
 - **Native file dialogs are optional.** `rfd` is used for ROM/save folders and
   palette import on desktop; text entries remain for platforms without a

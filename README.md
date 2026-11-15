@@ -37,7 +37,7 @@ verified against the public reference suites:
   `cpu_interrupts_v2` singles: pass
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **643 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **648 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **137 pass / 11 fail / 115 visual-or-input-only** (PAL APU timing leaves 4 failures; the alternate MMC3 selector leaves only `read_joy3/count_errors`)
 - RustyNES test tree: **159 pass / 11 fail / 171 visual-or-input-only** (166 / 4 with PAL APU in PAL mode; 1 with the alternate MMC3 selector too)
 
@@ -87,8 +87,8 @@ harness; a true Internet run needs two networks. See
 | Metric | Value |
 |---|---:|
 | Workspace crates | 9 |
-| First-party Rust lines | ~79,300 |
-| Workspace tests | 643 pass, 0 failed |
+| First-party Rust lines | ~79,800 |
+| Workspace tests | 648 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 
@@ -109,7 +109,7 @@ Current figures, dated entries and the remaining limits are in
 ```
 crates/
   unko-core/         # SystemId, Core trait, video/audio/input/state types, registry
-  unko-rom/          # discovery + .zip/.7z/.rar containers + iNES metadata
+  unko-rom/          # discovery + .zip/.7z/.rar containers + iNES/UNIF metadata
   unko-nes/          # standalone reference-parity NES core (no unko-core dependency)
   unko-nes-host/     # Core ABI adapter between unko-nes and unko-core
   unko-nes-dev/      # AccuracyCoin battery and development harnesses
@@ -231,7 +231,8 @@ cargo run -p unko-rom-manager -- \
 # --move deletes loose sources after a verified copy (loose output only)
 ```
 
-It scans loose files and ZIP, 7z or RAR containers, can download/update a DAT
+It scans loose files and ZIP, 7z or RAR containers, accepts UNIF images by
+converting their board/mirroring chunks to iNES 1.0, can download/update a DAT
 over HTTP with `--dat-url`, can write deterministic ZIP or TorrentZip-style
 sets, and has a read-only `verify`/`audit` mode that reports per-ROM
 missing/unknown/duplicate detail and exits nonzero unless the set is complete.
