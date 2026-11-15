@@ -16,4 +16,8 @@ sha1 = "0.10"
 md-5 = "0.10"
 sevenz-rust2 = { version = "0.24", default-features = false, features = ["bzip2", "ppmd", "compress", "util"] }
 rars = { version = "0.12", default-features = false }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+
+
+# DAT download is a desktop feature; mobile targets must not build a TLS stack.
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-native-roots"] }

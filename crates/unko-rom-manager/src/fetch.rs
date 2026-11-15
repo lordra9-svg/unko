@@ -6,9 +6,7 @@
 //! temporary file in the destination directory followed by a rename.
 
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use crate::{parse_dat_str, Error, Result};
 
@@ -24,7 +22,11 @@ pub const MAX_DAT_BYTES: u64 = 256 * 1024 * 1024;
 ///
 /// Returns [`Error::Http`] for transport/status failures, [`Error::Dat`] when
 /// the body is not a DAT, and [`Error::Io`] when the file cannot be written.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub fn fetch_dat(url: &str, destination: &Path) -> Result<PathBuf> {
+    use std::io::Read as _;
+    use std::time::Duration;
+
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(120))
         .user_agent(concat!("unko-rom-manager/", env!("CARGO_PKG_VERSION")))
@@ -77,10 +79,23 @@ pub fn fetch_dat(url: &str, destination: &Path) -> Result<PathBuf> {
     Ok(destination.to_path_buf())
 }
 
-#[cfg(test)]
+/// DAT download is unavailable on mobile targets, which do not build a TLS
+/// stack.
+///
+/// # Errors
+///
+/// Always returns [`Error::Http`] on iOS and Android.
+#[cfg(any(target_os = "ios", target_os = "android"))]
+pub fn fetch_dat(_url: &str, _destination: &Path) -> Result<PathBuf> {
+    Err(Error::Http(
+        "DAT download is not available on this platform".into(),
+    ))
+}
+
+#[cfg(all(test, not(any(target_os = "ios", target_os = "android"))))]
 mod tests {
     use super::*;
-    use std::io::Write as _;
+    use std::io::{Read as _, Write as _};
     use std::net::TcpListener;
     use std::thread;
 
