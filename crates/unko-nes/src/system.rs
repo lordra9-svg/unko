@@ -9,7 +9,7 @@ use crate::bus::CpuBus;
 use crate::cart::{CartError, Cartridge, Mirroring};
 use crate::clock::Timing;
 use crate::cpu::Cpu;
-use crate::ppu::Ppu;
+use crate::ppu::{Ppu, PpuModel};
 #[cfg(feature = "cheats")]
 use crate::types::Cheat;
 #[cfg(feature = "debug")]
@@ -881,6 +881,15 @@ impl System {
             cycle_count: 0,
             dma: None,
         };
+        let header = system.cart.header();
+        system.ppu.set_ppu_model(if header.console_type == 1 {
+            PpuModel::from_vs_nibble(header.vs_ppu)
+        } else if header.console_type == 2 {
+            // PlayChoice-10 uses the 2C03 RGB PPU.
+            PpuModel::Ppu2C03
+        } else {
+            PpuModel::Ppu2C02
+        });
         if system.cart.famicom_warmup() {
             system.ppu.end_warmup();
         }
@@ -1330,7 +1339,7 @@ impl System {
     #[cfg(feature = "save-states")]
     pub fn save_state(&self) -> Result<Vec<u8>, String> {
         let mut out = Vec::new();
-        out.extend_from_slice(b"UNKOST18");
+        out.extend_from_slice(b"UNKOST19");
         out.extend_from_slice(&self.cart.fingerprint().to_le_bytes());
         let mut cart_state = Vec::new();
         self.cart.save_state(&mut cart_state)?;
@@ -1378,7 +1387,7 @@ impl System {
     /// Restores a state produced by [`System::save_state`].
     #[cfg(feature = "save-states")]
     pub fn load_state(&mut self, data: &[u8]) -> Result<(), String> {
-        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST18" {
+        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST19" {
             return Err("not an Unko state (bad magic/version)".into());
         }
         let fingerprint = u64::from_le_bytes(
@@ -3855,7 +3864,7 @@ mod tests {
     fn state_magic_is_current() {
         let system = System::from_ines(&synthetic_nrom(0)).expect("load");
         let state = system.save_state().expect("state");
-        assert_eq!(&state[..8], b"UNKOST18");
+        assert_eq!(&state[..8], b"UNKOST19");
         let mut restored = System::from_ines(&synthetic_nrom(0)).expect("load");
         restored.load_state(&state).expect("restore");
     }
@@ -4158,6 +4167,19 @@ mod tests {
         assert!(other.famicom_3d_glasses());
         assert_eq!(other.stereo_eye(), Some(StereoEye::Right));
         assert_eq!(saved, other.save_state().expect("re-save"));
+    }
+
+    #[test]
+    fn vs_nes2_header_selects_the_rgb_ppu_model() {
+        let mut rom = synthetic_nrom(0);
+        rom[7] = (rom[7] & 0xFC) | 0x09; // NES 2.0, VS. System
+        rom[13] = 9; // 2C05-02
+        let system = System::from_ines(&rom).expect("load");
+        assert_eq!(system.ppu.ppu_model(), PpuModel::Ppu2C05B);
+
+        rom[7] = (rom[7] & 0xFC) | 0x0A; // NES 2.0, PlayChoice-10
+        let pc10 = System::from_ines(&rom).expect("load");
+        assert_eq!(pc10.ppu.ppu_model(), PpuModel::Ppu2C03);
     }
 
     #[test]

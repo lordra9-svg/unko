@@ -37,7 +37,7 @@ identical traces, but *Akumajou Dracula* differs from frame 5 between
 `rp2c33-01` and `rp2c33a-01a`; the revision is observable and must be
 selectable.
 
-Still absent: **VS. System BIOS/palette dumps** and **PlayChoice-10 game ROMs**.
+Still absent: **VS. System BIOS/game ROMs** and **PlayChoice-10 game ROMs**.
 The Miracle Piano's documented SysEx replies and the Datach X24C01 protocol are
 implemented from the published protocol/datasheet, so neither firmware nor a
 physical dump is required for those.
@@ -148,7 +148,7 @@ PAL APU singles in PAL mode, `dma_4016_read` and `5-branch_delays_irq`.
 | Asset | Needed for | Notes |
 |---|---|---|
 | `disksys.rom` (FDS BIOS) | `fdsirqtests`, FDS mirroring/`$4023`/audio/`$4030` tests, every `.fds` title | Present locally at `refs/bios/disksys.rom` (two revisions) and in the Myrient BIOS archive; it is **not** in `test-roms/`, and the desktop app reads it from Settings → Paths |
-| VS. System BIOS/game ROMs + 2C03/2C04/2C05 palette/security data | `characterize-vs`, VS compatibility | Blocked on ROMs and palette dumps |
+| VS. System BIOS/game ROMs | `characterize-vs`, VS compatibility | RGB palette/security data is implemented; ROMs/BIOS still missing |
 | PlayChoice-10 BIOS/ROMs | PC10 compatibility | Blocked on assets |
 | Miracle Piano firmware | MIDI replies | Not required: SysEx 4/11 replies are synthesized from the documented message set |
 | Datach external X24C01 dump (Battle Rush) | external EEPROM | Not required: the 128-byte X24C01 is modelled from the Xicor datasheet |

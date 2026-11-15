@@ -939,6 +939,10 @@ pub struct Header {
     pub mirroring: Mirroring,
     /// Raw iNES flags-6 byte (some bootleg boards overload its bits).
     pub raw_flags6: u8,
+    /// Console type from flags-7 bits 0-1 (0 NES, 1 VS., 2 PlayChoice).
+    pub console_type: u8,
+    /// NES 2.0 VS. PPU model nibble (byte 13 low nibble).
+    pub vs_ppu: u8,
 }
 
 impl Cartridge {
@@ -970,6 +974,8 @@ impl Cartridge {
                 prg_nvram_size: 0,
                 mirroring: Mirroring::Horizontal,
                 raw_flags6: 0,
+                console_type: 0,
+                vs_ppu: 0,
             },
         })
     }
@@ -1783,6 +1789,7 @@ pub fn parse_header(bytes: &[u8]) -> Result<Header, CartError> {
     }
     let flags6 = bytes[6];
     let flags7 = bytes[7];
+    let console_type = flags7 & 0x03;
     let nes2 = flags7 & 0x0C == 0x08;
     let mut mapper = u16::from(flags7 & 0xF0) | u16::from(flags6 >> 4);
     let mut prg_size = usize::from(bytes[4]) * 16 * 1024;
@@ -1818,6 +1825,12 @@ pub fn parse_header(bytes: &[u8]) -> Result<Header, CartError> {
         nes2,
         prg_ram_size,
         prg_nvram_size,
+        console_type,
+        vs_ppu: if nes2 && console_type == 1 {
+            bytes[13] & 0x0F
+        } else {
+            0
+        },
         mirroring: if flags6 & 0x08 != 0 {
             Mirroring::FourScreen
         } else if flags6 & 0x01 != 0 {

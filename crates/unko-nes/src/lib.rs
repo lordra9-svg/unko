@@ -24,6 +24,7 @@ pub mod ppu;
 pub mod resampler;
 pub mod system;
 pub mod types;
+mod vs;
 
 pub use apu::Apu;
 pub use bus::{CpuBus, RamBus};
@@ -33,7 +34,7 @@ pub use cheats::{GameGenie, GenieError};
 pub use clock::{Region, Timing};
 pub use cpu::{Cpu, Registers, Status};
 pub use nsf::{Nsf, NsfError, NsfHeader};
-pub use ppu::{PaletteVariant, Ppu};
+pub use ppu::{PaletteVariant, Ppu, PpuModel};
 pub use resampler::Resampler;
 pub use system::{PortDevice, StereoEye, System};
 #[cfg(feature = "cheats")]

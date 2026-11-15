@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **666 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **671 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -81,9 +81,9 @@ passes with the alternate selector. The selector is exposed as
 the FDS watchdog gained serialized reload state, the mouse added serialized
 port state, the Famicom 3D System added its field latch, Karaoke Studio added
 mapper-188 microphone state, the Miracle Piano added its SysEx parser and
-firmware bytes, and the Datach adapter added the external X24C01 array, so the
-save-state magic is now **`UNKOST18`**; `UNKOST17` and older states are rejected
-by the normal bad-magic check. See `docs/accuracy-divergences.md` for the open
+firmware bytes, the Datach adapter added the external X24C01 array, and the PPU
+added its hardware model, so the save-state magic is now **`UNKOST19`**;
+`UNKOST18` and older states are rejected by the normal bad-magic check. See `docs/accuracy-divergences.md` for the open
 mapper-suite items.
 
 ## Peripherals — SNES/Subor mouse (2026-11-15)
@@ -114,7 +114,7 @@ records every `$4016` write and samples OUT1 at the frame boundary, after the
 previous vertical blank and just before the next visible field, so each
 completed frame is tagged with the eye it was rendered for. The eye is exposed
 through `System::stereo_eye`; `Core::set_stereo_glasses` attaches or detaches
-the glasses. `UNKOST18` save states carry the attachment flag, latch and
+the glasses. `UNKOST19` save states carry the attachment flag, latch and
 current eye, so rewind and NetPlay rollback keep the correct eye.
 
 The desktop frontend offers **Settings → Video → Famicom 3D glasses** and
@@ -125,6 +125,31 @@ tools, not a shutter-glasses timing model; the game still runs at its normal
 60 Hz field rate. Unit tests cover the exact `$4016` bit-1 mapping for both
 eyes, the field-boundary sample, the attachment toggle, the state round trip
 and the anaglyph channel mapping.
+
+## VS. System RGB PPUs (2026-11-15)
+
+The PPU now carries a hardware model selected from the NES 2.0 console type
+and VS. PPU-model nibble (byte 13 low nibble). iNES VS images without that
+nibble default to 2C03. The public NESdev palette tables are implemented
+directly:
+
+- **2C03** — the documented 64-entry RGB DAC table (including black `$0D`,
+  `$2D` and `$3D`), also used by the 2C05 and PlayChoice-10.
+- **2C04-0001..0004** — the shared 64-entry master palette plus each chip's
+  documented permutation LUT.
+- **RGB emphasis** — setting a PPUMASK emphasis bit maxes that channel instead
+  of darkening the other two, as on the RGB PPUs.
+- **2C05** — A-D swap the meanings of `$2000` and `$2001`; `$2002` bits 4-0
+  return the expected identifier (`1B` for A/D, `3D` for B, `1C` for C) and
+  `2C05E` keeps normal open bus and no swap.
+
+The tables and identifiers are transcribed from the public NESdev
+`PPU_palettes` and `PPU_registers` pages; tests pin the 2C03 DAC values, the
+first entries of all four 2C04 permutations, RGB emphasis, the register swap,
+the status identifiers and the NES 2.0 header selection. This is palette and
+copy-protection data only: **mapper 99, VS coins/DIPs, the VS BIOS and game
+ROMs are still missing**, so no VS title has been booted yet. The header parser
+also ignores VS system type beyond the PPU nibble.
 
 ## ROM loading — UNIF (2026-11-15)
 
@@ -174,7 +199,7 @@ input (0 while sound is detected) and bits 7-3 are CPU open bus. The mapper now
 claims that window, so reads reach the board instead of returning open bus.
 `System::set_bandai_microphone` reports the ADC state; the A/B bits follow
 controller port 1. The mapper serializes both buttons, the ADC state and its
-open-bus latch in `UNKOST18` states. Unit tests cover the exact bit mapping,
+open-bus latch in `UNKOST19` states. Unit tests cover the exact bit mapping,
 the open-bus high bits, the CPU-bus path and a state round trip. No Karaoke
 Studio ROM is present locally, so this is validated against the NESdev protocol
 description rather than a title.

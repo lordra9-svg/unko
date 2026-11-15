@@ -35,9 +35,11 @@ verified against the public reference suites:
 - `ppu_vbl_nmi` **12/12**, `ppu_sprites` **19/19**, blargg APU/DMC **13/13**
 - `cpu_exec_space` (PPU-I/O and APU variants), `cpu_dummy_reads` and all five
   `cpu_interrupts_v2` singles: pass
+- VS. System RGB PPU palettes (2C03/2C04/2C05), RGB emphasis, 2C05 register
+  swap and `$2002` security identifiers: implemented and unit-tested
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **666 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **671 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **137 pass / 11 fail / 115 visual-or-input-only** (PAL APU timing leaves 4 failures; the alternate MMC3 selector leaves only `read_joy3/count_errors`)
 - RustyNES test tree: **159 pass / 11 fail / 171 visual-or-input-only** (166 / 4 with PAL APU in PAL mode; 1 with the alternate MMC3 selector too)
 
@@ -87,8 +89,8 @@ harness; a true Internet run needs two networks. See
 | Metric | Value |
 |---|---:|
 | Workspace crates | 9 |
-| First-party Rust lines | ~81,050 |
-| Workspace tests | 666 pass, 0 failed |
+| First-party Rust lines | ~81,400 |
+| Workspace tests | 671 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 

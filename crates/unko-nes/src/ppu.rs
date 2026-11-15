@@ -256,6 +256,8 @@ pub struct Ppu {
     pub timing: Timing,
     /// Display palette preset (does not affect emulated values).
     palette_variant: PaletteVariant,
+    /// Hardware PPU model; RGB models select their own palette and quirks.
+    ppu_model: PpuModel,
     /// User table for [`PaletteVariant::Custom`] (64 RGB triplets, indexed by
     /// the 6-bit NES colour).
     custom_palette: Vec<[u8; 3]>,
@@ -416,6 +418,7 @@ impl Ppu {
             disable_cancel_dot: 3,
             timing,
             palette_variant: PaletteVariant::Canonical,
+            ppu_model: PpuModel::Ppu2C02,
             custom_palette: Vec::new(),
             frame: vec![0; 256 * 240 * 4],
             bg_lo: 0,
@@ -1001,7 +1004,11 @@ impl Ppu {
                 if self.scanline == self.pre_render_line() && self.dot == self.vblank_clear_dot {
                     sampled &= !(STATUS_SPRITE0 | STATUS_OVERFLOW);
                 }
-                let value = (sampled & 0xE0) | (self.io_bus & 0x1F);
+                let value = if let Some((identifier, mask)) = self.ppu_model.status_identifier() {
+                    (sampled & 0xE0) | (identifier & mask)
+                } else {
+                    (sampled & 0xE0) | (self.io_bus & 0x1F)
+                };
                 self.io_bus = value;
                 // A $2002 read does not refresh the low five decaying bits.
                 self.status &= !STATUS_VBLANK;
@@ -1078,6 +1085,15 @@ impl Ppu {
 
     /// Writes a PPU register in `$2000..=$2007`.
     pub fn write_register(&mut self, index: u16, value: u8) {
+        let index = if self.ppu_model.swaps_registers() {
+            match index & 7 {
+                0 => (index & !7) | 1,
+                1 => index & !7,
+                _ => index,
+            }
+        } else {
+            index
+        };
         if self.um6578 {
             match index {
                 0x2008 => {
@@ -1342,6 +1358,18 @@ impl Ppu {
         self.refresh_palette_rgb();
     }
 
+    /// Selects the PPU hardware model (2C02 or an RGB VS./PlayChoice part).
+    pub fn set_ppu_model(&mut self, model: PpuModel) {
+        self.ppu_model = model;
+        self.refresh_palette_rgb();
+    }
+
+    /// Current hardware PPU model.
+    #[must_use]
+    pub const fn ppu_model(&self) -> PpuModel {
+        self.ppu_model
+    }
+
     /// Soft-reset the `$2000`/`$2001`-derived register state, as the
     /// MiSTer "NES" PPU reset behaviour does. VRAM, OAM and palette RAM are
     /// left intact.
@@ -1534,11 +1562,19 @@ impl Ppu {
         let emph = (self.mask >> 5) & 0x07;
         for index in 0..32 {
             let colour = self.palette[index] & 0x3F;
+            let hardware = crate::vs::colour(self.ppu_model, colour);
             let base = if matches!(self.palette_variant, PaletteVariant::Custom) {
                 self.custom_palette
                     .get(usize::from(colour))
                     .copied()
-                    .unwrap_or(NES_PALETTE[usize::from(colour)])
+                    .unwrap_or_else(|| hardware.unwrap_or(NES_PALETTE[usize::from(colour)]))
+            } else if hardware.is_some() {
+                // RGB PPUs have fixed hardware tables; display presets still
+                // transform them, but generated composite tables do not apply.
+                palette_colour(
+                    self.palette_variant,
+                    hardware.unwrap_or(NES_PALETTE[usize::from(colour)]),
+                )
             } else if let Some(table) = crate::palette::generated_table(self.palette_variant) {
                 table[usize::from(colour)]
             } else {
@@ -1546,6 +1582,19 @@ impl Ppu {
             };
             self.palette_rgb[index] = if emph == 0 {
                 base
+            } else if hardware.is_some() {
+                // RGB PPUs max the selected channel instead of darkening.
+                let mut colour = base;
+                if emph & 0x01 != 0 {
+                    colour[0] = 255;
+                }
+                if emph & 0x02 != 0 {
+                    colour[1] = 255;
+                }
+                if emph & 0x04 != 0 {
+                    colour[2] = 255;
+                }
+                colour
             } else {
                 let delta = emph_delta(colour, emph);
                 [
@@ -2557,6 +2606,55 @@ impl Ppu {
     }
 }
 
+/// PPU chip model. VS. System/PlayChoice RGB PPUs use their own palettes and,
+/// for the 2C05, swapped control/mask registers and a status identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum PpuModel {
+    /// Standard composite NTSC PPU.
+    #[default]
+    Ppu2C02,
+    /// RGB PPU used by early VS. games and the PlayChoice-10.
+    Ppu2C03,
+    /// First scrambled VS. palette.
+    Ppu2C04A,
+    /// Second scrambled VS. palette.
+    Ppu2C04B,
+    /// Third scrambled VS. palette.
+    Ppu2C04C,
+    /// Fourth scrambled VS. palette.
+    Ppu2C04D,
+    /// 2C05 with identifier $1B.
+    Ppu2C05A,
+    /// 2C05 with identifier $3D.
+    Ppu2C05B,
+    /// 2C05 with identifier $1C.
+    Ppu2C05C,
+    /// 2C05 with identifier $1B (later board).
+    Ppu2C05D,
+    /// 2C05-99: normal open bus and no register swap.
+    Ppu2C05E,
+}
+
+impl PpuModel {
+    /// Maps the NES 2.0 VS. PPU-model nibble to a chip.
+    #[must_use]
+    pub const fn from_vs_nibble(nibble: u8) -> Self {
+        match nibble & 0x0F {
+            1 | 6 | 7 => Self::Ppu2C03,
+            2 => Self::Ppu2C04A,
+            3 => Self::Ppu2C04B,
+            4 => Self::Ppu2C04C,
+            5 => Self::Ppu2C04D,
+            8 => Self::Ppu2C05A,
+            9 => Self::Ppu2C05B,
+            10 => Self::Ppu2C05C,
+            11 => Self::Ppu2C05D,
+            12 => Self::Ppu2C05E,
+            _ => Self::Ppu2C03,
+        }
+    }
+}
+
 /// Display palette variant, serialized with the machine state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum PaletteVariant {
@@ -3090,6 +3188,34 @@ mod tests {
         assert_eq!(steps_to_wrap(1, true), 2);
         // No skip when rendering is disabled, whatever the frame parity.
         assert_eq!(steps_to_wrap(1, false), 3);
+    }
+
+    #[test]
+    fn rgb_ppu_palettes_and_2c05_swap_and_identifier() {
+        let mut ppu = ppu();
+        ppu.set_ppu_model(PpuModel::Ppu2C03);
+        assert_eq!(ppu.debug_palette_rgb()[0], [109, 109, 109]);
+        ppu.set_ppu_model(PpuModel::Ppu2C04A);
+        assert_eq!(ppu.debug_palette_rgb()[0], [255, 182, 182]);
+        // RGB emphasis maxes the selected channel instead of darkening.
+        ppu.mask = 0x20;
+        ppu.refresh_palette_rgb();
+        assert_eq!(ppu.debug_palette_rgb()[0], [255, 182, 182]);
+        ppu.mask = 0x40;
+        ppu.refresh_palette_rgb();
+        assert_eq!(ppu.debug_palette_rgb()[0], [255, 255, 182]);
+        ppu.mask = 0;
+        ppu.set_ppu_model(PpuModel::Ppu2C05B);
+        ppu.end_warmup();
+        ppu.scanline = ppu.pre_render_line();
+        // 2C05 swaps $2000 and $2001.
+        ppu.write_register(0, 0x1E);
+        assert_eq!(ppu.mask, 0x1E);
+        assert_eq!(ppu.ctrl, 0);
+        ppu.write_register(1, 0x80);
+        assert_eq!(ppu.ctrl, 0x80);
+        ppu.status = 0;
+        assert_eq!(ppu.read_register(2) & 0x3F, 0x3D);
     }
 
     #[test]
