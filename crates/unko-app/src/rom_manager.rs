@@ -1,5 +1,6 @@
 //! ROM Manager window: DAT audit, 1G1R selection and safe rebuilding.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
@@ -7,9 +8,9 @@ use std::thread;
 
 use egui::{Color32, RichText};
 use unko_rom_manager::{
-    parse_dat_path, rebuild, scan_path, summary_line, write_csv, write_fixdat, Catalog,
-    MatchReport, MatchStatus, OneGameOneRom, OutputFormat, RebuildOptions, ScanOptions,
-    ScanProgress, VerifyReport,
+    clear_cache_file, parse_dat_path, rebuild, scan_path, summary_line, write_csv, write_fixdat,
+    Catalog, MatchReport, MatchStatus, OneGameOneRom, OutputFormat, RebuildOptions, ScanCache,
+    ScanOptions, ScanProgress, VerifyReport,
 };
 
 use crate::rom_manager_view::VerifyView;
@@ -27,6 +28,8 @@ pub struct RomManager {
     source: PathBuf,
     output: PathBuf,
     cache: PathBuf,
+    use_cache: bool,
+    cache_entries: usize,
     region_order: String,
     language_order: String,
     one_g1r: bool,
@@ -53,6 +56,8 @@ impl RomManager {
     /// Creates an idle manager.
     #[must_use]
     pub fn new(save_dir: PathBuf, source: PathBuf) -> Self {
+        let cache = save_dir.join("rom-manager").join("scan-cache.tsv");
+        let cache_entries = ScanCache::load(&cache).len();
         Self {
             open: false,
             focus_pending: false,
@@ -61,7 +66,9 @@ impl RomManager {
             dat_input: String::new(),
             source,
             output: save_dir.join("rom-manager").join("rebuilt"),
-            cache: save_dir.join("rom-manager").join("scan-cache.tsv"),
+            cache,
+            use_cache: true,
+            cache_entries,
             region_order: "USA,Europe,World,Japan".into(),
             language_order: "En".into(),
             one_g1r: true,
@@ -121,6 +128,7 @@ impl RomManager {
                 self.verify = None;
                 self.busy = false;
                 self.rx = None;
+                self.cache_entries = ScanCache::load(&self.cache).len();
                 if let Some(report) = self.reports.first() {
                     self.status = summary_line(report);
                     if self.verify_after_scan {
@@ -289,6 +297,29 @@ impl RomManager {
                     .hint_text("En"),
             );
         });
+
+        ui.add_space(7.0);
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.use_cache, "Use scan cache");
+            let bytes = fs::metadata(&self.cache).map_or(0, |meta| meta.len());
+            ui.label(
+                RichText::new(format!(
+                    "{} entries · {}",
+                    self.cache_entries,
+                    cache_bytes_label(bytes)
+                ))
+                .small()
+                .weak(),
+            );
+            if ui.button("Clear cache").clicked() {
+                self.clear_scan_cache();
+            }
+        });
+        ui.label(
+            RichText::new(self.cache.display().to_string())
+                .small()
+                .weak(),
+        );
 
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -487,6 +518,26 @@ impl RomManager {
         }
     }
 
+    /// Scan options honouring the cache toggle.
+    #[must_use]
+    pub fn scan_options(&self) -> ScanOptions {
+        ScanOptions {
+            cache: self.use_cache.then(|| self.cache.clone()),
+            ..ScanOptions::default()
+        }
+    }
+
+    /// Deletes the persistent scan cache and resets the displayed count.
+    pub fn clear_scan_cache(&mut self) {
+        match clear_cache_file(&self.cache) {
+            Ok(()) => {
+                self.cache_entries = 0;
+                self.status = "Scan cache cleared".into();
+            }
+            Err(err) => self.status = format!("cache clear: {err}"),
+        }
+    }
+
     /// Starts a scan when DAT files and a source folder are present.
     pub fn start_scan(&mut self) {
         if self.busy {
@@ -494,10 +545,7 @@ impl RomManager {
         }
         let dats = self.dat_paths.clone();
         let source = self.source.clone();
-        let options = ScanOptions {
-            cache: Some(self.cache.clone()),
-            ..ScanOptions::default()
-        };
+        let options = self.scan_options();
         let progress = Arc::clone(&self.progress);
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
@@ -746,6 +794,17 @@ fn verify_section(ui: &mut egui::Ui, title: &str, entries: &[String]) {
     });
 }
 
+fn cache_bytes_label(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MiB", bytes as f64 / (KIB * KIB))
+    } else if bytes >= 1024 {
+        format!("{:.0} KiB", bytes as f64 / KIB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 fn split_list(value: &str) -> Vec<String> {
     value
         .split(',')
@@ -819,6 +878,39 @@ mod tests {
             "status was {}",
             manager.status
         );
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use unko_rom_manager::hash_bytes;
+
+    #[test]
+    fn cache_toggle_count_and_clear_are_wired() {
+        let dir = std::env::temp_dir().join(format!("unko-rm-cache-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let save_dir = dir.join("saves");
+        let cache = save_dir.join("rom-manager").join("scan-cache.tsv");
+        let hashes = hash_bytes(b"payload");
+        let mut seeded = ScanCache::load(&cache);
+        seeded.store("a".into(), hashes.size, None, hashes, None);
+        seeded.save().expect("seed cache");
+
+        let mut manager = RomManager::new(save_dir, dir.join("roms"));
+        assert_eq!(manager.cache_entries, 1);
+        assert!(manager.scan_options().cache.is_some());
+        manager.use_cache = false;
+        assert!(
+            manager.scan_options().cache.is_none(),
+            "disabling the cache must leave scan options without a cache"
+        );
+
+        manager.clear_scan_cache();
+        assert_eq!(manager.cache_entries, 0);
+        assert!(!cache.exists(), "clear must remove the cache file");
+        assert!(manager.status.contains("cleared"), "{}", manager.status);
         let _ = fs::remove_dir_all(dir);
     }
 }

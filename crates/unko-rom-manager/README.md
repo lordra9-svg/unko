@@ -23,8 +23,10 @@ Rust project or used through the `unko-app` ROM Manager window.
   after the destination copy is written successfully; archive members are
   never removed from their container.
 - Deterministic ZIP output (`--zip`): one archive per game, fixed timestamps.
-- Persistent hash cache (`--cache FILE`): unchanged files and ZIP members are
-  reused by size and modification time instead of being read and hashed again.
+- Persistent hash cache (`--cache FILE`; the frontend shows its entry count,
+  size and path, can disable it per scan and can clear it): unchanged files
+  and ZIP members are reused by size and modification time instead of being
+  read and hashed again.
 - DAT download/update over HTTP (`--dat-url URL`): the body is parsed as a
   Logiqx DAT before it atomically replaces the destination.
 - TorrentZip-style output (`--torrentzip`): sorted entries, the 1996-12-24

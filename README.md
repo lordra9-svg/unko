@@ -35,7 +35,7 @@ verified against the public reference suites:
 - `ppu_vbl_nmi` **12/12**, `ppu_sprites` **19/19**, blargg APU/DMC **13/13**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **625 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **627 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **136 pass / 12 fail / 115 visual-or-input-only** (5 PAL APU failures pass when PAL timing is selected)
 - RustyNES test tree: **157 pass / 13 fail / 171 visual-or-input-only** (164 / 6 with PAL APU in PAL mode)
 
@@ -86,7 +86,7 @@ harness; a true Internet run needs two networks. See
 |---|---:|
 | Workspace crates | 9 |
 | First-party Rust lines | ~78,900 |
-| Workspace tests | 625 pass, 0 failed |
+| Workspace tests | 627 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 
@@ -236,8 +236,10 @@ missing/unknown/duplicate detail and exits nonzero unless the set is complete.
 The same report is available in the window behind the **Verify** button (or
 `--rom-verify` after the initial scan), with the CLEAN/NOT CLEAN status,
 matched source/hash/headerless flags and missing/unknown/duplicate sections.
-A rebuild that finishes without errors re-audits its output folder and opens
-the panel automatically:
+The scan cache is visible and controllable in the window: entry count, file
+size and path, a **Use scan cache** toggle, and **Clear cache** to force a
+full re-hash. A rebuild that finishes without errors re-audits its output
+folder and opens the panel automatically:
 
 ```sh
 cargo run -p unko-rom-manager -- verify --dat DAT --input rebuilt

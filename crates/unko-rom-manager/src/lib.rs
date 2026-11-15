@@ -38,7 +38,7 @@ pub mod verify;
 use std::fmt;
 use std::path::Path;
 
-pub use cache::ScanCache;
+pub use cache::{clear_cache_file, ScanCache};
 pub use catalog::{Catalog, GameMatch, Match, MatchReport, MatchStatus, RomRef, Summary};
 pub use dat::{parse_dat_path, parse_dat_str, Dat, DatRom, Game};
 pub use fetch::fetch_dat;

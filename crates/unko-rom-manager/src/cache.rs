@@ -56,6 +56,33 @@ impl ScanCache {
         cache
     }
 
+    /// Number of stored entries.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether the cache holds no entries.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Cache file path.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Empties the in-memory cache; the next [`Self::save`] rewrites the file
+    /// with only its header.
+    pub fn clear(&mut self) {
+        if !self.entries.is_empty() {
+            self.entries.clear();
+            self.dirty = true;
+        }
+    }
+
     /// Number of entries served from the cache.
     #[must_use]
     pub const fn hits(&self) -> usize {
@@ -168,6 +195,19 @@ fn format_line(key: &str, entry: &Entry) -> String {
     fields.join("\t")
 }
 
+/// Deletes a cache file, treating an absent file as already cleared.
+///
+/// # Errors
+///
+/// Returns the filesystem error when an existing file cannot be removed.
+pub fn clear_cache_file(path: &Path) -> std::io::Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
 fn parse_line(line: &str) -> Option<(String, Entry)> {
     let fields: Vec<&str> = line.split('\t').collect();
     if fields.len() != 10 {
@@ -269,5 +309,35 @@ mod tests {
         assert!(loaded.lookup("a\tb%c", hashes.size, Some(8)).is_none());
         assert_eq!(loaded.misses(), 1);
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn len_clear_and_clear_file_manage_the_cache() {
+        let path = std::env::temp_dir().join(format!(
+            "unko-cache-manage-{}-{}.tsv",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |time| time.as_nanos())
+        ));
+        let hashes = hash_bytes(b"payload");
+        let mut cache = ScanCache::load(&path);
+        assert!(cache.is_empty());
+        cache.store("a".into(), hashes.size, None, hashes, None);
+        cache.store("b".into(), hashes.size, None, hashes, Some(hashes));
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.path(), path.as_path());
+        cache.save().expect("save");
+        assert_eq!(ScanCache::load(&path).len(), 2);
+
+        cache.clear();
+        assert!(cache.is_empty());
+        cache.save().expect("save empty");
+        assert!(path.exists(), "clear rewrites the file");
+        assert!(ScanCache::load(&path).is_empty());
+
+        clear_cache_file(&path).expect("remove");
+        assert!(!path.exists());
+        clear_cache_file(&path).expect("absent file is already clear");
     }
 }

@@ -85,7 +85,8 @@ that matters for a playable library:
   fixed timestamp, so rebuilds are byte-identical. Loose files remain the
   default.
 - Persistent hash cache keyed by path, size and modification time, so repeated
-  audits only hash changed files and ZIP members.
+  audits only hash changed files and ZIP members; the window shows its entry
+  count, size and path, can disable it for a scan, and can clear it.
 - DAT download/update over HTTP, validated as a DAT before replacing the local
   catalog.
 - TorrentZip-style output (sorted entries, fixed timestamp); deterministic but
