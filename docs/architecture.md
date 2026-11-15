@@ -94,15 +94,17 @@ dependency. The desktop shell owns SDL3 input, cpal output and all files.
 ## ROM manager core
 
 `unko-netplay` is a host-side foundation for rollback netplay. It depends only
-on `unko-core` and provides framed four-port input messages, a `Transport`
-trait (in-process channel pair for tests and a non-blocking `UdpTransport`), a
-bounded serialized-state `RollbackBuffer`, and a `RollbackSession` that
-restores and resimulates when a late remote input arrives. `SessionConfig`
-selects the prediction mode (last input or neutral) and a fixed input delay
-applied identically to both peers; the session reports rollback count,
-predicted frames and the deepest rollback. The app drives it from
-`Player::step` and exposes a host/join UDP window. NAT traversal and more than
-two peers remain future work.
+on `unko-core` and provides framed per-player input messages, a `Transport` trait
+(in-process channel pair, a connected `UdpTransport`, and a `UdpMesh` /
+`MeshTransport` for 2-4 player meshes), a bounded serialized-state
+`RollbackBuffer`, and a `RollbackSession` that restores and resimulates when a
+late remote input arrives. Each instance owns one controller slot; the session
+keeps a per-peer input history and merges the four-port frame every tick.
+`SessionConfig` selects the player count, local slot, prediction mode (last
+input or neutral) and a fixed input delay applied identically to every player;
+the session reports rollback count, predicted frames and the deepest rollback.
+The app drives it from `Player::step` and exposes a host/join window with
+player/slot selection. NAT traversal remains future work.
 
 `unko-rom-manager` is a separate, non-emulator feature core: DAT auditing,
 1G1R selection, fixdat/CSV reports and safe rebuilding. It has no dependency

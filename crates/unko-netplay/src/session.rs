@@ -1,12 +1,14 @@
-//! Minimal rollback session loop with input-delay and prediction options.
+//! Minimal rollback session loop with per-peer inputs, input delay and
+//! prediction.
 //!
-//! Player 1's input is local; player 2's input is received from the peer.
-//! Ports 3/4 are cleared. Missing remote input is predicted with the last
-//! known value (or neutral input); a late input restores an older saved state,
-//! truncates the post-rollback states and resimulates up to the current frame.
+//! One instance owns one controller port; the other ports are received from
+//! peers and merged into the four-port frame the core simulates. Missing
+//! remote input is predicted per port with the last known value (or neutral
+//! input); a late input restores an older saved state, truncates the
+//! post-rollback states and resimulates up to the current frame.
 //!
-//! An optional fixed input delay shifts both the local and the remote input by
-//! the same number of frames. Both peers apply the identical mapping, so the
+//! An optional fixed input delay shifts both local and remote input by the
+//! same number of frames. All peers apply the identical mapping, so the
 //! simulations stay deterministic while the remote input for a simulated frame
 //! arrives earlier relative to simulation time (fewer rollbacks).
 
@@ -19,7 +21,7 @@ use crate::rollback::{RollbackBuffer, StoredFrame};
 /// How a missing remote input is predicted.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum PredictionMode {
-    /// Repeat the most recent remote input.
+    /// Repeat the most recent input from that port.
     #[default]
     LastInput,
     /// Use released inputs (all zero) until the real value arrives.
@@ -42,10 +44,14 @@ impl PredictionMode {
 pub struct SessionConfig {
     /// Rollback states retained.
     pub buffer_frames: usize,
-    /// Frames of input delay applied to both peers (0..=16).
+    /// Frames of input delay applied to every player (0..=16).
     pub input_delay: u32,
     /// Prediction used while a remote input is missing.
     pub prediction: PredictionMode,
+    /// Players in the session (2..=4).
+    pub players: u8,
+    /// Zero-based port owned by this instance.
+    pub local_player: u8,
 }
 
 impl Default for SessionConfig {
@@ -54,6 +60,23 @@ impl Default for SessionConfig {
             buffer_frames: 8,
             input_delay: 0,
             prediction: PredictionMode::LastInput,
+            players: 2,
+            local_player: 0,
+        }
+    }
+}
+
+impl SessionConfig {
+    /// Clamps the player count and local slot into a valid session.
+    #[must_use]
+    pub fn normalized(self) -> Self {
+        let players = self.players.clamp(2, 4);
+        Self {
+            buffer_frames: self.buffer_frames.max(1),
+            input_delay: self.input_delay.min(16),
+            prediction: self.prediction,
+            players,
+            local_player: self.local_player.min(players - 1),
         }
     }
 }
@@ -65,7 +88,7 @@ pub struct SessionStats {
     pub frame: u32,
     /// Frames that required resimulation.
     pub rollbacks: u32,
-    /// Frames simulated with a predicted remote input.
+    /// Port-frames simulated with a predicted input.
     pub predicted: u32,
     /// Deepest rollback (in frames) seen so far.
     pub max_rollback_depth: u32,
@@ -76,14 +99,15 @@ const NEUTRAL: [u16; 4] = [0; 4];
 /// A rollback session around one core.
 pub struct RollbackSession {
     buffer: RollbackBuffer,
-    known_remote: BTreeMap<u32, [u16; 4]>,
+    /// Per-peer input history: port -> (input frame -> value).
+    peers: BTreeMap<u8, BTreeMap<u32, u16>>,
     local_inputs: BTreeMap<u32, [u16; 4]>,
     config: SessionConfig,
     stats: SessionStats,
 }
 
 impl RollbackSession {
-    /// Creates a session holding `buffer_frames` rollback states with the
+    /// Creates a two-player session (this instance owns port 1) with the
     /// default prediction and no input delay.
     #[must_use]
     pub fn new(buffer_frames: usize) -> Self {
@@ -96,14 +120,10 @@ impl RollbackSession {
     /// Creates a session with explicit tuning.
     #[must_use]
     pub fn with_config(config: SessionConfig) -> Self {
-        let config = SessionConfig {
-            buffer_frames: config.buffer_frames.max(1),
-            input_delay: config.input_delay.min(16),
-            prediction: config.prediction,
-        };
+        let config = config.normalized();
         Self {
             buffer: RollbackBuffer::new(config.buffer_frames),
-            known_remote: BTreeMap::new(),
+            peers: BTreeMap::new(),
             local_inputs: BTreeMap::new(),
             config,
             stats: SessionStats::default(),
@@ -122,9 +142,6 @@ impl RollbackSession {
     }
 
     /// Changes the input delay (live, clamped to 0..=16).
-    ///
-    /// Changing the delay mid-session is allowed: the next frame uses the new
-    /// mapping and any missing input is predicted.
     pub fn set_input_delay(&mut self, delay: u32) {
         self.config.input_delay = delay.min(16);
     }
@@ -141,7 +158,10 @@ impl RollbackSession {
         self.stats
     }
 
-    /// Advances one frame with the local player's input.
+    /// Advances one frame with the local player's four-port input view.
+    ///
+    /// Only `local_player`'s port is taken from `local`; the rest are merged
+    /// from peers or predicted.
     ///
     /// # Errors
     ///
@@ -149,7 +169,7 @@ impl RollbackSession {
     pub fn step(&mut self, core: &mut dyn Core, local: [u16; 4]) -> Result<u32, CoreError> {
         let frame = self.stats.frame;
         self.local_inputs.insert(frame, local);
-        let (local, remote) = self.effective_inputs(frame, true);
+        let (local, merged) = self.effective_inputs(frame, true);
         let mut state = Vec::new();
         core.save_state(&mut state)?;
         self.buffer.push(StoredFrame {
@@ -157,14 +177,17 @@ impl RollbackSession {
             inputs: local,
             state,
         });
-        Self::apply(core, local, remote);
+        Self::apply(core, merged);
         core.run_frame()?;
         self.stats.frame = frame + 1;
         Ok(frame)
     }
 
-    /// Registers a remote input addressed to input frame `frame`. Returns
-    /// `true` when the frames were resimulated.
+    /// Registers one port's input from `player` for input frame `frame`.
+    /// Returns `true` when frames were resimulated.
+    ///
+    /// Inputs from this instance's own port and from slots outside
+    /// `config.players` are ignored.
     ///
     /// # Errors
     ///
@@ -172,13 +195,18 @@ impl RollbackSession {
     pub fn receive_remote(
         &mut self,
         core: &mut dyn Core,
+        player: u8,
         frame: u32,
-        inputs: [u16; 4],
+        input: u16,
     ) -> Result<bool, CoreError> {
-        if self.known_remote.get(&frame) == Some(&inputs) {
+        if player >= self.config.players || player == self.config.local_player {
             return Ok(false);
         }
-        self.known_remote.insert(frame, inputs);
+        let known = self.peers.entry(player).or_default();
+        if known.get(&frame) == Some(&input) {
+            return Ok(false);
+        }
+        known.insert(frame, input);
         let Some(target) = frame.checked_add(self.config.input_delay) else {
             return Ok(false);
         };
@@ -204,7 +232,7 @@ impl RollbackSession {
             .max_rollback_depth
             .max(self.stats.frame.saturating_sub(target));
         for number in replay {
-            let (local, remote) = self.effective_inputs(number, false);
+            let (local, merged) = self.effective_inputs(number, false);
             let mut state = Vec::new();
             core.save_state(&mut state)?;
             self.buffer.push(StoredFrame {
@@ -212,16 +240,15 @@ impl RollbackSession {
                 inputs: local,
                 state,
             });
-            Self::apply(core, local, remote);
+            Self::apply(core, merged);
             core.run_frame()?;
         }
         Ok(true)
     }
 
-    /// Inputs for simulation frame `frame`, applying the input delay.
+    /// Builds the four-port frame for simulation frame `frame`.
     ///
-    /// Both peers map a simulated frame to input frame `frame - delay`, so a
-    /// missing remote input is predicted from the newest known earlier input.
+    /// Both peers map a simulated frame to input frame `frame - delay`.
     fn effective_inputs(&mut self, frame: u32, count_prediction: bool) -> ([u16; 4], [u16; 4]) {
         let Some(input_frame) = frame.checked_sub(self.config.input_delay) else {
             return (NEUTRAL, NEUTRAL);
@@ -231,30 +258,35 @@ impl RollbackSession {
             .get(&input_frame)
             .copied()
             .unwrap_or(NEUTRAL);
-        let remote = match self.known_remote.get(&input_frame) {
-            Some(inputs) => *inputs,
-            None => {
-                if count_prediction {
-                    self.stats.predicted = self.stats.predicted.saturating_add(1);
-                }
-                match self.config.prediction {
-                    PredictionMode::LastInput => self
-                        .known_remote
-                        .range(..input_frame)
-                        .next_back()
-                        .map_or(NEUTRAL, |(_, inputs)| *inputs),
-                    PredictionMode::Neutral => NEUTRAL,
+        let mut merged = [0u16; 4];
+        for port in 0..usize::from(self.config.players) {
+            let player = port as u8;
+            if player == self.config.local_player {
+                merged[port] = local[port];
+                continue;
+            }
+            let known = self.peers.get(&player);
+            match known.and_then(|inputs| inputs.get(&input_frame)) {
+                Some(input) => merged[port] = *input,
+                None => {
+                    if count_prediction {
+                        self.stats.predicted = self.stats.predicted.saturating_add(1);
+                    }
+                    merged[port] = match self.config.prediction {
+                        PredictionMode::LastInput => known
+                            .and_then(|inputs| inputs.range(..input_frame).next_back())
+                            .map_or(0, |(_, input)| *input),
+                        PredictionMode::Neutral => 0,
+                    };
                 }
             }
-        };
-        (local, remote)
+        }
+        (local, merged)
     }
 
-    fn apply(core: &mut dyn Core, local: [u16; 4], remote: [u16; 4]) {
-        core.set_input(0, InputState::from_bits(local[0]));
-        core.set_input(1, InputState::from_bits(remote[0]));
-        for port in 2..4 {
-            core.set_input(port, InputState::empty());
+    fn apply(core: &mut dyn Core, merged: [u16; 4]) {
+        for (port, input) in merged.iter().enumerate() {
+            core.set_input(port, InputState::from_bits(*input));
         }
     }
 }
@@ -358,13 +390,19 @@ mod tests {
         }
     }
 
-    fn expected_state(locals: &[[u16; 4]], remotes: &[[u16; 4]]) -> Vec<u8> {
+    /// Reference state for a list of four-port frames.
+    fn expected(frames: &[[u16; 4]]) -> Vec<u8> {
         let mut core = FakeCore::default();
-        for (local, remote) in locals.iter().zip(remotes) {
-            core.inputs = [local[0], remote[0], 0, 0];
+        for frame in frames {
+            core.inputs = *frame;
             core.run_frame().unwrap();
         }
         core.state()
+    }
+
+    /// Two-player frame from a local port-0 value and a remote port-1 value.
+    fn two(player0: u16, player1: u16) -> [u16; 4] {
+        [player0, player1, 0, 0]
     }
 
     #[test]
@@ -377,12 +415,13 @@ mod tests {
         }
         assert_eq!(session.frame(), 4);
         assert!(session
-            .receive_remote(&mut core, 2, [20, 0, 0, 0])
+            .receive_remote(&mut core, 1, 2, 20)
             .expect("rollback"));
 
-        let state = core.state();
-        let expected = expected_state(&locals, &[[0; 4], [0; 4], [20, 0, 0, 0], [20, 0, 0, 0]]);
-        assert_eq!(state, expected);
+        assert_eq!(
+            core.state(),
+            expected(&[two(10, 0), two(11, 0), two(12, 20), two(13, 20),])
+        );
         assert_eq!(session.frame(), 4);
         assert_eq!(session.stats().rollbacks, 1);
         assert_eq!(session.stats().max_rollback_depth, 2);
@@ -397,12 +436,27 @@ mod tests {
                 .step(&mut core, [frame as u16, 0, 0, 0])
                 .expect("step");
         }
-        // Frame 0 has fallen out of the two-frame buffer.
-        assert!(!session.receive_remote(&mut core, 0, [1; 4]).expect("late"));
-        assert!(!session
-            .receive_remote(&mut core, 9, [1; 4])
-            .expect("future"));
+        assert!(!session.receive_remote(&mut core, 1, 0, 1).expect("late"));
+        assert!(!session.receive_remote(&mut core, 1, 9, 1).expect("future"));
         assert_eq!(session.frame(), 6);
+    }
+
+    #[test]
+    fn local_and_out_of_range_inputs_are_ignored() {
+        let mut core = FakeCore::default();
+        let mut session = RollbackSession::with_config(SessionConfig {
+            players: 3,
+            local_player: 1,
+            ..SessionConfig::default()
+        });
+        session.step(&mut core, [0, 5, 0, 0]).expect("step");
+        assert!(!session
+            .receive_remote(&mut core, 1, 0, 9)
+            .expect("own port"));
+        assert!(!session
+            .receive_remote(&mut core, 3, 0, 9)
+            .expect("out of range"));
+        assert_eq!(session.stats().rollbacks, 0);
     }
 
     #[test]
@@ -412,17 +466,12 @@ mod tests {
             buffer_frames: 8,
             input_delay: 1,
             prediction: PredictionMode::Neutral,
+            ..SessionConfig::default()
         });
         session.step(&mut core, [10, 0, 0, 0]).expect("step");
         session.step(&mut core, [11, 0, 0, 0]).expect("step");
         session.step(&mut core, [12, 0, 0, 0]).expect("step");
-        assert_eq!(
-            core.state(),
-            expected_state(
-                &[[0; 4], [10, 0, 0, 0], [11, 0, 0, 0]],
-                &[[0; 4], [0; 4], [0; 4]]
-            )
-        );
+        assert_eq!(core.state(), expected(&[two(0, 0), two(10, 0), two(11, 0)]));
     }
 
     #[test]
@@ -432,6 +481,7 @@ mod tests {
             buffer_frames: 8,
             input_delay: 2,
             prediction: PredictionMode::Neutral,
+            ..SessionConfig::default()
         });
         let locals = [[1, 0, 0, 0], [2, 0, 0, 0], [3, 0, 0, 0], [4, 0, 0, 0]];
         for local in locals {
@@ -439,17 +489,14 @@ mod tests {
         }
         // Input frame 0 belongs to simulation frame 2.
         assert!(session
-            .receive_remote(&mut core, 0, [9, 0, 0, 0])
+            .receive_remote(&mut core, 1, 0, 9)
             .expect("rollback"));
         assert_eq!(session.stats().rollbacks, 1);
         assert_eq!(session.stats().max_rollback_depth, 2);
         assert_eq!(session.frame(), 4);
         assert_eq!(
             core.state(),
-            expected_state(
-                &[[0; 4], [0; 4], [1, 0, 0, 0], [2, 0, 0, 0]],
-                &[[0; 4], [0; 4], [9, 0, 0, 0], [0; 4]]
-            )
+            expected(&[two(0, 0), two(0, 0), two(1, 9), two(2, 0)])
         );
     }
 
@@ -458,15 +505,12 @@ mod tests {
         let mut core = FakeCore::default();
         let mut session = RollbackSession::with_config(SessionConfig {
             buffer_frames: 4,
-            input_delay: 0,
             prediction: PredictionMode::Neutral,
+            ..SessionConfig::default()
         });
         session.step(&mut core, [5, 0, 0, 0]).expect("step");
         session.step(&mut core, [6, 0, 0, 0]).expect("step");
-        assert_eq!(
-            core.state(),
-            expected_state(&[[5, 0, 0, 0], [6, 0, 0, 0]], &[[0; 4], [0; 4]])
-        );
+        assert_eq!(core.state(), expected(&[two(5, 0), two(6, 0)]));
         assert_eq!(session.stats().predicted, 2);
         assert_eq!(session.stats().rollbacks, 0);
     }
@@ -475,16 +519,11 @@ mod tests {
     fn last_input_prediction_repeats_the_previous_remote() {
         let mut core = FakeCore::default();
         let mut session = RollbackSession::new(4);
-        session
-            .receive_remote(&mut core, 0, [8, 0, 0, 0])
-            .expect("remote");
+        session.receive_remote(&mut core, 1, 0, 8).expect("remote");
         session.step(&mut core, [1, 0, 0, 0]).expect("step");
         session.step(&mut core, [2, 0, 0, 0]).expect("step");
-        // Frame 1 was predicted from frame 0's remote (8), not neutral.
-        assert_eq!(
-            core.state(),
-            expected_state(&[[1, 0, 0, 0], [2, 0, 0, 0]], &[[8, 0, 0, 0], [8, 0, 0, 0]])
-        );
+        // Frame 1 predicted port 1 from frame 0's remote (8).
+        assert_eq!(core.state(), expected(&[two(1, 8), two(2, 8)]));
         assert_eq!(session.stats().predicted, 1);
         assert_eq!(session.stats().rollbacks, 0);
     }
@@ -497,14 +536,14 @@ mod tests {
             let mut session = RollbackSession::with_config(SessionConfig {
                 buffer_frames: 8,
                 input_delay: delay,
-                prediction: PredictionMode::LastInput,
+                ..SessionConfig::default()
             });
             for (frame, local) in inputs.iter().enumerate() {
                 session.step(&mut core, *local).expect("step");
                 // One frame of one-way latency: the peer's input for frame i
                 // is only available after our own step i.
                 session
-                    .receive_remote(&mut core, frame as u32, *local)
+                    .receive_remote(&mut core, 1, frame as u32, local[0])
                     .expect("remote");
             }
             session.stats()
@@ -515,5 +554,77 @@ mod tests {
         assert!(immediate.rollbacks > 0, "immediate mode rolls back");
         assert_eq!(delayed.predicted, 0);
         assert!(immediate.predicted > 0);
+    }
+
+    #[test]
+    fn three_players_merge_into_one_frame() {
+        let mut core = FakeCore::default();
+        let mut session = RollbackSession::with_config(SessionConfig {
+            buffer_frames: 8,
+            players: 3,
+            local_player: 0,
+            ..SessionConfig::default()
+        });
+        session.receive_remote(&mut core, 1, 0, 20).expect("p2");
+        session.receive_remote(&mut core, 2, 0, 30).expect("p3");
+        session.step(&mut core, [10, 0, 0, 0]).expect("step");
+        assert_eq!(core.state(), expected(&[[10, 20, 30, 0]]));
+        assert_eq!(session.stats().predicted, 0);
+    }
+
+    #[test]
+    fn four_players_converge_after_a_late_input() {
+        let mut core = FakeCore::default();
+        let mut session = RollbackSession::with_config(SessionConfig {
+            buffer_frames: 8,
+            players: 4,
+            local_player: 0,
+            ..SessionConfig::default()
+        });
+        for frame in 0..4u32 {
+            for (player, value) in [(1u8, 20u16), (2, 30), (3, 40)] {
+                session
+                    .receive_remote(&mut core, player, frame, value + frame as u16)
+                    .expect("remote");
+            }
+            session
+                .step(&mut core, [10 + frame as u16, 0, 0, 0])
+                .expect("step");
+        }
+        // Player 4's input for frame 1 arrives late.
+        assert!(session
+            .receive_remote(&mut core, 3, 1, 99)
+            .expect("rollback"));
+        let mut frames = Vec::new();
+        for frame in 0..4u16 {
+            frames.push([
+                10 + frame,
+                20 + frame,
+                30 + frame,
+                if frame == 1 { 99 } else { 40 + frame },
+            ]);
+        }
+        assert_eq!(core.state(), expected(&frames));
+        assert_eq!(session.stats().rollbacks, 1);
+        assert_eq!(session.stats().max_rollback_depth, 3);
+    }
+
+    #[test]
+    fn prediction_is_per_peer() {
+        let mut core = FakeCore::default();
+        let mut session = RollbackSession::with_config(SessionConfig {
+            buffer_frames: 4,
+            players: 3,
+            local_player: 0,
+            prediction: PredictionMode::LastInput,
+            ..SessionConfig::default()
+        });
+        session.receive_remote(&mut core, 1, 0, 7).expect("p2");
+        session.receive_remote(&mut core, 2, 0, 9).expect("p3");
+        session.step(&mut core, [1, 0, 0, 0]).expect("f0");
+        session.step(&mut core, [2, 0, 0, 0]).expect("f1");
+        // Frame 1 predicts each missing port from that same port's history.
+        assert_eq!(core.state(), expected(&[[1, 7, 9, 0], [2, 7, 9, 0]]));
+        assert_eq!(session.stats().predicted, 2);
     }
 }

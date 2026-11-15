@@ -28,7 +28,7 @@ use crate::player::{self, Player};
 use crate::recording::RecordModes;
 use crate::rom_manager::RomManager;
 use crate::settings::{Aspect, HotkeyAction, PortInput, Settings, ShaderPreset, Theme};
-use unko_netplay::{PredictionMode, SessionConfig, UdpTransport};
+use unko_netplay::{PredictionMode, SessionConfig, UdpMesh};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -208,6 +208,8 @@ pub struct App {
     netplay_status: String,
     netplay_delay: u32,
     netplay_prediction: PredictionMode,
+    netplay_players: u8,
+    netplay_slot: u8,
     controller_last: unko_core::InputState,
     controller_repeat: Instant,
     controller_menu_open: bool,
@@ -338,6 +340,8 @@ impl App {
             netplay_status: String::new(),
             netplay_delay: 0,
             netplay_prediction: PredictionMode::LastInput,
+            netplay_players: 2,
+            netplay_slot: 1,
             controller_last: unko_core::InputState::empty(),
             controller_repeat: Instant::now(),
             controller_menu_open: false,
@@ -2639,38 +2643,58 @@ impl App {
             self.netplay_status = "Load a game before starting netplay.".into();
             return;
         };
+        let players = self.netplay_players.clamp(2, 4);
+        let slot = self.netplay_slot.clamp(1, players) - 1;
         let Ok(port) = self.netplay_local_port.trim().parse::<u16>() else {
             self.netplay_status = "Local port must be a number.".into();
             return;
         };
-        let peer = self.netplay_peer.trim().to_string();
-        if peer.is_empty() {
-            self.netplay_status = "Peer address is empty.".into();
+        let peers: Vec<String> = self
+            .netplay_peer
+            .split(',')
+            .map(str::trim)
+            .filter(|peer| !peer.is_empty())
+            .map(str::to_string)
+            .collect();
+        if peers.len() != usize::from(players - 1) {
+            self.netplay_status = format!(
+                "{players} players need exactly {} peer address(es), found {}.",
+                players - 1,
+                peers.len()
+            );
             return;
         }
-        match UdpTransport::bind(&format!("0.0.0.0:{port}")) {
-            Ok(mut transport) => match transport.connect(&peer) {
-                Ok(()) => {
-                    player.start_netplay_with(
-                        Box::new(transport),
-                        SessionConfig {
-                            buffer_frames: 8,
-                            input_delay: self.netplay_delay,
-                            prediction: self.netplay_prediction,
-                        },
-                    );
-                    self.netplay_status = format!(
-                        "{} on UDP {port}, peer {peer}",
-                        if self.netplay_host {
-                            "Hosting"
-                        } else {
-                            "Joined"
-                        }
-                    );
-                }
-                Err(err) => self.netplay_status = format!("Connect failed: {err}"),
-            },
-            Err(err) => self.netplay_status = format!("Bind failed: {err}"),
+        let transport = UdpMesh::bind(&format!("0.0.0.0:{port}")).and_then(|mut mesh| {
+            for peer in &peers {
+                mesh.add_peer(peer)?;
+            }
+            Ok(mesh)
+        });
+        match transport {
+            Ok(mesh) => {
+                player.start_netplay_with(
+                    Box::new(mesh),
+                    SessionConfig {
+                        buffer_frames: 8,
+                        input_delay: self.netplay_delay,
+                        prediction: self.netplay_prediction,
+                        players,
+                        local_player: slot,
+                    },
+                );
+                self.netplay_status = format!(
+                    "{} on UDP {port}, {} player(s), slot {}, peer(s) {}",
+                    if self.netplay_host {
+                        "Hosting"
+                    } else {
+                        "Joined"
+                    },
+                    players,
+                    slot + 1,
+                    peers.join(", ")
+                );
+            }
+            Err(err) => self.netplay_status = format!("Netplay setup failed: {err}"),
         }
     }
 
@@ -2703,23 +2727,53 @@ impl App {
                     self.netplay_apply_defaults();
                 }
                 ui.horizontal(|ui| {
+                    ui.label("Players");
+                    let players_before = self.netplay_players;
+                    egui::ComboBox::from_id_salt("netplay-players")
+                        .selected_text(self.netplay_players.to_string())
+                        .show_ui(ui, |ui| {
+                            ui.add_enabled_ui(!active, |ui| {
+                                for count in 2..=4u8 {
+                                    ui.selectable_value(
+                                        &mut self.netplay_players,
+                                        count,
+                                        count.to_string(),
+                                    );
+                                }
+                            });
+                        });
+                    if self.netplay_players != players_before {
+                        self.netplay_slot = self.netplay_slot.min(self.netplay_players);
+                    }
+                    ui.label("My slot");
+                    egui::ComboBox::from_id_salt("netplay-slot")
+                        .selected_text(self.netplay_slot.to_string())
+                        .show_ui(ui, |ui| {
+                            ui.add_enabled_ui(!active, |ui| {
+                                for slot in 1..=self.netplay_players {
+                                    ui.selectable_value(&mut self.netplay_slot, slot, slot.to_string());
+                                }
+                            });
+                        });
                     ui.label("Local port");
                     ui.add_enabled(
                         !active,
                         egui::TextEdit::singleline(&mut self.netplay_local_port)
-                            .desired_width(90.0),
+                            .desired_width(72.0),
                     );
-                    ui.label("Peer");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Peers");
                     ui.add_enabled(
                         !active,
-                        egui::TextEdit::singleline(&mut self.netplay_peer).desired_width(180.0),
+                        egui::TextEdit::singleline(&mut self.netplay_peer).desired_width(330.0),
                     );
                 });
                 ui.label(
                     RichText::new(
-                        "Complementary local ports, each other's address. Prediction \
-                         fills a missing remote input; delay trades responsiveness \
-                         for fewer rollbacks. Rewind, movies and run-ahead are off.",
+                        "Each player picks a unique slot and lists the other players' \
+                         addresses (comma separated). Prediction fills missing input; \
+                         delay reduces rollbacks. Rewind, movies and run-ahead are off.",
                     )
                     .small()
                     .weak(),
@@ -2795,11 +2849,14 @@ impl App {
                         "Frame {frame} · sent {sent} · received {received} · rollbacks {rollbacks}"
                     ));
                     ui.label(format!(
-                        "Predicted {} · deepest rollback {} · delay {} · {}",
+                        "Predicted {} · deepest rollback {} · delay {} · {} · {}/{} players, slot {}",
                         session.predicted,
                         session.max_rollback_depth,
                         config.input_delay,
                         config.prediction.name(),
+                        config.players,
+                        config.players,
+                        config.local_player + 1,
                     ));
                     if let Some(err) = self
                         .player

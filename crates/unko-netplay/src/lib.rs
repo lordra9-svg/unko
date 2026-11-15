@@ -26,8 +26,8 @@ pub mod udp;
 pub use input::{InputFrame, INPUT_MESSAGE_LEN};
 pub use rollback::{RollbackBuffer, StoredFrame};
 pub use session::{PredictionMode, RollbackSession, SessionConfig, SessionStats};
-pub use transport::{channel_pair, ChannelTransport, Transport};
-pub use udp::UdpTransport;
+pub use transport::{channel_pair, ChannelTransport, MeshTransport, Transport};
+pub use udp::{UdpMesh, UdpTransport};
 
 /// Stable feature-core id.
 pub const CORE_ID: &str = "unko_netplay";

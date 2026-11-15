@@ -47,6 +47,62 @@ impl Transport for ChannelTransport {
     }
 }
 
+/// Fan-out transport for a peer mesh.
+///
+/// `send` broadcasts one message to every peer; `recv` polls each peer in
+/// order and returns the first complete message. Messages already carry the
+/// sender's player tag, so the transport does not need to identify the source.
+#[derive(Default)]
+pub struct MeshTransport {
+    peers: Vec<Box<dyn Transport>>,
+}
+
+impl MeshTransport {
+    /// Wraps an existing set of peer transports.
+    #[must_use]
+    pub fn new(peers: Vec<Box<dyn Transport>>) -> Self {
+        Self { peers }
+    }
+
+    /// Adds one peer.
+    pub fn push(&mut self, peer: Box<dyn Transport>) {
+        self.peers.push(peer);
+    }
+
+    /// Number of connected peers.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.peers.len()
+    }
+
+    /// Whether no peer is connected.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.peers.is_empty()
+    }
+}
+
+impl Transport for MeshTransport {
+    fn send(&mut self, bytes: &[u8]) -> io::Result<()> {
+        let mut first_error = None;
+        for peer in &mut self.peers {
+            if let Err(err) = peer.send(bytes) {
+                first_error.get_or_insert(err);
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    fn recv(&mut self) -> io::Result<Option<Vec<u8>>> {
+        for peer in &mut self.peers {
+            if let Some(bytes) = peer.recv()? {
+                return Ok(Some(bytes));
+            }
+        }
+        Ok(None)
+    }
+}
+
 /// Creates two connected in-process transports.
 #[must_use]
 pub fn channel_pair() -> (ChannelTransport, ChannelTransport) {
@@ -67,6 +123,19 @@ pub fn channel_pair() -> (ChannelTransport, ChannelTransport) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mesh_broadcasts_and_polls_every_peer() {
+        let (a, b) = channel_pair();
+        let (c, d) = channel_pair();
+        let mut mesh = MeshTransport::new(vec![Box::new(a), Box::new(c)]);
+        let mut first = b;
+        let mut second = d;
+        assert!(mesh.recv().expect("empty").is_none());
+        mesh.send(b"hello").expect("broadcast");
+        assert_eq!(first.recv().expect("first"), Some(b"hello".to_vec()));
+        assert_eq!(second.recv().expect("second"), Some(b"hello".to_vec()));
+    }
 
     #[test]
     fn channel_pair_preserves_messages() {

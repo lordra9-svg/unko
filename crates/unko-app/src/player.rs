@@ -460,11 +460,17 @@ impl Player {
                 }
             }
             if let Some(netplay) = self.netplay.as_mut() {
-                let local = self.last_input[0].bits();
-                let ports = [local, 0, 0, 0];
+                let player = netplay.session.config().local_player;
+                let local = self.last_input[usize::from(player)].bits();
+                let ports = self.last_input.map(unko_core::InputState::bits);
                 match netplay.session.step(self.core.as_mut(), ports) {
                     Ok(frame) => {
-                        let message = InputFrame { frame, ports }.encode();
+                        let message = InputFrame {
+                            frame,
+                            player,
+                            input: local,
+                        }
+                        .encode();
                         if let Err(err) = netplay.transport.send(&message) {
                             netplay.last_error = Some(err.to_string());
                         } else {
@@ -1062,8 +1068,9 @@ impl Player {
                         Some(frame) => {
                             match netplay.session.receive_remote(
                                 self.core.as_mut(),
+                                frame.player,
                                 frame.frame,
-                                frame.ports,
+                                frame.input,
                             ) {
                                 Ok(true) => netplay.rollbacks += 1,
                                 Ok(false) => {}
@@ -1736,7 +1743,8 @@ mod tests {
         peer.send(
             &InputFrame {
                 frame: 0,
-                ports: [InputState::A, 0, 0, 0],
+                player: 1,
+                input: InputState::A,
             }
             .encode(),
         )
@@ -1793,11 +1801,15 @@ mod tests {
                 buffer_frames: 4,
                 input_delay: 2,
                 prediction: PredictionMode::Neutral,
+                players: 3,
+                local_player: 1,
             },
         );
         let (config, stats) = player.netplay_session_stats().expect("session");
         assert_eq!(config.input_delay, 2);
         assert_eq!(config.prediction, PredictionMode::Neutral);
+        assert_eq!(config.players, 3);
+        assert_eq!(config.local_player, 1);
         assert_eq!(stats.frame, 0);
         player.set_netplay_input_delay(5);
         player.set_netplay_prediction(PredictionMode::LastInput);
