@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **508 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **511 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -25,8 +25,8 @@ Compatibility, local licensed 7,101-image NES library:
 | Unsupported mapper IDs | 0 | 0.0% |
 | Load/run failures (truncated images) | 28 | 0.39% |
 | Rendering at 20 frames | 3,897 | 54.9% of scanned |
-| Rendering at 120 frames | 6,497 | 91.5% of scanned |
-| Rendering at 240 frames | 6,425 | 90.5% of scanned |
+| Rendering at 120 frames | 6,503 | 91.6% of scanned |
+| Rendering at 240 frames | 6,427 | 90.5% of scanned |
 
 Only mapper 308 (NTDEC Batman) does not draw headless at 120 or 240 frames
 without Start input. The 240-frame count is lower than 120 because the exact
@@ -1456,9 +1456,9 @@ approximated.
 
 ### Holy Mapperel board matrix (2026-11-14)
 
-Ran all 42 Holy Mapperel variants in the RustyNES tree (900 frames each,
-reading the result line from VRAM). **28 report `0000` (pass).** The matrix
-found two real bugs, both fixed:
+Ran all 42 Holy Mapperel variants in the RustyNES tree (2400 frames each,
+reading the result line from VRAM). **33 report `0000` (pass).** The matrix
+found five real bugs, all fixed:
 
 - MMC3 `$A001`: bit 6 is the PRG-RAM read-only mode and bit 7 removes the chip
   from the bus. Holy Mapperel's `2xxx` WRAM code and the read/write protection
@@ -1466,14 +1466,22 @@ found two real bugs, both fixed:
 - MMC1 SNROM: `$A000` bit 4 disables PRG-RAM on CHR-RAM boards with at most
   256 KiB PRG, while `$E000` bit 4 remains the MMC1B/C protection bit. The
   `4xxx`/`1xxx` codes clear.
+- MMC2 `$F000` bit 0 polarity was inverted; 0 is vertical mirroring. Mapper
+  detection now identifies the board instead of falling through to MMC3.
+- MMC2 CHR latch banks reached the PPU only through the per-frame sync, but
+  CPU `$2007` pattern reads are CHR fetches too. The registers are now pushed
+  on the write, so the boot-time CHR tag checks pass.
+- FME-7 `$000C` had the same `0/1` polarity inversion, and the `$6000` window
+  decode was wrong: `00` selects ROM, `11` selects PRG-RAM, and mixed select
+  bits float. The floating window now returns the CPU's open-bus value.
 
 Remaining from the matrix:
 
 - Eight MMC1 CHR-RAM variants report `0003`: the 4 KiB CHR-window tag test
   fails in both windows. With only 8 KiB of CHR-RAM this may be expected on
   hardware; it is unverified without a capture.
-- MMC2 (9/10), FME-7 (69) and TxSROM (118) display no result at 900-2400
-  frames, so their board tests do not complete.
+- TxSROM (mapper 118) still shows no result: its CIRAM A10 = CHR A17
+  behaviour is not modelled precisely enough for the detection probe.
 
 ### Reproducible public-suite run (2026-11-14)
 

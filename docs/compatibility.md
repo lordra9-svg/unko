@@ -48,8 +48,8 @@ BIOS**; it never bundles the BIOS. FDS write-mode changes are persisted to
 - **0 unsupported mapper IDs**; the remaining 28 are truncated dumps.
 - **285 distinct mapper IDs** appear in the library.
 - 20-frame smoke audit: **3,897 rendering / 3,176 blank**.
-- 120-frame audit: **6,497 rendering / 576 blank**.
-- 240-frame audit: **6,425 rendering / 648 blank**.
+- 120-frame audit: **6,503 rendering / 570 blank**.
+- 240-frame audit: **6,427 rendering / 646 blank**.
 
 “Rendering” means the final sampled frame was not a single uniform colour; it
 is not a completion claim. Per-mapper counts and the remaining long-tail work
@@ -109,7 +109,7 @@ Public mapper-specific status:
 | x0000 APU write-window tests | 10/10 pass |
 | NESdev archive | 136 pass / 12 fail / 115 visual/audio/input-only; 5 failures with PAL APU in PAL mode and the alternate MMC3 selector |
 | RustyNES test tree | 157 pass / 13 fail / 171 visual/audio/input-only; 164 / 6 with PAL APU in PAL mode |
-| Workspace tests | 508 pass, 0 failed |
+| Workspace tests | 511 pass, 0 failed |
 
 The actionable accuracy failures are tracked in
 [`accuracy-divergences.md`](accuracy-divergences.md); the ROM/BIOS inventory is

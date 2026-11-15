@@ -619,6 +619,9 @@ pub trait Mapper: fmt::Debug + MapperState {
     /// another is ignored by the shift register.
     fn set_cpu_cycle(&mut self, _cycle: u64) {}
 
+    /// Supplies the CPU's last bus value before a floating read.
+    fn set_open_bus(&mut self, _value: u8) {}
+
     /// Whether the mapper drives PRG-ROM (not work RAM) at `$6000-$7FFF`.
     ///
     /// The CPU bus only forwards that window to the cartridge when this is
@@ -1409,6 +1412,11 @@ impl Cartridge {
     #[must_use]
     pub fn cpu_read(&self, address: u16) -> u8 {
         self.mapper.prg_read(address)
+    }
+
+    /// Supplies the last CPU bus value for mappers with floating windows.
+    pub fn set_open_bus(&mut self, value: u8) {
+        self.mapper.set_open_bus(value);
     }
 
     /// CPU read with side effects (FDS `$4030`/`$4031` acknowledgement).
@@ -3305,10 +3313,11 @@ impl Mapper for Mmc2 {
             0xD000 => self.chr_banks[2] = value & 0x1F,
             0xE000 => self.chr_banks[3] = value & 0x1F,
             0xF000 => {
+                // $F000 bit 0: 0 = vertical mirroring, 1 = horizontal.
                 self.mirroring = if value & 1 != 0 {
-                    Mirroring::Vertical
-                } else {
                     Mirroring::Horizontal
+                } else {
+                    Mirroring::Vertical
                 };
             }
             _ => {}
@@ -25729,6 +25738,8 @@ pub struct Fme7 {
     irq_assert: bool,
     irq_line: bool,
     irq_counter: u16,
+    /// Last CPU bus value, returned while `$6000` floats.
+    open_bus: u8,
     audio: Sunsoft5b,
 }
 
@@ -25749,6 +25760,7 @@ impl Fme7 {
             irq_assert: false,
             irq_line: false,
             irq_counter: 0,
+            open_bus: 0,
             audio: Sunsoft5b::default(),
         }
     }
@@ -25771,11 +25783,11 @@ impl Fme7 {
             0x0A => self.prg_banks[1] = value & 0x3F,
             0x0B => self.prg_banks[2] = value & 0x3F,
             0x0C => {
-                // 0 = horizontal (A10), 1 = vertical (A11), 2 = 1scA (GND),
+                // 0 = vertical (A10), 1 = horizontal (A11), 2 = 1scA (GND),
                 // 3 = 1scB (VCC).
                 self.mirroring = match value & 0x03 {
-                    0 => Mirroring::Horizontal,
-                    1 => Mirroring::Vertical,
+                    0 => Mirroring::Vertical,
+                    1 => Mirroring::Horizontal,
                     2 => Mirroring::SingleLower,
                     _ => Mirroring::SingleUpper,
                 }
@@ -25812,19 +25824,24 @@ impl Mapper for Fme7 {
         match address {
             0x6000..=0x7FFF => {
                 let offset = usize::from(self.ram_bank) * 0x2000 + usize::from(address - 0x6000);
-                if self.ram_selected {
-                    // RAM selected but disabled reads as open bus; return 0
-                    // here because the mapper has no bus value.
-                    if self.ram_enabled {
-                        self.prg_ram
-                            .get(offset % self.prg_ram.len())
-                            .copied()
-                            .unwrap_or(0)
-                    } else {
-                        0
+                // Register 8: bit 7 enables the window, bit 6 selects RAM.
+                // Disabled -> ROM; enabled + ROM select -> open bus; enabled
+                // + RAM select -> the banked PRG-RAM.
+                // Register 8 truth table: 00 = ROM, 11 = PRG-RAM, mixed =
+                // open bus. Both bits are part of the chip-select decode, so
+                // $40 and $80 float rather than falling back to ROM.
+                match (self.ram_enabled, self.ram_selected) {
+                    (false, false) => {
+                        let banks = self.prg_bank_count();
+                        let bank = usize::from(self.ram_bank) % banks;
+                        self.prg[bank * 0x2000 + (offset & 0x1FFF)]
                     }
-                } else {
-                    self.prg.get(offset).copied().unwrap_or(0)
+                    (true, true) => self
+                        .prg_ram
+                        .get(offset % self.prg_ram.len())
+                        .copied()
+                        .unwrap_or(0),
+                    _ => self.open_bus,
                 }
             }
             0x8000..=0x9FFF => {
@@ -25877,6 +25894,10 @@ impl Mapper for Fme7 {
         if let Some(byte) = self.chr.get_mut(index) {
             *byte = value;
         }
+    }
+
+    fn set_open_bus(&mut self, value: u8) {
+        self.open_bus = value;
     }
 
     fn mirroring(&self) -> Mirroring {
@@ -36443,7 +36464,7 @@ impl Mapper for Benshieng286 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     fn mmc3_clock(cart: &mut Cartridge) {
         let a12 = cart.mmc3_a12().expect("MMC3 A12");
         a12.borrow_mut().observe(0x0000, 0);
@@ -36608,10 +36629,10 @@ mod tests {
         cart.cpu_write(0x8000, 0x0B);
         cart.cpu_write(0xA000, 7);
         assert_eq!(cart.cpu_read(0xC000), 7);
-        // Nametable arrangement: 0 = horizontal, 1 = vertical, 2/3 = 1sc.
+        // Nametable arrangement: 0 = vertical, 1 = horizontal, 2/3 = 1sc.
         for (value, expected) in [
-            (0, Mirroring::Horizontal),
-            (1, Mirroring::Vertical),
+            (0, Mirroring::Vertical),
+            (1, Mirroring::Horizontal),
             (2, Mirroring::SingleLower),
             (3, Mirroring::SingleUpper),
         ] {
@@ -36625,7 +36646,7 @@ mod tests {
         assert_eq!(cart.cpu_read(0x6000), 3, "PRG ROM bank 3 at $6000");
         cart.cpu_write(0x8000, 0x08);
         cart.cpu_write(0xA000, 0x40);
-        assert_eq!(cart.cpu_read(0x6000), 0, "RAM selected but disabled");
+        assert_eq!(cart.cpu_read(0x6000), 0, "mixed select bits float");
         cart.cpu_write(0x8000, 0x08);
         cart.cpu_write(0xA000, 0xC2);
         cart.cpu_write(0x6000, 0x5A);
@@ -39197,6 +39218,36 @@ mod tests {
     }
 
     #[test]
+    fn mmc2_mirroring_bit_zero_is_vertical() {
+        let rom = synth_banked(9, 128, 64);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        cart.cpu_write(0xF000, 0x00);
+        assert_eq!(cart.mirroring(), Mirroring::Vertical);
+        cart.cpu_write(0xF000, 0x01);
+        assert_eq!(cart.mirroring(), Mirroring::Horizontal);
+    }
+
+    #[test]
+    fn fme7_6000_window_is_rom_ram_or_open_bus() {
+        let rom = synth_banked(69, 128, 64);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        // 00 = ROM bank 5.
+        cart.cpu_write(0x8000, 0x08);
+        cart.cpu_write(0xA000, 0x05);
+        assert_eq!(cart.cpu_read(0x6000), rom[16 + 5 * 0x2000]);
+        // 01 / 10 = open bus.
+        cart.set_open_bus(0x7F);
+        cart.cpu_write(0x8000, 0x08);
+        cart.cpu_write(0xA000, 0x7F);
+        assert_eq!(cart.cpu_read(0x6000), 0x7F);
+        // 11 = PRG-RAM.
+        cart.cpu_write(0x8000, 0x08);
+        cart.cpu_write(0xA000, 0xFF);
+        cart.cpu_write(0x6000, 0x5A);
+        assert_eq!(cart.cpu_read(0x6000), 0x5A);
+    }
+
+    #[test]
     fn multibank_334_prg_register() {
         // 128 KiB PRG (4 x 32 KiB), 128 KiB CHR.
         let rom = synth_banked(334, 128, 128);
@@ -40994,7 +41045,7 @@ mod tests {
         assert_eq!(cart.ppu_read(0x0123), 0x5A);
     }
 
-    fn synth_banked(mapper: u16, prg_kib: usize, chr_kib: usize) -> Vec<u8> {
+    pub(crate) fn synth_banked(mapper: u16, prg_kib: usize, chr_kib: usize) -> Vec<u8> {
         let prg_len = prg_kib * 1024;
         let chr_len = chr_kib * 1024;
         let mut rom = vec![0u8; 16 + prg_len + chr_len];
@@ -41049,9 +41100,9 @@ mod tests {
         assert_eq!(cart.chr_rom().map(<[u8]>::len), Some(64 * 1024));
 
         cart.cpu_write(0xF000, 1);
-        assert_eq!(cart.mirroring(), Mirroring::Vertical);
-        cart.cpu_write(0xF000, 0);
         assert_eq!(cart.mirroring(), Mirroring::Horizontal);
+        cart.cpu_write(0xF000, 0);
+        assert_eq!(cart.mirroring(), Mirroring::Vertical);
     }
 
     #[test]

@@ -31,17 +31,18 @@ None in AccuracyCoin. All non-DRAW rows pass.
 
 ### Holy Mapperel (2026-11-14)
 
-28 of 42 variants pass with `0000` after the MMC3 `$A001` read-only mode and
-MMC1 SNROM `$A000.4` fixes. Open items:
+33 of 42 variants pass with `0000` after the MMC3 `$A001` read-only mode,
+MMC1 SNROM `$A000.4`, MMC2 mirroring/latch-sync and FME-7 mirroring/`$6000`
+fixes. Open items:
 
 - **MMC1 CHR-RAM (8 variants, `0003`)** — `mmc1_test_one_chr_window` fails
   both 4 KiB windows. An 8 KiB CHR-RAM board cannot hold the distinct bank
   tags the test writes, so this may be expected on SNROM rather than an
   emulator bug; it is tracked as **unverified** until a hardware capture or
   the test's own notes settle it.
-- **MMC2 (9/10), FME-7 (69), TxSROM (118)** — the board test produces a
-  uniform frame at 900-2400 frames; the suite never prints a result. Likely
-  the CHR-latch (`$FD/$FE`) or IRQ-window startup path, not yet triaged.
+- **TxSROM (118)** — the board test produces a uniform frame. CIRAM A10 is
+  tied to CHR A17 on this board; the current global `bank_data[0]` mirroring
+  approximation does not reproduce the detection probe.
 
 ### NESdev screen-suite status (2026-11-14)
 

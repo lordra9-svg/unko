@@ -1285,6 +1285,18 @@ impl System {
         }
     }
 
+    /// Pushes MMC2/MMC4 CHR latch registers to the PPU immediately.
+    ///
+    /// A CPU `$2007` pattern-table access goes through the same latch state
+    /// as a rendering fetch, so a bank write must be visible in the same
+    /// frame. The per-frame cartridge sync alone is too late for the
+    /// boot-time tag checks in board test ROMs.
+    fn sync_mmc2_banks(&mut self) {
+        if let Some(banks) = self.cart.chr_banks() {
+            self.ppu.set_mmc2_banks(banks);
+        }
+    }
+
     fn sync_mirroring(&mut self) {
         let mirroring = self.cart.mirroring();
         if self.ppu.mirroring != mirroring {
@@ -1296,8 +1308,8 @@ impl System {
         // CHR-ROM is copied once per frame; mid-frame bank switches are an A4
         // follow-up. CHR-RAM is owned by the PPU because games upload tiles to
         // it through $2007, so it must not be overwritten.
-        if let Some(banks) = self.cart.chr_banks() {
-            self.ppu.set_mmc2_banks(banks);
+        if self.cart.chr_banks().is_some() {
+            self.sync_mmc2_banks();
         } else if !self.cart.chr_is_ram() {
             for address in 0..0x2000u16 {
                 self.ppu.chr[usize::from(address)] = self.cart.ppu_read(address);
@@ -1972,6 +1984,7 @@ impl CpuBus for System {
         if self.cart.needs_cpu_address() {
             self.cart.set_cpu_address(address);
         }
+        self.cart.set_open_bus(self.open_bus);
         // $2004 reflects the OAM data bus at the end of the CPU read cycle.
         // Advance the final PPU dot before sampling it and suppress the usual
         // post-access step so the cycle length is unchanged.
@@ -2148,6 +2161,7 @@ impl CpuBus for System {
                 // nametable arrangement mid-frame; hardware applies it to the
                 // next PPU access, so it cannot wait for the per-frame sync.
                 self.sync_mirroring();
+                self.sync_mmc2_banks();
                 if self.cart.chr_mapping_write(address) {
                     self.refresh_chr();
                 }
@@ -2369,6 +2383,17 @@ mod tests {
             peak = peak.max(system.cart.audio_mix().abs());
         }
         assert!(peak > 0.01, "FDS audio did not reach the mixer: {peak}");
+    }
+
+    #[test]
+    fn mmc2_chr_bank_writes_reach_the_ppu_immediately() {
+        let rom = crate::cart::tests::synth_banked(9, 128, 64);
+        let mut system = System::from_ines(&rom).expect("load");
+        CpuBus::write(&mut system, 0xB000, 0x0E);
+        CpuBus::write(&mut system, 0xC000, 0x0E);
+        CpuBus::write(&mut system, 0xD000, 0x0F);
+        CpuBus::write(&mut system, 0xE000, 0x0F);
+        assert_eq!(system.ppu.mmc2_banks(), Some([0x0E, 0x0E, 0x0F, 0x0F]));
     }
 
     #[test]

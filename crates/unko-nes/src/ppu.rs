@@ -928,6 +928,12 @@ impl Ppu {
                     } else {
                         address
                     };
+                    // A CPU $2007 access to the pattern tables is a CHR fetch
+                    // on the cartridge bus, so MMC2/MMC4 advance their tile
+                    // latches for it exactly as a rendering fetch does.
+                    if buffer_address < 0x2000 {
+                        self.note_chr_fetch(buffer_address);
+                    }
                     self.read_vram(buffer_address)
                 };
                 if self.data_read_render {
