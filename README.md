@@ -313,6 +313,9 @@ python3 scripts/license_audit.py
 
 Tests that need public test ROMs look for them under `test-roms/` and skip
 cleanly when the folder is absent. No ROMs are tracked in this repository.
+Save states are checked functionally across every mapper that constructs
+(294 boards: two frames of video and audio must be identical after restore),
+plus byte-exact re-save for the common mapper set.
 
 The synthetic performance floor is checked in CI; the current development
 machine measures about **785 fps** (13.1x real time):

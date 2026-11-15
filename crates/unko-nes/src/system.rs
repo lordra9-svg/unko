@@ -3625,24 +3625,46 @@ mod tests {
 
     #[cfg(feature = "save-states")]
     #[test]
-    fn every_implemented_mapper_serializes_its_state() {
-        let mut checked = 0;
+    fn every_implemented_mapper_restores_functionally() {
+        let mut checked = 0u32;
+        let mut failed = Vec::new();
         for mapper in 0u16..=600 {
             let rom = banked_rom(mapper);
             let Ok(mut system) = System::from_ines(&rom) else {
                 continue;
             };
+            // Let the mapper switch banks and the PPU fill its pipeline.
+            for _ in 0..3 {
+                system.run_frame();
+            }
             let Ok(saved) = system.save_state() else {
                 continue;
             };
+            for _ in 0..2 {
+                system.run_frame();
+            }
+            let video = system.video().to_vec();
+            let audio = system.audio().to_vec();
             system
                 .load_state(&saved)
                 .unwrap_or_else(|err| panic!("mapper {mapper} load error: {err}"));
+            for _ in 0..2 {
+                system.run_frame();
+            }
             // The PPU keeps a cached CHR window, so a byte-for-byte re-save can
-            // differ; survival of the load is the contract here. Functional
-            // equality is covered by the common-mapper test above.
+            // differ (the common-mapper test asserts it where the cache is
+            // deterministic); what every mapper must guarantee is that the
+            // restored machine produces the same two frames of video and audio.
+            if system.video() != video.as_slice() || system.audio() != audio.as_slice() {
+                failed.push(mapper);
+            }
             checked += 1;
         }
+        assert!(
+            failed.is_empty(),
+            "restore diverged for {} mapper(s): {failed:?}",
+            failed.len()
+        );
         assert!(checked > 200, "only {checked} mapper states exercised");
     }
 }
