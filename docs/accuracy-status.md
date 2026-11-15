@@ -131,7 +131,8 @@ and the anaglyph channel mapping.
 
 The PPU now carries a hardware model selected from the NES 2.0 console type
 and VS. PPU-model nibble (byte 13 low nibble). iNES VS images, including
-unmarked mapper-99 boards, default to 2C03. The public NESdev palette tables are implemented
+unmarked mapper-99 boards, default to 2C03; that is the common-case
+approximation, because the per-game PRG/CHR hash table is not available. The public NESdev palette tables are implemented
 directly:
 
 - **2C03** — the documented 64-entry RGB DAC table (including black `$0D`,
@@ -159,8 +160,10 @@ readback quirks are not modelled.
 Mapper 99 now loads a Vs. board directly from its iNES/NES 2.0 image:
 
 - **PRG** — one 8 KiB switchable bank at `$8000` and three fixed 8 KiB banks at
-  `$A000-$FFFF`. The 40 KiB *Vs. Gumshoe* image is padded to 48 KiB and `$4016`
-  bit 2 selects bank 0 or the alternate bank 4; smaller images keep bank 0.
+  `$A000-$FFFF`. The 40 KiB *Vs. Gumshoe* image is padded to 48 KiB in iNES and
+  `$4016` bit 2 selects bank 0 or the alternate bank 4; smaller images keep
+  bank 0. A real 48 KiB DualSystem image uses the same size for two 24 KiB
+  halves and is not distinguished yet.
 - **CHR** — `$4016` bit 2 selects between the two 8 KiB CHR sockets. An
   undersized image leaves the missing socket undriven, so reads return the
   open bus instead of mirroring.
