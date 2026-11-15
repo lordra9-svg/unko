@@ -38,6 +38,7 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut include_bios = false;
     let mut zip_sets = false;
     let mut torrentzip = false;
+    let mut sevenz = false;
     let mut move_files = false;
     let mut cache = None;
     let mut verify_mode = false;
@@ -77,6 +78,7 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
             "--all" => include_bios = true,
             "--zip" => zip_sets = true,
             "--torrentzip" => torrentzip = true,
+            "--7z" => sevenz = true,
             "--move" => move_files = true,
             "--cache" => cache = args.next().map(PathBuf::from),
             "--max-list" => {
@@ -91,7 +93,7 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
                     "usage: unko-rom-manager [scan|verify] --dat DAT --input ROMS [options]\n\
                      \n\
                      options: --1g1r --fixdat FILE --csv FILE --copy DIR\n\
-                     \x20        --zip | --torrentzip | --move --cache FILE\n\
+                     \x20        --zip | --torrentzip | --7z | --move --cache FILE\n\
                      \x20        --dat-url URL [--dat-out FILE]\n\
                      \x20        --regions USA,Europe,World,Japan --languages En --all\n\
                      \x20        --max-list N\n\
@@ -99,7 +101,7 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
                      verify (or audit) hashes and reports the library without writing;\n\
                      it exits 1 unless every game is complete and there are no unknown\n\
                      or duplicate files. --max-list caps each listing (0 = unlimited).\n\
-                     --copy writes loose files; --zip/--torrentzip write one archive per game;\n\
+                     --copy writes loose files; --zip/--torrentzip/--7z write one archive per game;\n\
                      --move deletes loose sources after a verified copy."
                 );
                 return Ok(());
@@ -117,8 +119,10 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
         println!("dat: downloaded {} -> {}", url, destination.display());
         dat = Some(destination);
     }
-    if verify_mode && (copy.is_some() || zip_sets || torrentzip || move_files) {
-        return Err("verify is read-only; --copy/--zip/--torrentzip/--move are not allowed".into());
+    if verify_mode && (copy.is_some() || zip_sets || torrentzip || sevenz || move_files) {
+        return Err(
+            "verify is read-only; --copy/--zip/--torrentzip/--7z/--move are not allowed".into(),
+        );
     }
     let dat = dat.ok_or("--dat or --dat-url is required")?;
     let input = input.ok_or("--input is required")?;
@@ -194,6 +198,8 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
                 move_files,
                 format: if torrentzip {
                     OutputFormat::TorrentZip
+                } else if sevenz {
+                    OutputFormat::SevenZ
                 } else if zip_sets {
                     OutputFormat::Zip
                 } else {

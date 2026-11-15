@@ -53,6 +53,7 @@ pub struct RomManager {
     include_bios: bool,
     zip_sets: bool,
     torrentzip: bool,
+    sevenz: bool,
     move_files: bool,
     prefer_parent: bool,
     prefer_verified: bool,
@@ -94,6 +95,7 @@ impl RomManager {
             include_bios: false,
             zip_sets: false,
             torrentzip: false,
+            sevenz: false,
             move_files: false,
             prefer_parent: true,
             prefer_verified: true,
@@ -319,13 +321,19 @@ impl RomManager {
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.one_g1r, "1G1R selection");
             ui.checkbox(&mut self.include_bios, "Include [BIOS] entries");
-            ui.checkbox(&mut self.zip_sets, "ZIP sets");
+            if ui.checkbox(&mut self.zip_sets, "ZIP sets").changed() && self.zip_sets {
+                self.sevenz = false;
+            }
             ui.add_enabled(
                 self.zip_sets,
                 egui::Checkbox::new(&mut self.torrentzip, "TorrentZip-style"),
             );
+            if ui.checkbox(&mut self.sevenz, "7z sets").changed() && self.sevenz {
+                self.zip_sets = false;
+                self.torrentzip = false;
+            }
             ui.add_enabled(
-                !self.zip_sets,
+                !self.zip_sets && !self.sevenz,
                 egui::Checkbox::new(&mut self.move_files, "Move (delete sources)"),
             );
         });
@@ -717,9 +725,11 @@ impl RomManager {
         let selected = selected.to_vec();
         let options = RebuildOptions {
             output: self.output.clone(),
-            move_files: self.move_files && !self.zip_sets,
+            move_files: self.move_files && !self.zip_sets && !self.sevenz,
             format: if self.zip_sets && self.torrentzip {
                 OutputFormat::TorrentZip
+            } else if self.sevenz {
+                OutputFormat::SevenZ
             } else if self.zip_sets {
                 OutputFormat::Zip
             } else {

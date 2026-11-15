@@ -37,7 +37,7 @@ verified against the public reference suites:
   `cpu_interrupts_v2` singles: pass
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **664 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **666 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **137 pass / 11 fail / 115 visual-or-input-only** (PAL APU timing leaves 4 failures; the alternate MMC3 selector leaves only `read_joy3/count_errors`)
 - RustyNES test tree: **159 pass / 11 fail / 171 visual-or-input-only** (166 / 4 with PAL APU in PAL mode; 1 with the alternate MMC3 selector too)
 
@@ -87,8 +87,8 @@ harness; a true Internet run needs two networks. See
 | Metric | Value |
 |---|---:|
 | Workspace crates | 9 |
-| First-party Rust lines | ~80,950 |
-| Workspace tests | 664 pass, 0 failed |
+| First-party Rust lines | ~81,050 |
+| Workspace tests | 666 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 
@@ -214,7 +214,7 @@ The Tools → ROM Manager window opens as a separate OS window on desktop. It
 audits a ROM folder against one or more Logiqx XML/No-Intro DATs, shows
 complete/partial/missing games (the full list, virtualized for large DATs),
 selects a 1G1R set, exports fixdats/CSV and safely copies matched ROMs to an
-output folder. A **ZIP sets** toggle writes one deterministic archive per
+output folder. **ZIP sets** and **7z sets** toggles write one deterministic archive per
 game instead of loose files, and a persistent scan cache skips unchanged
 files on later audits. Its position and size are remembered in `unko.conf`; the
 default size is used the first time. It is backed by the standalone `unko-rom-manager` crate, which has no
@@ -227,13 +227,13 @@ unko-app --rom-manager --dat "No-Intro NES.dat" --roms /path/to/roms
 # Headless equivalent
 cargo run -p unko-rom-manager -- \
   --dat "No-Intro NES.dat" --input /path/to/roms --1g1r \
-  --fixdat missing.xml --csv report.csv --copy rebuilt --zip
+  --fixdat missing.xml --csv report.csv --copy rebuilt --zip   # or --7z
 # --move deletes loose sources after a verified copy (loose output only)
 ```
 
 It scans loose files and ZIP, 7z or RAR containers, accepts `.unif`/`.unf` images by
 converting their board/mirroring chunks to iNES/NES 2.0, can download/update a DAT
-over HTTP with `--dat-url`, can write deterministic ZIP or TorrentZip-style
+over HTTP with `--dat-url`, can write deterministic ZIP, TorrentZip-style or 7z
 sets, and has a read-only `verify`/`audit` mode that reports per-ROM
 missing/unknown/duplicate detail and exits nonzero unless the set is complete.
 The same report is available in the window behind the **Verify** button (or
