@@ -96,7 +96,8 @@ impl Drop for RelayServer {
 }
 
 fn serve(socket: &UdpSocket, stop: &AtomicBool) {
-    let mut rooms: HashMap<[u8; 8], Vec<SocketAddr>> = HashMap::new();
+    // room -> (member id -> source address)
+    let mut rooms: HashMap<[u8; 8], HashMap<u8, SocketAddr>> = HashMap::new();
     let mut buffer = [0u8; MAX_DATAGRAM];
     while !stop.load(Ordering::Relaxed) {
         let Ok((size, from)) = socket.recv_from(&mut buffer) else {
@@ -107,34 +108,48 @@ fn serve(socket: &UdpSocket, stop: &AtomicBool) {
         };
         match kind {
             JOIN => {
-                if payload.len() != 8 {
+                if payload.len() != 9 {
                     continue;
                 }
                 let mut room = [0u8; 8];
-                room.copy_from_slice(payload);
-                let members = rooms.entry(room).or_default();
-                if !members.contains(&from) {
-                    members.push(from);
-                }
-                let mut ack = Vec::with_capacity(HEADER);
+                room.copy_from_slice(&payload[..8]);
+                let member_id = payload[8];
+                rooms.entry(room).or_default().insert(member_id, from);
+                let mut ack = Vec::with_capacity(HEADER + 1);
                 ack.extend_from_slice(MAGIC);
                 ack.push(JOINED);
+                ack.push(member_id);
                 let _ = socket.send_to(&ack, from);
             }
             DATA => {
-                // Forward to every other member of the room. The sender is
-                // resolved from the source address, so a client cannot spoof
-                // another member's traffic.
-                let room = rooms.iter().find(|(_, members)| members.contains(&from));
-                if let Some((_, members)) = room {
-                    let mut frame = Vec::with_capacity(HEADER + payload.len());
-                    frame.extend_from_slice(MAGIC);
-                    frame.push(DATA);
-                    frame.extend_from_slice(payload);
-                    for member in members {
-                        if *member != from {
-                            let _ = socket.send_to(&frame, member);
-                        }
+                // payload[0] is the destination member id (0xFF broadcasts);
+                // the rest is the GGRS datagram. The source id is prepended on
+                // the forwarded frame, so a client cannot spoof another
+                // member's traffic.
+                if payload.is_empty() {
+                    continue;
+                }
+                let destination = payload[0];
+                let body = &payload[1..];
+                let Some((source_id, members)) = rooms.iter().find_map(|(_, members)| {
+                    members
+                        .iter()
+                        .find(|(_, address)| **address == from)
+                        .map(|(id, _)| (*id, members))
+                }) else {
+                    continue;
+                };
+                let mut frame = Vec::with_capacity(HEADER + 1 + body.len());
+                frame.extend_from_slice(MAGIC);
+                frame.push(DATA);
+                frame.push(source_id);
+                frame.extend_from_slice(body);
+                for (id, member) in members {
+                    if *member == from {
+                        continue;
+                    }
+                    if destination == 0xFF || destination == *id {
+                        let _ = socket.send_to(&frame, member);
                     }
                 }
             }
@@ -164,9 +179,10 @@ pub struct RelayTransport {
     socket: UdpSocket,
     relay: SocketAddr,
     room: [u8; 8],
+    member_id: u8,
     joined: bool,
     last_join: Option<Instant>,
-    pending: VecDeque<Vec<u8>>,
+    pending: VecDeque<(u8, Vec<u8>)>,
     scratch: Vec<u8>,
 }
 
@@ -176,7 +192,7 @@ impl RelayTransport {
     /// # Errors
     ///
     /// Returns an address, bind or configuration error.
-    pub fn bind(local: &str, relay: &str, room: &str) -> io::Result<Self> {
+    pub fn bind(local: &str, relay: &str, room: &str, member_id: u8) -> io::Result<Self> {
         let relay = relay.to_socket_addrs()?.next().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, format!("{relay}: no address"))
         })?;
@@ -186,6 +202,7 @@ impl RelayTransport {
             socket,
             relay,
             room: room_token(room),
+            member_id,
             joined: false,
             last_join: None,
             pending: VecDeque::new(),
@@ -224,7 +241,10 @@ impl RelayTransport {
 
     fn send_join(&mut self) {
         self.last_join = Some(Instant::now());
-        let message = frame(JOIN, &self.room);
+        let mut payload = Vec::with_capacity(9);
+        payload.extend_from_slice(&self.room);
+        payload.push(self.member_id);
+        let message = frame(JOIN, &payload);
         let _ = self.socket.send_to(&message, self.relay);
     }
 
@@ -237,7 +257,10 @@ impl RelayTransport {
                     };
                     match kind {
                         JOINED => self.joined = true,
-                        DATA => self.pending.push_back(payload.to_vec()),
+                        DATA if !payload.is_empty() => {
+                            self.pending.push_back((payload[0], payload[1..].to_vec()));
+                        }
+                        DATA => {}
                         _ => {}
                     }
                 }
@@ -256,9 +279,14 @@ impl RelayTransport {
     }
 }
 
-impl Transport for RelayTransport {
-    fn send(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if bytes.len() > MAX_DATAGRAM {
+impl RelayTransport {
+    /// Sends one datagram to a room member id (0xFF broadcasts).
+    ///
+    /// # Errors
+    ///
+    /// Returns the relay I/O error.
+    pub fn send_to(&mut self, member: u8, bytes: &[u8]) -> io::Result<()> {
+        if bytes.len() > MAX_DATAGRAM - 1 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "netplay message is too large for one datagram",
@@ -267,7 +295,10 @@ impl Transport for RelayTransport {
         if !self.joined {
             self.send_join();
         }
-        let message = frame(DATA, bytes);
+        let mut payload = Vec::with_capacity(1 + bytes.len());
+        payload.push(member);
+        payload.extend_from_slice(bytes);
+        let message = frame(DATA, &payload);
         let sent = self.socket.send_to(&message, self.relay)?;
         if sent != message.len() {
             return Err(io::Error::new(
@@ -278,9 +309,24 @@ impl Transport for RelayTransport {
         Ok(())
     }
 
-    fn recv(&mut self) -> io::Result<Option<Vec<u8>>> {
+    /// Receives one `(source member id, payload)` datagram, or `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the relay I/O error.
+    pub fn recv_from(&mut self) -> io::Result<Option<(u8, Vec<u8>)>> {
         self.pump();
         Ok(self.pending.pop_front())
+    }
+}
+
+impl Transport for RelayTransport {
+    fn send(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.send_to(0xFF, bytes)
+    }
+
+    fn recv(&mut self) -> io::Result<Option<Vec<u8>>> {
+        Ok(self.recv_from()?.map(|(_, bytes)| bytes))
     }
 }
 
@@ -319,8 +365,8 @@ mod tests {
     fn relay_forwards_between_room_members() {
         let server = RelayServer::spawn("127.0.0.1:0").expect("server");
         let relay = server.local_addr().to_string();
-        let mut a = RelayTransport::bind("127.0.0.1:0", &relay, "room").expect("a");
-        let mut b = RelayTransport::bind("127.0.0.1:0", &relay, "room").expect("b");
+        let mut a = RelayTransport::bind("127.0.0.1:0", &relay, "room", 0).expect("a");
+        let mut b = RelayTransport::bind("127.0.0.1:0", &relay, "room", 1).expect("b");
         wait_joined(&mut [&mut a, &mut b]);
         assert!(a.joined() && b.joined());
 
@@ -353,9 +399,9 @@ mod tests {
     fn rooms_are_isolated() {
         let server = RelayServer::spawn("127.0.0.1:0").expect("server");
         let relay = server.local_addr().to_string();
-        let mut a = RelayTransport::bind("127.0.0.1:0", &relay, "one").expect("a");
-        let mut b = RelayTransport::bind("127.0.0.1:0", &relay, "one").expect("b");
-        let mut c = RelayTransport::bind("127.0.0.1:0", &relay, "two").expect("c");
+        let mut a = RelayTransport::bind("127.0.0.1:0", &relay, "one", 0).expect("a");
+        let mut b = RelayTransport::bind("127.0.0.1:0", &relay, "one", 1).expect("b");
+        let mut c = RelayTransport::bind("127.0.0.1:0", &relay, "two", 0).expect("c");
         wait_joined(&mut [&mut a, &mut b, &mut c]);
 
         a.send(b"a-data").expect("send");

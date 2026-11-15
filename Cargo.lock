@@ -4222,6 +4222,7 @@ dependencies = [
 name = "unko-netplay"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "ggrs",
  "unko-core",
 ]

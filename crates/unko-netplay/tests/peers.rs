@@ -381,8 +381,8 @@ fn peers_converge_over_a_hole_punched_transport() {
 fn peers_converge_over_a_relay() {
     let mut server = RelayServer::spawn("127.0.0.1:0").expect("relay");
     let relay = server.local_addr().to_string();
-    let mut a = RelayTransport::bind("127.0.0.1:0", &relay, "test").expect("a");
-    let mut b = RelayTransport::bind("127.0.0.1:0", &relay, "test").expect("b");
+    let mut a = RelayTransport::bind("127.0.0.1:0", &relay, "test", 0).expect("a");
+    let mut b = RelayTransport::bind("127.0.0.1:0", &relay, "test", 1).expect("b");
     for _ in 0..100 {
         a.pump();
         b.pump();

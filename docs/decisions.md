@@ -98,8 +98,8 @@ This is additive: the shell, ABI and frontend do not change.
 
 ## ADR-0009 — rollback netcode: GGRS
 
-Direct-UDP netplay uses **GGRS** (`gschup/ggrs` 0.13, MIT OR Apache-2.0) as the
-rollback engine. `GgrsNetplay` implements `ggrs::Config` for the NES input and
+Netplay uses **GGRS** (`gschup/ggrs` 0.13, MIT OR Apache-2.0) as the rollback
+engine for direct UDP, hole punching and the relay room. `GgrsNetplay` implements `ggrs::Config` for the NES input and
 state shape and maps `SaveGameState`/`LoadGameState`/`AdvanceFrame` requests onto
 `unko_core::Core`, so the core and shell do not depend on GGRS internals.
 
@@ -111,8 +111,8 @@ Consequences:
 - A GGRS desync is reported and pauses the session; GGRS has no state-transfer
   repair. The legacy engine keeps its chunked repair for the transports it
   still serves.
-- UDP hole punching and the `unko-relay` room fallback still use the legacy
-  `RollbackSession` because those transports do not expose GGRS's per-peer
-  source address. A `ggrs::NonBlockingSocket` adapter is the follow-up.
+- Hole punching and the `unko-relay` room implement `ggrs::NonBlockingSocket`
+  adapters. Relay frames are directed by player-slot member ids and the relay
+  server prepends the source id, so GGRS does not need public peer addresses.
 - The GGRS path is covered by a loopback integration test and the
   `netplay_harness --engine ggrs` two-host harness on the real NES core.

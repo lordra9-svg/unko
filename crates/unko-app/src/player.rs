@@ -22,9 +22,9 @@ use crate::slots::{
     default_slot_name, now_unix, sanitize_slot_name, SlotInfo, SlotMeta, SlotStore,
 };
 use unko_netplay::{
-    DesyncInfo, DesyncMonitor, GgrsNetplay, InputFrame, PredictionMode, RollbackSession,
-    SessionConfig, SessionStats, StateAck, StateChunk, StateHash, StateReassembler, StateSender,
-    Transport,
+    DesyncInfo, DesyncMonitor, GgrsNetplay, HolePunchTransport, InputFrame, PredictionMode,
+    RelayTransport, RollbackSession, SessionConfig, SessionStats, StateAck, StateChunk, StateHash,
+    StateReassembler, StateSender, Transport,
 };
 
 /// Maximum frames emulated in one UI update. When the desktop stalls the
@@ -1220,6 +1220,7 @@ impl Player {
     ///
     /// Movies, rewind and run-ahead are disabled while netplay is active.
     #[cfg(test)]
+    #[cfg(test)]
     pub fn start_netplay(&mut self, transport: Box<dyn Transport>, buffer_frames: usize) {
         self.start_netplay_with(
             transport,
@@ -1239,17 +1240,46 @@ impl Player {
         peers: &[String],
         config: SessionConfig,
     ) -> Result<(), String> {
-        self.core.reset().map_err(|err| err.to_string())?;
-        self.ggrs = Some(GgrsNetplay::start(bind_port, peers, config)?);
+        let session = GgrsNetplay::start(bind_port, peers, config)?;
+        self.begin_ggrs(session);
+        Ok(())
+    }
+
+    /// Starts GGRS over a completed hole-punch transport.
+    pub fn start_ggrs_punch(
+        &mut self,
+        transport: HolePunchTransport,
+        peers: &[String],
+        config: SessionConfig,
+    ) -> Result<(), String> {
+        let session = GgrsNetplay::start_punch(transport, peers, config)?;
+        self.begin_ggrs(session);
+        Ok(())
+    }
+
+    /// Starts GGRS over a joined relay room.
+    pub fn start_ggrs_relay(
+        &mut self,
+        transport: RelayTransport,
+        config: SessionConfig,
+    ) -> Result<(), String> {
+        let session = GgrsNetplay::start_relay(transport, config)?;
+        self.begin_ggrs(session);
+        Ok(())
+    }
+
+    fn begin_ggrs(&mut self, session: GgrsNetplay) {
+        let _ = self.core.reset();
+        self.ggrs = Some(session);
         self.netplay = None;
         self.frames = 0;
         self.paused = false;
-        Ok(())
     }
 
     /// Starts a rollback netplay session with explicit tuning.
     ///
     /// Movies, rewind and run-ahead are disabled while netplay is active.
+    #[cfg(test)]
     pub fn start_netplay_with(&mut self, transport: Box<dyn Transport>, config: SessionConfig) {
         self.movie_record = None;
         self.movie_playback = None;

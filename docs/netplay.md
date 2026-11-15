@@ -9,11 +9,12 @@ states.
 | Path | Rollback engine |
 |---|---|
 | Direct UDP | **GGRS** (`gschup/ggrs` 0.13, `ggrs::P2PSession`) |
-| UDP hole punching | legacy `RollbackSession` |
-| `unko-relay` room | legacy `RollbackSession` |
+| UDP hole punching | **GGRS** over a `NonBlockingSocket` adapter |
+| `unko-relay` room | **GGRS** over a directed relay adapter |
 
 `GgrsNetplay` implements `ggrs::Config` (`Input = u16`, `State = Vec<u8>`,
-`Address = SocketAddr`) and translates GGRS requests into `Core` calls:
+`Address = GgrsAddress::{Direct, Relay}`) and translates GGRS requests into
+`Core` calls:
 
 - `SaveGameState` serializes the core state and passes a 128-bit FNV-1a
   checksum to GGRS for desync detection.
@@ -29,8 +30,13 @@ reports the active engine, frame, confirmed frame, rollbacks, predicted
 port-frames, deepest rollback and desync reports. GGRS cannot repair a desync:
 the session pauses and must be restarted.
 
-The legacy engine is retained for the transports that do not expose GGRS's
-per-peer source address yet:
+Relay sessions use the player slot as a stable member id. The relay server
+prepends the sender's id to forwarded frames, and the client adapter maps that
+id to `GgrsAddress::Relay(id)`, so GGRS needs no public peer addresses. Hole
+punching maps the confirmed peer address to `GgrsAddress::Direct(addr)`.
+
+The legacy engine remains as a library fallback and for
+`netplay_harness --engine legacy`:
 
 - One instance owns one controller slot; 2-4 players are supported. Input
   messages carry the sender's player tag (`UNKOI2`), and each session keeps a
@@ -52,29 +58,29 @@ per-peer source address yet:
 | Transport | Use |
 |---|---|
 | GGRS UDP socket | Direct UDP to one peer per player (LAN or forwarded port) |
+| `HolePunchTransport` + adapter | Hole-punched direct UDP; exchange `PUNCH`/`PONG` and start only after bidirectional traffic |
+| `RelayTransport` + adapter | Directed relay room (`unko-relay`), member ids = player slots |
 | `UdpMesh` | Legacy direct/mesh transport used by the legacy engine and tests |
 | UPnP-IGD | Ask the router to open the UDP port and report the public endpoint |
 | STUN (RFC 5389) | Discover the external IP when UPnP is unavailable |
-| `HolePunchTransport` | Exchange `PUNCH`/`PONG` datagrams; start only after bidirectional traffic |
-| `RelayTransport` + `unko-relay` | Room-based fallback when direct paths fail |
 | Manual endpoint | User-supplied public `ip:port` |
 
 The window is **Tools → NetPlay…**: role, players, slot, ports, peers, public
 endpoint, UPnP/STUN detection, hole punch, relay server/room, prediction and
 input delay. Direct UDP starts GGRS and resets the core; the console is paused
-during a hole-punch handshake so both legacy peers start from the same frame.
+during a hole-punch handshake so both peers start from the same frame.
 
 ## Two-host harness
 
 `crates/unko-nes-dev/src/bin/netplay_harness.rs` runs one side of a real UDP
-session on the actual NES core. `--engine ggrs` validates the direct GGRS path
-in lockstep mode (no prediction): it runs exactly the requested frames, then
-compares the final save-state hash with an independent local run of both
-deterministic input sequences. The GGRS library also has loopback integration
-tests for rollback and lockstep sessions using a `Core` test double. It builds a synthetic NROM whose RAM
-accumulates both controller ports, runs a deterministic input sequence,
-prints the final save-state hash, and compares it with an independent local
-run of the true input sequence. No commercial ROM is needed.
+session on the actual NES core. `--engine ggrs` validates any GGRS transport
+(`mesh`, `punch`, `relay`) in lockstep mode (no prediction): it runs exactly
+the requested frames, then compares the final save-state hash with an
+independent local run of both deterministic input sequences. The GGRS library
+also has loopback integration tests for rollback and lockstep sessions over
+direct, punch and relay adapters using a `Core` test double. The harness builds
+a synthetic NROM whose RAM accumulates both controller ports, runs a
+deterministic input sequence and needs no commercial ROM.
 
 ```sh
 cargo build --release -p unko-nes-dev --bin netplay_harness
@@ -85,6 +91,19 @@ netplay_harness --role host --engine ggrs --bind 192.168.12.252:7901 \
     --peer 192.168.12.252:7902 --frames 240
 netplay_harness --role join --engine ggrs --bind 192.168.12.252:7902 \
     --peer 192.168.12.252:7901 --frames 240
+
+# Hole punching with GGRS
+netplay_harness --role host --engine ggrs --transport punch \
+    --bind 192.168.12.252:7911 --peer 192.168.12.252:7912 --frames 240
+netplay_harness --role join --engine ggrs --transport punch \
+    --bind 192.168.12.252:7912 --peer 192.168.12.252:7911 --frames 240
+
+# Relay with GGRS (run unko-relay first)
+unko-relay --bind 192.168.12.252:7900
+netplay_harness --role host --engine ggrs --transport relay \
+    --relay 192.168.12.252:7900 --room demo --bind 192.168.12.252:7901 --frames 240
+netplay_harness --role join --engine ggrs --transport relay \
+    --relay 192.168.12.252:7900 --room demo --bind 192.168.12.252:7902 --frames 240
 
 # Direct UDP with the legacy engine (the default)
 netplay_harness --role host --bind 192.168.12.252:7901 \

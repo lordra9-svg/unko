@@ -116,18 +116,20 @@ NES-shaped; moving them is the second half of roadmap **A8**.
 
 ## ROM manager core
 
-`unko-netplay` provides two rollback engines. **Direct UDP uses GGRS**
-(`ggrs::P2PSession`): `GgrsNetplay` implements the GGRS `Config` for the NES
-input/state shape, maps `SaveGameState`/`LoadGameState`/`AdvanceFrame` requests
-onto `Core`, and uses GGRS checksum desync detection. The app resets the core
-and keeps frames frozen until the handshake completes. The legacy engine
-provides framed per-player input messages, a `Transport` trait (in-process
-channel pair, connected `UdpTransport`, and `UdpMesh`/`MeshTransport` for 2-4
-player meshes), a serialized-state `RollbackBuffer`, and `RollbackSession`.
-Hole punching and the `unko-relay` room server still use that engine because
-their transports do not expose GGRS's per-peer source address yet.
+`unko-netplay` uses **GGRS** (`ggrs::P2PSession`) for direct UDP, hole punching
+and the `unko-relay` room. `GgrsNetplay` implements the GGRS `Config` for the
+NES input/state shape, maps `SaveGameState`/`LoadGameState`/`AdvanceFrame`
+requests onto `Core`, and uses GGRS checksum desync detection. The app resets
+the core and keeps frames frozen until the handshake completes. Direct UDP uses
+GGRS's UDP socket; hole punching and relay implement `NonBlockingSocket`
+adapters. Relay frames are directed by player-slot member ids and the relay
+server prepends the source id, so GGRS sees stable per-peer identities without
+public addresses.
 
-`SessionConfig` selects the player count, local slot, prediction and input
+The legacy engine (framed per-player input messages, `Transport`, a
+serialized-state `RollbackBuffer`, and `RollbackSession`) remains as a library
+fallback and powers `netplay_harness --engine legacy`; the app no longer starts
+it. `SessionConfig` selects the player count, local slot, prediction and input
 delay. GGRS uses repeat-last prediction; the legacy engine also offers neutral.
 `upnp` adds a std-only UPnP-IGD client (SSDP discovery, device-description
 fetch, `AddPortMapping`, `GetExternalIPAddress`) used from a worker thread;

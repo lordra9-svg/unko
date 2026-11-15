@@ -3029,12 +3029,16 @@ impl App {
                 self.netplay_status = "Relay rooms need a name.".into();
                 return;
             }
-            match RelayTransport::bind(&format!("0.0.0.0:{port}"), &relay, &room) {
-                Ok(transport) => {
-                    player.start_netplay_with(Box::new(transport), config);
-                    self.netplay_status =
-                        format!("Relay room {room} on {relay}, UDP {port} local.");
-                }
+            match RelayTransport::bind(&format!("0.0.0.0:{port}"), &relay, &room, slot) {
+                Ok(transport) => match player.start_ggrs_relay(transport, config) {
+                    Ok(()) => {
+                        self.netplay_status = format!(
+                            "GGRS relay room {room} on {relay}, slot {}.",
+                            config.local_player + 1
+                        );
+                    }
+                    Err(err) => self.netplay_status = format!("Relay GGRS setup failed: {err}"),
+                },
                 Err(err) => self.netplay_status = format!("Relay setup failed: {err}"),
             }
             return;
@@ -3172,14 +3176,26 @@ impl App {
                 .take()
                 .expect("pending hole punch");
             self.netplay_punch_deadline = None;
-            match RelayTransport::bind(&format!("0.0.0.0:{port}"), &relay, &room) {
+            match RelayTransport::bind(
+                &format!("0.0.0.0:{port}"),
+                &relay,
+                &room,
+                config.local_player,
+            ) {
                 Ok(relay_transport) => {
                     if let Some(player) = &mut self.player {
-                        player.start_netplay_with(Box::new(relay_transport), config);
-                        player.paused = !self.netplay_resume_after_punch;
+                        match player.start_ggrs_relay(relay_transport, config) {
+                            Ok(()) => {
+                                player.paused = !self.netplay_resume_after_punch;
+                                self.netplay_status = format!(
+                                    "Hole punch timed out; GGRS relaying via {relay} room {room}."
+                                );
+                            }
+                            Err(err) => {
+                                self.netplay_status = format!("Relay GGRS setup failed: {err}");
+                            }
+                        }
                     }
-                    self.netplay_status =
-                        format!("Hole punch timed out; relaying via {relay} room {room}.");
                 }
                 Err(err) => {
                     self.netplay_status =
@@ -3202,10 +3218,24 @@ impl App {
                 .take()
                 .expect("pending hole punch");
             self.netplay_punch_deadline = None;
+            let peers: Vec<String> = self
+                .netplay_peer
+                .split(',')
+                .map(str::trim)
+                .filter(|peer| !peer.is_empty())
+                .map(str::to_string)
+                .collect();
             if let Some(player) = &mut self.player {
-                player.start_netplay_with(Box::new(transport), config);
-                player.paused = !self.netplay_resume_after_punch;
-                self.netplay_status = format!("Hole punch confirmed ({total}/{total}); running.");
+                match player.start_ggrs_punch(transport, &peers, config) {
+                    Ok(()) => {
+                        player.paused = !self.netplay_resume_after_punch;
+                        self.netplay_status =
+                            format!("Hole punch confirmed ({total}/{total}); GGRS running.");
+                    }
+                    Err(err) => {
+                        self.netplay_status = format!("Punch GGRS setup failed: {err}");
+                    }
+                }
             }
             if self.netplay_upnp {
                 self.spawn_nat_detect();

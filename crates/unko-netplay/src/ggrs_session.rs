@@ -5,20 +5,42 @@
 //! synchronization and checksum desync detection; this module only turns its
 //! requests into `Core` save/load/advance calls.
 //!
-//! Direct UDP is supported. The relay and hole-punch transports still use the
-//! legacy session until a `NonBlockingSocket` adapter tags their sources.
+//! Direct UDP, UDP hole punching and the relay transport are supported through
+//! [`ggrs::NonBlockingSocket`] adapters. The relay adapter uses explicit member
+//! ids assigned by the client (the player slot) rather than public addresses.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
 use ggrs::{
-    Config, DesyncDetection, Frame, GgrsError, GgrsEvent, GgrsRequest, InputStatus, P2PSession,
-    PlayerHandle, PlayerType, SessionBuilder, SessionState, UdpNonBlockingSocket,
+    Config, DesyncDetection, Frame, GgrsError, GgrsEvent, GgrsRequest, InputStatus, Message,
+    NonBlockingSocket, P2PSession, PlayerHandle, PlayerType, SessionBuilder, SessionState,
+    UdpNonBlockingSocket,
 };
 use unko_core::{Core, InputState};
 
+use crate::holepunch::HolePunchTransport;
+use crate::relay::RelayTransport;
 use crate::session::{PredictionMode, SessionConfig, SessionStats};
 use crate::sync::DesyncInfo;
+
+/// Endpoint identity for a GGRS peer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GgrsAddress {
+    /// Direct UDP or hole-punched peer address.
+    Direct(SocketAddr),
+    /// Relay room member id (the player slot).
+    Relay(u8),
+}
+
+impl std::fmt::Display for GgrsAddress {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Direct(address) => write!(formatter, "{address}"),
+            Self::Relay(member) => write!(formatter, "relay#{member}"),
+        }
+    }
+}
 
 /// GGRS game configuration for the NES core.
 pub struct GgrsConfig;
@@ -30,15 +52,15 @@ impl Config for GgrsConfig {
     type InputPredictor = ggrs::PredictRepeatLast;
     /// A serialized `Core` save state.
     type State = Vec<u8>;
-    /// Direct UDP endpoint.
-    type Address = SocketAddr;
+    /// Direct address or relay member id.
+    type Address = GgrsAddress;
 }
 
 /// A running GGRS peer-to-peer session.
 pub struct GgrsNetplay {
     session: P2PSession<GgrsConfig>,
     local_handle: PlayerHandle,
-    remote_handles: HashMap<SocketAddr, PlayerHandle>,
+    remote_handles: HashMap<GgrsAddress, PlayerHandle>,
     config: SessionConfig,
     stats: SessionStats,
     running: bool,
@@ -54,7 +76,7 @@ impl GgrsNetplay {
     /// with the local player's own slot omitted. Both peers must build the
     /// same player list; the local slot comes from `config.local_player`.
     pub fn start(bind_port: u16, peers: &[String], config: SessionConfig) -> Result<Self, String> {
-        Self::start_inner(bind_port, peers, config, false)
+        Self::start_lockstep_mode(bind_port, peers, config, false)
     }
 
     /// Starts a lockstep session (no prediction) for deterministic validation.
@@ -63,12 +85,84 @@ impl GgrsNetplay {
         peers: &[String],
         config: SessionConfig,
     ) -> Result<Self, String> {
-        Self::start_inner(bind_port, peers, config, true)
+        Self::start_lockstep_mode(bind_port, peers, config, true)
     }
 
-    fn start_inner(
+    /// Starts GGRS over a hole-punched transport.
+    pub fn start_punch(
+        transport: HolePunchTransport,
+        peers: &[String],
+        config: SessionConfig,
+    ) -> Result<Self, String> {
+        Self::start_punch_mode(transport, peers, config, false)
+    }
+
+    /// Lockstep hole-punch session for deterministic validation.
+    pub fn start_punch_lockstep(
+        transport: HolePunchTransport,
+        peers: &[String],
+        config: SessionConfig,
+    ) -> Result<Self, String> {
+        Self::start_punch_mode(transport, peers, config, true)
+    }
+
+    fn start_punch_mode(
+        transport: HolePunchTransport,
+        peers: &[String],
+        config: SessionConfig,
+        lockstep: bool,
+    ) -> Result<Self, String> {
+        let addresses = parse_direct_peers(peers, config)?;
+        Self::start_with_socket(PunchSocket { transport }, addresses, config, lockstep)
+    }
+
+    /// Starts GGRS over a relay room. Member ids are the player slots; the
+    /// transport must have joined with `config.local_player`.
+    pub fn start_relay(transport: RelayTransport, config: SessionConfig) -> Result<Self, String> {
+        Self::start_relay_mode(transport, config, false)
+    }
+
+    /// Lockstep relay session for deterministic validation.
+    pub fn start_relay_lockstep(
+        transport: RelayTransport,
+        config: SessionConfig,
+    ) -> Result<Self, String> {
+        Self::start_relay_mode(transport, config, true)
+    }
+
+    fn start_relay_mode(
+        transport: RelayTransport,
+        config: SessionConfig,
+        lockstep: bool,
+    ) -> Result<Self, String> {
+        let config = config.normalized();
+        let players = usize::from(config.players);
+        let local = usize::from(config.local_player);
+        let addresses: Vec<GgrsAddress> = (0..players)
+            .filter(|handle| *handle != local)
+            .map(|handle| GgrsAddress::Relay(handle as u8))
+            .collect();
+        Self::start_with_socket(RelaySocket { transport }, addresses, config, lockstep)
+    }
+
+    fn start_lockstep_mode(
         bind_port: u16,
         peers: &[String],
+        config: SessionConfig,
+        lockstep: bool,
+    ) -> Result<Self, String> {
+        if bind_port == 0 {
+            return Err("bind port must be non-zero".into());
+        }
+        let addresses = parse_direct_peers(peers, config)?;
+        let socket = UdpNonBlockingSocket::bind_to_port(bind_port)
+            .map_err(|err| format!("bind UDP {bind_port}: {err}"))?;
+        Self::start_with_socket(DirectSocket { inner: socket }, addresses, config, lockstep)
+    }
+
+    fn start_with_socket(
+        socket: impl NonBlockingSocket<GgrsAddress> + 'static,
+        addresses: Vec<GgrsAddress>,
         config: SessionConfig,
         lockstep: bool,
     ) -> Result<Self, String> {
@@ -77,18 +171,13 @@ impl GgrsNetplay {
         // repeat-last. Direct sessions therefore ignore `PredictionMode`.
         config.prediction = PredictionMode::LastInput;
         let players = usize::from(config.players);
-        if peers.len() != players.saturating_sub(1) {
+        if addresses.len() != players.saturating_sub(1) {
             return Err(format!(
                 "{} players need exactly {} peer address(es), found {}",
                 players,
                 players.saturating_sub(1),
-                peers.len()
+                addresses.len()
             ));
-        }
-        let mut addresses = Vec::with_capacity(peers.len());
-        for peer in peers {
-            let address: SocketAddr = peer.parse().map_err(|err| format!("{peer}: {err}"))?;
-            addresses.push(address);
         }
 
         let mut builder = SessionBuilder::<GgrsConfig>::new()
@@ -121,8 +210,6 @@ impl GgrsNetplay {
                     .map_err(|err| err.to_string())?;
             }
         }
-        let socket = UdpNonBlockingSocket::bind_to_port(bind_port)
-            .map_err(|err| format!("bind UDP {bind_port}: {err}"))?;
         let session = builder
             .start_p2p_session(socket)
             .map_err(|err| err.to_string())?;
@@ -294,6 +381,98 @@ impl GgrsNetplay {
     }
 }
 
+fn parse_direct_peers(peers: &[String], config: SessionConfig) -> Result<Vec<GgrsAddress>, String> {
+    let players = usize::from(config.normalized().players);
+    if peers.len() != players.saturating_sub(1) {
+        return Err(format!(
+            "{} players need exactly {} peer address(es), found {}",
+            players,
+            players.saturating_sub(1),
+            peers.len()
+        ));
+    }
+    let mut addresses = Vec::with_capacity(peers.len());
+    for peer in peers {
+        let address: SocketAddr = peer.parse().map_err(|err| format!("{peer}: {err}"))?;
+        if address.is_ipv6() {
+            return Err(format!("{address}: GGRS direct UDP supports IPv4 only"));
+        }
+        addresses.push(GgrsAddress::Direct(address));
+    }
+    Ok(addresses)
+}
+
+/// GGRS socket over the built-in non-blocking UDP socket.
+struct DirectSocket {
+    inner: UdpNonBlockingSocket,
+}
+
+impl NonBlockingSocket<GgrsAddress> for DirectSocket {
+    fn send_to(&mut self, msg: &Message, addr: &GgrsAddress) {
+        if let GgrsAddress::Direct(address) = addr {
+            self.inner.send_to(msg, address);
+        }
+    }
+
+    fn receive_all_messages(&mut self) -> Vec<(GgrsAddress, Message)> {
+        self.inner
+            .receive_all_messages()
+            .into_iter()
+            .map(|(address, message)| (GgrsAddress::Direct(address), message))
+            .collect()
+    }
+}
+
+/// GGRS socket over a hole-punched UDP transport.
+struct PunchSocket {
+    transport: HolePunchTransport,
+}
+
+impl NonBlockingSocket<GgrsAddress> for PunchSocket {
+    fn send_to(&mut self, msg: &Message, addr: &GgrsAddress) {
+        if let GgrsAddress::Direct(address) = addr {
+            if let Ok(bytes) = bincode::serialize(msg) {
+                let _ = self.transport.send_to(*address, &bytes);
+            }
+        }
+    }
+
+    fn receive_all_messages(&mut self) -> Vec<(GgrsAddress, Message)> {
+        let mut messages = Vec::new();
+        while let Ok(Some((address, bytes))) = self.transport.recv_from() {
+            if let Ok(message) = bincode::deserialize(&bytes) {
+                messages.push((GgrsAddress::Direct(address), message));
+            }
+        }
+        messages
+    }
+}
+
+/// GGRS socket over the relay room.
+struct RelaySocket {
+    transport: RelayTransport,
+}
+
+impl NonBlockingSocket<GgrsAddress> for RelaySocket {
+    fn send_to(&mut self, msg: &Message, addr: &GgrsAddress) {
+        if let GgrsAddress::Relay(member) = addr {
+            if let Ok(bytes) = bincode::serialize(msg) {
+                let _ = self.transport.send_to(*member, &bytes);
+            }
+        }
+    }
+
+    fn receive_all_messages(&mut self) -> Vec<(GgrsAddress, Message)> {
+        let mut messages = Vec::new();
+        while let Ok(Some((member, bytes))) = self.transport.recv_from() {
+            if let Ok(message) = bincode::deserialize(&bytes) {
+                messages.push((GgrsAddress::Relay(member), message));
+            }
+        }
+        messages
+    }
+}
+
 /// Stable 128-bit FNV-1a checksum for GGRS desync detection.
 fn checksum(bytes: &[u8]) -> u128 {
     let mut hash: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
@@ -313,6 +492,7 @@ fn frame_number(frame: Frame) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::relay::RelayServer;
     use unko_core::{AudioBuffer, CoreError, FrameBuffer, FrameStats, LoadOptions, PixelFormat};
 
     #[derive(Default)]
@@ -503,6 +683,89 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
         assert!(a_frames >= 40 && b_frames >= 40, "both peers advanced");
+        assert_eq!(core_a.state(), core_b.state());
+    }
+
+    fn test_config(local_player: u8) -> SessionConfig {
+        SessionConfig {
+            players: 2,
+            local_player,
+            input_delay: 0,
+            buffer_frames: 8,
+            prediction: PredictionMode::LastInput,
+            hash_states: false,
+        }
+    }
+
+    fn run_lockstep_pair(
+        mut host: GgrsNetplay,
+        mut join: GgrsNetplay,
+        frames: u32,
+    ) -> (TestCore, TestCore) {
+        let mut core_a = TestCore::default();
+        let mut core_b = TestCore::default();
+        let mut a_frames = 0;
+        let mut b_frames = 0;
+        for _ in 0..8000 {
+            if a_frames < frames && host.step(&mut core_a, 0x01).unwrap_or(false) {
+                a_frames += 1;
+            }
+            if b_frames < frames && join.step(&mut core_b, 0x02).unwrap_or(false) {
+                b_frames += 1;
+            }
+            if a_frames >= frames && b_frames >= frames {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(
+            a_frames >= frames && b_frames >= frames,
+            "both peers advanced"
+        );
+        (core_a, core_b)
+    }
+
+    #[test]
+    fn relay_ggrs_sessions_reach_the_same_state() {
+        let relay = RelayServer::spawn("127.0.0.1:0").expect("relay");
+        let endpoint = relay.local_addr().to_string();
+        let mut a = RelayTransport::bind("127.0.0.1:0", &endpoint, "ggrs", 0).expect("relay a");
+        let mut b = RelayTransport::bind("127.0.0.1:0", &endpoint, "ggrs", 1).expect("relay b");
+        for _ in 0..100 {
+            a.pump();
+            b.pump();
+            if a.joined() && b.joined() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(a.joined() && b.joined(), "relay joined");
+        let host = GgrsNetplay::start_relay_lockstep(a, test_config(0)).expect("host");
+        let join = GgrsNetplay::start_relay_lockstep(b, test_config(1)).expect("join");
+        let (core_a, core_b) = run_lockstep_pair(host, join, 30);
+        assert_eq!(core_a.state(), core_b.state());
+    }
+
+    #[test]
+    fn punch_ggrs_sessions_reach_the_same_state() {
+        let host_addr: SocketAddr = "127.0.0.1:7760".parse().unwrap();
+        let join_addr: SocketAddr = "127.0.0.1:7761".parse().unwrap();
+        let mut a = HolePunchTransport::bind("127.0.0.1:7760", &[join_addr]).expect("punch a");
+        let mut b = HolePunchTransport::bind("127.0.0.1:7761", &[host_addr]).expect("punch b");
+        for _ in 0..200 {
+            a.punch();
+            b.punch();
+            if a.connected() && b.connected() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(a.connected() && b.connected(), "punch connected");
+        let host = GgrsNetplay::start_punch_lockstep(a, &[join_addr.to_string()], test_config(0))
+            .expect("host");
+        let join = GgrsNetplay::start_punch_lockstep(b, &[host_addr.to_string()], test_config(1))
+            .expect("join");
+        let (core_a, core_b) = run_lockstep_pair(host, join, 30);
         assert_eq!(core_a.state(), core_b.state());
     }
 

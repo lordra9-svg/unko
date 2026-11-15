@@ -239,7 +239,7 @@ fn build_transport(args: &Args) -> Result<Box<dyn Transport>, String> {
         }
         "relay" => {
             let relay = args.relay.as_ref().ok_or("relay needs --relay")?;
-            let mut transport = RelayTransport::bind(&args.bind, relay, &args.room)
+            let mut transport = RelayTransport::bind(&args.bind, relay, &args.room, args.role)
                 .map_err(|err| err.to_string())?;
             let deadline = Instant::now() + Duration::from_secs(10);
             while !transport.joined() {
@@ -414,20 +414,10 @@ fn reference_hash(rom: &[u8], frames: u32) -> Result<u64, String> {
 /// Runs one side of a direct GGRS session and compares its final state with a
 /// local reference run of both known input sequences.
 fn run_ggrs(args: &Args) -> Result<(), String> {
-    if args.transport != "mesh" {
-        return Err("--engine ggrs only supports --transport mesh (direct UDP)".into());
-    }
     if args.inject.is_some() {
         return Err("--engine ggrs does not support --inject-desync".into());
     }
-    let peer = args.peer.clone().ok_or("ggrs needs --peer")?;
-    let port: u16 = args
-        .bind
-        .rsplit(':')
-        .next()
-        .ok_or("--bind needs host:port")?
-        .parse()
-        .map_err(|_| "--bind needs host:port with a numeric port")?;
+    let peer = args.peer.clone();
     let config = SessionConfig {
         buffer_frames: 8,
         input_delay: args.delay,
@@ -441,7 +431,49 @@ fn run_ggrs(args: &Args) -> Result<(), String> {
     core.load(&rom, &LoadOptions::default())
         .map_err(|err| err.to_string())?;
     core.reset().map_err(|err| err.to_string())?;
-    let mut session = GgrsNetplay::start_lockstep(port, &[peer], config)?;
+    let mut session = match args.transport.as_str() {
+        "mesh" => {
+            let peer = peer.ok_or("mesh needs --peer")?;
+            let port: u16 = args
+                .bind
+                .rsplit(':')
+                .next()
+                .ok_or("--bind needs host:port")?
+                .parse()
+                .map_err(|_| "--bind needs host:port with a numeric port")?;
+            GgrsNetplay::start_lockstep(port, std::slice::from_ref(&peer), config)?
+        }
+        "punch" => {
+            let peer = peer.ok_or("punch needs --peer")?;
+            let endpoint: SocketAddr = peer.parse().map_err(|err| format!("--peer: {err}"))?;
+            let mut punch =
+                HolePunchTransport::bind(&args.bind, &[endpoint]).map_err(|err| err.to_string())?;
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !punch.connected() {
+                if Instant::now() >= deadline {
+                    return Err("hole punch timed out".into());
+                }
+                punch.punch();
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            GgrsNetplay::start_punch_lockstep(punch, std::slice::from_ref(&peer), config)?
+        }
+        "relay" => {
+            let relay = args.relay.clone().ok_or("relay needs --relay")?;
+            let mut transport = RelayTransport::bind(&args.bind, &relay, &args.room, args.role)
+                .map_err(|err| err.to_string())?;
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !transport.joined() {
+                if Instant::now() >= deadline {
+                    return Err("relay join timed out".into());
+                }
+                transport.pump();
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            GgrsNetplay::start_relay_lockstep(transport, config)?
+        }
+        other => return Err(format!("unknown GGRS transport {other}")),
+    };
 
     // Lockstep GGRS only advances when every input is confirmed, so the
     // requested frame count is also the comparison point.
@@ -484,8 +516,9 @@ fn run_ggrs(args: &Args) -> Result<(), String> {
         .map_err(|err| err.to_string())?;
     let reference_hash = fnv1a(&reference_state);
     println!(
-        "ggrs role={} frames={} session={session_hash:016x} reference={reference_hash:016x} match={}",
+        "ggrs role={} transport={} frames={} session={session_hash:016x} reference={reference_hash:016x} match={}",
         if args.role == 0 { "host" } else { "join" },
+        args.transport,
         args.frames,
         session_hash == reference_hash
     );

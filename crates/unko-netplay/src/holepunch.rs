@@ -39,7 +39,7 @@ pub struct PunchPeer {
 pub struct HolePunchTransport {
     socket: UdpSocket,
     peers: BTreeMap<SocketAddr, bool>,
-    pending: VecDeque<Vec<u8>>,
+    pending: VecDeque<(SocketAddr, Vec<u8>)>,
     buffer: Vec<u8>,
     last_punch: Option<Instant>,
 }
@@ -147,7 +147,7 @@ impl HolePunchTransport {
                             }
                         }
                     } else if size > 0 {
-                        self.pending.push_back(data.to_vec());
+                        self.pending.push_back((from, data.to_vec()));
                     }
                 }
                 Err(err)
@@ -185,6 +185,49 @@ fn control_kind(data: &[u8]) -> Option<Control> {
     }
 }
 
+impl HolePunchTransport {
+    /// Sends one datagram to a known peer.
+    ///
+    /// # Errors
+    ///
+    /// Returns the socket error, or an error when `peer` is not configured.
+    pub fn send_to(&mut self, peer: SocketAddr, bytes: &[u8]) -> io::Result<()> {
+        if !self.peers.contains_key(&peer) {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "unknown punch peer",
+            ));
+        }
+        if bytes.len() > MAX_DATAGRAM {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "netplay message is too large for one datagram",
+            ));
+        }
+        let sent = self.socket.send_to(bytes, peer)?;
+        if sent != bytes.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "partial punch datagram",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Receives one `(source, payload)` datagram, or `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the socket error.
+    pub fn recv_from(&mut self) -> io::Result<Option<(SocketAddr, Vec<u8>)>> {
+        if let Some(message) = self.pending.pop_front() {
+            return Ok(Some(message));
+        }
+        self.drain();
+        Ok(self.pending.pop_front())
+    }
+}
+
 impl Transport for HolePunchTransport {
     fn send(&mut self, bytes: &[u8]) -> io::Result<()> {
         if bytes.len() > MAX_DATAGRAM {
@@ -203,11 +246,7 @@ impl Transport for HolePunchTransport {
     }
 
     fn recv(&mut self) -> io::Result<Option<Vec<u8>>> {
-        if let Some(message) = self.pending.pop_front() {
-            return Ok(Some(message));
-        }
-        self.drain();
-        Ok(self.pending.pop_front())
+        Ok(self.recv_from()?.map(|(_, bytes)| bytes))
     }
 }
 
