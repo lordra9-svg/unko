@@ -7,6 +7,7 @@ use std::fs;
 use std::path::Path;
 
 use unko_core::{Core, LoadOptions, PortDevice, Region, VideoFilter};
+use unko_nes_api::NesCore;
 use unko_nes_host::AccuracyCore;
 
 fn load_nestest() -> Option<Vec<u8>> {

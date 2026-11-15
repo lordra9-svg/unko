@@ -2,7 +2,7 @@
 
 use unko_core::{
     Accuracy, AudioBuffer, Core, CoreError, CoreInfo, Features, FrameBuffer, FrameStats,
-    InputState, LoadOptions, PixelFormat, SystemId, VideoFilter,
+    InputState, LoadOptions, PixelFormat, SystemId,
 };
 use unko_netplay::holepunch::HolePunchTransport;
 use unko_netplay::input::InputFrame;
@@ -83,7 +83,6 @@ impl Core for TestCore {
         }
     }
     fn set_sample_rate(&mut self, _sample_rate: f32) {}
-    fn set_video_filter(&mut self, _filter: VideoFilter) {}
     fn save_state(&mut self, out: &mut Vec<u8>) -> Result<(), CoreError> {
         out.extend_from_slice(&self.state());
         Ok(())

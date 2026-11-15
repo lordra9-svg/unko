@@ -4117,6 +4117,7 @@ dependencies = [
  "rtrb",
  "sdl3",
  "unko-core",
+ "unko-nes-api",
  "unko-nes-host",
  "unko-netplay",
  "unko-rom",
@@ -4130,6 +4131,7 @@ version = "0.1.0"
 dependencies = [
  "unko-core",
  "unko-nes",
+ "unko-nes-api",
  "unko-nes-host",
  "unko-rom",
  "unko-rom-manager",
@@ -4149,6 +4151,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "unko-nes-api"
+version = "0.1.0"
+dependencies = [
+ "unko-core",
+]
+
+[[package]]
 name = "unko-nes-dev"
 version = "0.1.0"
 dependencies = [
@@ -4164,6 +4173,7 @@ version = "0.1.0"
 dependencies = [
  "unko-core",
  "unko-nes",
+ "unko-nes-api",
 ]
 
 [[package]]

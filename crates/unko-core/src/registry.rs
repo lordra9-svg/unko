@@ -143,8 +143,6 @@ mod tests {
 
         fn set_sample_rate(&mut self, _sample_rate: f32) {}
 
-        fn set_video_filter(&mut self, _filter: crate::types::VideoFilter) {}
-
         fn save_state(&mut self, _out: &mut Vec<u8>) -> Result<(), CoreError> {
             Ok(())
         }

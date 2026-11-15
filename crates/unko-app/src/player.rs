@@ -5,10 +5,11 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use unko_core::{
-    compose_anaglyph, AudioFilterModel, AudioQuality, AudioSource, Core, CoreError, DebugSpace,
-    InputState, LoadOptions, PortDevice, PpuResetBehavior, RamClear, Region, Registry, StereoEye,
-    SystemId, VideoFilter,
+    compose_anaglyph, AudioFilterModel, AudioQuality, AudioSource, CoreError, DebugSpace,
+    InputState, LoadOptions, PortDevice, PpuResetBehavior, RamClear, Region, StereoEye,
+    VideoFilter,
 };
+use unko_nes_api::NesCore;
 
 use crate::audio::AudioOutput;
 use crate::debugger::{Action, DebugView, Debugger};
@@ -153,7 +154,7 @@ impl RewindBuffer {
 
     /// Restores the newest keyframe at or before `target`, replays the
     /// recorded inputs to `target`, and drops the obsolete future states.
-    fn restore(&mut self, core: &mut dyn Core, target: u64) -> Option<u64> {
+    fn restore(&mut self, core: &mut dyn NesCore, target: u64) -> Option<u64> {
         let index = self
             .keyframes
             .iter()
@@ -249,7 +250,7 @@ impl StereoDisplay {
 
 /// A loaded machine plus frontend state (pause, slot, counters).
 pub struct Player {
-    core: Box<dyn Core>,
+    core: Box<dyn NesCore>,
     texture: Option<egui::TextureHandle>,
     /// Pause without dropping the machine.
     pub paused: bool,
@@ -365,7 +366,7 @@ impl Netplay {
     /// predicted remote input, which a later rollback would normally correct
     /// (and cannot after the history is discarded), so the transfer uses a
     /// buffered pre-frame state instead.
-    fn start_state_transfer(&mut self, core: &mut dyn Core) -> Result<bool, CoreError> {
+    fn start_state_transfer(&mut self, core: &mut dyn NesCore) -> Result<bool, CoreError> {
         let Some((frame, state)) = self.session.transfer_snapshot() else {
             return Ok(false);
         };
@@ -399,7 +400,7 @@ impl Netplay {
     /// Loads a reassembled snapshot and acknowledges it.
     fn accept_state(
         &mut self,
-        core: &mut dyn Core,
+        core: &mut dyn NesCore,
         state: &[u8],
         frame: u32,
         checksum: u64,
@@ -457,12 +458,7 @@ impl Player {
             }
             apply_mapper_override(&mut rom, mapper)?;
         }
-        let mut registry = Registry::new();
-        // The accuracy core is the default now that it owns save states.
-        registry.register(unko_nes_host::registration());
-        let mut core = registry
-            .create_default(SystemId::Nes)
-            .ok_or("no NES core registered")?;
+        let mut core: Box<dyn NesCore> = Box::new(unko_nes_host::AccuracyCore::new());
         let save_dir = settings.save_dir.clone();
         fs::create_dir_all(&save_dir).map_err(|err| format!("create save dir: {err}"))?;
         // Key saves by a content hash (FNV-1a 64) in addition to the scan CRC so
@@ -659,7 +655,7 @@ impl Player {
                 let player = netplay.session.config().local_player;
                 let local = self.last_input[usize::from(player)].bits();
                 let ports = self.last_input.map(unko_core::InputState::bits);
-                match netplay.session.step(self.core.as_mut(), ports) {
+                match netplay.session.step(self.core.as_core(), ports) {
                     Ok(frame) => {
                         let message = InputFrame {
                             frame,
@@ -2021,6 +2017,7 @@ fn rom_fingerprint(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use unko_core::Core;
 
     fn pacer_at(start: Instant) -> FramePacer {
         FramePacer::new(start)

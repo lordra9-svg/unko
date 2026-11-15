@@ -21,6 +21,7 @@ use unko_nes::{
     PaletteVariant, PortDevice as NesPortDevice, PpuResetBehavior as NesPpuResetBehavior,
     RamClear as NesRamClear, System,
 };
+use unko_nes_api::NesCore;
 
 /// Stable id of this core implementation.
 pub const CORE_ID: &str = "nes_accuracy_core";
@@ -341,36 +342,6 @@ impl Core for AccuracyCore {
         self.configure_system(system, options)
     }
 
-    fn load_fds(
-        &mut self,
-        disk: &[u8],
-        bios: &[u8],
-        options: &LoadOptions,
-    ) -> Result<(), CoreError> {
-        let system = System::from_fds(disk, bios).map_err(map_err)?;
-        self.configure_system(system, options)
-    }
-
-    fn disk_sides(&self) -> usize {
-        self.system.as_ref().map_or(0, System::disk_side_count)
-    }
-
-    fn current_disk_side(&self) -> usize {
-        self.system.as_ref().map_or(0, System::current_disk_side)
-    }
-
-    fn insert_disk_side(&mut self, side: Option<usize>) {
-        if let Some(system) = self.system.as_mut() {
-            system.insert_disk_side(side);
-        }
-    }
-
-    fn disk_image(&mut self) -> Vec<u8> {
-        self.system
-            .as_mut()
-            .map_or_else(Vec::new, System::save_disk_image)
-    }
-
     fn reset(&mut self) -> Result<(), CoreError> {
         self.system
             .as_mut()
@@ -433,6 +404,70 @@ impl Core for AccuracyCore {
         }
     }
 
+    fn set_audio_quality(&mut self, quality: AudioQuality) {
+        let quality = audio_quality(quality);
+        self.audio_quality = quality;
+        if let Some(system) = self.system.as_mut() {
+            system.set_audio_quality(quality);
+        }
+    }
+
+    fn save_state(&mut self, out: &mut Vec<u8>) -> Result<(), CoreError> {
+        let system = self
+            .system
+            .as_ref()
+            .ok_or_else(|| CoreError::State("no ROM loaded".into()))?;
+        *out = system.save_state().map_err(CoreError::State)?;
+        Ok(())
+    }
+
+    fn load_state(&mut self, state: &[u8]) -> Result<(), CoreError> {
+        let system = self
+            .system
+            .as_mut()
+            .ok_or_else(|| CoreError::State("no ROM loaded".into()))?;
+        system.load_state(state).map_err(CoreError::State)?;
+        self.frame = system.video().to_vec();
+        self.audio.clear();
+        Ok(())
+    }
+
+    fn sram(&mut self) -> &[u8] {
+        self.system.as_ref().map_or(&[], System::sram)
+    }
+}
+
+impl NesCore for AccuracyCore {
+    fn load_fds(
+        &mut self,
+        disk: &[u8],
+        bios: &[u8],
+        options: &LoadOptions,
+    ) -> Result<(), CoreError> {
+        let system = System::from_fds(disk, bios).map_err(map_err)?;
+        self.configure_system(system, options)
+    }
+
+    fn disk_sides(&self) -> usize {
+        self.system.as_ref().map_or(0, System::disk_side_count)
+    }
+
+    fn current_disk_side(&self) -> usize {
+        self.system.as_ref().map_or(0, System::current_disk_side)
+    }
+
+    fn insert_disk_side(&mut self, side: Option<usize>) {
+        if let Some(system) = self.system.as_mut() {
+            system.insert_disk_side(side);
+        }
+    }
+
+    fn disk_image(&mut self) -> Vec<u8> {
+        self.system
+            .as_mut()
+            .map_or_else(Vec::new, System::save_disk_image)
+    }
+
     fn set_video_filter(&mut self, filter: VideoFilter) {
         self.filter = filter;
     }
@@ -448,14 +483,6 @@ impl Core for AccuracyCore {
         self.palette_table = Some(table);
         if let Some(system) = self.system.as_mut() {
             system.set_palette_table(table);
-        }
-    }
-
-    fn set_audio_quality(&mut self, quality: AudioQuality) {
-        let quality = audio_quality(quality);
-        self.audio_quality = quality;
-        if let Some(system) = self.system.as_mut() {
-            system.set_audio_quality(quality);
         }
     }
 
@@ -626,30 +653,6 @@ impl Core for AccuracyCore {
         }
     }
 
-    fn save_state(&mut self, out: &mut Vec<u8>) -> Result<(), CoreError> {
-        let system = self
-            .system
-            .as_ref()
-            .ok_or_else(|| CoreError::State("no ROM loaded".into()))?;
-        *out = system.save_state().map_err(CoreError::State)?;
-        Ok(())
-    }
-
-    fn load_state(&mut self, state: &[u8]) -> Result<(), CoreError> {
-        let system = self
-            .system
-            .as_mut()
-            .ok_or_else(|| CoreError::State("no ROM loaded".into()))?;
-        system.load_state(state).map_err(CoreError::State)?;
-        self.frame = system.video().to_vec();
-        self.audio.clear();
-        Ok(())
-    }
-
-    fn sram(&mut self) -> &[u8] {
-        self.system.as_ref().map_or(&[], System::sram)
-    }
-
     fn debug_supported(&self) -> bool {
         self.system.is_some()
     }
@@ -731,6 +734,14 @@ impl Core for AccuracyCore {
             bytes: decoded.bytes,
             text: decoded.text,
         })
+    }
+
+    fn as_core(&mut self) -> &mut dyn Core {
+        self
+    }
+
+    fn as_core_ref(&self) -> &dyn Core {
+        self
     }
 }
 

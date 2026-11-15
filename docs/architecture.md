@@ -93,9 +93,21 @@ The `unko-nes-host` adapter:
 
 The core is deterministic and has no window, audio-device or filesystem
 dependency. The desktop shell owns SDL3 input, cpal output and all files.
-`unko-core` carries the host contract, but its device/palette/debug vocabulary
-is still NES-shaped; the extension-trait split is queued in `docs/roadmap.md`
-before any second system is added.
+
+`unko_core::Core` is now limited to the generic lifecycle: `load`, `reset`,
+`run_frame`, `video`, `audio`, `set_input`, `set_sample_rate`,
+`set_audio_quality`, save states and SRAM. All NES-only controls moved to
+`unko_nes_api::NesCore`: controller-port devices, Famicom microphone/3D glasses,
+Vs. System input, Miracle Piano, Datach, FDS, core-side palettes and filters,
+cheats and the PPU/APU debugger. `NesCore: Core` also exposes `as_core` /
+`as_core_ref` for generic helpers such as netplay and frame hashing.
+
+The desktop `Player` stores a `Box<dyn NesCore>`; the CLI validates `--core`
+through the registry and then builds the adapter. The registry still returns
+`Box<dyn Core>` for future non-NES systems. A future system implements only
+`Core` plus its own extension trait. The remaining shared types (`PortDevice`,
+`Palette`, `VideoFilter`, `InputState` order and the debug snapshots) are still
+NES-shaped; moving them is the second half of roadmap **A8**.
 
 ## ROM manager core
 

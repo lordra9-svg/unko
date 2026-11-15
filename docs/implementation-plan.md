@@ -39,7 +39,7 @@ Scope decisions from this pass:
 | 10 | Lua scripting (sandboxed 5.4) | 3 | Hard | scripting host API | **deferred** (needs an embedded interpreter dependency, a sandbox policy and API surface; out of this pass) |
 | 11 | RetroAchievements | 3 | Hard | network + memory hashes | **blocked** (requires RA credentials/network and achievement hashing; no offline validation) |
 | 12 | HD packs | 3 | Very hard | graphics pack loader | **deferred** (Mesen-style pack format and tile replacement pipeline) |
-| 13 | Generalise `unko-core` (NES extension trait split) | 2 | Medium-hard | a second system, or an explicit cleanup pass | **queued** (the GUI already links only `unko-core` + `unko-nes-host`) |
+| 13 | Generalise `unko-core` (NES extension trait split) | 2 | Medium-hard | a second system, or an explicit cleanup pass | **partial**: all NES methods moved to `unko-nes-api::NesCore`; the NES-shaped shared types (`PortDevice`, `Palette`, `VideoFilter`, `InputState` order, debug snapshots) still need a second phase |
 | 14 | Netplay (rollback, 2-4 players) | 3 | Very hard | deterministic states + transport | **partial**: `unko-netplay` has per-player input framing, channel/UDP mesh transports, a per-peer rollback session for 2-4 players, last-input/neutral prediction, a fixed input delay with rollback/predicted/depth counters, a host/join window with player/slot selection, and a UPnP-IGD mapping client, an RFC 5389 STUN fallback, UDP hole punching with confirmed bidirectional traffic, a room-based relay server fallback (`unko-relay`), settled-state hash exchange, in-session chunked save-state transfer repair (checksum/reassembly/ack) and a manual public endpoint; direct, hole-punch and relay paths plus desync detection/recovery are validated on a real LAN with the two-host harness (`docs/netplay.md`), and a true Internet run needs two networks |
 
 The remaining blocked assets are the VS. System BIOS/game ROMs and the
@@ -56,9 +56,9 @@ synthetic-tested (see `docs/accuracy-status.md`).
 - VS. System / PlayChoice-10: remaining VS BIOS/game ROMs, per-title DIP
   defaults, the DualSystem sub-CPU/watchdog and PC10 input; mapper 99, cabinet
   input, RGB PPU palettes and 2C05 security are now implemented.
-- `unko-core` generalisation: the base `Core` still exposes NES-only devices,
-  FDS/Vs. hooks and PPU/APU debug shapes. Split them into a `NesCore`
-  extension trait or `unko-nes-api` crate before a second system lands.
+- `unko-core` generalisation: the NES methods now live in
+  `unko-nes-api::NesCore`. The remaining shared NES-shaped types and the
+  `InputState` bit order need a second phase before a second system lands.
 - NES 2.0 header editor, repair database and IPS/BPS soft-patching (owner
   deferred the decision). The warning for missing NES 2.0 headers is in.
 

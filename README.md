@@ -1,8 +1,9 @@
 # Unko
 
 A multi-platform, multi-core emulator shell written in Rust. The first system
-is the NES, powered by the reusable `unko-nes` core behind a
-system-agnostic interface.
+is the NES, powered by the reusable `unko-nes` core. The base
+`unko_core::Core` contract is system-generic; NES-only controls live in the
+`unko-nes-api` extension trait.
 
 > **Rename:** this project was formerly `multi-emu` / `multiemu`. The emulator is
 > now **Unko**, the host crates are `unko-core`, `unko-rom`, `unko-cli` and
@@ -90,8 +91,8 @@ harness; a true Internet run needs two networks. See
 
 | Metric | Value |
 |---|---:|
-| Workspace crates | 9 |
-| First-party Rust lines | ~82,000 |
+| Workspace crates | 10 |
+| First-party Rust lines | ~82,300 |
 | Workspace tests | 685 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
@@ -112,10 +113,11 @@ Current figures, dated entries and the remaining limits are in
 
 ```
 crates/
-  unko-core/         # SystemId, Core trait, video/audio/input/state types, registry
+  unko-core/         # SystemId, generic Core trait, registry, frame/audio/state types
   unko-rom/          # discovery + .zip/.7z/.rar containers + iNES/UNIF metadata
   unko-nes/          # standalone reference-parity NES core (no unko-core dependency)
-  unko-nes-host/     # Core ABI adapter between unko-nes and unko-core
+  unko-nes-api/      # NesCore extension trait (devices, FDS, Vs., debugger, filters)
+  unko-nes-host/     # Core + NesCore adapter between unko-nes and unko-core
   unko-nes-dev/      # AccuracyCoin battery and development harnesses
   unko-rom-manager/  # standalone DAT audit, 1G1R, fixdat and rebuild core
   unko-netplay/      # input framing, transport and rollback session (foundation)
@@ -401,8 +403,9 @@ let audio = nes.audio();  // mono f32 samples for the frame
 ```
 
 Save states, cheats and debugger helpers are default features; build with
-`default-features = false` for a lean core. If you need the system-agnostic
-`unko_core::Core` interface, use the separate `unko-nes-host` adapter.
+`default-features = false` for a lean core. If you need the host interface,
+use the separate `unko-nes-host` adapter: it implements the generic
+`unko_core::Core` and the NES-specific `unko_nes_api::NesCore`.
 
 ## Licensing
 

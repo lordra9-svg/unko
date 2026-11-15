@@ -105,13 +105,15 @@ The main effort is now the reference-parity accuracy core. Details in
       CPU hogs. CI enforces a 300 fps synthetic budget, and the Windows/macOS
       check jobs plus the Android/iOS core checks cover the other targets.
       Hardware captures remain outstanding.
-- [ ] **A8** generalise `unko-core`: split the NES-shaped device, palette,
-      filter, cheat and PPU/APU debug vocabulary out of the base `Core` into a
-      `NesCore` extension trait (implemented by `unko-nes-host`) or a
-      `unko-nes-api` crate, so a second system implements only the generic
-      lifecycle and presentation hooks. The GUI already avoids linking
-      `unko-nes` directly; `unko-cli` keeps its direct dependency for
-      NES-specific analysis commands.
+- [ ] **A8** generalise `unko-core`. Progress: every NES method now lives on
+      `unko_nes_api::NesCore` (`unko-nes-api`), implemented by `unko-nes-host`;
+      the base `Core` keeps only load/run/video/audio/input/sample-rate,
+      save-state and SRAM. The GUI stores a `Box<dyn NesCore>` and no longer
+      links `unko-nes`; `unko-cli` keeps its direct dependency for NES-specific
+      analysis commands. Remaining: move the NES-shaped shared types
+      (`PortDevice`, `Palette`, `VideoFilter`, `RamClear`,
+      `PpuResetBehavior`, `Cheat`, debug snapshots) and the `InputState`
+      bit order out of the base vocabulary.
 
 ## M0 — core boundary (done)
 

@@ -403,7 +403,7 @@ mod tests {
     use super::*;
     use unko_core::{
         Accuracy, AudioBuffer, CoreInfo, Features, FrameBuffer, FrameStats, LoadOptions,
-        PixelFormat, SystemId, VideoFilter,
+        PixelFormat, SystemId,
     };
 
     #[derive(Default)]
@@ -479,8 +479,6 @@ mod tests {
         }
 
         fn set_sample_rate(&mut self, _sample_rate: f32) {}
-
-        fn set_video_filter(&mut self, _filter: VideoFilter) {}
 
         fn save_state(&mut self, out: &mut Vec<u8>) -> Result<(), CoreError> {
             out.extend_from_slice(&self.state());

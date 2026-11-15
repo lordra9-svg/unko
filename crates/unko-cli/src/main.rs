@@ -11,6 +11,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use unko_core::{Core, LoadOptions, Registry, SystemId};
+use unko_nes_api::NesCore;
 
 fn main() {
     if let Err(err) = run() {
@@ -854,8 +855,8 @@ fn run() -> Result<(), Box<dyn Error>> {
             text.push_str(&format!("frames {frames}\n"));
             for frame in 0..frames {
                 core.run_frame()?;
-                let video = hash_video(FNV_OFFSET, core.as_ref());
-                let audio = hash_audio(FNV_OFFSET, core.as_ref());
+                let video = hash_video(FNV_OFFSET, core.as_core_ref());
+                let audio = hash_audio(FNV_OFFSET, core.as_core_ref());
                 let geometry = hash_geometry(core.video().data);
                 if let Some(dir) = &audio_dir {
                     write_audio_dump(dir, frame, core.audio().samples)?;
@@ -1212,7 +1213,7 @@ fn load_arg(path: &str) -> Result<(unko_rom::RomEntry, Vec<u8>), Box<dyn Error>>
     Ok((entry, bytes))
 }
 
-fn create_core(registry: &Registry, id: Option<&str>) -> Result<Box<dyn Core>, String> {
+fn create_core(registry: &Registry, id: Option<&str>) -> Result<Box<dyn NesCore>, String> {
     let core = match id {
         Some(id) => registry.create(SystemId::Nes, id),
         None => registry.create_default(SystemId::Nes),
@@ -1220,7 +1221,10 @@ fn create_core(registry: &Registry, id: Option<&str>) -> Result<Box<dyn Core>, S
     core.ok_or_else(|| match id {
         Some(id) => format!("no NES core with id '{id}'"),
         None => "no NES core registered".into(),
-    })
+    })?;
+    // The registry validates the id; the CLI is NES-only for now, so build
+    // the extension-capable adapter directly.
+    Ok(Box::new(unko_nes_host::AccuracyCore::new()))
 }
 
 fn usage() -> String {

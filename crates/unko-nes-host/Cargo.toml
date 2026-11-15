@@ -11,3 +11,4 @@ readme = "README.md"
 [dependencies]
 unko-core.workspace = true
 unko-nes = { path = "../unko-nes", features = ["save-states", "cheats", "debug"] }
+unko-nes-api = { path = "../unko-nes-api" }

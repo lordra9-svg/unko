@@ -18,6 +18,7 @@ path = "src/main.rs"
 [dependencies]
 unko-core.workspace = true
 unko-netplay = { path = "../unko-netplay" }
+unko-nes-api = { path = "../unko-nes-api" }
 unko-nes-host = { path = "../unko-nes-host" }
 unko-rom-manager = { path = "../unko-rom-manager" }
 unko-rom = { path = "../unko-rom" }
