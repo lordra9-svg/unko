@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **511 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **512 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -1457,8 +1457,8 @@ approximated.
 ### Holy Mapperel board matrix (2026-11-14)
 
 Ran all 42 Holy Mapperel variants in the RustyNES tree (2400 frames each,
-reading the result line from VRAM). **33 report `0000` (pass).** The matrix
-found five real bugs, all fixed:
+reading the result line from VRAM). **34 report `0000` (pass).** The matrix
+found six real bugs, all fixed:
 
 - MMC3 `$A001`: bit 6 is the PRG-RAM read-only mode and bit 7 removes the chip
   from the bus. Holy Mapperel's `2xxx` WRAM code and the read/write protection
@@ -1474,14 +1474,14 @@ found five real bugs, all fixed:
 - FME-7 `$000C` had the same `0/1` polarity inversion, and the `$6000` window
   decode was wrong: `00` selects ROM, `11` selects PRG-RAM, and mixed select
   bits float. The floating window now returns the CPU's open-bus value.
+- TxSROM (118) needs per-slot nametable mapping from bit 7 of the CHR
+  registers that back each slot (R0/R1 in 8 KiB mode, R2-R5 in 4 KiB mode),
+  not a global mirroring mode. The board now provides that map and updates it
+  on the write.
 
-Remaining from the matrix:
-
-- Eight MMC1 CHR-RAM variants report `0003`: the 4 KiB CHR-window tag test
-  fails in both windows. With only 8 KiB of CHR-RAM this may be expected on
-  hardware; it is unverified without a capture.
-- TxSROM (mapper 118) still shows no result: its CIRAM A10 = CHR A17
-  behaviour is not modelled precisely enough for the detection probe.
+Remaining from the matrix: eight MMC1 CHR-RAM variants report `0003`. The
+4 KiB CHR-window tag test fails in both windows; with only 8 KiB of CHR-RAM
+this may be expected on hardware, and it is unverified without a capture.
 
 ### Reproducible public-suite run (2026-11-14)
 

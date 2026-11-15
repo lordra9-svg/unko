@@ -2161,6 +2161,7 @@ impl CpuBus for System {
                 // nametable arrangement mid-frame; hardware applies it to the
                 // next PPU access, so it cannot wait for the per-frame sync.
                 self.sync_mirroring();
+                self.ppu.set_nametable_map(self.cart.nametable_map());
                 self.sync_mmc2_banks();
                 if self.cart.chr_mapping_write(address) {
                     self.refresh_chr();

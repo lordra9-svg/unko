@@ -21569,16 +21569,34 @@ impl Mapper for Mmc3 {
         }
     }
 
-    fn mirroring(&self) -> Mirroring {
-        if self.txsrom {
-            if self.bank_data[0] & 0x80 != 0 {
-                Mirroring::SingleUpper
-            } else {
-                Mirroring::SingleLower
-            }
-        } else {
-            self.mirroring
+    fn nametable_map(&self) -> Option<[u8; 4]> {
+        if !self.txsrom {
+            return None;
         }
+        // TxSROM wires CHR A17 to CIRAM A10, so bit 7 of the CHR register
+        // backing a nametable slot selects the physical CIRAM bank. In 8 KiB
+        // CHR mode R0 covers slots 0/1 and R1 slots 2/3; in 4 KiB mode R2-R5
+        // cover the four slots individually.
+        let bank = |register: u8| (register >> 7) & 0x01;
+        if self.select & 0x80 != 0 {
+            Some([
+                bank(self.bank_data[2]),
+                bank(self.bank_data[3]),
+                bank(self.bank_data[4]),
+                bank(self.bank_data[5]),
+            ])
+        } else {
+            Some([
+                bank(self.bank_data[0]),
+                bank(self.bank_data[0]),
+                bank(self.bank_data[1]),
+                bank(self.bank_data[1]),
+            ])
+        }
+    }
+
+    fn mirroring(&self) -> Mirroring {
+        self.mirroring
     }
 
     fn number(&self) -> u16 {
@@ -39215,6 +39233,24 @@ pub(crate) mod tests {
         cart.cpu_write(0x6001, 0xA5);
         assert_eq!(cart.cpu_read(0x6000), 0x00);
         assert_eq!(cart.cpu_read(0x6001), 0x00);
+    }
+
+    #[test]
+    fn txsrom_nametable_map_follows_chr_bit_seven() {
+        let rom = synth_banked(118, 128, 64);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        // 8 KiB CHR mode: R0 controls slots 0/1, R1 slots 2/3.
+        cart.cpu_write(0x8000, 0x00);
+        cart.cpu_write(0x8001, 0x80);
+        cart.cpu_write(0x8000, 0x01);
+        cart.cpu_write(0x8001, 0x00);
+        assert_eq!(cart.nametable_map(), Some([1, 1, 0, 0]));
+        // 4 KiB CHR mode: R2-R5 control the four slots individually.
+        for (register, value) in [(0x82u8, 0x80u8), (0x83, 0x00), (0x84, 0x80), (0x85, 0x00)] {
+            cart.cpu_write(0x8000, register);
+            cart.cpu_write(0x8001, value);
+        }
+        assert_eq!(cart.nametable_map(), Some([1, 0, 1, 0]));
     }
 
     #[test]
