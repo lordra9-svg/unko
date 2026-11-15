@@ -3,8 +3,9 @@
 //! Runs one side of a real UDP session on the Unko NES core, using a built-in
 //! synthetic ROM whose RAM accumulates the two controller ports. Each side
 //! periodically exchanges save-state hashes; `--inject-desync N` corrupts one
-//! side's local input at frame N to prove detection, then both peers restart
-//! from frame 0 after a `RESYNC` barrier to prove recovery.
+//! side's local input at frame N to prove detection. The host then streams its
+//! serialized state in checksummed chunks, the join loads it and both continue
+//! from that frame, proving in-session state-transfer recovery.
 //!
 //! Examples:
 //!
@@ -25,7 +26,9 @@ use unko_netplay::holepunch::HolePunchTransport;
 use unko_netplay::input::InputFrame;
 use unko_netplay::relay::RelayTransport;
 use unko_netplay::session::{PredictionMode, RollbackSession, SessionConfig};
-use unko_netplay::sync::{DesyncInfo, DesyncMonitor, StateHash};
+use unko_netplay::sync::{
+    DesyncInfo, DesyncMonitor, StateAck, StateChunk, StateHash, StateReassembler, StateSender,
+};
 use unko_netplay::udp::UdpMesh;
 use unko_netplay::Transport;
 
@@ -33,7 +36,7 @@ const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 const SYNC: &[u8] = b"UNKOHARN";
 const READY: &[u8] = b"UNKORDY1";
-const RESYNC: &[u8] = b"UNKORSY1";
+const RESUMED: &[u8] = b"UNKORS01";
 
 fn fnv1a(bytes: &[u8]) -> u64 {
     let mut hash = FNV_OFFSET;
@@ -285,22 +288,43 @@ fn snapshot_hash(core: &mut AccuracyCore) -> Result<u64, String> {
     Ok(fnv1a(&state))
 }
 
-struct DrainResult {
+#[derive(Default)]
+struct SyncEvents {
     desync: Option<DesyncInfo>,
+    state: Option<(Vec<u8>, u32, u64)>,
+    ack: Option<StateAck>,
+    resumed: bool,
 }
 
-fn drain(
+/// Routes every transport message to its handler.
+fn exchange(
     transport: &mut dyn Transport,
     session: &mut RollbackSession,
     core: &mut AccuracyCore,
     seen: &mut HashSet<u32>,
     monitor: &mut DesyncMonitor,
-) -> Result<DrainResult, String> {
-    let mut desync = None;
+    reassembler: &mut StateReassembler,
+) -> Result<SyncEvents, String> {
+    let mut events = SyncEvents::default();
     while let Some(bytes) = transport.recv().map_err(|err| err.to_string())? {
+        if bytes == RESUMED {
+            events.resumed = true;
+            continue;
+        }
+        if let Some(ack) = StateAck::decode(&bytes) {
+            events.ack = Some(ack);
+            continue;
+        }
+        if let Some(chunk) = StateChunk::decode(&bytes) {
+            let (frame, checksum) = (chunk.frame, chunk.checksum);
+            if let Some(state) = reassembler.accept(chunk)? {
+                events.state = Some((state, frame, checksum));
+            }
+            continue;
+        }
         if let Some(hash) = StateHash::decode(&bytes) {
             if let Some(info) = monitor.record_remote(hash) {
-                desync.get_or_insert(info);
+                events.desync = Some(info);
             }
             continue;
         }
@@ -312,7 +336,61 @@ fn drain(
             .receive_remote(core, frame.player, frame.frame, frame.input)
             .map_err(|err| err.to_string())?;
     }
-    Ok(DrainResult { desync })
+    Ok(events)
+}
+
+/// Steps one frame, sends its input, and exchanges any settled hashes.
+#[allow(clippy::too_many_arguments)]
+fn play_frame(
+    args: &Args,
+    transport: &mut dyn Transport,
+    session: &mut RollbackSession,
+    core: &mut AccuracyCore,
+    monitor: &mut DesyncMonitor,
+    last_hash: &mut Option<u32>,
+    hashes: &mut u32,
+    frame: u32,
+    inject: bool,
+) -> Result<(), String> {
+    let local = if args.role == 0 {
+        host_input(frame)
+    } else {
+        join_input(frame)
+    };
+    let applied = if inject { local ^ 1 } else { local };
+    let mut ports = [0u16; 4];
+    ports[usize::from(args.role)] = applied;
+    let number = session.step(core, ports).map_err(|err| err.to_string())?;
+    transport
+        .send(
+            &InputFrame {
+                frame: number,
+                player: args.role,
+                input: local,
+            }
+            .encode(),
+        )
+        .map_err(|err| err.to_string())?;
+    if frame.is_multiple_of(args.hash_interval) {
+        for (number, hash) in session.settled_hashes(*last_hash) {
+            *last_hash = Some(number);
+            if let Some(info) = monitor.record_local(number, hash) {
+                eprintln!("local mismatch at frame {number}: {info}");
+            }
+            transport
+                .send(
+                    &StateHash {
+                        frame: number,
+                        player: args.role,
+                        hash,
+                    }
+                    .encode(),
+                )
+                .map_err(|err| err.to_string())?;
+            *hashes += 1;
+        }
+    }
+    Ok(())
 }
 
 fn reference_hash(rom: &[u8], frames: u32) -> Result<u64, String> {
@@ -351,75 +429,216 @@ fn main() -> Result<(), String> {
     let mut detected = None;
     let mut last_hash: Option<u32> = None;
     let mut hashes = 0u32;
-    for frame in 0..args.frames {
-        let local = if args.role == 0 {
-            host_input(frame)
-        } else {
-            join_input(frame)
-        };
-        let injected = args.inject == Some(frame) && args.role == 1;
-        let applied = if injected { local ^ 1 } else { local };
-        let mut ports = [0u16; 4];
-        ports[usize::from(args.role)] = applied;
-        let number = session
-            .step(&mut core, ports)
-            .map_err(|err| err.to_string())?;
-        let message = InputFrame {
-            frame: number,
-            player: args.role,
-            input: local,
-        };
-        transport
-            .send(&message.encode())
-            .map_err(|err| err.to_string())?;
+    let mut reassembler = StateReassembler::default();
+    let mut sender: Option<StateSender> = None;
+    let mut frame = 0u32;
 
-        if frame.is_multiple_of(args.hash_interval) {
-            for (number, hash) in session.settled_hashes(last_hash) {
-                last_hash = Some(number);
-                if let Some(info) = monitor.record_local(number, hash) {
-                    detected.get_or_insert(info);
-                }
-                transport
-                    .send(
-                        &StateHash {
-                            frame: number,
-                            player: args.role,
-                            hash,
-                        }
-                        .encode(),
-                    )
-                    .map_err(|err| err.to_string())?;
-                hashes += 1;
-            }
-        }
-
-        if let Some(info) = drain(
+    // Phase 1: normal play, stopping as soon as a divergence is noticed.
+    while frame < args.frames && detected.is_none() {
+        let inject = args.inject == Some(frame) && args.role == 1;
+        play_frame(
+            &args,
+            transport.as_mut(),
+            &mut session,
+            &mut core,
+            &mut monitor,
+            &mut last_hash,
+            &mut hashes,
+            frame,
+            inject,
+        )?;
+        let events = exchange(
             transport.as_mut(),
             &mut session,
             &mut core,
             &mut seen,
             &mut monitor,
-        )?
-        .desync
-        {
-            detected.get_or_insert(info);
-        }
+            &mut reassembler,
+        )?;
+        detected = events.desync;
+        frame += 1;
         std::thread::sleep(Duration::from_millis(8));
+    }
+
+    // Phase 2: repair in place when a divergence was detected.
+    if let Some(info) = detected {
+        if args.inject.is_none() {
+            return Err(format!("unexpected desync: {info}"));
+        }
+        println!(
+            "desync=detected frame={} player={} local={:016x} remote={:016x}",
+            info.frame, info.player, info.local, info.remote
+        );
+
+        let authority = args.role == 0;
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut repaired = false;
+        while !repaired {
+            if Instant::now() >= deadline {
+                return Err("state transfer timed out".into());
+            }
+            if authority && sender.is_none() {
+                // Wait for a buffered state whose inputs are all known: the
+                // live state can still embed a predicted remote input.
+                if let Some((resume_frame, state)) = session.transfer_snapshot() {
+                    core.load_state(&state).map_err(|err| err.to_string())?;
+                    session.resync(resume_frame);
+                    monitor.reset();
+                    last_hash = None;
+                    sender = Some(StateSender::new(resume_frame, &state));
+                }
+            }
+            if let Some(out) = sender.as_mut() {
+                for _ in 0..24 {
+                    match out.next_chunk() {
+                        Some(chunk) => transport.send(chunk).map_err(|err| err.to_string())?,
+                        None => {
+                            out.restart();
+                            break;
+                        }
+                    }
+                }
+            }
+            let events = exchange(
+                transport.as_mut(),
+                &mut session,
+                &mut core,
+                &mut seen,
+                &mut monitor,
+                &mut reassembler,
+            )?;
+            if let Some(ack) = events.ack {
+                if sender.as_ref().is_some_and(|out| out.acknowledged(ack)) {
+                    transport.send(RESUMED).map_err(|err| err.to_string())?;
+                    sender = None;
+                    repaired = true;
+                    println!(
+                        "state-transfer ack frame={} checksum={:016x}",
+                        ack.frame, ack.checksum
+                    );
+                }
+            }
+            if let Some((state, resume_frame, checksum)) = events.state {
+                core.load_state(&state).map_err(|err| err.to_string())?;
+                session.resync(resume_frame);
+                monitor.reset();
+                last_hash = None;
+                transport
+                    .send(
+                        &StateAck {
+                            frame: resume_frame,
+                            checksum,
+                            player: args.role,
+                        }
+                        .encode(),
+                    )
+                    .map_err(|err| err.to_string())?;
+                let wait = Instant::now() + Duration::from_secs(10);
+                loop {
+                    if Instant::now() >= wait {
+                        return Err("resume barrier timed out".into());
+                    }
+                    if exchange(
+                        transport.as_mut(),
+                        &mut session,
+                        &mut core,
+                        &mut seen,
+                        &mut monitor,
+                        &mut reassembler,
+                    )?
+                    .resumed
+                    {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                repaired = true;
+                println!("state-transfer loaded frame={resume_frame} checksum={checksum:016x}");
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        // Phase 3: continue from the shared snapshot with the true inputs.
+        let start = session.frame();
+        let end = start + args.recover_frames;
+        while session.frame() < end {
+            let number = session.frame();
+            play_frame(
+                &args,
+                transport.as_mut(),
+                &mut session,
+                &mut core,
+                &mut monitor,
+                &mut last_hash,
+                &mut hashes,
+                number,
+                false,
+            )?;
+            let events = exchange(
+                transport.as_mut(),
+                &mut session,
+                &mut core,
+                &mut seen,
+                &mut monitor,
+                &mut reassembler,
+            )?;
+            if let Some(info) = events.desync {
+                return Err(format!("desync after state transfer: {info}"));
+            }
+            std::thread::sleep(Duration::from_millis(8));
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut quiet = Instant::now();
+        while quiet.elapsed() < Duration::from_millis(400) {
+            if Instant::now() >= deadline {
+                break;
+            }
+            let events = exchange(
+                transport.as_mut(),
+                &mut session,
+                &mut core,
+                &mut seen,
+                &mut monitor,
+                &mut reassembler,
+            )?;
+            if events.desync.is_some() {
+                return Err("desync after state transfer".into());
+            }
+            quiet = Instant::now();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        let hash = snapshot_hash(&mut core)?;
+        let final_frame = session.frame();
+        let reference = reference_hash(&rom, final_frame)?;
+        let recovered = monitor.mismatches() == 0 && hash == reference && monitor.checked() > 0;
+        println!(
+            "recovered=state-transfer frame={final_frame} hashes={} mismatches={} hash={hash:016x} reference={reference:016x} match={}",
+            monitor.checked(),
+            monitor.mismatches(),
+            hash == reference
+        );
+        if !recovered {
+            return Err("state transfer did not converge".into());
+        }
+        return Ok(());
     }
 
     // Wait for the remaining inputs and hashes to settle.
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut quiet = Instant::now();
     loop {
-        let result = drain(
+        let events = exchange(
             transport.as_mut(),
             &mut session,
             &mut core,
             &mut seen,
             &mut monitor,
+            &mut reassembler,
         )?;
-        if let Some(info) = result.desync {
-            detected.get_or_insert(info);
+        if let Some(info) = events.desync {
+            return Err(format!("unexpected desync: {info}"));
         }
         if seen.len() >= args.frames as usize && quiet.elapsed() > Duration::from_millis(400) {
             break;
@@ -433,123 +652,6 @@ fn main() -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(8));
     }
 
-    if let Some(inject_frame) = args.inject {
-        let Some(info) = detected else {
-            return Err(format!(
-                "injected divergence at frame {inject_frame} was not detected"
-            ));
-        };
-        println!(
-            "desync=detected frame={} player={} local={:016x} remote={:016x}",
-            info.frame, info.player, info.local, info.remote
-        );
-
-        // Coordinated restart: both peers exchange RESYNC, drop the old
-        // session and replay from frame 0.
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let mut peer_ready = false;
-        while !peer_ready {
-            if Instant::now() >= deadline {
-                return Err("resync barrier timed out".into());
-            }
-            transport.send(RESYNC).map_err(|err| err.to_string())?;
-            while let Some(bytes) = transport.recv().map_err(|err| err.to_string())? {
-                if bytes == RESYNC {
-                    peer_ready = true;
-                }
-            }
-            if !peer_ready {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-        }
-
-        let mut core = AccuracyCore::new();
-        core.load(&rom, &LoadOptions::default())
-            .map_err(|err| err.to_string())?;
-        let mut session = RollbackSession::with_config(config);
-        let mut monitor = DesyncMonitor::default();
-        let mut seen = HashSet::new();
-        last_hash = None;
-        for frame in 0..args.recover_frames {
-            let local = if args.role == 0 {
-                host_input(frame)
-            } else {
-                join_input(frame)
-            };
-            let mut ports = [0u16; 4];
-            ports[usize::from(args.role)] = local;
-            let number = session
-                .step(&mut core, ports)
-                .map_err(|err| err.to_string())?;
-            transport
-                .send(
-                    &InputFrame {
-                        frame: number,
-                        player: args.role,
-                        input: local,
-                    }
-                    .encode(),
-                )
-                .map_err(|err| err.to_string())?;
-            if frame.is_multiple_of(args.hash_interval) {
-                for (number, hash) in session.settled_hashes(last_hash) {
-                    last_hash = Some(number);
-                    if let Some(info) = monitor.record_local(number, hash) {
-                        detected.get_or_insert(info);
-                    }
-                    transport
-                        .send(
-                            &StateHash {
-                                frame: number,
-                                player: args.role,
-                                hash,
-                            }
-                            .encode(),
-                        )
-                        .map_err(|err| err.to_string())?;
-                }
-            }
-            if let Some(info) = drain(
-                transport.as_mut(),
-                &mut session,
-                &mut core,
-                &mut seen,
-                &mut monitor,
-            )?
-            .desync
-            {
-                detected.get_or_insert(info);
-            }
-            std::thread::sleep(Duration::from_millis(8));
-        }
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while seen.len() < args.recover_frames as usize && Instant::now() < deadline {
-            let _ = drain(
-                transport.as_mut(),
-                &mut session,
-                &mut core,
-                &mut seen,
-                &mut monitor,
-            )?;
-            std::thread::sleep(Duration::from_millis(8));
-        }
-        let hash = snapshot_hash(&mut core)?;
-        let reference = reference_hash(&rom, args.recover_frames)?;
-        let recovered = monitor.mismatches() == 0 && hash == reference;
-        println!(
-            "recovered={recovered} hashes={} mismatches={} hash={hash:016x} reference={reference:016x}",
-            monitor.checked(),
-            monitor.mismatches()
-        );
-        if !recovered {
-            return Err("recovery did not converge".into());
-        }
-        return Ok(());
-    }
-
-    if let Some(info) = detected {
-        return Err(format!("unexpected desync: {info}"));
-    }
     let hash = snapshot_hash(&mut core)?;
     let reference = reference_hash(&rom, args.frames)?;
     let stats = session.stats();

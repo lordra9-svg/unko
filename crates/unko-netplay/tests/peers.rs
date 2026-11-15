@@ -8,6 +8,7 @@ use unko_netplay::holepunch::HolePunchTransport;
 use unko_netplay::input::InputFrame;
 use unko_netplay::relay::{RelayServer, RelayTransport};
 use unko_netplay::session::{PredictionMode, RollbackSession, SessionConfig};
+use unko_netplay::sync::{DesyncMonitor, StateAck, StateChunk, StateReassembler, StateSender};
 use unko_netplay::transport::{channel_pair, ChannelTransport, MeshTransport};
 use unko_netplay::Transport;
 
@@ -483,4 +484,192 @@ fn peers_converge_over_a_relay() {
     assert_eq!(a_core.state(), expected.state());
     assert_eq!(b_core.state(), expected.state());
     server.shutdown();
+}
+
+#[test]
+fn peers_repair_a_desync_with_a_state_transfer() {
+    let (mut a_link, mut b_link) = channel_pair();
+    let config = SessionConfig {
+        buffer_frames: 4,
+        players: 2,
+        hash_states: true,
+        ..SessionConfig::default()
+    };
+    let mut a_core = TestCore::default();
+    let mut b_core = TestCore::default();
+    let mut a = RollbackSession::with_config(config);
+    let mut b = RollbackSession::with_config(SessionConfig {
+        local_player: 1,
+        ..config
+    });
+    let mut a_monitor = DesyncMonitor::default();
+    let mut b_monitor = DesyncMonitor::default();
+    let mut a_last: Option<u32> = None;
+    let mut b_last: Option<u32> = None;
+
+    // Play 24 frames; B applies a wrong input at frame 12 only.
+    for frame in 0..24u32 {
+        let a_local = 10 + frame as u16;
+        let b_local = 20 + frame as u16;
+        let a_frame = a.step(&mut a_core, [a_local, 0, 0, 0]).expect("a");
+        a_link
+            .send(
+                &InputFrame {
+                    frame: a_frame,
+                    player: 0,
+                    input: a_local,
+                }
+                .encode(),
+            )
+            .expect("a send");
+        let applied = if frame == 12 { b_local + 100 } else { b_local };
+        let b_frame = b.step(&mut b_core, [0, applied, 0, 0]).expect("b");
+        b_link
+            .send(
+                &InputFrame {
+                    frame: b_frame,
+                    player: 1,
+                    input: b_local,
+                }
+                .encode(),
+            )
+            .expect("b send");
+
+        // Exchange inputs and settled hashes.
+        while let Some(bytes) = a_link.recv().expect("a recv") {
+            if let Some(hash) = unko_netplay::StateHash::decode(&bytes) {
+                a_monitor.record_remote(hash);
+            } else if let Some(frame) = InputFrame::decode(&bytes) {
+                a.receive_remote(&mut a_core, frame.player, frame.frame, frame.input)
+                    .expect("a remote");
+            }
+        }
+        while let Some(bytes) = b_link.recv().expect("b recv") {
+            if let Some(hash) = unko_netplay::StateHash::decode(&bytes) {
+                b_monitor.record_remote(hash);
+            } else if let Some(frame) = InputFrame::decode(&bytes) {
+                b.receive_remote(&mut b_core, frame.player, frame.frame, frame.input)
+                    .expect("b remote");
+            }
+        }
+        for (session, monitor, last, link) in [
+            (&a, &mut a_monitor, &mut a_last, &mut a_link),
+            (&b, &mut b_monitor, &mut b_last, &mut b_link),
+        ] {
+            let player = session.config().local_player;
+            for (number, hash) in session.settled_hashes(*last) {
+                *last = Some(number);
+                monitor.record_local(number, hash);
+                link.send(
+                    &unko_netplay::StateHash {
+                        frame: number,
+                        player,
+                        hash,
+                    }
+                    .encode(),
+                )
+                .expect("hash send");
+            }
+        }
+        // Drain the hashes just sent so both monitors compare them.
+        while let Some(bytes) = a_link.recv().expect("a recv") {
+            if let Some(hash) = unko_netplay::StateHash::decode(&bytes) {
+                a_monitor.record_remote(hash);
+            }
+        }
+        while let Some(bytes) = b_link.recv().expect("b recv") {
+            if let Some(hash) = unko_netplay::StateHash::decode(&bytes) {
+                b_monitor.record_remote(hash);
+            }
+        }
+    }
+    assert!(
+        a_monitor.mismatches() > 0 || b_monitor.mismatches() > 0,
+        "the injected input must be detected"
+    );
+    assert_ne!(a_core.state(), b_core.state(), "timelines diverged");
+
+    // The authority streams its snapshot in chunks; the peer reassembles it,
+    // loads it, resyncs its session and acknowledges.
+    let resume_frame = a.frame();
+    let mut state = Vec::new();
+    a_core.save_state(&mut state).expect("save");
+    let sender = StateSender::new(resume_frame, &state);
+    let mut reassembler = StateReassembler::default();
+    let mut chunks = Vec::new();
+    let mut sender = sender;
+    while let Some(chunk) = sender.next_chunk() {
+        chunks.push(chunk.to_vec());
+    }
+    for chunk in &chunks {
+        a_link.send(chunk).expect("chunk send");
+    }
+    let mut ack = None;
+    while ack.is_none() {
+        while let Some(bytes) = b_link.recv().expect("b recv") {
+            if let Some(chunk) = StateChunk::decode(&bytes) {
+                if let Some(state) = reassembler.accept(chunk).expect("accept") {
+                    b_core.load_state(&state).expect("load");
+                    b.resync(resume_frame);
+                    b_monitor.reset();
+                    ack = Some(StateAck {
+                        frame: resume_frame,
+                        checksum: sender.checksum(),
+                        player: 1,
+                    });
+                }
+            }
+        }
+    }
+    let ack = ack.expect("ack");
+    b_link.send(&ack.encode()).expect("ack send");
+    assert!(sender.acknowledged(ack));
+    a.resync(resume_frame);
+    a_monitor.reset();
+    assert_eq!(a_core.state(), b_core.state(), "snapshot adopted");
+
+    // Continue from the shared frame; both must converge again.
+    for frame in resume_frame..resume_frame + 12 {
+        let a_local = 10 + frame as u16;
+        let b_local = 20 + frame as u16;
+        let a_frame = a.step(&mut a_core, [a_local, 0, 0, 0]).expect("a");
+        a_link
+            .send(
+                &InputFrame {
+                    frame: a_frame,
+                    player: 0,
+                    input: a_local,
+                }
+                .encode(),
+            )
+            .expect("a send");
+        let b_frame = b.step(&mut b_core, [0, b_local, 0, 0]).expect("b");
+        b_link
+            .send(
+                &InputFrame {
+                    frame: b_frame,
+                    player: 1,
+                    input: b_local,
+                }
+                .encode(),
+            )
+            .expect("b send");
+        while let Some(bytes) = a_link.recv().expect("a recv") {
+            if let Some(frame) = InputFrame::decode(&bytes) {
+                a.receive_remote(&mut a_core, frame.player, frame.frame, frame.input)
+                    .expect("a remote");
+            }
+        }
+        while let Some(bytes) = b_link.recv().expect("b recv") {
+            if let Some(frame) = InputFrame::decode(&bytes) {
+                b.receive_remote(&mut b_core, frame.player, frame.frame, frame.input)
+                    .expect("b remote");
+            }
+        }
+    }
+    assert_eq!(
+        a_core.state(),
+        b_core.state(),
+        "peers converge after the transfer"
+    );
 }

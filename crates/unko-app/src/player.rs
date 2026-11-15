@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use unko_core::{
-    AudioFilterModel, AudioQuality, AudioSource, Core, DebugSpace, InputState, LoadOptions,
-    PortDevice, PpuResetBehavior, RamClear, Region, Registry, SystemId, VideoFilter,
+    AudioFilterModel, AudioQuality, AudioSource, Core, CoreError, DebugSpace, InputState,
+    LoadOptions, PortDevice, PpuResetBehavior, RamClear, Region, Registry, SystemId, VideoFilter,
 };
 
 use crate::audio::AudioOutput;
@@ -17,7 +17,7 @@ use crate::recording::{RecordModes, Recorder};
 use crate::settings::Settings;
 use unko_netplay::{
     DesyncInfo, DesyncMonitor, InputFrame, PredictionMode, RollbackSession, SessionConfig,
-    SessionStats, StateHash, Transport,
+    SessionStats, StateAck, StateChunk, StateHash, StateReassembler, StateSender, Transport,
 };
 
 /// Maximum frames emulated in one UI update. When the desktop stalls the
@@ -243,6 +243,10 @@ pub struct Netplay {
     monitor: DesyncMonitor,
     desync: Option<DesyncInfo>,
     last_hash_sent: Option<u32>,
+    /// In-seam state transfer used to repair a diverged peer.
+    reassembler: StateReassembler,
+    state_sender: Option<StateSender>,
+    awaiting_state: bool,
     last_error: Option<String>,
 }
 
@@ -273,6 +277,87 @@ impl Netplay {
             self.monitor.mismatches(),
             self.desync,
         )
+    }
+
+    /// Whether a state transfer is in flight (sending or receiving).
+    #[must_use]
+    pub const fn resyncing(&self) -> bool {
+        self.state_sender.is_some() || self.awaiting_state
+    }
+
+    /// Starts sending the newest fully-determined buffered state.
+    ///
+    /// Returns `false` when no such state exists yet; the caller retries on
+    /// the next poll. Snapshotting the current live state can capture a
+    /// predicted remote input, which a later rollback would normally correct
+    /// (and cannot after the history is discarded), so the transfer uses a
+    /// buffered pre-frame state instead.
+    fn start_state_transfer(&mut self, core: &mut dyn Core) -> Result<bool, CoreError> {
+        let Some((frame, state)) = self.session.transfer_snapshot() else {
+            return Ok(false);
+        };
+        core.load_state(&state)?;
+        self.session.resync(frame);
+        self.state_sender = Some(StateSender::new(frame, &state));
+        self.monitor.reset();
+        self.desync = None;
+        self.last_hash_sent = None;
+        Ok(true)
+    }
+
+    /// Paces outgoing chunks: a batch per call, then another pass for loss.
+    fn pump_state(&mut self) {
+        let Some(sender) = self.state_sender.as_mut() else {
+            return;
+        };
+        for _ in 0..24 {
+            match sender.next_chunk() {
+                Some(chunk) => {
+                    let _ = self.transport.send(chunk);
+                }
+                None => {
+                    sender.restart();
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Loads a reassembled snapshot and acknowledges it.
+    fn accept_state(
+        &mut self,
+        core: &mut dyn Core,
+        state: &[u8],
+        frame: u32,
+        checksum: u64,
+        player: u8,
+    ) -> Result<(), String> {
+        core.load_state(state).map_err(|err| err.to_string())?;
+        self.session.resync(frame);
+        self.monitor.reset();
+        self.desync = None;
+        self.last_hash_sent = None;
+        self.awaiting_state = false;
+        self.transport
+            .send(
+                &StateAck {
+                    frame,
+                    checksum,
+                    player,
+                }
+                .encode(),
+            )
+            .map_err(|err| err.to_string())?;
+        Ok(())
+    }
+
+    /// Clears the failure state once both sides agree again.
+    fn finish_resync(&mut self) {
+        self.monitor.reset();
+        self.desync = None;
+        self.last_hash_sent = None;
+        self.state_sender = None;
+        self.awaiting_state = false;
     }
 
     /// Last transport or rollback error.
@@ -428,14 +513,26 @@ impl Player {
     /// Advances emulation (bounded catch-up) and refreshes the texture.
     pub fn step(&mut self, ctx: &egui::Context, mut audio: Option<&mut AudioOutput>) {
         self.apply_input(ctx);
-        if self.paused {
-            self.next_repaint = Duration::from_millis(250);
-            return;
-        }
-        if let Some(desync) = self.poll_netplay() {
-            self.message = format!("NetPlay {desync}");
+        // Netplay keeps polling while paused: desync recovery exchanges
+        // hashes and state chunks without advancing the core.
+        let (desync, resolved) = self.poll_netplay();
+        if let Some(desync) = desync {
+            self.message = format!("NetPlay {desync} — repairing state");
             self.paused = true;
-            self.next_repaint = Duration::from_millis(250);
+        }
+        if resolved {
+            self.message = "NetPlay resynchronised from the authoritative peer".into();
+            self.paused = false;
+        }
+        if self.paused {
+            // A repair transfer needs frequent polls to move chunks quickly;
+            // an ordinary pause can idle at a slow repaint rate.
+            self.next_repaint = if self.netplay_resyncing() {
+                Duration::from_millis(10)
+            } else {
+                Duration::from_millis(250)
+            };
+            return;
         }
         self.update_rewind_enabled();
         let effective_speed = if self.fast_forward {
@@ -1040,6 +1137,9 @@ impl Player {
             monitor: DesyncMonitor::default(),
             desync: None,
             last_hash_sent: None,
+            reassembler: StateReassembler::default(),
+            state_sender: None,
+            awaiting_state: false,
             last_error: None,
         });
     }
@@ -1085,6 +1185,12 @@ impl Player {
         self.netplay.as_ref().map(Netplay::session_stats)
     }
 
+    /// Whether a desync repair transfer is in flight.
+    #[must_use]
+    pub fn netplay_resyncing(&self) -> bool {
+        self.netplay.as_ref().is_some_and(Netplay::resyncing)
+    }
+
     /// `(checked, mismatches, last)` state-hash counters when netplay is
     /// active.
     #[must_use]
@@ -1098,13 +1204,49 @@ impl Player {
         self.netplay.as_ref().and_then(Netplay::last_error)
     }
 
-    fn poll_netplay(&mut self) -> Option<DesyncInfo> {
-        let netplay = self.netplay.as_mut()?;
+    fn poll_netplay(&mut self) -> (Option<DesyncInfo>, bool) {
+        let Some(netplay) = self.netplay.as_mut() else {
+            return (None, false);
+        };
+        let local = netplay.session.config().local_player;
         let mut desync = None;
+        let mut resolved = false;
+        netplay.pump_state();
         loop {
             match netplay.transport.recv() {
                 Ok(Some(bytes)) => {
                     netplay.received += 1;
+                    if let Some(ack) = StateAck::decode(&bytes) {
+                        if netplay
+                            .state_sender
+                            .as_ref()
+                            .is_some_and(|sender| sender.acknowledged(ack))
+                        {
+                            netplay.finish_resync();
+                            resolved = true;
+                        }
+                        continue;
+                    }
+                    if let Some(chunk) = StateChunk::decode(&bytes) {
+                        let (frame, checksum) = (chunk.frame, chunk.checksum);
+                        match netplay.reassembler.accept(chunk) {
+                            Ok(Some(state)) => {
+                                match netplay.accept_state(
+                                    self.core.as_mut(),
+                                    &state,
+                                    frame,
+                                    checksum,
+                                    local,
+                                ) {
+                                    Ok(()) => resolved = true,
+                                    Err(err) => netplay.last_error = Some(err),
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(err) => netplay.last_error = Some(err),
+                        }
+                        continue;
+                    }
                     if let Some(hash) = StateHash::decode(&bytes) {
                         if let Some(info) = netplay.monitor.record_remote(hash) {
                             netplay.desync = Some(info);
@@ -1135,7 +1277,21 @@ impl Player {
                 }
             }
         }
-        desync
+        if let Some(info) = desync {
+            // One side owns the repaired timeline; the lowest port sends its
+            // snapshot and everyone else waits for it.
+            if local == 0 {
+                if netplay.state_sender.is_none() {
+                    if let Err(err) = netplay.start_state_transfer(self.core.as_mut()) {
+                        netplay.last_error = Some(err.to_string());
+                    }
+                }
+            } else {
+                netplay.awaiting_state = true;
+            }
+            netplay.desync = Some(info);
+        }
+        (desync, resolved)
     }
 
     /// Sets the gamepad state for one controller port.

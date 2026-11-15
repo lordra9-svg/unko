@@ -18,6 +18,15 @@ NetPlay is a peer-to-peer rollback layer in `unko-netplay`. It depends only on
   frames that fell out of the rollback buffer, where no late input can change
   them. Both sides compare the hashes; the first mismatch per frame/peer is
   reported and the app pauses with the frame, local and remote values.
+- **In-session repair**: on a mismatch the lowest-numbered player streams a
+  save state in 1024-byte chunks (`StateChunk`, frame + length + FNV-1a
+  checksum). It sends the newest **buffered** state whose preceding inputs are
+  all known (`transfer_snapshot`), never a live state that may still contain a
+  predicted remote input that a later rollback would have corrected. Each
+  receiver reassembles (`StateReassembler`), verifies the checksum, loads the
+  state, discards its rollback/input history (`RollbackSession::resync`) and
+  acknowledges (`StateAck`). The sender stops on the ack and both continue
+  from the shared frame — no restart, no lost session.
 
 ## Transports
 
@@ -73,8 +82,10 @@ stored for their frame numbers.
 
 `--inject-desync N` deliberately applies a different local input on the join
 side at frame `N` (the wire input stays correct) to prove detection. After a
-mismatch both peers exchange `RESYNC`, drop the old session and replay
-`--recover-frames` from frame 0 to prove recovery.
+mismatch the host streams its state in chunks; the join reassembles it,
+verifies the checksum, loads it, resynchronises and acknowledges. Both then
+continue for `--recover-frames` from the transferred frame to prove
+in-session recovery.
 
 Expected output (both sides):
 
@@ -103,12 +114,23 @@ Two processes, direct UDP, 300 frames, hashes exchanged every 30 frames:
 
 ```text
 normal run   host/join: 300/300 inputs, 143 hashes, 0 mismatches, match=true
-injected     join applies input^1 at frame 100:
-             both sides: desync=detected frame=101 player=1 ...
-             after RESYNC + 160-frame replay:
-             recovered=true hashes=23 mismatches=0 hash=2bc2d775f6ec0112                reference=2bc2d775f6ec0112
-``` A true Internet run still needs two networks/hosts; the
-commands above are the reproducible procedure.
+injected     join applies input^1 at frame 100 (wire input stays correct),
+             detected once frame 112 settled:
+             desync=detected frame=112 player=1 local=26d761f09280ef68 remote=2df7722e654c5586
+             state-transfer ack frame=241 checksum=095ff293e97c4ed5
+             recovered=state-transfer frame=441 hashes=52 mismatches=0 \
+               hash=b8bb578e43a68454 reference=b8bb578e43a68454 match=true
+```
+
+Both processes printed the same detection, transfer and recovery lines. The
+same run over the `unko-relay` room transport (port 7900, room `demo3`)
+produced the identical detection, transfer (`frame=241`,
+`checksum=095ff293e97c4ed5`) and recovery (`frame=441`, 52 hashes, 0
+mismatches, `b8bb578e43a68454`). Three consecutive direct runs also all
+matched.
+
+A true Internet run still needs two networks/hosts; the commands above are the
+reproducible procedure.
 
 ## Limitations
 
@@ -120,3 +142,6 @@ commands above are the reproducible procedure.
 - State hashing reuses the rollback save states, but it still hashes the full
   serialized state at the configured cadence and costs some CPU on large
   boards (FDS/MMC5); it is off for local play and only enabled in netplay.
+- A repair transfer needs a fully-settled buffered state. If the buffer was
+  just cleared, the authority waits (and keeps retrying) until one exists;
+  chunks are retransmitted until the acknowledgement arrives.

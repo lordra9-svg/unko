@@ -34,7 +34,10 @@ pub use relay::{room_token, RelayServer, RelayTransport};
 pub use rollback::{RollbackBuffer, StoredFrame};
 pub use session::{PredictionMode, RollbackSession, SessionConfig, SessionStats};
 pub use stun::{public_address as stun_public_address, StunError};
-pub use sync::{DesyncInfo, DesyncMonitor, StateHash};
+pub use sync::{
+    DesyncInfo, DesyncMonitor, StateAck, StateChunk, StateHash, StateReassembler, StateSender,
+    STATE_CHUNK_BYTES,
+};
 pub use transport::{channel_pair, ChannelTransport, MeshTransport, Transport};
 pub use udp::{UdpMesh, UdpTransport};
 pub use upnp::{

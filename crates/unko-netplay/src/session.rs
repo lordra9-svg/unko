@@ -165,6 +165,44 @@ impl RollbackSession {
         self.stats
     }
 
+    /// A buffered pre-frame state whose inputs are all known.
+    ///
+    /// Scans the rollback buffer from the newest frame down for the first
+    /// `s` whose preceding inputs are complete, so a state transfer cannot
+    /// capture a predicted remote input that would otherwise be corrected by
+    /// a later rollback. Returns the state taken before simulating `s`; both
+    /// peers can load it and resume at `s` deterministically.
+    #[must_use]
+    pub fn transfer_snapshot(&self) -> Option<(u32, Vec<u8>)> {
+        let oldest = self.buffer.oldest_frame()?;
+        let newest = self.buffer.newest_frame()?.min(self.stats.frame);
+        if newest < oldest {
+            return None;
+        }
+        (oldest..=newest).rev().find_map(|frame| {
+            let determined = frame == 0 || self.remote_inputs_through(frame - 1);
+            if !determined {
+                return None;
+            }
+            self.buffer
+                .find(frame)
+                .map(|entry| (frame, entry.state.clone()))
+        })
+    }
+
+    /// Discards rollback and input history and continues from `frame`.
+    ///
+    /// Used when a peer adopts a transferred snapshot: the buffered states and
+    /// peer inputs describe the old, diverged timeline and must not be used for
+    /// rollback or prediction. Counters are kept apart from the frame number.
+    pub fn resync(&mut self, frame: u32) {
+        self.buffer.clear();
+        self.peers.clear();
+        self.local_inputs.clear();
+        self.hashes.clear();
+        self.stats.frame = frame;
+    }
+
     /// Whether every remote port has supplied the input for simulation frame
     /// `frame` (after applying the input delay).
     ///
@@ -508,6 +546,74 @@ mod tests {
         assert!(!session.receive_remote(&mut core, 1, 0, 1).expect("late"));
         assert!(!session.receive_remote(&mut core, 1, 9, 1).expect("future"));
         assert_eq!(session.frame(), 6);
+    }
+
+    #[test]
+    fn transfer_snapshot_waits_for_every_preceding_input() {
+        let config = SessionConfig {
+            buffer_frames: 8,
+            ..SessionConfig::default()
+        };
+        let mut core = FakeCore::default();
+        let mut session = RollbackSession::with_config(config);
+        for frame in 0..8u32 {
+            if frame < 6 {
+                session
+                    .receive_remote(&mut core, 1, frame, 50 + frame as u16)
+                    .expect("remote");
+            }
+            session
+                .step(&mut core, [10 + frame as u16, 0, 0, 0])
+                .expect("step");
+        }
+        // Inputs 0..=5 are known, so the newest determined pre-state is 6.
+        let (frame, state) = session.transfer_snapshot().expect("snapshot");
+        assert_eq!(frame, 6);
+
+        // Loading it and replaying 6..8 with the real inputs equals a session
+        // that had every input from the start.
+        let mut resumed = FakeCore::default();
+        resumed.load_state(&state).expect("load");
+        let mut session = RollbackSession::with_config(config);
+        session.resync(frame);
+        for number in 6..8u32 {
+            session
+                .receive_remote(&mut core, 1, number, 50 + number as u16)
+                .expect("remote");
+            session
+                .step(&mut resumed, [10 + number as u16, 0, 0, 0])
+                .expect("step");
+        }
+        let frames: Vec<[u16; 4]> = (0..8u32)
+            .map(|frame| [10 + frame as u16, 50 + frame as u16, 0, 0])
+            .collect();
+        assert_eq!(resumed.state(), expected(&frames));
+    }
+
+    #[test]
+    fn resync_drops_history_and_restarts_the_frame() {
+        let mut core = FakeCore::default();
+        let mut session = RollbackSession::with_config(SessionConfig {
+            buffer_frames: 4,
+            hash_states: true,
+            ..SessionConfig::default()
+        });
+        for frame in 0..6u32 {
+            session
+                .receive_remote(&mut core, 1, frame, 9)
+                .expect("remote");
+            session
+                .step(&mut core, [frame as u16, 0, 0, 0])
+                .expect("step");
+        }
+        assert!(!session.settled_hashes(None).is_empty());
+        session.resync(100);
+        assert_eq!(session.frame(), 100);
+        assert!(session.settled_hashes(None).is_empty());
+        // No peer input is remembered, so the next frame is predicted.
+        session.step(&mut core, [1, 0, 0, 0]).expect("step");
+        assert_eq!(session.frame(), 101);
+        assert!(!session.remote_inputs_through(100));
     }
 
     #[test]

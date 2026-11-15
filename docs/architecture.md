@@ -110,7 +110,9 @@ worker thread; `stun` adds an RFC 5389 binding client that supplies the
 external IP when the router has no UPnP; `holepunch` retries `PUNCH`/`PONG`
 datagrams to public peers and reports when bidirectional traffic is confirmed;
 `sync` exchanges pre-frame state hashes for frames that left the rollback
-window and reports the first mismatch;
+window, reports the first mismatch, and carries the chunked checksummed
+save-state transfer plus `StateReassembler`/`StateAck` used to repair a
+diverged peer; `RollbackSession::resync` discards the old timeline;
 `relay` is a simplified TURN-style server (`unko-relay`) that assigns clients
 to a room and forwards `DATA` frames between members, used when punching
 stalls. A manual public-endpoint field covers everything else. Live Internet

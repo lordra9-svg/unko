@@ -3146,8 +3146,15 @@ impl App {
                     if let Some(info) = last {
                         ui.colored_label(
                             Color32::LIGHT_RED,
-                            format!("{info} — session paused"),
+                            format!("{info} — repairing state"),
                         );
+                    }
+                    if self
+                        .player
+                        .as_ref()
+                        .is_some_and(crate::player::Player::netplay_resyncing)
+                    {
+                        ui.label("Transferring a save state from the authoritative peer…");
                     }
                     if let Some(err) = self
                         .player
