@@ -26,6 +26,7 @@ mod library;
 mod microphone;
 mod movie;
 mod paths;
+mod piano;
 mod player;
 mod playtime;
 mod recording;

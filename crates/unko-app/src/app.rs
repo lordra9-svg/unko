@@ -216,6 +216,7 @@ pub struct App {
     cheat_value: String,
     cheat_error: Option<String>,
     microphone: bool,
+    piano_last: Option<u8>,
     microphone_input: Option<MicrophoneInput>,
     microphone_devices: Vec<String>,
     microphone_error: Option<String>,
@@ -377,6 +378,7 @@ impl App {
             cheat_value: String::new(),
             cheat_error: None,
             microphone: false,
+            piano_last: None,
             microphone_input: None,
             microphone_devices: Vec::new(),
             microphone_error: None,
@@ -2504,6 +2506,11 @@ impl App {
             if closed {
                 open = false;
                 self.devices_window_shown = false;
+                if let Some(note) = self.piano_last.take() {
+                    if let Some(player) = &mut self.player {
+                        player.set_piano_note(note, false);
+                    }
+                }
                 let _ = self.settings.save(&Settings::path());
             }
         } else {
@@ -2529,6 +2536,8 @@ impl App {
             .is_some_and(|player| player.mapper() == 188);
         let microphone_error = self.microphone_error.clone();
         let microphone_devices = self.microphone_devices.clone();
+        let mut piano_last = self.piano_last;
+        let mut piano_events = Vec::new();
         let mut body = |ui: &mut egui::Ui| {
             ui.heading("NES ports");
             ui.label(
@@ -2627,6 +2636,22 @@ impl App {
                         .small(),
                     );
                 }
+            }
+            if settings.port1_device == PortDevice::MiraclePiano
+                || settings.port2_device == PortDevice::MiraclePiano
+            {
+                ui.add_space(10.0);
+                ui.separator();
+                ui.heading("Miracle Piano");
+                ui.label(
+                    RichText::new(
+                        "Click or drag the keys. Notes are sent on channel 0; the \
+                         game's controller belongs in the other port.",
+                    )
+                    .weak()
+                    .small(),
+                );
+                piano_events = crate::piano::keyboard(ui, &mut piano_last);
             }
             ui.add_space(10.0);
             ui.separator();
@@ -2742,6 +2767,14 @@ impl App {
             });
         }
         self.microphone = microphone;
+        self.piano_last = piano_last;
+        if !piano_events.is_empty() {
+            if let Some(player) = &mut self.player {
+                for (note, on) in piano_events {
+                    player.set_piano_note(note, on);
+                }
+            }
+        }
         self.datach_code = datach_code;
         if datach_scan {
             let result = self

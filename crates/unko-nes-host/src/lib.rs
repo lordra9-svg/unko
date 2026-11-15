@@ -515,6 +515,12 @@ impl Core for AccuracyCore {
         }
     }
 
+    fn set_piano_note(&mut self, note: u8, velocity: u8) {
+        if let Some(system) = self.system.as_mut() {
+            system.piano_note(note, velocity);
+        }
+    }
+
     fn stereo_eye(&self) -> Option<unko_core::StereoEye> {
         self.system.as_ref().and_then(|system| {
             system.stereo_eye().map(|eye| match eye {

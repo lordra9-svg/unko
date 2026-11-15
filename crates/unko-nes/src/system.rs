@@ -1021,6 +1021,16 @@ impl System {
         }
     }
 
+    /// Queues a Miracle Piano note toward the NES software.
+    ///
+    /// The piano sends Note On on channel 0 with the supplied velocity; a
+    /// velocity of 0 is a Note Off, matching the documented MIDI behaviour.
+    pub fn piano_note(&mut self, note: u8, velocity: u8) {
+        self.push_piano_rx(0x90);
+        self.push_piano_rx(note & 0x7F);
+        self.push_piano_rx(velocity & 0x7F);
+    }
+
     /// Selects the firmware version advertised in the Miracle Piano SysEx 5
     /// reply. The default is 2.03.
     pub fn set_piano_firmware(&mut self, major: u8, minor: u8) {
@@ -3115,6 +3125,19 @@ mod tests {
             system.piano_tx_log(),
             &[0xF0, 0x00, 0x00, 0x42, 0x01, 0x04, 0xF0, 0x00, 0x00, 0x42, 0x01, 0x0B]
         );
+    }
+
+    #[test]
+    fn miracle_piano_note_messages_reach_the_polled_register() {
+        let rom = synthetic_nrom(0);
+        let mut system = System::from_ines(&rom).expect("load");
+        system.set_port_device(0, PortDevice::MiraclePiano);
+        system.piano_note(0x30, 0x50);
+        let reply: Vec<u8> = (0..3).filter_map(|_| piano_poll(&mut system)).collect();
+        assert_eq!(reply, vec![0x90, 0x30, 0x50]);
+        system.piano_note(0x30, 0);
+        let reply: Vec<u8> = (0..3).filter_map(|_| piano_poll(&mut system)).collect();
+        assert_eq!(reply, vec![0x90, 0x30, 0x00]);
     }
 
     fn piano_send(system: &mut System, byte: u8) {

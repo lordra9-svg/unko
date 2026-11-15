@@ -1669,6 +1669,11 @@ impl Player {
         self.core.set_sample_rate(rate);
     }
 
+    /// Sends a Miracle Piano note toward the NES software (`on` = Note On).
+    pub fn set_piano_note(&mut self, note: u8, on: bool) {
+        self.core.set_piano_note(note, if on { 0x50 } else { 0 });
+    }
+
     /// Reports the Famicom microphone state (`$4016` bit 2).
     pub fn set_microphone(&mut self, pressed: bool) {
         self.core.set_microphone(pressed);

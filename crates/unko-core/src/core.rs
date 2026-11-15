@@ -104,6 +104,11 @@ pub trait Core {
     /// 188 cartridge ignore it.
     fn set_bandai_microphone(&mut self, _pressed: bool) {}
 
+    /// Sends a Miracle Piano note toward the NES software.
+    ///
+    /// `velocity` 0 is a Note Off; a non-zero value is a Note On on channel 0.
+    fn set_piano_note(&mut self, _note: u8, _velocity: u8) {}
+
     /// Loads a Datach barcode for a mapper 157 cartridge.
     fn set_datach_barcode(&mut self, _code: &str) -> bool {
         false

@@ -76,7 +76,7 @@ Public mapper-specific status:
 | Subor/Dendy keyboard | **Verified** |
 | Famicom microphone | **Implemented** (manual checkbox + default system input via a peak gate; no analog ADC capture) |
 | Data recorder tape loopback | **Synthetic/partial** |
-| Miracle Piano transport | **Implemented** (transport plus the documented SysEx 4 version and SysEx 11 memory-test replies; default firmware 2.03) |
+| Miracle Piano transport | **Implemented** (transport, documented SysEx 4/11 replies (default firmware 2.03) and an on-screen 49-key note input) |
 | Datach scanner + internal X24C02 | **Verified** (synthetic I2C tests + real-ROM smoke) |
 | Datach external X24C01 | **Implemented** (128-byte X24C01 on `$8000-$8003` bit 3, shared SDA; NES 2.0 PRG-NVRAM flag selects the 384-byte save) |
 | SNES/Subor mouse | **Verified** (32-bit report, buttons, sensitivity and sign-magnitude motion in unit tests) |
@@ -111,7 +111,7 @@ Public mapper-specific status:
 | x0000 APU write-window tests | 10/10 pass |
 | NESdev archive | 137 pass / 11 fail / 115 visual/audio/input-only; PAL APU timing leaves 4 failures, adding the alternate MMC3 selector leaves only `read_joy3/count_errors` |
 | RustyNES test tree | 159 pass / 11 fail / 171 visual/audio/input-only; 166 / 4 with PAL APU in PAL mode, 1 with the alternate MMC3 selector too |
-| Workspace tests | 659 pass, 0 failed |
+| Workspace tests | 663 pass, 0 failed |
 
 The actionable accuracy failures are tracked in
 [`accuracy-divergences.md`](accuracy-divergences.md); the ROM/BIOS inventory is
