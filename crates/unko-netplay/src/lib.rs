@@ -10,9 +10,9 @@
 //!   the frame that follows it, so a late remote input can restore an older
 //!   frame and resimulate.
 //!
-//! The session loop (prediction, resimulation and the app wiring) and a real
-//! UDP transport are follow-up work; this crate defines the pieces they build
-//! on and is covered by unit tests.
+//! A [`UdpTransport`] exchanges the same messages over the network. The app
+//! wiring and prediction tuning are follow-up work; this crate defines the
+//! pieces they build on and is covered by unit tests.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -21,11 +21,13 @@ pub mod input;
 pub mod rollback;
 pub mod session;
 pub mod transport;
+pub mod udp;
 
 pub use input::{InputFrame, INPUT_MESSAGE_LEN};
 pub use rollback::{RollbackBuffer, StoredFrame};
 pub use session::RollbackSession;
 pub use transport::{channel_pair, ChannelTransport, Transport};
+pub use udp::UdpTransport;
 
 /// Stable feature-core id.
 pub const CORE_ID: &str = "unko_netplay";
