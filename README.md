@@ -34,7 +34,7 @@ verified against the public reference suites:
 - `ppu_vbl_nmi` **12/12**, `ppu_sprites` **19/19**, blargg APU/DMC **13/13**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **601 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **606 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **136 pass / 12 fail / 115 visual-or-input-only** (5 PAL APU failures pass when PAL timing is selected)
 - RustyNES test tree: **157 pass / 13 fail / 171 visual-or-input-only** (164 / 6 with PAL APU in PAL mode)
 
@@ -85,7 +85,7 @@ harness; a true Internet run needs two networks. See
 |---|---:|
 | Workspace crates | 9 |
 | First-party Rust lines | ~78,900 |
-| Workspace tests | 601 pass, 0 failed |
+| Workspace tests | 606 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 
@@ -316,6 +316,18 @@ cleanly when the folder is absent. No ROMs are tracked in this repository.
 Save states are checked functionally across every mapper that constructs
 (294 boards: two frames of video and audio must be identical after restore),
 plus byte-exact re-save for the common mapper set.
+
+The public mapper test-ROM matrix is reproducible with the local RustyNES tree
+(ROMs are not committed):
+
+```sh
+cargo run --release -p unko-nes-dev --example mapper_suite -- \
+  /path/to/rustynes/tests/roms
+```
+
+It scores Holy Mapperel (42 variants), the three blargg MMC3 suites, MMC5,
+VRC2a and MMC1-A12, and prints per-mapper totals. Latest run: **65/65 pass,
+0 failed, 0 without a verdict**.
 
 The synthetic performance floor is checked in CI; the current development
 machine measures about **785 fps** (13.1x real time):

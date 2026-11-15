@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **601 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **606 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -2341,3 +2341,27 @@ is missing, mis-serialized or only correct until the next frame.
   resumed read clocks the controller again).
 - AccuracyCoin isolated: **146/151 passed, 0 failed, 5 skipped** (199,320
   frames), unchanged. 601 workspace tests.
+
+### 2026-11-15 — public mapper test-ROM matrix
+
+Ran the local mapper-focused public suites with
+`unko-nes-dev --example mapper_suite` and recorded the oracle per case:
+
+| Suite | Cases | Oracle | Result |
+|---|---:|---|---|
+| Holy Mapperel (19 + 23 variants) | 42 | result line `0000` | **42/42** |
+| blargg `mmc3_test` | 6 | screen and `$6000` text | **6/6** |
+| blargg `mmc3_test_2` | 6 | screen and `$6000` text | **6/6** |
+| blargg `mmc3_irq_tests` | 6 | screen text | **6/6** |
+| MMC5 (`mmc5test_v1/v2`, `mmc5exram`) | 3 | visual smoke | **3/3** |
+| VRC2a CHR banking (`m22`) | 1 | visual smoke | **1/1** |
+| MMC1 A12 (`mmc1_a12`) | 1 | visual smoke | **1/1** |
+
+**65/65 pass, 0 failures, 0 cases without a verdict.** The three MMC3 revision
+rows use the alternate MMC3 revision (`5.MMC3_rev_A`, `6-MMC3_alt`, `6-MMC6`).
+The MMC5, VRC2a and MMC1-A12 ROMs are visual-only; the runner requires a
+rendered multi-colour frame (2-15 distinct colours) as their oracle, which
+matches the reference harness's smoke contract. No regression was found.
+
+Per-mapper aggregate: 0:3, 1:15, 2:2, 3:1, 4:22, 5:3, 7:2, 9:1, 10:2, 11:2,
+22:1, 28:2, 34:2, 66:1, 69:2, 78:1, 118:1, 180:2. 606 workspace tests.

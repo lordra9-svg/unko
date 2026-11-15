@@ -75,6 +75,27 @@ blargg failures (`dma_4016_read`, `5-branch_delays_irq`) now pass.
 `holy_mapperel` runs to the title/menu path but produces a uniform frame in
 the headless probe, so it needs an input script or a screenshot oracle.
 
+### Mapper suite matrix (2026-11-15)
+
+`cargo run --release -p unko-nes-dev --example mapper_suite -- <rustynes/tests/roms>`
+runs every local mapper-focused suite and records the oracle result:
+
+| Suite | Mapper(s) | Oracle | Result |
+|---|---|---|---|
+| Holy Mapperel (19 + 23 variants) | 0,1,2,3,4,7,9,10,11,28,34,66,69,78,118,180 | result line `0000` | **42/42** |
+| blargg `mmc3_test` | 4 | screen/`$6000` text | **6/6** |
+| blargg `mmc3_test_2` | 4 | screen/`$6000` text | **6/6** (incl. `6-MMC3_alt`) |
+| blargg `mmc3_irq_tests` | 4 | screen text | **6/6** (rev A uses the alternate revision) |
+| MMC5 `mmc5test`/`mmc5exram` | 5 | visual smoke (2-15 colours) | **3/3** |
+| VRC2a CHR banking (`m22`) | 22 | visual smoke (4 colours) | **1/1** |
+| MMC1 A12 (`mmc1_a12`) | 1 | visual smoke (3 colours) | **1/1** |
+
+**65/65 cases pass, 0 failed, 0 without a verdict.** The per-mapper aggregate
+is 0:3, 1:15, 2:2, 3:1, 4:22, 5:3, 7:2, 9:1, 10:2, 11:2, 22:1, 28:2, 34:2,
+66:1, 69:2, 78:1, 118:1, 180:2 (mapper 4 includes both the blargg rows and
+four Holy Mapperel boards). The runner skips missing suite directories, so a
+partial local drop is safe.
+
 ### Commercial FDS images
 
 `refs/Minerva_Myrient/No-Intro/Nintendo - Family Computer Disk System (FDS)`

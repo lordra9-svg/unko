@@ -7,6 +7,8 @@
 //! Result encoding (from the ROM's own source): `value & 1 == 1` passes,
 //! `value & 1 == 0` fails with code `value >> 1`, and `$FF` means skipped.
 
+pub mod mapper_suite;
+
 use unko_nes::System;
 
 /// One AccuracyCoin catalog row.
