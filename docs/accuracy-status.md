@@ -1477,12 +1477,12 @@ emitted FNV-1a hashes of each frame's f32 samples with the same byte layout as
 The audio unit was rewritten to the documented model (16-CPU-cycle wave and
 modulation clock, integer 24/18-bit accumulators, `$408A` envelope multiplier,
 separate modulation envelope, documented output scaling). This moved the
-FDS-only bit-exact window from the first note to 10.9 s. The frame-653
-residual is not envelope or phase: over the differing run the zero crossings
-are identical, RMS differs by 3e-7 relative, correlation is 0.999993 at lag 0,
-and reordering the audio clock relative to the CPU write changes nothing.
-It is a sub-1e-6 output-path difference; the next check is the pre-resampler
-expansion output.
+FDS-only bit-exact window from the first note to 10.9 s. A pre-resampler replay of the entire register timeline into both audio
+implementations is **bit-identical for 35,360,017 CPU cycles** once the
+wave/mod prescaler starts one cycle into its 16-cycle period at reset. The
+remaining APU-muted, post-resampler difference (first at sample 479,795) has
+identical zero crossings and RMS and correlation 0.999993, so it lies in the
+output/resampler path rather than the FDS synthesis model.
 
 ### Holy Mapperel board matrix (2026-11-14)
 

@@ -32407,7 +32407,11 @@ impl Default for FdsAudio {
             mod_write_pos: 0,
             master_volume: 0,
             env_speed: 0xE8,
-            prescaler: 0,
+            // The wave/mod prescaler is free-running; its phase at reset is
+            // one cycle into the 16-cycle period. A pre-resampler replay of
+            // 35.36M cycles against RustyNES is bit-identical with this phase
+            // and differs without it.
+            prescaler: 1,
         }
     }
 }
@@ -32517,7 +32521,7 @@ impl FdsAudio {
         self.mod_counter = 0;
         self.mod_acc = 0;
         self.mod_write_pos = 0;
-        self.prescaler = 0;
+        self.prescaler = 1;
     }
 
     fn volume_period(&self) -> u32 {

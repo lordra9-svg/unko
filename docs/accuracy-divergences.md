@@ -32,16 +32,17 @@ None in AccuracyCoin. All non-DRAW rows pass.
   Responsible module: `cart.rs` (`Fds::clock_watchdog`).
 - `FDS-4023-Test` and `FDS-Audio-Registers` are display-only dumps with no
   pass/fail line; their register dumps are captured but have no oracle yet.
-- **FDS audio synthesis** — after the documented-model rewrite, an APU-muted
-  comparison against RustyNES is bit-identical for 479,795 samples (~10.9 s)
-  and first differs at frame 653 during a wavetable/mod-table upload. The
-  residual was narrowed on 2026-11-15: over the differing run the zero-crossing
-  count is identical (2,246), RMS differs by 3e-7 relative, normalized
-  correlation is 0.999993 with best lag 0 at the start/middle/end, and moving
-  the FDS audio clock after the CPU bus write produces a byte-identical
-  stream. It is therefore not envelope or wave-phase timing; it is a
-  sub-1e-6 output-path (resampler/rounding) difference. The next step is a
-  pre-resampler expansion-output comparison.
+- **FDS audio synthesis** — the model is verified. Replaying the complete
+  1,200-frame register timeline into both `FdsAudio` implementations and
+  comparing the per-CPU-cycle output **before resampling** gives **0 differing
+  samples over 35,360,017 cycles** with the corrected prescaler phase (the
+  phase is one cycle into the 16-cycle period at reset; without it the replay
+  differs from cycle 19,472,959). The remaining APU-muted, post-resampler
+  difference starts at sample 479,795, has identical zero crossings and RMS
+  (3e-7 relative) and correlation 0.999993 at lag 0, so it is in the output /
+  resampler path, not the FDS synthesis model. The phase correction also
+  reduces the post-resampler differing samples from 331,486 to 236,936 and
+  keeps fdsirqtests 21/21 and FDS-Mirroring 3/3.
 
 ### Holy Mapperel (2026-11-14)
 
