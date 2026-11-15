@@ -1483,8 +1483,11 @@ identical pre-resampler stream into Unko's and RustyNES's resamplers: their
 outputs differ by at most one f32 ULP (max 1.49e-8), so the resampler is not
 the cause either. The remaining APU-muted, post-resampler difference (first at
 sample 479,795) is the emulator's per-cycle expansion-audio sampling/clock
-point relative to CPU writes; the model replay matches the reference when both
-use the same sample point.
+point relative to CPU writes. Moving the shared APU tick to end-of-cycle hangs
+the FDS run in the DMC path; moving only the expansion clock/sample keeps the
+sample count but gives 327,341 differing samples, worse than the 236,936 with
+the prescaler-phase fix. The exact reference clock/write semantics need more
+instrumentation or a hardware capture.
 
 ### Holy Mapperel board matrix (2026-11-14)
 

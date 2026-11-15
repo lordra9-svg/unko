@@ -44,12 +44,14 @@ None in AccuracyCoin. All non-DRAW rows pass.
   RustyNES's resamplers produces outputs that differ only by at most one f32
   ULP (max |diff| 1.49e-8, 149,033 of 871,253 samples), so the resampler is
   not the cause. The residual is the emulator's per-cycle expansion-audio
-  sampling/clock point relative to CPU register writes (the model replay
-  matches the reference under the replay's sample point). Fixing it requires
-  reordering the expansion audio clock/sample against CPU writes without
-  disturbing the APU path; the phase correction already cuts post-resampler
-  differing samples from 331,486 to 236,936 and keeps fdsirqtests 21/21 and
-  FDS-Mirroring 3/3.
+  sampling/clock point relative to CPU register writes. Two reorderings were
+  tried on 2026-11-15 and rejected: moving the shared APU tick to the end of
+  the CPU cycle hangs the FDS run in the DMC path; splitting the tick from the
+  sample and moving only the expansion clock/sample to end-of-cycle keeps the
+  sample count equal but yields 327,341 differing samples (worse than the
+  236,936 with the prescaler-phase fix). The phase correction remains; the
+  exact reference clock/write semantics need more instrumentation or a
+  hardware capture.
 
 ### Holy Mapperel (2026-11-14)
 
