@@ -933,6 +933,8 @@ pub struct Header {
     pub nes2: bool,
     /// PRG-RAM size in bytes.
     pub prg_ram_size: usize,
+    /// Battery-backed PRG-NVRAM size in bytes (NES 2.0 byte 10 high nibble).
+    pub prg_nvram_size: usize,
     /// Initial nametable mirroring from the header.
     pub mirroring: Mirroring,
     /// Raw iNES flags-6 byte (some bootleg boards overload its bits).
@@ -965,6 +967,7 @@ impl Cartridge {
                 four_screen: false,
                 nes2: false,
                 prg_ram_size: 0,
+                prg_nvram_size: 0,
                 mirroring: Mirroring::Horizontal,
                 raw_flags6: 0,
             },
@@ -1785,6 +1788,7 @@ pub fn parse_header(bytes: &[u8]) -> Result<Header, CartError> {
     let mut prg_size = usize::from(bytes[4]) * 16 * 1024;
     let mut chr_size = usize::from(bytes[5]) * 8 * 1024;
     let mut prg_ram_size = 8 * 1024;
+    let mut prg_nvram_size = 0;
     let mut submapper = 0;
     if nes2 {
         mapper |= u16::from(bytes[8] & 0x0F) << 8;
@@ -1802,6 +1806,7 @@ pub fn parse_header(bytes: &[u8]) -> Result<Header, CartError> {
             }
         };
         prg_ram_size = (ram_shift(bytes[10] & 0x0F) + ram_shift(bytes[10] >> 4)).max(0x2000);
+        prg_nvram_size = ram_shift(bytes[10] >> 4);
     }
     Ok(Header {
         mapper,
@@ -1812,6 +1817,7 @@ pub fn parse_header(bytes: &[u8]) -> Result<Header, CartError> {
         four_screen: flags6 & 0x08 != 0,
         nes2,
         prg_ram_size,
+        prg_nvram_size,
         mirroring: if flags6 & 0x08 != 0 {
             Mirroring::FourScreen
         } else if flags6 & 0x01 != 0 {
@@ -27990,6 +27996,7 @@ struct Datach {
     latch: u8,
     eeprom: X24c02,
     external: X24c01,
+    external_present: bool,
     scl: bool,
     external_scl: bool,
     host_sda: bool,
@@ -27997,6 +28004,13 @@ struct Datach {
 }
 
 impl Datach {
+    fn new(external_present: bool) -> Self {
+        Self {
+            external_present,
+            ..Self::default()
+        }
+    }
+
     fn load(&mut self, code: Vec<bool>) {
         self.pixels.clear();
         self.pixels.extend(std::iter::repeat_n(true, 61));
@@ -28052,6 +28066,9 @@ impl Datach {
     }
 
     fn clock_24c01(&mut self, prev_sda: bool, next_scl: bool, next_sda: bool) {
+        if !self.external_present {
+            return;
+        }
         if self.external_scl && next_scl {
             if prev_sda && !next_sda {
                 self.external.start();
@@ -28081,21 +28098,26 @@ impl Datach {
     }
 
     fn write_external(&mut self, value: u8) {
+        if !self.external_present {
+            return;
+        }
         let next_scl = value & 0x08 != 0;
         self.clock_24c01(self.host_sda, next_scl, self.host_sda);
     }
 
     fn eeprom_image(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(384);
+        let mut out = Vec::with_capacity(if self.external_present { 384 } else { 256 });
         out.extend_from_slice(&self.eeprom.data);
-        out.extend_from_slice(&self.external.data);
+        if self.external_present {
+            out.extend_from_slice(&self.external.data);
+        }
         out
     }
 
     fn load_eeprom(&mut self, bytes: &[u8]) {
         let len = bytes.len().min(256);
         self.eeprom.data[..len].copy_from_slice(&bytes[..len]);
-        if bytes.len() > 256 {
+        if self.external_present && bytes.len() > 256 {
             let external = (bytes.len() - 256).min(128);
             self.external.data[..external].copy_from_slice(&bytes[256..256 + external]);
         }
@@ -28247,7 +28269,7 @@ impl BandaiFcg {
             },
             wram_enabled: false,
             datach: if number == 157 {
-                Some(Datach::default())
+                Some(Datach::new(header.prg_nvram_size >= 128))
             } else {
                 None
             },
@@ -37113,7 +37135,7 @@ pub(crate) mod tests {
 
     #[test]
     fn datach_external_x24c01_uses_8000_bit_3_and_shared_sda() {
-        let mut datach = Datach::default();
+        let mut datach = Datach::new(true);
         x24_start_ext(&mut datach);
         x24_write_ext(&mut datach, 0x12); // address 0x12, write
         x24_write_ext(&mut datach, 0x5A);
@@ -37137,6 +37159,17 @@ pub(crate) mod tests {
 
     fn cart_x24_scl(cart: &mut Cartridge, scl: bool) {
         cart.cpu_write(0x8000, if scl { 0x08 } else { 0 });
+    }
+
+    fn with_datach_external(mut rom: Vec<u8>) -> Vec<u8> {
+        // NES 2.0 byte 10 high nibble = 1 declares 128 bytes of battery
+        // PRG-NVRAM, the convention used by Battle Rush.
+        rom[7] = (rom[7] & 0xF0) | 0x08;
+        rom[8] = 0;
+        rom[9] = 0;
+        rom[10] = 0x10;
+        rom[11] = 0;
+        rom
     }
 
     fn cart_x24_sda(cart: &mut Cartridge, sda: bool) {
@@ -37174,7 +37207,7 @@ pub(crate) mod tests {
 
     #[test]
     fn datach_external_eeprom_is_reachable_through_the_cpu_window() {
-        let rom = synth_banked(157, 256, 8);
+        let rom = with_datach_external(synth_banked(157, 256, 8));
         let mut cart = Cartridge::from_ines(&rom).expect("cart");
         cart_x24_start(&mut cart);
         cart_x24_write(&mut cart, 0x12);
@@ -37196,8 +37229,17 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn datach_external_eeprom_needs_the_nes2_nvram_flag() {
+        let plain = Cartridge::from_ines(&synth_banked(157, 256, 8)).expect("cart");
+        assert_eq!(plain.datach_eeprom().len(), 256);
+        let battle =
+            Cartridge::from_ines(&with_datach_external(synth_banked(157, 256, 8))).expect("cart");
+        assert_eq!(battle.datach_eeprom().len(), 384);
+    }
+
+    #[test]
     fn datach_eeprom_survives_a_cartridge_snapshot() {
-        let rom = synth_banked(157, 256, 8);
+        let rom = with_datach_external(synth_banked(157, 256, 8));
         let mut cart = Cartridge::from_ines(&rom).expect("cart");
         cart.load_datach_eeprom(&[0x42; 384]);
         assert_eq!(cart.datach_eeprom(), vec![0x42; 384]);

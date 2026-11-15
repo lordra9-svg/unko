@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **658 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **659 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -214,11 +214,12 @@ direction (`$800D` bit 7) and the `$6000` bit 4 input are shared with the
 internal chip; the two open-drain outputs are ANDed. This matches the attached
 X24C01 datasheet and the reference emulator behaviour used by Battle Rush.
 
-The save image is now 384 bytes: the internal 256-byte X24C02 followed by the
-cartridge's 128-byte X24C01. A legacy 256-byte `datach.eeprom` still loads and
-leaves the external chip erased. The core instantiates the optional X24C01 for
-every mapper-157 image; titles that do not have it never address the window,
-and its open-drain output stays high. Unit tests cover LSB-first address/data,
+The optional chip is enabled when the NES 2.0 header declares 128 bytes of
+battery PRG-NVRAM (byte 10 high nibble 1), the convention used by Battle Rush.
+The save image is then 384 bytes: the internal 256-byte X24C02 followed by the
+cartridge's 128-byte X24C01; a plain iNES mapper-157 image keeps the 256-byte
+internal-only image. A legacy 256-byte `datach.eeprom` still loads, and the
+external chip's open-drain output stays high when it is absent. Unit tests cover LSB-first address/data,
 four-byte page wrap, sequential read, the `$8000`/`$800D` bit-banged wiring,
 the `$6000` read path and the snapshot round trip. The local *Battle Rush*
 (Japan, Datach) image boots to its title screen with the external chip
