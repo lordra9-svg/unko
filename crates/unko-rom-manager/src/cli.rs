@@ -83,7 +83,7 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
                      \x20        --dat-url URL [--dat-out FILE]\n\
                      \x20        --regions USA,Europe,World,Japan --languages En --all\n\
                      \n\
-                     --copy writes loose files; --zip writes one archive per game."
+                     --copy writes loose files; --zip/--torrentzip write one archive per game."
                 );
                 return Ok(());
             }
