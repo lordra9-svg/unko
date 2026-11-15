@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **651 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **652 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -134,9 +134,10 @@ core still sees only the format it validates. The converter joins `PRG0..PRGF` a
 vertical or four-screen), `BATR`, `TVCI` (NTSC/PAL/dual) and `VROR`
 (CHR-RAM), and maps the common Nintendo boards: NROM, UNROM/UOROM, CNROM,
 MMC1 (`S*ROM`), MMC3 (`T*ROM`, `B4`, HKROM), AxROM (`A*ROM`), CPROM, BNROM
-UNROM-512, plus common third-party names (VRC7, Namcot 163, Sunsoft FME-7,
-Bandai FCG/LZ93D50, Jaleco JF, Sachen 8259/74LS374N, Waixing FS005/FW01,
-DreamTech01, CoolBoy/MindKids, Konami QTAI, Bandai LZ93D50 and FK23C). Mappers above 255 and boards with a
+UNROM-512, plus the documented third-party/licensed names in the NESdev table
+(VRC7, Namcot 163, Sunsoft FME-7, Bandai FCG/LZ93D50, Jaleco JF, Sachen,
+Waixing, DreamTech01, CoolBoy/MindKids, Konami QTAI, KS703x, LH32/LH51/LH10,
+TF1201, Bmc289/299/301 and the rest of the `SPECIFIC` table). Mappers above 255 and boards with a
 submapper (UNROM 2, AxROM 1/2, FS005 2) emit a NES 2.0 header. Unknown `MAPR`
 names are rejected instead of guessing a mapper.
 Loose `.unif` files and members of ZIP/7z/RAR archives are discovered, shown in
