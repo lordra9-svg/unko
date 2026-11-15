@@ -3666,6 +3666,55 @@ mod tests {
     }
 
     #[test]
+    fn rts_dummy_fetch_clears_the_ppu_write_latch() {
+        // Mirrors `cpu_exec_space_ppuio`: an RTS fetched from the $2001 open
+        // bus must read the next opcode byte at $2002, which clears the PPU
+        // write latch. Without that read the following $2006 write becomes the
+        // low half of the address and PPUDATA reads $2411 instead of $2400.
+        const PROGRAM: [u8; 70] = [
+            0xA9, 0x24, 0x8D, 0x06, 0x20, // LDA #$24 ; STA $2006
+            0xA9, 0x00, 0x8D, 0x06, 0x20, // LDA #$00 ; STA $2006 -> v=$2400
+            0xA9, 0x55, 0x8D, 0x07, 0x20, // LDA #$55 ; STA $2007 -> $2400=$55
+            0xA9, 0x24, 0x8D, 0x06, 0x20, // LDA #$24 ; STA $2006 (high half)
+            0xA9, 0x11, 0x8D, 0x06, 0x20, // LDA #$11 ; STA $2006 -> v=$2411
+            0xA9, 0xAA, 0x8D, 0x07, 0x20, // LDA #$AA ; STA $2007 -> $2411=$AA
+            0xA9, 0x24, 0x8D, 0x06, 0x20, // LDA #$24 ; STA $2006 -> v=$2400
+            0xA9, 0x00, 0x8D, 0x06, 0x20, // LDA #$00 ; STA $2006
+            0xA9, 0x24, 0x8D, 0x06, 0x20, // LDA #$24 ; STA $2006 (leaves w=1)
+            0xA9, 0x60, 0x8D, 0x03, 0x20, // LDA #$60 ; STA $2003 -> open bus RTS
+            0x20, 0x01, 0x20, // JSR $2001, which executes the RTS
+            0xA9, 0x11, 0x8D, 0x06, 0x20, // LDA #$11 ; STA $2006
+            0xAD, 0x07, 0x20, // LDA $2007 (buffered byte)
+            0xAD, 0x07, 0x20, // LDA $2007 -> $2400
+            0x8D, 0x00, 0x03, // STA $0300
+            0x4C, 0x43, 0x80, // JMP $8043
+        ];
+        let run = |dummy_fetch: bool| {
+            let mut program = PROGRAM;
+            if !dummy_fetch {
+                program[50..53].copy_from_slice(&[0xEA; 3]);
+            }
+            let mut rom = synthetic_nrom(0);
+            rom[16..16 + program.len()].copy_from_slice(&program);
+            let mut system = System::from_ines(&rom).expect("load");
+            for _ in 0..4 {
+                system.run_frame();
+            }
+            system.read_ram(0x0300)
+        };
+        assert_eq!(
+            run(true),
+            0x55,
+            "the RTS dummy read at $2002 must clear the write latch"
+        );
+        assert_eq!(
+            run(false),
+            0xAA,
+            "skipping the dummy read leaves the latch set and reads $2411"
+        );
+    }
+
+    #[test]
     fn subor_keyboard_scans_nibbles_and_resets() {
         let mut system = System::from_ines(&synthetic_nrom(0)).expect("load");
         system.set_port_device(1, PortDevice::SuborKeyboard);

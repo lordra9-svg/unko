@@ -44,14 +44,14 @@ Still absent: **VS. System BIOS/palette dumps**, **PlayChoice-10 game ROMs**,
 
 This adds the x0000 APU tests, `holy_mapperel`, `extra/{apu,cpu,mappers,ppu}`,
 `audio-tests`, `dap`, `mmc5`, `mmc1_a12`, `m22` and a full copy of the blargg
-suites. Latest probe run (2026-11-14, screen-text verdicts including the
-alternate framebuffer font):
+suites. Latest probe run (2026-11-15, screen-text verdicts including the
+alternate framebuffer font; the 2026-11-14 run plus the `RTS`/`RTI` dummy-fetch
+fix, which moves the two `cpu_exec_space_ppuio` copies to pass):
 
-- **157 passes** in the default NTSC run. Running the PAL singles in PAL mode
-  moves all seven to pass (**164**), leaving **6** failures.
-- **13 failures**: seven PAL APU singles (region), three MMC3 revision rows
-  (selector), `read_joy3/count_errors` (input) and two copies of
-  `cpu_exec_space_ppuio` (screen-only CPU dummy-fetch residual).
+- **159 passes** in the default NTSC run. Running the PAL singles in PAL mode
+  moves all seven to pass (**166**), leaving **4** failures.
+- **11 failures**: seven PAL APU singles (region), three MMC3 revision rows
+  (selector) and `read_joy3/count_errors` (input).
 - **171 without a machine-readable verdict**
 
 Reproducible text-verdict run (2026-11-14, `unko text`, 600 frames, all 341
@@ -65,7 +65,7 @@ configuration-dependent:
   pass in PAL mode);
 - `read_joy3/count_errors` needs a controller script.
 
-No unexpected failure remains. The difference from the 157/13/171 probe above
+No unexpected failure remains. The difference from the 159/11/171 probe above
 is methodological: `unko text` only scores suites that print with the standard
 ASCII font.
 
@@ -116,14 +116,13 @@ rows from the nametables, and stops on `Passed`/`Failed`. Many NESdev tests
 only report by audio, so a missing result is not a failure. `UNKO_REGION=pal`
 forces PAL timing and `UNKO_MMC3_ALT=1` selects the alternate MMC3 revision.
 
-Latest run (2026-11-14):
+Latest run (2026-11-15; the 2026-11-14 run plus the `RTS`/`RTI` dummy-fetch
+fix, which moves `cpu_exec_space_ppuio` to pass):
 
-- **136 passes** and **12 failures** in the default NTSC run. The seven PAL APU
-  failures all pass with PAL timing selected, leaving **5** failures:
+- **137 passes** and **11 failures** in the default NTSC run. The seven PAL APU
+  failures all pass with PAL timing selected, leaving **4** failures:
   - three MMC3 revision rows, which pass with the alternate selector,
-  - `read_joy3/count_errors`, which needs a controller script,
-  - `cpu_exec_space/test_cpu_exec_space_ppuio`, a screen-only CPU dummy-fetch
-    residual.
+  - `read_joy3/count_errors`, which needs a controller script.
 - **Revision-dependent passes:** `mmc3_irq_tests/5.MMC3_rev_A`,
   `mmc3_test/6-MMC6` and `mmc3_test_2/6-MMC3_alt` pass when the alternate
   MMC3A/NEC revision is selected (`UNKO_MMC3_ALT=1` or Settings -> Advanced).

@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **631 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **633 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -38,23 +38,26 @@ Performance: `unko bench --synthetic 3000 --min-fps 300` measures **791.6 fps**
 (13.17x real time, 1.263 ms/frame); release save states are 417,090 bytes at
 172 us save / 237 us restore. Details in `docs/performance.md`.
 
-## Public test-ROM suite (2026-11-14)
+## Public test-ROM suite (2026-11-15)
 
 Fresh runs over the two reference trees (default NTSC, 1500 frames, screen-text
-verdicts including the alternate framebuffer font):
+verdicts including the alternate framebuffer font). The totals below carry the
+2026-11-15 `RTS`/`RTI` dummy-fetch fix forward from the 2026-11-14 run: the
+only changed verdicts are the `cpu_exec_space_ppuio` copies (one in the NESdev
+archive, two in the RustyNES tree), which now print `PASSED`.
 
 | Tree | Pass | Fail | No verdict |
 |---|---:|---:|---:|
-| RustyNES tree (341) | 157 | 13 | 171 |
-| NESdev archive (263) | 136 | 12 | 115 |
+| RustyNES tree (341) | 159 | 11 | 171 |
+| NESdev archive (263) | 137 | 11 | 115 |
 
-The remaining failures are region/selector/input caveats plus one screen-only
-CPU residual: the seven PAL APU singles (pass with `UNKO_REGION=pal`), three
-MMC3 revision rows (pass with `UNKO_MMC3_ALT=1`), `read_joy3/count_errors`
-(input script), and `cpu_exec_space_ppuio` (dummy fetch of a one-byte opcode).
+The remaining failures are region/selector/input caveats: the seven PAL APU
+singles (pass with `UNKO_REGION=pal`), three MMC3 revision rows (pass with
+`UNKO_MMC3_ALT=1`) and `read_joy3/count_errors` (input script).
 
 `dma_4016_read` now prints `08 08 07 08 08` and passes; all five
-`cpu_interrupts_v2` singles pass, including `5-branch_delays_irq`.
+`cpu_interrupts_v2` singles pass, including `5-branch_delays_irq`, and both
+`cpu_exec_space` variants pass.
 
 ## MMC3 A12 IRQ clocking (2026-11-14)
 
@@ -100,6 +103,28 @@ and both sensitivity changes with their scaled magnitudes
 protocol bytes come from the hardware description. The Famicom 3D glasses
 remain unimplemented because they need an expansion-port output model.
 
+## CPU dummy fetches for RTS/RTI (2026-11-15)
+
+`RTS` and `RTI` now perform their documented bus reads: cycle 2 reads the byte
+after the opcode, cycle 3 reads `$0100|SP` before the pull increments it, and
+`RTS` reads the pulled return address on its final cycle before incrementing
+PC. Previously those cycles were internal, so no read reached `$2002`.
+
+`cpu_exec_space/test_cpu_exec_space_ppuio` executes an `RTS` fetched from the
+`$2001` open bus and relies on that `$2002` read to clear the PPU write latch.
+The ROM now prints `PASSED` (it previously failed its `RTS` dummy-fetch
+subtest). The APU variant (`test_cpu_exec_space_apu`) also passes, as do all
+five `cpu_interrupts_v2` singles, `cpu_dummy_reads`, nestest (8,980 lines),
+blargg `instr_timing`/`instr_basics`, APU 13/13, PPU 12/12 and 19/19, and
+AccuracyCoin 146/146 non-DRAW. Cycle counts are unchanged, so the timing gates
+do not move.
+
+Two unit tests pin the behaviour:
+`rts_and_rti_read_the_next_opcode_and_the_stack` asserts the exact read
+sequence with a recording bus, and `rts_dummy_fetch_clears_the_ppu_write_latch`
+runs the ROM's PPU scenario from a synthetic NROM, including the control case
+without the dummy read (which reads `$2411` instead of `$2400`).
+
 ## A1 — 6502
 
 | Test | Result | Evidence |
@@ -107,6 +132,7 @@ remain unimplemented because they need an expansion-port output model.
 | `nestest` golden log | **8980 / 8980 lines**, registers + PC + SP + P + CYC all match | `cargo test -p unko-nes --test nestest -- --nocapture` |
 | blargg `instr_timing` | **Passed** (official, NOP/SBC, unofficial) | `cargo test -p unko-nes --test blargg blargg_instr_timing -- --nocapture` |
 | blargg `instr_basics` | **Passed** | `cargo test -p unko-nes --test blargg blargg_instr_basics -- --nocapture` |
+| `cpu_exec_space` (PPU-I/O + APU), `cpu_dummy_reads` | **Passed** | `unko text <rom> --frames 1200` (screen verdict) |
 | blargg interrupt suites | see A2/A3 | requires PPU NMI + APU/DMA timing; tests are `#[ignore]` |
 
 The CPU implementation in `crates/unko-nes/src/cpu.rs` is

@@ -33,11 +33,13 @@ verified against the public reference suites:
 - `nestest` golden log: **8,980 / 8,980 lines** exact (PC, A/X/Y, SP, P and cycle count)
 - blargg `instr_timing` and `instr_basics`: pass
 - `ppu_vbl_nmi` **12/12**, `ppu_sprites` **19/19**, blargg APU/DMC **13/13**
+- `cpu_exec_space` (PPU-I/O and APU variants), `cpu_dummy_reads` and all five
+  `cpu_interrupts_v2` singles: pass
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **631 passed, 0 failed**; clippy `-D warnings` clean
-- NESdev archive baseline: **136 pass / 12 fail / 115 visual-or-input-only** (5 PAL APU failures pass when PAL timing is selected)
-- RustyNES test tree: **157 pass / 13 fail / 171 visual-or-input-only** (164 / 6 with PAL APU in PAL mode)
+- `cargo test --workspace`: **633 passed, 0 failed**; clippy `-D warnings` clean
+- NESdev archive baseline: **137 pass / 11 fail / 115 visual-or-input-only** (PAL APU timing leaves 4 failures; the alternate MMC3 selector leaves only `read_joy3/count_errors`)
+- RustyNES test tree: **159 pass / 11 fail / 171 visual-or-input-only** (166 / 4 with PAL APU in PAL mode; 1 with the alternate MMC3 selector too)
 
 Compatibility from the local licensed 7,101-image NES audit:
 
@@ -86,7 +88,7 @@ harness; a true Internet run needs two networks. See
 |---|---:|
 | Workspace crates | 9 |
 | First-party Rust lines | ~78,900 |
-| Workspace tests | 631 pass, 0 failed |
+| Workspace tests | 633 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 

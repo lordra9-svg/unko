@@ -6,7 +6,7 @@ ROM). It is required by the accuracy charter in `docs/accuracy.md`. Add a dated
 entry whenever a divergence is found, and remove it only when a test or a
 hardware capture proves the behaviour matches.
 
-Current snapshot: **2026-11-14**, AccuracyCoin v3.1.0, isolated battery
+Current snapshot: **2026-11-15**, AccuracyCoin v3.1.0, isolated battery
 **146/146 non-DRAW rows passed** (146/151 total, 0 failed, 5 DRAW skips,
 0 unrun).
 
@@ -83,9 +83,23 @@ divergences:
   `mmc3_irq_tests/5.MMC3_rev_A` pass with the alternate MMC3A/NEC revision
   selected (`UNKO_MMC3_ALT=1` or Settings → Advanced).
 - `read_joy3/count_errors` is input-dependent (no controller script).
-- `cpu_exec_space/test_cpu_exec_space_ppuio` is a screen-only ROM that reports
-  a missing dummy fetch for the `AND` one-byte opcode; it is a CPU fetch
-  residual recorded here rather than an AccuracyCoin regression.
+
+### CPU dummy fetches for RTS/RTI (2026-11-15)
+
+- **`cpu_exec_space/test_cpu_exec_space_ppuio`** — **resolved**. The ROM
+  executes an `RTS` fetched from the `$2001` open bus and then checks that the
+  instruction read the next opcode byte at `$2002`, which clears the PPU write
+  latch; a missing read makes the next `$2006` write the low half of the
+  address and returns `$AA` from `$2411` instead of `$55` from `$2400`.
+  `RTS` and `RTI` used internal cycles for their early cycles, so no bus
+  access reached `$2002`. Both now read PC on cycle 2 and the pre-increment stack
+  pointer on cycle 3; `RTS` also reads the pulled address on its last cycle
+  before incrementing PC. Cycle counts are unchanged. The ROM now prints
+  `PASSED` (previously the "`An RTS opcode should still do a dummy fetch`"
+  failure), so the earlier note that blamed a one-byte `AND` fetch was wrong:
+  the opcode was `RTS`, fetched from open bus. Unit coverage asserts the exact
+  read sequence (`rts_and_rti_read_the_next_opcode_and_the_stack`) and the PPU
+  latch side effect (`rts_dummy_fetch_clears_the_ppu_write_latch`).
 
 ### MMC3 A12 timing (2026-11-14)
 

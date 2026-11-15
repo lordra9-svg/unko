@@ -645,20 +645,28 @@ impl Cpu {
                 self.registers.pc = u16::from(low) | (u16::from(high) << 8);
             }
             Kind::Rts => {
-                self.idle(bus);
-                self.idle(bus);
+                // Cycle 2 reads the byte after the opcode, cycle 3 reads the
+                // stack at the pre-increment pointer, and the last cycle reads
+                // the pulled address before incrementing it. Those reads can
+                // hit I/O space, so they are bus accesses, not internal
+                // cycles.
+                self.dummy_read_pc(bus);
+                self.dummy_read_stack(bus);
                 let low = self.pull(bus);
                 let high = self.pull(bus);
-                self.idle(bus);
-                self.registers.pc = (u16::from(low) | (u16::from(high) << 8)).wrapping_add(1);
+                let pc = u16::from(low) | (u16::from(high) << 8);
+                self.read(bus, pc);
+                self.registers.pc = pc.wrapping_add(1);
             }
             Kind::Rti => {
-                self.idle(bus);
+                // RTI also discards the next instruction byte and reads the
+                // stack pointer position before pulling.
+                self.dummy_read_pc(bus);
+                self.dummy_read_stack(bus);
                 let p = self.pull(bus);
                 self.registers.p = Status::from_bits(p & !Status::BREAK);
                 let low = self.pull(bus);
                 let high = self.pull(bus);
-                self.idle(bus);
                 self.registers.pc = u16::from(low) | (u16::from(high) << 8);
             }
             Kind::Brk => {
@@ -1443,6 +1451,37 @@ mod tests {
     use super::*;
     use crate::bus::RamBus;
 
+    /// A flat bus that records every read address, so the dummy-fetch cycles
+    /// of an instruction can be asserted exactly.
+    struct ReadLog {
+        inner: RamBus,
+        reads: Vec<u16>,
+    }
+
+    impl ReadLog {
+        fn new() -> Self {
+            Self {
+                inner: RamBus::new(),
+                reads: Vec::new(),
+            }
+        }
+    }
+
+    impl CpuBus for ReadLog {
+        fn read(&mut self, address: u16) -> u8 {
+            self.reads.push(address);
+            self.inner.read(address)
+        }
+
+        fn write(&mut self, address: u16, value: u8) {
+            self.inner.write(address, value);
+        }
+
+        fn tick(&mut self) {
+            self.inner.tick();
+        }
+    }
+
     #[test]
     fn disassembler_matches_reference_listing() {
         assert_eq!(disassemble(0x8000, 0xA9, 0x10, 0).text, "LDA #$10");
@@ -1512,6 +1551,44 @@ mod tests {
         assert_eq!(registers.y, 0);
         assert_eq!(registers.sp, 0xFD);
         assert_eq!(registers.p.bits(), 0x34);
+    }
+
+    #[test]
+    fn rts_and_rti_read_the_next_opcode_and_the_stack() {
+        // Executing at $2001 puts the next-instruction byte at $2002, which is
+        // PPUSTATUS: the dummy read there clears the PPU write latch. This is
+        // the case `cpu_exec_space_ppuio` checks, so assert the exact read
+        // sequence rather than only the final register state.
+        let mut bus = ReadLog::new();
+        let mut cpu = Cpu::new();
+        bus.inner.memory[0x2001] = 0x60; // RTS
+        bus.inner.memory[0x01F1] = 0x00; // pulled PCL
+        bus.inner.memory[0x01F2] = 0x20; // pulled PCH
+        cpu.registers.pc = 0x2001;
+        cpu.registers.sp = 0xF0;
+        assert_eq!(cpu.step(&mut bus), 6);
+        assert_eq!(
+            bus.reads,
+            vec![0x2001, 0x2002, 0x01F0, 0x01F1, 0x01F2, 0x2000],
+            "RTS: opcode, next byte, stack, PCL, PCH, pulled address"
+        );
+        assert_eq!(cpu.registers.pc, 0x2001);
+
+        let mut bus = ReadLog::new();
+        let mut cpu = Cpu::new();
+        bus.inner.memory[0x2001] = 0x40; // RTI
+        bus.inner.memory[0x01F1] = 0x30; // pulled status
+        bus.inner.memory[0x01F2] = 0x00; // pulled PCL
+        bus.inner.memory[0x01F3] = 0x20; // pulled PCH
+        cpu.registers.pc = 0x2001;
+        cpu.registers.sp = 0xF0;
+        assert_eq!(cpu.step(&mut bus), 6);
+        assert_eq!(
+            bus.reads,
+            vec![0x2001, 0x2002, 0x01F0, 0x01F1, 0x01F2, 0x01F3],
+            "RTI: opcode, next byte, stack, status, PCL, PCH"
+        );
+        assert_eq!(cpu.registers.pc, 0x2000);
     }
 
     #[test]

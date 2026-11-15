@@ -108,9 +108,9 @@ Public mapper-specific status:
 | `nestest` | 8,980/8,980 lines exact |
 | blargg CPU / PPU / APU | CPU and PPU suites green; APU 13/13 |
 | x0000 APU write-window tests | 10/10 pass |
-| NESdev archive | 136 pass / 12 fail / 115 visual/audio/input-only; 5 failures with PAL APU in PAL mode and the alternate MMC3 selector |
-| RustyNES test tree | 157 pass / 13 fail / 171 visual/audio/input-only; 164 / 6 with PAL APU in PAL mode |
-| Workspace tests | 631 pass, 0 failed |
+| NESdev archive | 137 pass / 11 fail / 115 visual/audio/input-only; PAL APU timing leaves 4 failures, adding the alternate MMC3 selector leaves only `read_joy3/count_errors` |
+| RustyNES test tree | 159 pass / 11 fail / 171 visual/audio/input-only; 166 / 4 with PAL APU in PAL mode, 1 with the alternate MMC3 selector too |
+| Workspace tests | 633 pass, 0 failed |
 
 The actionable accuracy failures are tracked in
 [`accuracy-divergences.md`](accuracy-divergences.md); the ROM/BIOS inventory is
