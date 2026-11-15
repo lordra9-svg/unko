@@ -69,6 +69,10 @@ pub struct System {
     audio: Vec<f32>,
     audio_rate: f32,
     resampler: crate::resampler::Resampler,
+    /// The first executed CPU cycle precedes the reference's first sampled
+    /// cycle; its audio sample is dropped once so the resampler phase lines
+    /// up (verified against the reference FDS stream).
+    drop_leading_audio_sample: bool,
     /// Host audio preferences (never part of a save state).
     audio_quality: AudioQuality,
     audio_filters: AudioFilterModel,
@@ -138,6 +142,7 @@ struct SystemStateRef<'a> {
     dma: Option<Dma>,
     audio_rate: f32,
     resampler: &'a crate::resampler::Resampler,
+    drop_leading_audio_sample: bool,
 }
 
 #[cfg(feature = "save-states")]
@@ -171,6 +176,7 @@ struct SystemState {
     dma: Option<Dma>,
     audio_rate: f32,
     resampler: crate::resampler::Resampler,
+    drop_leading_audio_sample: bool,
 }
 
 /// Device attached to a controller port.
@@ -650,6 +656,7 @@ impl System {
             audio: Vec::with_capacity(1024),
             audio_rate: 44_100.0,
             resampler: crate::resampler::Resampler::new(44_100, 1_789_773.0),
+            drop_leading_audio_sample: false,
             audio_quality: AudioQuality::Standard,
             audio_filters: AudioFilterModel::NesRf,
             channel_gains: [1.0; 6],
@@ -686,6 +693,10 @@ impl System {
             .apu
             .set_pal(timing.region == crate::clock::Region::Pal);
         system.clock();
+        // The power-on clock primes the resampler. The first cycle executed by
+        // `run_frame` is one cycle ahead of the reference's first sampled
+        // cycle, so drop its sample once to keep the sub-sample phase aligned.
+        system.drop_leading_audio_sample = true;
         system.cpu = cpu;
         system
     }
@@ -1041,7 +1052,7 @@ impl System {
     #[cfg(feature = "save-states")]
     pub fn save_state(&self) -> Result<Vec<u8>, String> {
         let mut out = Vec::new();
-        out.extend_from_slice(b"UNKOST11");
+        out.extend_from_slice(b"UNKOST12");
         out.extend_from_slice(&self.cart.fingerprint().to_le_bytes());
         let mut cart_state = Vec::new();
         self.cart.save_state(&mut cart_state)?;
@@ -1075,6 +1086,7 @@ impl System {
             dma: self.dma,
             audio_rate: self.audio_rate,
             resampler: &self.resampler,
+            drop_leading_audio_sample: self.drop_leading_audio_sample,
         };
         let payload = bincode::serialize(&state).map_err(|err| err.to_string())?;
         out.extend_from_slice(&payload);
@@ -1084,7 +1096,7 @@ impl System {
     /// Restores a state produced by [`System::save_state`].
     #[cfg(feature = "save-states")]
     pub fn load_state(&mut self, data: &[u8]) -> Result<(), String> {
-        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST11" {
+        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST12" {
             return Err("not an Unko state (bad magic/version)".into());
         }
         let fingerprint = u64::from_le_bytes(
@@ -1135,6 +1147,7 @@ impl System {
         self.dma = state.dma;
         self.audio_rate = state.audio_rate;
         self.resampler = state.resampler;
+        self.drop_leading_audio_sample = state.drop_leading_audio_sample;
         // The state carries the resampler cursor but not the host's quality,
         // filter or mixer preferences; re-apply them (and the APU gains) now.
         self.apply_audio_preferences();
@@ -1597,6 +1610,10 @@ impl System {
     #[inline]
     fn mix_sample(&mut self) {
         let output = self.current_mix();
+        if self.drop_leading_audio_sample {
+            self.drop_leading_audio_sample = false;
+            return;
+        }
         self.resampler.add_sample(output);
     }
 
@@ -2396,6 +2413,24 @@ mod tests {
         CpuBus::write(&mut system, 0xD000, 0x0F);
         CpuBus::write(&mut system, 0xE000, 0x0F);
         assert_eq!(system.ppu.mmc2_banks(), Some([0x0E, 0x0E, 0x0F, 0x0F]));
+    }
+
+    #[test]
+    fn the_first_executed_audio_sample_is_dropped_once() {
+        let rom = crate::cart::tests::synth_banked(0, 32, 8);
+        let mut system = System::from_ines(&rom).expect("load");
+        assert!(
+            system.drop_leading_audio_sample,
+            "pending after the power-on clock"
+        );
+        // The first `run_frame` reports the power-on frame without executing.
+        system.run_frame();
+        assert!(system.drop_leading_audio_sample);
+        system.run_frame();
+        assert!(
+            !system.drop_leading_audio_sample,
+            "consumed by the first executed cycle"
+        );
     }
 
     #[test]

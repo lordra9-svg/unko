@@ -46,18 +46,15 @@ None in AccuracyCoin. All non-DRAW rows pass.
   This required one model fix: the wave/mod prescaler is free-running from
   reset and is **not** gated by the sound-enable bit. With that, the phase is
   `c ≡ 0 (mod 16)` like the reference.
-- **FDS post-resampler residual** — the APU-muted stream still differs first at
-  output sample 479,795, at the first nonzero step edge. Constant stretches
-  (all-zero) match exactly, and the differing values are edge interpolations
-  (identical zero crossings; RMS differs by 3e-7 relative; correlation
-  0.999993 at lag 0). Feeding the identical pre-resampler stream into both
-  resamplers differs by at most one f32 ULP (max 1.49e-8), so the filter
-  kernel is not the cause. The signature is a sub-sample phase/priming offset
-  in the resampler input count (the dump has one extra leading sample). Two
-  clock reorderings were tried and rejected: moving the shared APU tick to
-  end-of-cycle hangs the FDS DMC path; moving only the expansion clock/sample
-  to end-of-cycle gives 327,341 differing samples. Resolving this needs the
-  reference resampler's input priming to be matched exactly.
+- **FDS post-resampler stream** — **resolved**. The APU-muted, post-resampler
+  stream is now byte-identical to the reference for the full 1,200-frame Zelda
+  run (879,799 samples, 0 differing values). The residual was one extra
+  leading resampler input: the first cycle executed by `run_frame` is one
+  cycle ahead of the reference's first sampled cycle. `System` now drops that
+  single sample, and the one-shot flag is serialized so save/restore (including
+  run-ahead) keeps the phase aligned. The state magic moves to `UNKOST12`.
+  fdsirqtests 21/21 and FDS-Mirroring-Test 3/3 remain green, and the whole
+  workspace suite passes.
 
 ### Holy Mapperel (2026-11-14)
 

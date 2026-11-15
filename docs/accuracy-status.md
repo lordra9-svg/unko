@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **536 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **537 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -75,7 +75,7 @@ passes with the alternate selector. The selector is exposed as
 (3,897/6,497 rendering).
 
 Because `Mmc3` gained serialized PRG-RAM protection state and `FdsAudio` was
-rewritten, the save-state magic is now **`UNKOST11`**; `UNKOST10` and older
+rewritten, the save-state magic is now **`UNKOST12`**; `UNKOST11` and older
 states are rejected by the normal bad-magic check. See `docs/accuracy-divergences.md` for the open mapper-suite
 items.
 
@@ -1489,16 +1489,12 @@ Instrumenting the reference bus on 2026-11-15 closed the model question:
   reset and is not gated by the sound-enable bit, so the tick phase is
   `c ≡ 0 (mod 16)` like the reference.
 
-The remaining APU-muted, post-resampler difference starts at output sample
-479,795 (the first nonzero step edge). Constant (all-zero) stretches match
-exactly; the differing values are edge interpolations with identical zero
-crossings, RMS within 3e-7 relative and correlation 0.999993 at lag 0. Feeding
-the identical pre-resampler stream into both resamplers differs by at most one
-f32 ULP (max 1.49e-8), so the kernel is not the cause; the signature is a
-sub-sample phase/priming offset in the resampler's input count. Moving the
-shared APU tick to end-of-cycle hangs the FDS DMC path, and moving only the
-expansion clock/sample gives 327,341 differing samples, so neither reordering
-is the answer.
+The APU-muted, post-resampler stream is now **byte-identical** to the
+reference over 1,200 frames (879,799 samples, 0 differing values). The last
+gap was one extra leading resampler input: the first executed `run_frame`
+cycle precedes the reference's first sampled cycle, so `System` drops that
+single sample. Serializing the one-shot flag keeps save/restore and run-ahead
+phase-aligned (state magic `UNKOST12`).
 
 ### Holy Mapperel board matrix (2026-11-14)
 

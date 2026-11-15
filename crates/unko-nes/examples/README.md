@@ -13,6 +13,7 @@ locally under `test-roms/` (never committed).
 | `apudump` | Per-CPU-cycle APU channel trace for one frame; requires `--features apu-trace`. |
 | `exectrace` | Per-instruction `(CPU cycle, PC)` trace for one frame; requires `--features apu-trace`. |
 | `expwrites` | Per-cycle expansion-port and APU register write trace; requires `--features apu-trace`. |
+| `fdsonly` | APU-muted FDS expansion channel as raw `f32` for reference-emulator audio comparison. |
 
 Typical invocation:
 
