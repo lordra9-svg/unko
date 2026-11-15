@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **522 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **531 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -1477,8 +1477,12 @@ emitted FNV-1a hashes of each frame's f32 samples with the same byte layout as
 The audio unit was rewritten to the documented model (16-CPU-cycle wave and
 modulation clock, integer 24/18-bit accumulators, `$408A` envelope multiplier,
 separate modulation envelope, documented output scaling). This moved the
-FDS-only bit-exact window from the first note to 10.9 s; the remaining
-divergence is localized to the frame-653 table upload.
+FDS-only bit-exact window from the first note to 10.9 s. The frame-653
+residual is not envelope or phase: over the differing run the zero crossings
+are identical, RMS differs by 3e-7 relative, correlation is 0.999993 at lag 0,
+and reordering the audio clock relative to the CPU write changes nothing.
+It is a sub-1e-6 output-path difference; the next check is the pre-resampler
+expansion output.
 
 ### Holy Mapperel board matrix (2026-11-14)
 

@@ -354,9 +354,11 @@ mod tests {
             second_hashes.sha1_hex()
         ))
         .expect("dat");
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let output = std::env::temp_dir().join(format!(
-            "unko-rebuild-{}-{}",
+            "unko-rebuild-{}-{}-{}",
             std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |time| time.as_nanos())

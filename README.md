@@ -34,7 +34,7 @@ verified against the public reference suites:
 - `ppu_vbl_nmi` **12/12**, `ppu_sprites` **19/19**, blargg APU/DMC **13/13**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **522 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **531 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **136 pass / 12 fail / 115 visual-or-input-only** (5 PAL APU failures pass when PAL timing is selected)
 - RustyNES test tree: **157 pass / 13 fail / 171 visual-or-input-only** (164 / 6 with PAL APU in PAL mode)
 
@@ -50,17 +50,24 @@ Compatibility from the local licensed 7,101-image NES audit:
 | Rendering at 120 frames | 6,503 |
 | Distinct mapper IDs in the set | 285 |
 
-### Project stats
+## Netplay foundations
+
+Netplay foundations live in `unko-netplay`: framed four-port input messages, a
+transport trait with an in-process channel pair, a serialized-state rollback
+buffer and a session loop that resimulates after a late remote input. The UDP
+transport and app integration are follow-up work.
+
+## Project stats
 
 | Metric | Value |
 |---|---:|
-| Workspace crates | 8 |
-| First-party Rust lines | ~76,700 |
-| Workspace tests | 522 pass, 0 failed |
+| Workspace crates | 9 |
+| First-party Rust lines | ~78,900 |
+| Workspace tests | 531 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 
-Numbers are from the local checkout on 2026-11-14; the test and
+Numbers are from the local checkout on 2026-11-15; the test and
 accuracy figures are re-measured on every CI run or release audit.
 
 Only mapper 308 (NTDEC Batman) does not draw headless without Start input.
@@ -82,6 +89,7 @@ crates/
   unko-nes-host/     # Core ABI adapter between unko-nes and unko-core
   unko-nes-dev/      # AccuracyCoin battery and development harnesses
   unko-rom-manager/  # standalone DAT audit, 1G1R, fixdat and rebuild core
+  unko-netplay/      # input framing, transport and rollback session (foundation)
   unko-cli/          # headless runner: info, scan, run, verify, trace, diff, bench, corpus
   unko-app/          # desktop shell (Dolphin-inspired UX)
 docs/

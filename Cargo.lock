@@ -4164,6 +4164,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "unko-netplay"
+version = "0.1.0"
+dependencies = [
+ "unko-core",
+]
+
+[[package]]
 name = "unko-rom"
 version = "0.1.0"
 dependencies = [

@@ -36,7 +36,7 @@ Scope decisions from this pass:
 | 10 | Lua scripting (sandboxed 5.4) | 3 | Hard | scripting host API | **deferred** (needs an embedded interpreter dependency, a sandbox policy and API surface; out of this pass) |
 | 11 | RetroAchievements | 3 | Hard | network + memory hashes | **blocked** (requires RA credentials/network and achievement hashing; no offline validation) |
 | 12 | HD packs | 3 | Very hard | graphics pack loader | **deferred** (Mesen-style pack format and tile replacement pipeline) |
-| 13 | Netplay (rollback, 2-4 players) | 3 | Very hard | deterministic states + transport | **deferred** (rollback loop and NAT/transport are a separate subsystem) |
+| 13 | Netplay (rollback, 2-4 players) | 3 | Very hard | deterministic states + transport | **partial**: `unko-netplay` has input framing, a transport trait/channel pair and a rollback buffer/session with tests; UDP/NAT and app wiring outstanding |
 
 Items 7 and 8 stay queued until the required ROMs/hardware captures exist;
 the transports and scanner are already synthetic-tested (see

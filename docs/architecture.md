@@ -93,6 +93,13 @@ dependency. The desktop shell owns SDL3 input, cpal output and all files.
 
 ## ROM manager core
 
+`unko-netplay` is a host-side foundation for rollback netplay. It depends only
+on `unko-core` and provides framed four-port input messages, a `Transport`
+trait (with an in-process channel pair for tests), a bounded serialized-state
+`RollbackBuffer`, and a `RollbackSession` that restores and resimulates when a
+late remote input arrives. UDP transport, prediction tuning and app wiring are
+not part of this crate yet.
+
 `unko-rom-manager` is a separate, non-emulator feature core: DAT auditing,
 1G1R selection, fixdat/CSV reports and safe rebuilding. It has no dependency
 on `unko-core`, `unko-nes` or the app, and CI enforces that boundary. The app
