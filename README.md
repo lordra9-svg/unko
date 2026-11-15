@@ -58,7 +58,7 @@ Compatibility from the local licensed 7,101-image NES audit:
 | Rendering at 120 frames | 6,503 |
 | Distinct mapper IDs in the set | 285 |
 
-## Netplay foundations
+## Netplay
 
 Netplay lives in `unko-netplay` and is wired into the shell. **Direct UDP uses
 GGRS** (`gschup/ggrs`): GGRS owns input exchange, repeat-last prediction,
