@@ -23,6 +23,7 @@ pub mod relay;
 pub mod rollback;
 pub mod session;
 pub mod stun;
+pub mod sync;
 pub mod transport;
 pub mod udp;
 pub mod upnp;
@@ -33,6 +34,7 @@ pub use relay::{room_token, RelayServer, RelayTransport};
 pub use rollback::{RollbackBuffer, StoredFrame};
 pub use session::{PredictionMode, RollbackSession, SessionConfig, SessionStats};
 pub use stun::{public_address as stun_public_address, StunError};
+pub use sync::{DesyncInfo, DesyncMonitor, StateHash};
 pub use transport::{channel_pair, ChannelTransport, MeshTransport, Transport};
 pub use udp::{UdpMesh, UdpTransport};
 pub use upnp::{

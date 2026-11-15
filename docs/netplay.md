@@ -13,6 +13,11 @@ NetPlay is a peer-to-peer rollback layer in `unko-netplay`. It depends only on
   frame `s-delay` on every peer, trading responsiveness for fewer rollbacks.
 - Late inputs restore a saved state, truncate the newer states and resimulate.
   Counters: rollbacks, predicted port-frames, deepest rollback.
+- **Desync detection**: each peer hashes the pre-frame save state it already
+  writes for rollback (no extra serialization), and exchanges hashes only for
+  frames that fell out of the rollback buffer, where no late input can change
+  them. Both sides compare the hashes; the first mismatch per frame/peer is
+  reported and the app pauses with the frame, local and remote values.
 
 ## Transports
 
@@ -66,6 +71,11 @@ Start both sides within about a second. A two-phase `SYNC`/`READY` handshake
 then aligns the frame loops; frames that arrive during the handshake are
 stored for their frame numbers.
 
+`--inject-desync N` deliberately applies a different local input on the join
+side at frame `N` (the wire input stays correct) to prove detection. After a
+mismatch both peers exchange `RESYNC`, drop the old session and replay
+`--recover-frames` from frame 0 to prove recovery.
+
 Expected output (both sides):
 
 ```text
@@ -85,7 +95,19 @@ processes and the real `AccuracyCore`:
 | Relay (`unko-relay`) | `0c6f6706deada347` | `0c6f6706deada347` | yes (depth 70/112) |
 
 All runs delivered 240/240 remote inputs and converged to the independent
-reference hash. A true Internet run still needs two networks/hosts; the
+reference hash.
+
+### Desync detection and recovery (2026-11-14)
+
+Two processes, direct UDP, 300 frames, hashes exchanged every 30 frames:
+
+```text
+normal run   host/join: 300/300 inputs, 143 hashes, 0 mismatches, match=true
+injected     join applies input^1 at frame 100:
+             both sides: desync=detected frame=101 player=1 ...
+             after RESYNC + 160-frame replay:
+             recovered=true hashes=23 mismatches=0 hash=2bc2d775f6ec0112                reference=2bc2d775f6ec0112
+``` A true Internet run still needs two networks/hosts; the
 commands above are the reproducible procedure.
 
 ## Limitations
@@ -95,3 +117,6 @@ commands above are the reproducible procedure.
   authentication or encryption.
 - Hole punching cannot traverse symmetric NATs; use the relay there.
 - Live Internet latency/loss has not been measured from two networks yet.
+- State hashing reuses the rollback save states, but it still hashes the full
+  serialized state at the configured cadence and costs some CPU on large
+  boards (FDS/MMC5); it is off for local play and only enabled in netplay.

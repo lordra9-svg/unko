@@ -16,7 +16,8 @@ use crate::library::GameEntry;
 use crate::recording::{RecordModes, Recorder};
 use crate::settings::Settings;
 use unko_netplay::{
-    InputFrame, PredictionMode, RollbackSession, SessionConfig, SessionStats, Transport,
+    DesyncInfo, DesyncMonitor, InputFrame, PredictionMode, RollbackSession, SessionConfig,
+    SessionStats, StateHash, Transport,
 };
 
 /// Maximum frames emulated in one UI update. When the desktop stalls the
@@ -239,6 +240,9 @@ pub struct Netplay {
     sent: u32,
     received: u32,
     rollbacks: u32,
+    monitor: DesyncMonitor,
+    desync: Option<DesyncInfo>,
+    last_hash_sent: Option<u32>,
     last_error: Option<String>,
 }
 
@@ -259,6 +263,16 @@ impl Netplay {
     #[must_use]
     pub fn session_stats(&self) -> (SessionConfig, SessionStats) {
         (self.session.config(), self.session.stats())
+    }
+
+    /// `(checked, mismatches, last)` state-hash counters.
+    #[must_use]
+    pub fn sync_stats(&self) -> (u64, u64, Option<DesyncInfo>) {
+        (
+            self.monitor.checked(),
+            self.monitor.mismatches(),
+            self.desync,
+        )
     }
 
     /// Last transport or rollback error.
@@ -418,7 +432,11 @@ impl Player {
             self.next_repaint = Duration::from_millis(250);
             return;
         }
-        self.poll_netplay();
+        if let Some(desync) = self.poll_netplay() {
+            self.message = format!("NetPlay {desync}");
+            self.paused = true;
+            self.next_repaint = Duration::from_millis(250);
+        }
         self.update_rewind_enabled();
         let effective_speed = if self.fast_forward {
             300
@@ -475,6 +493,20 @@ impl Player {
                             netplay.last_error = Some(err.to_string());
                         } else {
                             netplay.sent += 1;
+                        }
+                        if frame.is_multiple_of(30) {
+                            for (number, hash) in
+                                netplay.session.settled_hashes(netplay.last_hash_sent)
+                            {
+                                netplay.last_hash_sent = Some(number);
+                                netplay.monitor.record_local(number, hash);
+                                let message = StateHash {
+                                    frame: number,
+                                    player,
+                                    hash,
+                                };
+                                let _ = netplay.transport.send(&message.encode());
+                            }
                         }
                     }
                     Err(err) => {
@@ -1005,6 +1037,9 @@ impl Player {
             sent: 0,
             received: 0,
             rollbacks: 0,
+            monitor: DesyncMonitor::default(),
+            desync: None,
+            last_hash_sent: None,
             last_error: None,
         });
     }
@@ -1050,20 +1085,33 @@ impl Player {
         self.netplay.as_ref().map(Netplay::session_stats)
     }
 
+    /// `(checked, mismatches, last)` state-hash counters when netplay is
+    /// active.
+    #[must_use]
+    pub fn netplay_sync_stats(&self) -> Option<(u64, u64, Option<DesyncInfo>)> {
+        self.netplay.as_ref().map(Netplay::sync_stats)
+    }
+
     /// Last netplay transport/rollback error, if any.
     #[must_use]
     pub fn netplay_error(&self) -> Option<&str> {
         self.netplay.as_ref().and_then(Netplay::last_error)
     }
 
-    fn poll_netplay(&mut self) {
-        let Some(netplay) = self.netplay.as_mut() else {
-            return;
-        };
+    fn poll_netplay(&mut self) -> Option<DesyncInfo> {
+        let netplay = self.netplay.as_mut()?;
+        let mut desync = None;
         loop {
             match netplay.transport.recv() {
                 Ok(Some(bytes)) => {
                     netplay.received += 1;
+                    if let Some(hash) = StateHash::decode(&bytes) {
+                        if let Some(info) = netplay.monitor.record_remote(hash) {
+                            netplay.desync = Some(info);
+                            desync.get_or_insert(info);
+                        }
+                        continue;
+                    }
                     match InputFrame::decode(&bytes) {
                         Some(frame) => {
                             match netplay.session.receive_remote(
@@ -1087,6 +1135,7 @@ impl Player {
                 }
             }
         }
+        desync
     }
 
     /// Sets the gamepad state for one controller port.
@@ -1803,6 +1852,7 @@ mod tests {
                 prediction: PredictionMode::Neutral,
                 players: 3,
                 local_player: 1,
+                hash_states: true,
             },
         );
         let (config, stats) = player.netplay_session_stats().expect("session");

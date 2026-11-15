@@ -75,7 +75,7 @@ Key interaction rules worth keeping:
 | Settings: NES page | region, mapper/header info, deterministic RAM | now |
 | Settings: Advanced | core id, log level, state format | now |
 | Per-game properties | Tools → Game properties…: timing region, per-port controller devices and header mapper overrides per game, saved as `<stem>.game` and applied on the next load | now |
-| NetPlay | Tools → NetPlay…: host/join 2-4 player UDP mesh, player slot, prediction mode, 0-16 frame input delay, UPnP-IGD port mapping, STUN external-IP fallback, UDP hole punching, relay-server/room fallback + manual public endpoint, rollback/predicted/depth counters; rewind/movies/run-ahead disabled; LAN two-host harness validates the transports, Internet run needs two networks | now |
+| NetPlay | Tools → NetPlay…: host/join 2-4 player UDP mesh, player slot, prediction mode, 0-16 frame input delay, UPnP-IGD port mapping, STUN external-IP fallback, UDP hole punching, relay-server/room fallback, state-hash desync detection (pause/report) + manual public endpoint, rollback/predicted/depth/hash counters; rewind/movies/run-ahead disabled; LAN two-host harness validates the transports, Internet run needs two networks | now |
 | Achievements | separate milestone (credentials/network) | blocked |
 
 ## Platforms

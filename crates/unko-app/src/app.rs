@@ -2682,6 +2682,7 @@ impl App {
             prediction: self.netplay_prediction,
             players,
             local_player: slot,
+            hash_states: true,
         };
         let relay = self.netplay_relay_server.trim().to_string();
         let room = self.netplay_room.trim().to_string();
@@ -3134,6 +3135,20 @@ impl App {
                         config.players,
                         config.local_player + 1,
                     ));
+                    let (checked, mismatches, last) = self
+                        .player
+                        .as_ref()
+                        .and_then(crate::player::Player::netplay_sync_stats)
+                        .unwrap_or((0, 0, None));
+                    ui.label(format!(
+                        "State hashes: {checked} checked · {mismatches} mismatch(es)"
+                    ));
+                    if let Some(info) = last {
+                        ui.colored_label(
+                            Color32::LIGHT_RED,
+                            format!("{info} — session paused"),
+                        );
+                    }
                     if let Some(err) = self
                         .player
                         .as_ref()

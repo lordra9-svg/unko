@@ -52,6 +52,8 @@ pub struct SessionConfig {
     pub players: u8,
     /// Zero-based port owned by this instance.
     pub local_player: u8,
+    /// Hash every state whose inputs are fully known (desync detection).
+    pub hash_states: bool,
 }
 
 impl Default for SessionConfig {
@@ -62,6 +64,7 @@ impl Default for SessionConfig {
             prediction: PredictionMode::LastInput,
             players: 2,
             local_player: 0,
+            hash_states: false,
         }
     }
 }
@@ -77,6 +80,7 @@ impl SessionConfig {
             prediction: self.prediction,
             players,
             local_player: self.local_player.min(players - 1),
+            hash_states: self.hash_states,
         }
     }
 }
@@ -104,6 +108,8 @@ pub struct RollbackSession {
     local_inputs: BTreeMap<u32, [u16; 4]>,
     config: SessionConfig,
     stats: SessionStats,
+    /// Hashes of fully-settled frames, for desync detection.
+    hashes: BTreeMap<u32, u64>,
 }
 
 impl RollbackSession {
@@ -127,6 +133,7 @@ impl RollbackSession {
             local_inputs: BTreeMap::new(),
             config,
             stats: SessionStats::default(),
+            hashes: BTreeMap::new(),
         }
     }
 
@@ -158,6 +165,25 @@ impl RollbackSession {
         self.stats
     }
 
+    /// Whether every remote port has supplied the input for simulation frame
+    /// `frame` (after applying the input delay).
+    ///
+    /// Once this is true, the state after `frame` is final: no later input can
+    /// roll it back, so it is safe to publish a state hash for comparison.
+    #[must_use]
+    pub fn remote_inputs_through(&self, frame: u32) -> bool {
+        let Some(input_frame) = frame.checked_sub(self.config.input_delay) else {
+            return true;
+        };
+        (0..self.config.players)
+            .filter(|player| *player != self.config.local_player)
+            .all(|player| {
+                self.peers
+                    .get(&player)
+                    .is_some_and(|inputs| inputs.contains_key(&input_frame))
+            })
+    }
+
     /// Advances one frame with the local player's four-port input view.
     ///
     /// Only `local_player`'s port is taken from `local`; the rest are merged
@@ -169,9 +195,10 @@ impl RollbackSession {
     pub fn step(&mut self, core: &mut dyn Core, local: [u16; 4]) -> Result<u32, CoreError> {
         let frame = self.stats.frame;
         self.local_inputs.insert(frame, local);
-        let (local, merged) = self.effective_inputs(frame, true);
+        let (local, merged, _complete) = self.effective_inputs(frame, true);
         let mut state = Vec::new();
         core.save_state(&mut state)?;
+        self.note_hash(frame, &state);
         self.buffer.push(StoredFrame {
             frame,
             inputs: local,
@@ -232,9 +259,10 @@ impl RollbackSession {
             .max_rollback_depth
             .max(self.stats.frame.saturating_sub(target));
         for number in replay {
-            let (local, merged) = self.effective_inputs(number, false);
+            let (local, merged, _complete) = self.effective_inputs(number, false);
             let mut state = Vec::new();
             core.save_state(&mut state)?;
+            self.note_hash(number, &state);
             self.buffer.push(StoredFrame {
                 frame: number,
                 inputs: local,
@@ -249,9 +277,13 @@ impl RollbackSession {
     /// Builds the four-port frame for simulation frame `frame`.
     ///
     /// Both peers map a simulated frame to input frame `frame - delay`.
-    fn effective_inputs(&mut self, frame: u32, count_prediction: bool) -> ([u16; 4], [u16; 4]) {
+    fn effective_inputs(
+        &mut self,
+        frame: u32,
+        count_prediction: bool,
+    ) -> ([u16; 4], [u16; 4], bool) {
         let Some(input_frame) = frame.checked_sub(self.config.input_delay) else {
-            return (NEUTRAL, NEUTRAL);
+            return (NEUTRAL, NEUTRAL, true);
         };
         let local = self
             .local_inputs
@@ -259,6 +291,7 @@ impl RollbackSession {
             .copied()
             .unwrap_or(NEUTRAL);
         let mut merged = [0u16; 4];
+        let mut complete = true;
         for port in 0..usize::from(self.config.players) {
             let player = port as u8;
             if player == self.config.local_player {
@@ -269,6 +302,7 @@ impl RollbackSession {
             match known.and_then(|inputs| inputs.get(&input_frame)) {
                 Some(input) => merged[port] = *input,
                 None => {
+                    complete = false;
                     if count_prediction {
                         self.stats.predicted = self.stats.predicted.saturating_add(1);
                     }
@@ -281,7 +315,42 @@ impl RollbackSession {
                 }
             }
         }
-        (local, merged)
+        (local, merged, complete)
+    }
+
+    /// Hashes the pre-frame save state that is already needed for rollback.
+    fn note_hash(&mut self, frame: u32, state: &[u8]) {
+        if !self.config.hash_states {
+            return;
+        }
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for byte in state {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        self.hashes.insert(frame, hash);
+        while self.hashes.len() > 1024 {
+            let oldest = *self.hashes.keys().next().expect("non-empty");
+            self.hashes.remove(&oldest);
+        }
+    }
+
+    /// Hashes of frames that can no longer be rolled back (older than the
+    /// state buffer), after `after` when given.
+    ///
+    /// These are the safe frames to exchange: a late input can still change a
+    /// buffered frame, but not one that already fell out of the buffer.
+    #[must_use]
+    pub fn settled_hashes(&self, after: Option<u32>) -> Vec<(u32, u64)> {
+        let oldest = self.buffer.oldest_frame().unwrap_or(u32::MAX);
+        let start = after.map_or(0, |frame| frame.saturating_add(1));
+        if start >= oldest {
+            return Vec::new();
+        }
+        self.hashes
+            .range(start..oldest)
+            .map(|(frame, hash)| (*frame, *hash))
+            .collect()
     }
 
     fn apply(core: &mut dyn Core, merged: [u16; 4]) {
@@ -439,6 +508,82 @@ mod tests {
         assert!(!session.receive_remote(&mut core, 1, 0, 1).expect("late"));
         assert!(!session.receive_remote(&mut core, 1, 9, 1).expect("future"));
         assert_eq!(session.frame(), 6);
+    }
+
+    #[test]
+    fn hashes_wait_for_every_remote_input() {
+        let mut core = FakeCore::default();
+        let mut session = RollbackSession::new(4);
+        session.step(&mut core, [1, 0, 0, 0]).expect("step");
+        assert!(!session.remote_inputs_through(0));
+        session.receive_remote(&mut core, 1, 0, 7).expect("remote");
+        assert!(session.remote_inputs_through(0));
+        assert!(!session.remote_inputs_through(1));
+    }
+
+    #[test]
+    fn settled_hashes_cover_only_rollback_final_frames() {
+        let mut core = FakeCore::default();
+        let mut session = RollbackSession::with_config(SessionConfig {
+            buffer_frames: 4,
+            hash_states: true,
+            ..SessionConfig::default()
+        });
+        for frame in 0..8u32 {
+            session
+                .receive_remote(&mut core, 1, frame, 20 + frame as u16)
+                .expect("remote");
+            session
+                .step(&mut core, [10 + frame as u16, 0, 0, 0])
+                .expect("step");
+        }
+        let hashes = session.settled_hashes(None);
+        assert!(!hashes.is_empty());
+        assert!(
+            hashes.iter().all(|(frame, _)| *frame < 4),
+            "only frames older than the 4-frame buffer settle"
+        );
+        assert_eq!(session.settled_hashes(Some(0)), hashes[1..]);
+    }
+
+    #[test]
+    fn equal_sessions_hash_equal_and_divergence_changes_the_hash() {
+        let config = SessionConfig {
+            buffer_frames: 4,
+            hash_states: true,
+            ..SessionConfig::default()
+        };
+        let mut a = RollbackSession::with_config(config);
+        let mut b = RollbackSession::with_config(config);
+        let mut c = RollbackSession::with_config(config);
+        let mut core_a = FakeCore::default();
+        let mut core_b = FakeCore::default();
+        let mut core_c = FakeCore::default();
+        for frame in 0..8u32 {
+            a.receive_remote(&mut core_a, 1, frame, 30)
+                .expect("a remote");
+            b.receive_remote(&mut core_b, 1, frame, 30)
+                .expect("b remote");
+            c.receive_remote(&mut core_c, 1, frame, 30)
+                .expect("c remote");
+            a.step(&mut core_a, [1, 0, 0, 0]).expect("a");
+            b.step(&mut core_b, [1, 0, 0, 0]).expect("b");
+            c.step(&mut core_c, [1, 0, 0, 0]).expect("c");
+        }
+        assert_eq!(a.settled_hashes(None), b.settled_hashes(None));
+        // Differing remote input at frame 0 changes states after frame 0.
+        let mut d = RollbackSession::with_config(config);
+        let mut core_d = FakeCore::default();
+        for frame in 0..8u32 {
+            let input = if frame == 0 { 31 } else { 30 };
+            d.receive_remote(&mut core_d, 1, frame, input)
+                .expect("d remote");
+            d.step(&mut core_d, [1, 0, 0, 0]).expect("d");
+        }
+        let base = a.settled_hashes(None);
+        let changed = d.settled_hashes(None);
+        assert_eq!(base.first(), changed.first(), "pre-state 0 is unchanged");
+        assert_ne!(base, changed, "later pre-states include the divergence");
     }
 
     #[test]
