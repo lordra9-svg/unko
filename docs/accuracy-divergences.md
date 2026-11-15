@@ -23,9 +23,13 @@ None in AccuracyCoin. All non-DRAW rows pass.
 - **`$4030.D1` DRAM-refresh watchdog IRQ** — modelled from the documented
   7-bit refresh counter and 12-bit timer (reload 3245). `FDS-4030D1-Addr`
   renders `67FF`/`6E24`; a Sharp Twin Famicom capture shows `67FF`/`6E25`.
-  The second return address is one CPU cycle early, so one edge of the
-  refresh/timer interaction is still off. Responsible module: `cart.rs`
-  (`Fds::clock_watchdog`).
+  The second return address is one byte early. Experiments on 2026-11-15
+  (reload 3246 instead of 3245; skipping the timer on the `$4030` acknowledge
+  cycle) each lengthen the measured IRQ interval by one cycle but leave the
+  displayed address unchanged, so the residual is in interrupt
+  recognition/return-address capture rather than the refresh/timer edge.
+  Resolving it needs a cycle-level hardware CPU trace around the second IRQ.
+  Responsible module: `cart.rs` (`Fds::clock_watchdog`).
 - `FDS-4023-Test` and `FDS-Audio-Registers` are display-only dumps with no
   pass/fail line; their register dumps are captured but have no oracle yet.
 

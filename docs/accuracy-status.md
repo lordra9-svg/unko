@@ -1452,7 +1452,9 @@ by the once-per-frame cartridge sync, so a nametable check in the same frame
 still saw the previous arrangement. `System` now syncs mirroring on every
 cartridge write. The watchdog follows the documented 7-bit refresh counter
 and 12-bit timer (3245 reload); the first captured return address matches the
-hardware exactly and the second is one CPU cycle early.
+hardware exactly and the second is one byte early. Reload-value and ack-cycle
+experiments move the interval by a cycle without moving that address, which
+places the residual in interrupt recognition rather than the refresh edge.
 
 ### Holy Mapperel board matrix (2026-11-14)
 
