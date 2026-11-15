@@ -150,7 +150,8 @@ first entries of all four 2C04 permutations, RGB emphasis, the register swap,
 the status identifiers and the NES 2.0 header selection. This is palette and
 copy-protection data only: **mapper 99, VS coins/DIPs, the VS BIOS and game
 ROMs are still missing**, so no VS title has been booted yet. The header parser
-also ignores VS system type beyond the PPU nibble.
+also ignores VS system type beyond the PPU nibble, and the RGB PPUs' OAM/palette
+readback quirks are not modelled.
 
 ## ROM loading — UNIF (2026-11-15)
 
