@@ -650,11 +650,13 @@ mod tests {
         nes[..4].copy_from_slice(b"NES\x1a");
         nes.extend_from_slice(b"payload");
         fs::write(src.join("game.nes"), &nes).expect("rom");
-        let archive = dir.join("set.7z");
+        let archives = dir.join("archives");
+        fs::create_dir_all(&archives).expect("archives");
+        let archive = archives.join("set.7z");
         sevenz_rust2::compress_to_path(&src, &archive).expect("compress");
 
         let mut progress = |_: &ScanProgress| {};
-        let (roms, _) = scan_path(&dir, &ScanOptions::default(), &mut progress).expect("scan");
+        let (roms, _) = scan_path(&archives, &ScanOptions::default(), &mut progress).expect("scan");
         let rom = roms
             .iter()
             .find(|rom| rom.file_name == "game.nes")
