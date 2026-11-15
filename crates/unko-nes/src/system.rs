@@ -1320,7 +1320,7 @@ impl System {
     #[cfg(feature = "save-states")]
     pub fn save_state(&self) -> Result<Vec<u8>, String> {
         let mut out = Vec::new();
-        out.extend_from_slice(b"UNKOST17");
+        out.extend_from_slice(b"UNKOST18");
         out.extend_from_slice(&self.cart.fingerprint().to_le_bytes());
         let mut cart_state = Vec::new();
         self.cart.save_state(&mut cart_state)?;
@@ -1368,7 +1368,7 @@ impl System {
     /// Restores a state produced by [`System::save_state`].
     #[cfg(feature = "save-states")]
     pub fn load_state(&mut self, data: &[u8]) -> Result<(), String> {
-        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST17" {
+        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST18" {
             return Err("not an Unko state (bad magic/version)".into());
         }
         let fingerprint = u64::from_le_bytes(
@@ -3832,7 +3832,7 @@ mod tests {
     fn state_magic_is_current() {
         let system = System::from_ines(&synthetic_nrom(0)).expect("load");
         let state = system.save_state().expect("state");
-        assert_eq!(&state[..8], b"UNKOST17");
+        assert_eq!(&state[..8], b"UNKOST18");
         let mut restored = System::from_ines(&synthetic_nrom(0)).expect("load");
         restored.load_state(&state).expect("restore");
     }

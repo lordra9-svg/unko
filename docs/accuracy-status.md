@@ -82,7 +82,7 @@ the FDS watchdog gained serialized reload state, the mouse added serialized
 port state, the Famicom 3D System added its field latch, Karaoke Studio added
 mapper-188 microphone state, the Miracle Piano added its SysEx parser and
 firmware bytes, and the Datach adapter added the external X24C01 array, so the
-save-state magic is now **`UNKOST17`**; `UNKOST16` and older states are rejected
+save-state magic is now **`UNKOST18`**; `UNKOST17` and older states are rejected
 by the normal bad-magic check. See `docs/accuracy-divergences.md` for the open
 mapper-suite items.
 
@@ -114,7 +114,7 @@ records every `$4016` write and samples OUT1 at the frame boundary, after the
 previous vertical blank and just before the next visible field, so each
 completed frame is tagged with the eye it was rendered for. The eye is exposed
 through `System::stereo_eye`; `Core::set_stereo_glasses` attaches or detaches
-the glasses. `UNKOST17` save states carry the attachment flag, latch and
+the glasses. `UNKOST18` save states carry the attachment flag, latch and
 current eye, so rewind and NetPlay rollback keep the correct eye.
 
 The desktop frontend offers **Settings → Video → Famicom 3D glasses** and
@@ -174,7 +174,7 @@ input (0 while sound is detected) and bits 7-3 are CPU open bus. The mapper now
 claims that window, so reads reach the board instead of returning open bus.
 `System::set_bandai_microphone` reports the ADC state; the A/B bits follow
 controller port 1. The mapper serializes both buttons, the ADC state and its
-open-bus latch in `UNKOST17` states. Unit tests cover the exact bit mapping,
+open-bus latch in `UNKOST18` states. Unit tests cover the exact bit mapping,
 the open-bus high bits, the CPU-bus path and a state round trip. No Karaoke
 Studio ROM is present locally, so this is validated against the NESdev protocol
 description rather than a title.
