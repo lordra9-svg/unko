@@ -228,6 +228,7 @@ impl GgrsNetplay {
         self.session
             .add_local_input(self.local_handle, local_input)
             .map_err(|err| err.to_string())?;
+        let before = self.session.current_frame();
         let requests = match self.session.advance_frame() {
             Ok(requests) => requests,
             Err(GgrsError::PredictionThreshold | GgrsError::NotSynchronized) => {
@@ -269,7 +270,9 @@ impl GgrsNetplay {
             }
         }
         self.stats.frame = self.session.current_frame().max(0) as u32;
-        Ok(true)
+        // A rollback-only pass resimulates earlier frames without advancing the
+        // session frame; the caller must not count it as a new display frame.
+        Ok(self.session.current_frame() > before)
     }
 }
 

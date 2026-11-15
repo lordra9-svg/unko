@@ -67,10 +67,11 @@ during a hole-punch handshake so both legacy peers start from the same frame.
 ## Two-host harness
 
 `crates/unko-nes-dev/src/bin/netplay_harness.rs` runs one side of a real UDP
-session on the actual NES core using the legacy transport engine. The GGRS
-path has a loopback integration test in `unko-netplay` (two GGRS sessions, a
-`Core` test double with save/load/input semantics, 90 simulated frames and an
-identical final state). It builds a synthetic NROM whose RAM
+session on the actual NES core. `--engine ggrs` validates the direct GGRS path:
+it runs the requested frames plus 30 settling frames, then compares the final
+save-state hash with an independent local run of both deterministic input
+sequences. The GGRS library also has a loopback integration test in
+`unko-netplay` using a `Core` test double. It builds a synthetic NROM whose RAM
 accumulates both controller ports, runs a deterministic input sequence,
 prints the final save-state hash, and compares it with an independent local
 run of the true input sequence. No commercial ROM is needed.
@@ -79,7 +80,13 @@ run of the true input sequence. No commercial ROM is needed.
 cargo build --release -p unko-nes-dev --bin netplay_harness
 cargo build --release -p unko-netplay --bin unko-relay
 
-# Direct UDP (replace the addresses with two hosts on the same LAN)
+# Direct UDP with GGRS (replace the addresses with two hosts on the same LAN)
+netplay_harness --role host --engine ggrs --bind 192.168.12.252:7901 \
+    --peer 192.168.12.252:7902 --frames 240
+netplay_harness --role join --engine ggrs --bind 192.168.12.252:7902 \
+    --peer 192.168.12.252:7901 --frames 240
+
+# Direct UDP with the legacy engine (the default)
 netplay_harness --role host --bind 192.168.12.252:7901 \
     --peer 192.168.12.252:7902 --frames 240
 netplay_harness --role join --bind 192.168.12.252:7902 \

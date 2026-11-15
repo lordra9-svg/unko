@@ -80,7 +80,8 @@ until GGRS gains a `NonBlockingSocket` adapter for those transports. The window
 reports the active engine, frame, confirmed frame, rollbacks, predicted frames,
 the deepest rollback and GGRS desync reports. Netplay disables rewind, movies
 and run-ahead. Direct UDP, hole punching and the relay were validated over a
-real LAN with the two-host harness; a true Internet run needs two networks. See
+real LAN with the two-host harness; the GGRS path also passes the same harness
+on loopback against the real NES core. A true Internet run needs two networks. See
 [`docs/netplay.md`](docs/netplay.md) for the harness commands and results.
 
 ## Project stats

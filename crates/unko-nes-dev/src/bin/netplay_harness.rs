@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 use unko_core::{Core, InputState, LoadOptions};
 use unko_nes_api::NesButtons;
 use unko_nes_host::AccuracyCore;
+use unko_netplay::ggrs_session::GgrsNetplay;
 use unko_netplay::holepunch::HolePunchTransport;
 use unko_netplay::input::InputFrame;
 use unko_netplay::relay::RelayTransport;
@@ -99,6 +100,7 @@ struct Args {
     hash_interval: u32,
     inject: Option<u32>,
     recover_frames: u32,
+    engine: String,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -114,6 +116,7 @@ fn parse_args() -> Result<Args, String> {
     let mut hash_interval = 30;
     let mut inject = None;
     let mut recover_frames = 160;
+    let mut engine = "legacy".to_string();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -134,6 +137,7 @@ fn parse_args() -> Result<Args, String> {
                     .parse()
                     .map_err(|_| "--frames needs a number")?
             }
+            "--engine" => engine = args.next().ok_or("--engine needs legacy|ggrs")?,
             "--transport" => transport = args.next().ok_or("--transport needs a value")?,
             "--relay" => relay = Some(args.next().ok_or("--relay needs an address")?),
             "--room" => room = args.next().ok_or("--room needs a name")?,
@@ -180,8 +184,8 @@ fn parse_args() -> Result<Args, String> {
             "-h" | "--help" => {
                 println!(
                     "usage: netplay_harness --role host|join --frames N [--bind ADDR] \
-                     [--peer ADDR] [--transport mesh|punch|relay] [--relay ADDR] \
-                     [--room NAME] [--delay N] [--prediction last|neutral] \
+                     [--peer ADDR] [--engine legacy|ggrs] [--transport mesh|punch|relay] \
+                     [--relay ADDR] [--room NAME] [--delay N] [--prediction last|neutral] \
                      [--hash-interval N] [--inject-desync N] [--recover-frames N]"
                 );
                 std::process::exit(0);
@@ -202,6 +206,7 @@ fn parse_args() -> Result<Args, String> {
         hash_interval,
         inject,
         recover_frames,
+        engine,
     })
 }
 
@@ -406,8 +411,96 @@ fn reference_hash(rom: &[u8], frames: u32) -> Result<u64, String> {
     snapshot_hash(&mut core)
 }
 
+/// Runs one side of a direct GGRS session and compares its final state with a
+/// local reference run of both known input sequences.
+fn run_ggrs(args: &Args) -> Result<(), String> {
+    if args.transport != "mesh" {
+        return Err("--engine ggrs only supports --transport mesh (direct UDP)".into());
+    }
+    if args.inject.is_some() {
+        return Err("--engine ggrs does not support --inject-desync".into());
+    }
+    let peer = args.peer.clone().ok_or("ggrs needs --peer")?;
+    let port: u16 = args
+        .bind
+        .rsplit(':')
+        .next()
+        .ok_or("--bind needs host:port")?
+        .parse()
+        .map_err(|_| "--bind needs host:port with a numeric port")?;
+    let config = SessionConfig {
+        buffer_frames: 8,
+        input_delay: args.delay,
+        prediction: PredictionMode::LastInput,
+        players: 2,
+        local_player: args.role,
+        hash_states: true,
+    };
+    let rom = synthetic_rom();
+    let mut core = AccuracyCore::new();
+    core.load(&rom, &LoadOptions::default())
+        .map_err(|err| err.to_string())?;
+    core.reset().map_err(|err| err.to_string())?;
+    let mut session = GgrsNetplay::start(port, &[peer], config)?;
+
+    // Keep running past the reported frame so late remote inputs for the last
+    // reported frames arrive and GGRS can roll back to the correct state.
+    let total = args.frames + 30;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut frame = 0;
+    while frame < total {
+        if Instant::now() >= deadline {
+            return Err(format!("GGRS session stalled at frame {frame}"));
+        }
+        let input = if args.role == 0 {
+            host_input(frame)
+        } else {
+            join_input(frame)
+        };
+        if session.step(&mut core, input)? {
+            frame += 1;
+        } else {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    let mut state = Vec::new();
+    core.save_state(&mut state).map_err(|err| err.to_string())?;
+    let session_hash = fnv1a(&state);
+
+    // Independent reference: same ROM and both input sequences.
+    let mut reference = AccuracyCore::new();
+    reference
+        .load(&rom, &LoadOptions::default())
+        .map_err(|err| err.to_string())?;
+    reference.reset().map_err(|err| err.to_string())?;
+    for frame in 0..total {
+        reference.set_input(0, InputState::from_bits(host_input(frame)));
+        reference.set_input(1, InputState::from_bits(join_input(frame)));
+        reference.run_frame().map_err(|err| err.to_string())?;
+    }
+    let mut reference_state = Vec::new();
+    reference
+        .save_state(&mut reference_state)
+        .map_err(|err| err.to_string())?;
+    let reference_hash = fnv1a(&reference_state);
+    println!(
+        "ggrs role={} frames={} settled={} session={session_hash:016x} reference={reference_hash:016x} match={}",
+        if args.role == 0 { "host" } else { "join" },
+        args.frames,
+        total,
+        session_hash == reference_hash
+    );
+    if session_hash != reference_hash {
+        return Err("GGRS final state differs from the local reference".into());
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), String> {
     let args = parse_args()?;
+    if args.engine == "ggrs" {
+        return run_ggrs(&args);
+    }
     let rom = synthetic_rom();
     let mut transport = build_transport(&args)?;
     let config = SessionConfig {
