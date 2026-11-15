@@ -79,7 +79,8 @@ The main effort is now the reference-parity accuracy core. Details in
       PlayChoice-10 (blocked on ROMs and palette/security data), FDS audio
       parity, Miracle Piano MIDI replies, the Famicom 3D glasses and mouse,
       and validation against real PAL/NSF content. The FDS `$4030.D1`
-      DRAM-refresh watchdog IRQ is the remaining FDS accuracy item.
+      DRAM-refresh watchdog is modelled with a one-cycle residual on the
+      second captured return address.
 - [ ] **A7** differential harness, hardware captures, performance pass.
       The differential harness is complete: per-frame RGBA, audio and
       palette-independent geometry hashes are compared against RustyNES, and

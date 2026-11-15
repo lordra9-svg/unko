@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **514 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **515 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -1445,14 +1445,14 @@ Ran the released FDS test images against the `rp2c33a-01a` BIOS
 | `FDS-Mirroring-Test` v1.1 | **3/3 pass** (`$4025.D3 W`, `$4030.D3 R`, `$4023.D0=0`) |
 | `FDS-4023-Test` v1.0 | display-only: `$4020-$409F` dump captured, no pass/fail line |
 | `FDS-Audio-Registers` v1.2 | display-only: `$4090-$4097` dump captured |
-| `FDS-4030D1-Addr` v1.0 | **gap**: `$4030.D1` DRAM-refresh watchdog IRQ is not modelled, so the address fields print `XXXX`; hardware shows `67FF`/`6E25` |
+| `FDS-4030D1-Addr` v1.0 | `$4030.D1` DRAM-refresh watchdog modelled; renders `67FF`/`6E24` against hardware `67FF`/`6E25` (one cycle on the second address) |
 
 The mirroring suite exposed a real bug: `$4025.D3` was only copied to the PPU
 by the once-per-frame cartridge sync, so a nametable check in the same frame
 still saw the previous arrangement. `System` now syncs mirroring on every
-cartridge write. The watchdog IRQ remains an open A6 item; its period and
-acknowledgement timing are still hardware-research topics, so it is not
-approximated.
+cartridge write. The watchdog follows the documented 7-bit refresh counter
+and 12-bit timer (3245 reload); the first captured return address matches the
+hardware exactly and the second is one CPU cycle early.
 
 ### Holy Mapperel board matrix (2026-11-14)
 

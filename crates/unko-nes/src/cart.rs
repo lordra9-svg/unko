@@ -622,6 +622,9 @@ pub trait Mapper: fmt::Debug + MapperState {
     /// Supplies the CPU's last bus value before a floating read.
     fn set_open_bus(&mut self, _value: u8) {}
 
+    /// Supplies the address of the CPU cycle about to be clocked.
+    fn set_cpu_access(&mut self, _address: Option<u16>) {}
+
     /// Whether the mapper drives PRG-ROM (not work RAM) at `$6000-$7FFF`.
     ///
     /// The CPU bus only forwards that window to the cartridge when this is
@@ -1417,6 +1420,11 @@ impl Cartridge {
     /// Supplies the last CPU bus value for mappers with floating windows.
     pub fn set_open_bus(&mut self, value: u8) {
         self.mapper.set_open_bus(value);
+    }
+
+    /// Supplies the address of the CPU cycle about to be clocked.
+    pub fn set_cpu_access(&mut self, address: Option<u16>) {
+        self.mapper.set_cpu_access(address);
     }
 
     /// CPU read with side effects (FDS `$4030`/`$4031` acknowledgement).
@@ -32669,6 +32677,16 @@ pub struct Fds {
 
     mirroring: Mirroring,
     audio: FdsAudio,
+    /// `$4023` bit 7: DRAM-refresh watchdog IRQs enabled.
+    watchdog_enabled: bool,
+    /// `$4030` bit 1: a watchdog IRQ is pending.
+    watchdog_irq: bool,
+    /// 7-bit refresh counter (rows refreshed outside PRG-RAM).
+    refresh_counter: u8,
+    /// 12-bit watchdog cycle timer (reloads to 3245 on a refresh).
+    watchdog_timer: u16,
+    /// Address of the CPU cycle being clocked (for the refresh counter).
+    cpu_access: Option<u16>,
 }
 
 impl Fds {
@@ -32715,6 +32733,11 @@ impl Fds {
             auto_side: false,
             mirroring: Mirroring::Vertical,
             audio: FdsAudio::default(),
+            watchdog_enabled: false,
+            watchdog_irq: false,
+            refresh_counter: 0,
+            watchdog_timer: 0x0FFF,
+            cpu_access: None,
         };
         fds.rebuild_wire();
         fds
@@ -32926,6 +32949,33 @@ impl Fds {
         self.update_transfer_state();
     }
 
+    fn clock_watchdog(&mut self) {
+        // The 2C33 refreshes DRAM rows on cycles that do not touch PRG-RAM.
+        // Steady PRG-RAM execution starves the refreshes; when the 12-bit
+        // timer underflows the watchdog raises an IRQ (if enabled).
+        if !self.disk_enabled {
+            self.watchdog_timer = 0x0FFF;
+            self.refresh_counter = 0;
+            self.watchdog_irq = false;
+            return;
+        }
+        let prg_ram = matches!(self.cpu_access, Some(0x6000..=0xDFFF));
+        if !prg_ram {
+            self.refresh_counter = self.refresh_counter.wrapping_add(1) & 0x7F;
+            if self.refresh_counter == 0 {
+                self.watchdog_timer = 3245;
+            }
+        }
+        if self.watchdog_timer == 0 {
+            self.watchdog_timer = 0x0FFF;
+            if self.watchdog_enabled {
+                self.watchdog_irq = true;
+            }
+        } else {
+            self.watchdog_timer -= 1;
+        }
+    }
+
     fn clock_timer(&mut self) {
         if !self.irq_enabled {
             return;
@@ -32946,6 +32996,9 @@ impl Fds {
         if self.timer_irq_flag {
             value |= 0x01;
         }
+        if self.watchdog_irq {
+            value |= 0x02;
+        }
         if self.mirroring == Mirroring::Horizontal {
             value |= 0x08;
         }
@@ -32955,9 +33008,10 @@ impl Fds {
         if self.byte_transfer_flag {
             value |= 0x80;
         }
-        // Reading $4030 acknowledges the timer IRQ but not the byte-transfer
-        // flag.
+        // Reading $4030 acknowledges the timer and watchdog IRQs but not the
+        // byte-transfer flag.
         self.timer_irq_flag = false;
+        self.watchdog_irq = false;
         value
     }
 
@@ -33035,6 +33089,10 @@ impl Mapper for Fds {
                 let was_enabled = self.disk_enabled;
                 self.disk_enabled = value & 0x01 != 0;
                 self.sound_enabled = value & 0x02 != 0;
+                self.watchdog_enabled = value & 0x80 != 0;
+                if !self.watchdog_enabled {
+                    self.watchdog_irq = false;
+                }
                 self.audio.write(0x4023, value);
                 if was_enabled && !self.disk_enabled {
                     self.irq_enabled = false;
@@ -33049,6 +33107,9 @@ impl Mapper for Fds {
                     self.end_of_head = false;
                     self.mirroring = Mirroring::Vertical;
                     self.ext_con = 0x7F;
+                    self.watchdog_timer = 0x0FFF;
+                    self.refresh_counter = 0;
+                    self.watchdog_irq = false;
                 }
                 self.update_transfer_state();
             }
@@ -33118,8 +33179,13 @@ impl Mapper for Fds {
         Some((0x4020, 0x4097))
     }
 
+    fn set_cpu_access(&mut self, address: Option<u16>) {
+        self.cpu_access = address;
+    }
+
     fn clock_cpu(&mut self) {
         self.audio.clock();
+        self.clock_watchdog();
         self.clock_timer();
         if self.insert_not_ready > 0 {
             self.insert_not_ready -= 1;
@@ -33148,7 +33214,9 @@ impl Mapper for Fds {
     }
 
     fn irq_line(&self) -> bool {
-        self.timer_irq_flag || (self.byte_transfer_flag && self.irq_on_transfer)
+        self.timer_irq_flag
+            || self.watchdog_irq
+            || (self.byte_transfer_flag && self.irq_on_transfer)
     }
 
     fn acknowledge_irq(&mut self) {}
@@ -40916,6 +40984,28 @@ pub(crate) mod tests {
         }
         assert_eq!(cart.cpu_read(0x8000), 32);
         assert_eq!(cart.cpu_read(0xC000), 62);
+    }
+
+    #[test]
+    fn fds_watchdog_fires_only_when_prg_ram_starves_refreshes() {
+        let bios = vec![0xEAu8; 0x2000];
+        let disk = vec![0u8; 65500];
+        let mut cart = Cartridge::from_fds(&disk, &bios).expect("fds");
+        cart.cpu_write(0x4023, 0x83); // disk I/O + watchdog IRQs enabled
+                                      // Code outside PRG-RAM refreshes rows, reloading the timer.
+        for _ in 0..10_000 {
+            cart.set_cpu_access(Some(0xE000));
+            cart.clock_cpu();
+        }
+        assert_eq!(cart.cpu_read_io(0x4030) & 0x02, 0, "no watchdog IRQ");
+        // A long PRG-RAM-only stretch stops refreshes and underflows.
+        for _ in 0..4_000 {
+            cart.set_cpu_access(Some(0x6000));
+            cart.clock_cpu();
+        }
+        assert_eq!(cart.cpu_read_io(0x4030) & 0x02, 0x02, "watchdog IRQ");
+        // Reading $4030 acknowledges it.
+        assert_eq!(cart.cpu_read_io(0x4030) & 0x02, 0);
     }
 
     #[test]

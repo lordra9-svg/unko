@@ -1628,6 +1628,7 @@ impl System {
         // Advance the APU for this CPU cycle before sampling the DMC request,
         // matching the reference where the APU runs before the CPU bus access.
         if self.cart.needs_cpu_clock() {
+            self.cart.set_cpu_access(address);
             self.cart.clock_cpu();
         }
         self.apu_cycle();
