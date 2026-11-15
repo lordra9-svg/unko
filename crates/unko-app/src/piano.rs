@@ -2,7 +2,7 @@
 //!
 //! The piano's 49 keys are C2-C6. The widget is intentionally small: the
 //! Devices window shows it when a Miracle Piano is attached, and pointer
-//! press/drag sends Note On/Off through `Core::set_piano_note`. It is a
+//! press/drag sends Note On/Off through `NesCore::set_piano_note`. It is a
 //! presentation input, not a model of the piano's keybed matrix.
 
 use egui::{pos2, vec2, Color32, Rect, Sense, Stroke, Ui};

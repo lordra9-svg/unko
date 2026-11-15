@@ -86,7 +86,8 @@ Rust, and there is no deadline. The consequences:
   source. ares adaptations are attributed in `PROVENANCE.md` and `NOTICE`.
 - The accuracy core became the default, gained versioned save states, and
   TetaNES was removed from the workspace and dependencies.
-- Any future NES core can implement `unko_core::Core` and be selected by
+- Any future NES core can implement `unko_core::Core` plus
+  `unko_nes_api::NesCore` and be selected by
   `CoreInfo.id`.
 - GPL emulators (MesenCE, RustyNES, Dolphin) are run as black-box oracles only
   and are never copied or linked. ares is ISC, so documented adaptations are

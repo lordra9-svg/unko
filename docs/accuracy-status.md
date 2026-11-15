@@ -73,7 +73,7 @@ variants forward the shared A12 detector.
 alternate row, as expected. The combined `mmc3_test` suite's `6-MMC6` also
 passes with the alternate selector. The selector is exposed as
 `Settings -> Advanced -> Alternate MMC3 IRQ revision` (and
-`Core::set_mmc3_alternate`). AccuracyCoin remains
+`NesCore::set_mmc3_alternate`). AccuracyCoin remains
 **146/146 non-DRAW**, and the 20/120-frame library audit is unchanged
 (3,897/6,497 rendering).
 
@@ -114,7 +114,7 @@ strobe: 0 selects the left eye for the next field and 1 the right. `System`
 records every `$4016` write and samples OUT1 at the frame boundary, after the
 previous vertical blank and just before the next visible field, so each
 completed frame is tagged with the eye it was rendered for. The eye is exposed
-through `System::stereo_eye`; `Core::set_stereo_glasses` attaches or detaches
+through `System::stereo_eye`; `NesCore::set_stereo_glasses` attaches or detaches
 the glasses. `UNKOST20` save states carry the attachment flag, latch and
 current eye, so rewind and NetPlay rollback keep the correct eye.
 
@@ -264,7 +264,7 @@ The reply bytes are queued on the same polled shift register the piano uses;
 `push_piano_rx` remains available for tests and external injection. The
 transport now returns to idle after each transmitted byte, so multi-byte
 requests work. The Devices window also draws the 49 keys (C2-C6); pointer
-press/drag calls `Core::set_piano_note`, which queues channel-0 Note On
+press/drag calls `NesCore::set_piano_note`, which queues channel-0 Note On
 (`90 note velocity`) and Note Off (`90 note 00`) messages. An optional
 **Computer keyboard input** toggle maps the number, QWERTY, ASDFG and
 ZXCVB/Backtick/F1/Space rows chromatically to the same notes; Space is

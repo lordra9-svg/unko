@@ -3,7 +3,7 @@
 //! The NES microphone is a 1-bit signal: the host only needs to decide whether
 //! sound is present. This captures the default input device, follows its peak
 //! level with a short hold, and exposes a boolean that the player feeds to
-//! `Core::set_microphone` / `Core::set_bandai_microphone`. It is presentation
+//! `NesCore::set_microphone` / `NesCore::set_bandai_microphone`. It is presentation
 //! input, not an analog ADC model; the threshold and hold are documented below
 //! and can be tuned without touching the core.
 

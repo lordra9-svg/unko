@@ -1,6 +1,7 @@
 //! Optional debugger surface shared by frontends and cores.
 //!
-//! A core advertises support by returning `Some` from [`Core::debug_cpu`] and
+//! The NES adapter advertises support by returning `Some` from
+//! `NesCore::debug_cpu` and
 //! friends. Frontends must treat every accessor as optional so a future core
 //! without debug hooks still works; all methods default to "unsupported".
 
