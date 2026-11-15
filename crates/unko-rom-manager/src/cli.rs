@@ -38,6 +38,7 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut include_bios = false;
     let mut zip_sets = false;
     let mut torrentzip = false;
+    let mut move_files = false;
     let mut cache = None;
 
     let mut args = args;
@@ -73,17 +74,19 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
             "--all" => include_bios = true,
             "--zip" => zip_sets = true,
             "--torrentzip" => torrentzip = true,
+            "--move" => move_files = true,
             "--cache" => cache = args.next().map(PathBuf::from),
             "-h" | "--help" => {
                 println!(
                     "usage: unko-rom-manager --dat DAT --input ROMS [options]\n\
                      \n\
                      options: --1g1r --fixdat FILE --csv FILE --copy DIR\n\
-                     \x20        --zip | --torrentzip --cache FILE\n\
+                     \x20        --zip | --torrentzip | --move --cache FILE\n\
                      \x20        --dat-url URL [--dat-out FILE]\n\
                      \x20        --regions USA,Europe,World,Japan --languages En --all\n\
                      \n\
-                     --copy writes loose files; --zip/--torrentzip write one archive per game."
+                     --copy writes loose files; --zip/--torrentzip write one archive per game;\n\
+                     --move deletes loose sources after a verified copy."
                 );
                 return Ok(());
             }
@@ -156,6 +159,7 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
             &selected,
             &RebuildOptions {
                 output: output.clone(),
+                move_files,
                 format: if torrentzip {
                     OutputFormat::TorrentZip
                 } else if zip_sets {
@@ -167,9 +171,10 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
             },
         );
         println!(
-            "copy: {} written, {} archives, {} skipped, {} errors -> {}",
+            "copy: {} written, {} archives, {} moved, {} skipped, {} errors -> {}",
             result.written,
             result.archives,
+            result.moved,
             result.skipped,
             result.errors.len(),
             output.display()

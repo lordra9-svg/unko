@@ -31,6 +31,7 @@ pub struct RomManager {
     include_bios: bool,
     zip_sets: bool,
     torrentzip: bool,
+    move_files: bool,
     prefer_parent: bool,
     prefer_verified: bool,
     prefer_retail: bool,
@@ -63,6 +64,7 @@ impl RomManager {
             include_bios: false,
             zip_sets: false,
             torrentzip: false,
+            move_files: false,
             prefer_parent: true,
             prefer_verified: true,
             prefer_retail: true,
@@ -244,6 +246,10 @@ impl RomManager {
             ui.add_enabled(
                 self.zip_sets,
                 egui::Checkbox::new(&mut self.torrentzip, "TorrentZip-style"),
+            );
+            ui.add_enabled(
+                !self.zip_sets,
+                egui::Checkbox::new(&mut self.move_files, "Move (delete sources)"),
             );
         });
         ui.horizontal(|ui| {
@@ -535,6 +541,7 @@ impl RomManager {
             selected,
             &RebuildOptions {
                 output: self.output.clone(),
+                move_files: self.move_files && !self.zip_sets,
                 format: if self.zip_sets && self.torrentzip {
                     OutputFormat::TorrentZip
                 } else if self.zip_sets {
@@ -546,9 +553,10 @@ impl RomManager {
             },
         );
         self.status = format!(
-            "Rebuilt {} files in {} archives ({} skipped, {} errors) into {}",
+            "Rebuilt {} files in {} archives, {} moved ({} skipped, {} errors) into {}",
             result.written,
             result.archives,
+            result.moved,
             result.skipped,
             result.errors.len(),
             self.output.display()

@@ -10,7 +10,7 @@ use zip::{CompressionMethod, DateTime, ZipWriter};
 
 use crate::catalog::{MatchReport, MatchStatus};
 use crate::hash::hash_bytes;
-use crate::scan::ScannedRom;
+use crate::scan::{Origin, ScannedRom};
 
 /// How rebuilt sets are written.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -42,6 +42,11 @@ pub struct RebuildOptions {
     pub verify: bool,
     /// Write loose files or one ZIP archive per game.
     pub format: OutputFormat,
+    /// Move loose source files instead of copying them after a verified write.
+    ///
+    /// Only valid with [`OutputFormat::Loose`]; archive members are never
+    /// removed from their container.
+    pub move_files: bool,
 }
 
 impl Default for RebuildOptions {
@@ -53,6 +58,7 @@ impl Default for RebuildOptions {
             only_complete: true,
             verify: true,
             format: OutputFormat::Loose,
+            move_files: false,
         }
     }
 }
@@ -66,8 +72,17 @@ pub struct RebuildReport {
     pub archives: usize,
     /// Files skipped because they already existed or were not matched.
     pub skipped: usize,
+    /// Loose source files removed after a verified move.
+    pub moved: usize,
     /// Per-file errors.
     pub errors: Vec<String>,
+}
+
+struct OutputEntry {
+    name: String,
+    bytes: Vec<u8>,
+    /// Loose source file that may be removed by a move.
+    source: Option<PathBuf>,
 }
 
 /// Copies the matched ROMs of `selected` games into `options.output`.
@@ -82,6 +97,12 @@ pub fn rebuild(
     options: &RebuildOptions,
 ) -> RebuildReport {
     let mut result = RebuildReport::default();
+    if options.move_files && options.format != OutputFormat::Loose {
+        result
+            .errors
+            .push("move requires loose output; archive output keeps the source files".into());
+        return result;
+    }
     if let Err(err) = fs::create_dir_all(&options.output) {
         result
             .errors
@@ -128,7 +149,7 @@ fn prepare_game(
     game_index: usize,
     options: &RebuildOptions,
     errors: &mut Vec<String>,
-) -> Option<Vec<(String, Vec<u8>)>> {
+) -> Option<Vec<OutputEntry>> {
     let game = report.dat.games.get(game_index)?;
     let mut entries = Vec::with_capacity(game.roms.len());
     for (rom_index, rom) in game.roms.iter().enumerate() {
@@ -148,7 +169,15 @@ fn prepare_game(
                 return None;
             }
         }
-        entries.push((sanitize(&rom.name), bytes));
+        let source = match &scanned.origin {
+            Origin::File(path) => Some(path.clone()),
+            _ => None,
+        };
+        entries.push(OutputEntry {
+            name: sanitize(&rom.name),
+            bytes,
+            source,
+        });
     }
     Some(entries)
 }
@@ -192,7 +221,7 @@ fn write_loose(
     result: &mut RebuildReport,
     options: &RebuildOptions,
     game: &str,
-    entries: &mut Vec<(String, Vec<u8>)>,
+    entries: &mut Vec<OutputEntry>,
 ) {
     let directory = if options.per_game {
         options.output.join(sanitize(game))
@@ -205,14 +234,29 @@ fn write_loose(
             .push(format!("create {}: {err}", directory.display()));
         return;
     }
-    for (name, bytes) in entries.drain(..) {
-        let destination = directory.join(&name);
+    for entry in entries.drain(..) {
+        let destination = directory.join(&entry.name);
         if destination.exists() && !options.overwrite {
             result.skipped += 1;
             continue;
         }
-        match fs::write(&destination, bytes) {
-            Ok(()) => result.written += 1,
+        match fs::write(&destination, &entry.bytes) {
+            Ok(()) => {
+                result.written += 1;
+                if options.move_files {
+                    if let Some(source) = entry.source {
+                        if !same_file(&source, &destination) {
+                            match fs::remove_file(&source) {
+                                Ok(()) => result.moved += 1,
+                                Err(err) => result.errors.push(format!(
+                                    "moved copy written but source {} could not be removed: {err}",
+                                    source.display()
+                                )),
+                            }
+                        }
+                    }
+                }
+            }
             Err(err) => result
                 .errors
                 .push(format!("write {}: {err}", destination.display())),
@@ -224,7 +268,7 @@ fn write_archive(
     result: &mut RebuildReport,
     options: &RebuildOptions,
     game: &str,
-    entries: &[(String, Vec<u8>)],
+    entries: &[OutputEntry],
 ) {
     let destination = options.output.join(format!("{}.zip", sanitize(game)));
     if destination.exists() && !options.overwrite {
@@ -232,7 +276,11 @@ fn write_archive(
         return;
     }
     let torrentzip = matches!(options.format, OutputFormat::TorrentZip);
-    match archive(destination.as_path(), entries, torrentzip) {
+    let payload: Vec<(String, Vec<u8>)> = entries
+        .iter()
+        .map(|entry| (entry.name.clone(), entry.bytes.clone()))
+        .collect();
+    match archive(destination.as_path(), &payload, torrentzip) {
         Ok(()) => {
             result.written += entries.len();
             result.archives += 1;
@@ -298,6 +346,14 @@ fn write_archive_file(
         .finish()
         .map(|_| ())
         .map_err(|err| format!("{}: {err}", part.display()))
+}
+
+/// Whether two paths refer to the same file (or the same lexical path).
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
 }
 
 fn sanitize(name: &str) -> String {
@@ -530,6 +586,84 @@ mod tests {
         );
         assert_eq!(again.archives, 0);
         assert_eq!(again.skipped, 2);
+        let _ = fs::remove_dir_all(&output);
+    }
+
+    #[test]
+    fn moves_loose_sources_after_a_verified_write() {
+        let (report, output) = fixture();
+        let source = output.join("source.bin");
+        let second = output.join("source2.bin");
+        let result = rebuild(
+            &report,
+            &[0],
+            &RebuildOptions {
+                output: output.clone(),
+                overwrite: true,
+                move_files: true,
+                ..RebuildOptions::default()
+            },
+        );
+        assert_eq!(result.moved, 2);
+        assert_eq!(result.written, 2);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(!source.exists(), "loose source removed");
+        assert!(!second.exists());
+        assert_eq!(
+            fs::read(output.join("Game (USA)").join("Game (USA).bin")).expect("read"),
+            b"rom bytes"
+        );
+        let _ = fs::remove_dir_all(&output);
+    }
+
+    #[test]
+    fn move_keeps_sources_when_the_destination_exists() {
+        let (report, output) = fixture();
+        let source = output.join("source.bin");
+        let copy = rebuild(
+            &report,
+            &[0],
+            &RebuildOptions {
+                output: output.clone(),
+                overwrite: true,
+                ..RebuildOptions::default()
+            },
+        );
+        assert_eq!(copy.written, 2);
+        let result = rebuild(
+            &report,
+            &[0],
+            &RebuildOptions {
+                output: output.clone(),
+                overwrite: false,
+                move_files: true,
+                ..RebuildOptions::default()
+            },
+        );
+        assert_eq!(result.moved, 0);
+        assert_eq!(result.skipped, 2);
+        assert!(source.exists(), "a skipped file must not be deleted");
+        let _ = fs::remove_dir_all(&output);
+    }
+
+    #[test]
+    fn move_rejects_archive_output() {
+        let (report, output) = fixture();
+        let result = rebuild(
+            &report,
+            &[0],
+            &RebuildOptions {
+                output: output.clone(),
+                overwrite: true,
+                format: OutputFormat::Zip,
+                move_files: true,
+                ..RebuildOptions::default()
+            },
+        );
+        assert_eq!(result.written, 0);
+        assert_eq!(result.archives, 0);
+        assert!(result.errors[0].contains("move requires loose"));
+        assert!(output.join("source.bin").exists());
         let _ = fs::remove_dir_all(&output);
     }
 }

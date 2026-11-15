@@ -16,6 +16,9 @@ Rust project or used through the `unko-app` ROM Manager window.
   preferences.
 - Fixdat and CSV reports.
 - Safe copy/rebuild with per-file hash verification.
+- Optional verified **move** (`--move`): a loose source file is deleted only
+  after the destination copy is written successfully; archive members are
+  never removed from their container.
 - Deterministic ZIP output (`--zip`): one archive per game, fixed timestamps.
 - Persistent hash cache (`--cache FILE`): unchanged files and ZIP members are
   reused by size and modification time instead of being read and hashed again.
@@ -51,10 +54,11 @@ The crate also ships `unko-rom-manager`, a small headless CLI:
 ```sh
 cargo run -p unko-rom-manager -- \
   --dat "No-Intro.dat" --input roms --1g1r \
-  --fixdat missing.xml --csv report.csv --copy rebuilt --cache scan.tsv
+  --fixdat missing.xml --csv report.csv --copy rebuilt --move --cache scan.tsv
 # Download/update a DAT first
 cargo run -p unko-rom-manager -- --dat-url https://example.test/nes.dat \
   --dat-out nes.dat --input roms
+# --move deletes loose sources after a verified copy (not with --zip)
 # Add --zip to write one deterministic archive per game instead of loose files
 ```
 

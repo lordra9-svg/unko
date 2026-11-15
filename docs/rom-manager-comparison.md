@@ -72,7 +72,8 @@ that matters for a playable library:
   preferences.
 - Fixdat and CSV report output.
 - Safe copy/rebuild of matched ROMs into an output folder, with hash
-  verification; no delete or in-place move.
+  verification; an optional verified move deletes loose sources only after the
+  copy succeeds, and archive members are never removed.
 - Deterministic ZIP output: one archive per game, entries in DAT order with a
   fixed timestamp, so rebuilds are byte-identical. Loose files remain the
   default.
