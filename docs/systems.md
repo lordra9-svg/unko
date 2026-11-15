@@ -36,7 +36,8 @@ compatibility oracle, the coprocessor feature checklist, and the overclock /
 SPC-clock / strict-board ideas.
 
 Integration: build `ares/sfc` plus its shared CPU/DSP components as a static
-C++ library behind `unko_sfc_*`; expose the same `Core` surface. Do not port
+C++ library behind `unko_sfc_*`; implement the generic `Core` plus a SNES
+ extension trait, mirroring the NES `NesCore` split. Do not port
 Mesen code.
 
 ## Nintendo 64 — planned
