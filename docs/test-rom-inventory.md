@@ -37,8 +37,10 @@ identical traces, but *Akumajou Dracula* differs from frame 5 between
 `rp2c33-01` and `rp2c33a-01a`; the revision is observable and must be
 selectable.
 
-Still absent: **VS. System BIOS/palette dumps**, **PlayChoice-10 game ROMs**,
-**Miracle Piano firmware**, and the **Datach external X24C01** dump.
+Still absent: **VS. System BIOS/palette dumps** and **PlayChoice-10 game ROMs**.
+The Miracle Piano's documented SysEx replies and the Datach X24C01 protocol are
+implemented from the published protocol/datasheet, so neither firmware nor a
+physical dump is required for those.
 
 ### RustyNES test tree (`refs/rustynes/tests/roms`, 341 `.nes`)
 
@@ -148,8 +150,8 @@ PAL APU singles in PAL mode, `dma_4016_read` and `5-branch_delays_irq`.
 | `disksys.rom` (FDS BIOS) | `fdsirqtests`, FDS mirroring/`$4023`/audio/`$4030` tests, every `.fds` title | Present locally at `refs/bios/disksys.rom` (two revisions) and in the Myrient BIOS archive; it is **not** in `test-roms/`, and the desktop app reads it from Settings → Paths |
 | VS. System BIOS/game ROMs + 2C03/2C04/2C05 palette/security data | `characterize-vs`, VS compatibility | Blocked on ROMs and palette dumps |
 | PlayChoice-10 BIOS/ROMs | PC10 compatibility | Blocked on assets |
-| Miracle Piano firmware | MIDI replies | The transport is implemented, but replies need the piano firmware or a real unit |
-| Datach external X24C01 dump (Battle Rush) | external EEPROM | Internal X24C02 is implemented; the external chip is not |
+| Miracle Piano firmware | MIDI replies | Not required: SysEx 4/11 replies are synthesized from the documented message set |
+| Datach external X24C01 dump (Battle Rush) | external EEPROM | Not required: the 128-byte X24C01 is modelled from the Xicor datasheet |
 
 ### NESdev suites not yet run to a verdict
 
