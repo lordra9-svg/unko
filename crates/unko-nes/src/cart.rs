@@ -841,7 +841,8 @@ pub trait Mapper: fmt::Debug + MapperState {
     /// Sets the Bandai Karaoke Studio microphone and its A/B buttons.
     fn set_bandai_microphone(&mut self, _a: bool, _b: bool, _microphone: bool) {}
 
-    /// Datach X24C02 contents (256 bytes; empty for other boards).
+    /// Datach EEPROM contents (256-byte X24C02 plus 128-byte X24C01 for
+    /// mapper 157; empty for other boards).
     fn datach_eeprom(&self) -> Vec<u8> {
         Vec::new()
     }
@@ -1462,7 +1463,8 @@ impl Cartridge {
         self.mapper.set_datach_barcode(code)
     }
 
-    /// Datach X24C02 contents (256 bytes; empty for other boards).
+    /// Datach EEPROM contents (256-byte X24C02 plus 128-byte X24C01 for
+    /// mapper 157; empty for other boards).
     #[must_use]
     pub fn datach_eeprom(&self) -> Vec<u8> {
         self.mapper.datach_eeprom()
@@ -27832,13 +27834,154 @@ impl X24c02 {
     }
 }
 
+/// Xicor X24C01 128-byte I2C EEPROM, as fitted to the Battle Rush cartridge.
+///
+/// Unlike the X24C02, the X24C01 has no device-select byte: the first byte
+/// after START is a combined 7-bit word address and R/W bit. The part shifts
+/// address and data **LSB-first**, samples SDA on rising SCL edges and changes
+/// its output on falling edges. The two low address bits wrap within a
+/// four-byte page on writes; reads walk the full 128-byte array.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct X24c01 {
+    #[serde(with = "serde_big_array::BigArray")]
+    data: [u8; 128],
+    address: u8,
+    shift: u8,
+    bit: u8,
+    ack_clock: bool,
+    ack: bool,
+    active: bool,
+    addressed: bool,
+    reading: bool,
+    output: u8,
+    out_bits: u8,
+    out_low: bool,
+}
+
+impl Default for X24c01 {
+    fn default() -> Self {
+        Self {
+            data: [0xFF; 128],
+            address: 0,
+            shift: 0,
+            bit: 0,
+            ack_clock: false,
+            ack: false,
+            active: false,
+            addressed: false,
+            reading: false,
+            output: 0,
+            out_bits: 0,
+            out_low: false,
+        }
+    }
+}
+
+impl X24c01 {
+    fn start(&mut self) {
+        self.active = true;
+        self.addressed = false;
+        self.reading = false;
+        self.shift = 0;
+        self.bit = 0;
+        self.ack_clock = false;
+        self.ack = false;
+        self.out_bits = 0;
+        self.out_low = false;
+    }
+
+    fn stop(&mut self) {
+        self.active = false;
+        self.addressed = false;
+        self.ack = false;
+        self.ack_clock = false;
+        self.out_low = false;
+    }
+
+    fn process_byte(&mut self) {
+        if !self.addressed {
+            self.address = self.shift & 0x7F;
+            self.reading = self.shift & 0x80 != 0;
+            self.addressed = true;
+            self.out_bits = 0;
+            self.out_low = false;
+            if self.reading {
+                self.output = self.data[usize::from(self.address)];
+            }
+        } else if !self.reading {
+            let index = usize::from(self.address);
+            self.data[index] = self.shift;
+            // Page write: only the two low address bits increment.
+            self.address = (self.address & !0x03) | ((self.address + 1) & 0x03);
+        }
+    }
+
+    fn rising(&mut self, sda: bool) {
+        if !self.active {
+            return;
+        }
+        if self.ack_clock {
+            self.ack_clock = false;
+            if self.addressed && self.reading {
+                if sda {
+                    // NACK ends the read.
+                    self.addressed = false;
+                } else if self.out_bits >= 8 {
+                    // Master ACK after a data byte: advance and continue.
+                    self.address = (self.address + 1) & 0x7F;
+                    self.output = self.data[usize::from(self.address)];
+                    self.out_bits = 0;
+                }
+            }
+            self.bit = 0;
+            return;
+        }
+        self.shift |= u8::from(sda) << self.bit;
+        self.bit += 1;
+        if self.bit == 8 {
+            if !self.reading || !self.addressed {
+                self.process_byte();
+            }
+            self.shift = 0;
+            self.bit = 0;
+            self.ack_clock = true;
+            if self.addressed && (!self.reading || self.out_bits < 8) {
+                self.ack = true;
+            }
+        }
+    }
+
+    fn falling(&mut self) {
+        if !self.active || self.ack_clock {
+            return;
+        }
+        self.ack = false;
+        if self.addressed && self.reading && self.out_bits < 8 {
+            self.out_low = (self.output >> self.out_bits) & 1 == 0;
+            self.out_bits += 1;
+        }
+    }
+
+    fn sda(&self, read_direction: bool, host_sda: bool) -> bool {
+        if self.ack || (self.addressed && self.reading && self.out_low) {
+            false
+        } else if read_direction {
+            true
+        } else {
+            host_sda
+        }
+    }
+}
+
 /// Datach barcode scanner and internal EEPROM (mapper 157).
 ///
 /// The scanner returns one pixel per 1000 CPU cycles on `$6000` bit 3
 /// (MAME's `datach.cpp` timer), framed by 61 white pixels before and after
 /// the barcode. `$800D` bit 5 is the internal X24C02 clock, bit 6 its data
 /// output and bit 7 the direction (1 = read); `$6000` bit 4 is its data
-/// input. The adapter's second (external) EEPROM is not modelled.
+/// input. Battle Rush adds a 128-byte X24C01; its SCL is `$8000-$8003` bit 3
+/// and it shares SDA and the read direction with the internal chip. Both
+/// open-drain outputs are ANDed onto `$6000` bit 4.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct Datach {
     pixels: Vec<bool>,
@@ -27846,7 +27989,9 @@ struct Datach {
     countdown: u32,
     latch: u8,
     eeprom: X24c02,
+    external: X24c01,
     scl: bool,
+    external_scl: bool,
     host_sda: bool,
     read_direction: bool,
 }
@@ -27882,39 +28027,78 @@ impl Datach {
     }
 
     fn read(&self) -> u8 {
-        let sda = u8::from(self.eeprom.sda(self.read_direction, self.host_sda)) << 4;
+        let sda = u8::from(
+            self.eeprom.sda(self.read_direction, self.host_sda)
+                && self.external.sda(self.read_direction, self.host_sda),
+        ) << 4;
         0x40 | sda | self.latch
     }
 
-    fn write_control(&mut self, value: u8) {
-        let scl = value & 0x20 != 0;
-        let sda = value & 0x40 != 0;
-        let read = value & 0x80 != 0;
-        if self.scl && scl {
-            if self.host_sda && !sda {
+    fn clock_24c02(&mut self, prev_sda: bool, next_scl: bool, next_sda: bool) {
+        if self.scl && next_scl {
+            if prev_sda && !next_sda {
                 self.eeprom.start();
-            } else if !self.host_sda && sda {
+            } else if !prev_sda && next_sda {
                 self.eeprom.stop();
             }
         }
-        if scl && !self.scl {
-            self.eeprom.rising(sda);
+        if next_scl && !self.scl {
+            self.eeprom.rising(next_sda);
         }
-        if !scl && self.scl {
+        if !next_scl && self.scl {
             self.eeprom.falling();
         }
-        self.scl = scl;
-        self.host_sda = sda;
-        self.read_direction = read;
+        self.scl = next_scl;
     }
 
-    fn eeprom_image(&self) -> &[u8; 256] {
-        &self.eeprom.data
+    fn clock_24c01(&mut self, prev_sda: bool, next_scl: bool, next_sda: bool) {
+        if self.external_scl && next_scl {
+            if prev_sda && !next_sda {
+                self.external.start();
+            } else if !prev_sda && next_sda {
+                self.external.stop();
+            }
+        }
+        if next_scl && !self.external_scl {
+            self.external.rising(next_sda);
+        }
+        if !next_scl && self.external_scl {
+            self.external.falling();
+        }
+        self.external_scl = next_scl;
+    }
+
+    fn write_control(&mut self, value: u8) {
+        let prev_sda = self.host_sda;
+        let next_scl = value & 0x20 != 0;
+        let next_sda = value & 0x40 != 0;
+        self.clock_24c02(prev_sda, next_scl, next_sda);
+        // $800D does not change the external clock, but a shared SDA change
+        // can still be a START or STOP for the cartridge chip.
+        self.clock_24c01(prev_sda, self.external_scl, next_sda);
+        self.host_sda = next_sda;
+        self.read_direction = value & 0x80 != 0;
+    }
+
+    fn write_external(&mut self, value: u8) {
+        let next_scl = value & 0x08 != 0;
+        self.clock_24c01(self.host_sda, next_scl, self.host_sda);
+    }
+
+    fn eeprom_image(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(384);
+        out.extend_from_slice(&self.eeprom.data);
+        out.extend_from_slice(&self.external.data);
+        out
     }
 
     fn load_eeprom(&mut self, bytes: &[u8]) {
         let len = bytes.len().min(256);
         self.eeprom.data[..len].copy_from_slice(&bytes[..len]);
+        if bytes.len() > 256 {
+            let external = (bytes.len() - 256).min(128);
+            self.external.data[..external].copy_from_slice(&bytes[256..256 + external]);
+        }
     }
 }
 
@@ -28203,7 +28387,12 @@ impl Mapper for BandaiFcg {
                 return;
             }
             match address & 0x0F {
-                0x00..=0x07 => {}
+                0x00..=0x03 => {
+                    if let Some(datach) = &mut self.datach {
+                        datach.write_external(value);
+                    }
+                }
+                0x04..=0x07 => {}
                 0x08 => self.prg_bank = value & 0x0F,
                 0x09 => {
                     self.mirroring = match value & 0x03 {
@@ -28362,7 +28551,7 @@ impl Mapper for BandaiFcg {
     fn datach_eeprom(&self) -> Vec<u8> {
         self.datach
             .as_ref()
-            .map_or_else(Vec::new, |datach| datach.eeprom_image().to_vec())
+            .map_or_else(Vec::new, Datach::eeprom_image)
     }
 
     fn load_datach_eeprom(&mut self, bytes: &[u8]) {
@@ -36884,17 +37073,201 @@ pub(crate) mod tests {
         assert_eq!(datach.eeprom.data[0x10], 0x5A);
     }
 
+    fn x24_scl(datach: &mut Datach, scl: bool) {
+        datach.write_external(if scl { 0x08 } else { 0 });
+    }
+
+    fn x24_sda(datach: &mut Datach, sda: bool) {
+        datach.write_control(if sda { 0x40 } else { 0 });
+    }
+
+    fn x24_start_ext(datach: &mut Datach) {
+        x24_scl(datach, false);
+        x24_sda(datach, true);
+        x24_scl(datach, true);
+        x24_sda(datach, false);
+    }
+
+    fn x24_stop_ext(datach: &mut Datach) {
+        x24_scl(datach, false);
+        x24_sda(datach, false);
+        x24_scl(datach, true);
+        x24_sda(datach, true);
+    }
+
+    fn x24_write_ext(datach: &mut Datach, byte: u8) {
+        for bit in 0..8 {
+            let sda = (byte >> bit) & 1 != 0;
+            x24_scl(datach, false);
+            x24_sda(datach, sda);
+            x24_scl(datach, true);
+        }
+        // The master ACKs by driving SDA low through the ninth clock.
+        x24_scl(datach, false);
+        x24_sda(datach, false);
+        x24_scl(datach, true);
+        assert_eq!(datach.read() & 0x10, 0, "device must ACK its address/data");
+        x24_scl(datach, false);
+        x24_sda(datach, true);
+    }
+
+    #[test]
+    fn datach_external_x24c01_uses_8000_bit_3_and_shared_sda() {
+        let mut datach = Datach::default();
+        x24_start_ext(&mut datach);
+        x24_write_ext(&mut datach, 0x12); // address 0x12, write
+        x24_write_ext(&mut datach, 0x5A);
+        x24_stop_ext(&mut datach);
+        assert_eq!(datach.external.data[0x12], 0x5A);
+
+        // Read the same byte: bit 7 of $800D selects SDA as an output, and
+        // the chip drives $6000 bit 4 through the open-drain AND.
+        x24_start_ext(&mut datach);
+        x24_write_ext(&mut datach, 0x92); // address 0x12, read
+        datach.write_control(0xC0);
+        let mut value = 0u8;
+        for bit in 0..8 {
+            x24_scl(&mut datach, false);
+            value |= u8::from(datach.read() & 0x10 != 0) << bit;
+            x24_scl(&mut datach, true);
+        }
+        x24_stop_ext(&mut datach);
+        assert_eq!(value, 0x5A);
+    }
+
+    fn cart_x24_scl(cart: &mut Cartridge, scl: bool) {
+        cart.cpu_write(0x8000, if scl { 0x08 } else { 0 });
+    }
+
+    fn cart_x24_sda(cart: &mut Cartridge, sda: bool) {
+        cart.cpu_write(0x800D, if sda { 0x40 } else { 0 });
+    }
+
+    fn cart_x24_start(cart: &mut Cartridge) {
+        cart_x24_scl(cart, false);
+        cart_x24_sda(cart, true);
+        cart_x24_scl(cart, true);
+        cart_x24_sda(cart, false);
+    }
+
+    fn cart_x24_stop(cart: &mut Cartridge) {
+        cart_x24_scl(cart, false);
+        cart_x24_sda(cart, false);
+        cart_x24_scl(cart, true);
+        cart_x24_sda(cart, true);
+    }
+
+    fn cart_x24_write(cart: &mut Cartridge, byte: u8) {
+        for bit in 0..8 {
+            let sda = (byte >> bit) & 1 != 0;
+            cart_x24_scl(cart, false);
+            cart_x24_sda(cart, sda);
+            cart_x24_scl(cart, true);
+        }
+        cart_x24_scl(cart, false);
+        cart_x24_sda(cart, false);
+        cart_x24_scl(cart, true);
+        assert_eq!(cart.cpu_read(0x6000) & 0x10, 0, "device must ACK");
+        cart_x24_scl(cart, false);
+        cart_x24_sda(cart, true);
+    }
+
+    #[test]
+    fn datach_external_eeprom_is_reachable_through_the_cpu_window() {
+        let rom = synth_banked(157, 256, 8);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        cart_x24_start(&mut cart);
+        cart_x24_write(&mut cart, 0x12);
+        cart_x24_write(&mut cart, 0x5A);
+        cart_x24_stop(&mut cart);
+        assert_eq!(cart.datach_eeprom()[256 + 0x12], 0x5A);
+
+        cart_x24_start(&mut cart);
+        cart_x24_write(&mut cart, 0x92);
+        cart.cpu_write(0x800D, 0xC0);
+        let mut value = 0u8;
+        for bit in 0..8 {
+            cart_x24_scl(&mut cart, false);
+            value |= u8::from(cart.cpu_read(0x6000) & 0x10 != 0) << bit;
+            cart_x24_scl(&mut cart, true);
+        }
+        cart_x24_stop(&mut cart);
+        assert_eq!(value, 0x5A);
+    }
+
     #[test]
     fn datach_eeprom_survives_a_cartridge_snapshot() {
         let rom = synth_banked(157, 256, 8);
         let mut cart = Cartridge::from_ines(&rom).expect("cart");
-        cart.load_datach_eeprom(&[0x42; 256]);
-        assert_eq!(cart.datach_eeprom(), vec![0x42; 256]);
+        cart.load_datach_eeprom(&[0x42; 384]);
+        assert_eq!(cart.datach_eeprom(), vec![0x42; 384]);
         let mut state = Vec::new();
         cart.save_state(&mut state).expect("state");
         let mut other = Cartridge::from_ines(&rom).expect("cart");
         other.load_state(&state).expect("load");
-        assert_eq!(other.datach_eeprom(), vec![0x42; 256]);
+        assert_eq!(other.datach_eeprom(), vec![0x42; 384]);
+
+        // A legacy 256-byte image still loads; the cartridge chip keeps its
+        // erased value until written.
+        let mut legacy = Cartridge::from_ines(&rom).expect("cart");
+        legacy.load_datach_eeprom(&[0x24; 256]);
+        let image = legacy.datach_eeprom();
+        assert_eq!(&image[..256], &[0x24; 256]);
+        assert_eq!(&image[256..], &[0xFF; 128]);
+    }
+
+    fn x24_send(chip: &mut X24c01, byte: u8) {
+        for bit in 0..8 {
+            chip.rising((byte >> bit) & 1 != 0);
+            chip.falling();
+        }
+    }
+
+    fn x24_ack(chip: &mut X24c01) {
+        chip.rising(false);
+        chip.falling();
+    }
+
+    fn x24_read(chip: &mut X24c01) -> u8 {
+        let mut value = 0u8;
+        for bit in 0..8 {
+            value |= u8::from(!chip.out_low) << bit;
+            chip.rising(false);
+            chip.falling();
+        }
+        value
+    }
+
+    #[test]
+    fn x24c01_uses_lsb_first_combined_addressing_and_page_wrap() {
+        let mut chip = X24c01::default();
+        chip.start();
+        x24_send(&mut chip, 0x12); // address 0x12, write
+        x24_ack(&mut chip);
+        x24_send(&mut chip, 0x5A);
+        x24_ack(&mut chip);
+        chip.stop();
+        assert_eq!(chip.data[0x12], 0x5A);
+
+        // Four-byte page wrap: the fifth byte overwrites the first.
+        chip.start();
+        x24_send(&mut chip, 0x12);
+        x24_ack(&mut chip);
+        for value in [1, 2, 3, 4, 5] {
+            x24_send(&mut chip, value);
+            x24_ack(&mut chip);
+        }
+        chip.stop();
+        // Starting at 0x12 the low two bits walk 2, 3, 0, 1, 2, so the
+        // fifth byte wraps to 0x12 and the page base is 0x10.
+        assert_eq!(&chip.data[0x10..=0x13], &[3, 4, 5, 2]);
+
+        // Combined read address; the data is shifted out LSB-first.
+        chip.start();
+        x24_send(&mut chip, 0x92); // address 0x12, read
+        x24_ack(&mut chip);
+        assert_eq!(x24_read(&mut chip), 5);
+        chip.stop();
     }
 
     #[test]

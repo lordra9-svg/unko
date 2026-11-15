@@ -203,7 +203,8 @@ between machines; see `docs/platforms.md` for the resolution order and the
   BASIC keyboard (host keys map to the documented 9x8 matrix), a Four Score
   adapter (four players across both ports), the Famicom microphone (`$4016`
   D2, held from the Devices window) or the Family BASIC data recorder
-  (cassette bit loopback on `$4016`). Settings -> Controllers selects the
+  (cassette bit loopback on `$4016`), the Miracle Piano transport, and the
+  Datach scanner with its internal X24C02 and cartridge X24C01. Settings -> Controllers selects the
   device per port and applies it immediately. Mapper 188 (Karaoke Studio)
   presents its own cartridge microphone: the Devices window shows the same
   microphone checkbox, the A/B bits follow controller port 1, and the ADC
@@ -241,7 +242,7 @@ between machines; see `docs/platforms.md` for the resolution order and the
 - Recording: WAV audio, numbered PNG frames and animated GIF, written under
   `saves/recordings`; all encoders are pure Rust and work on every target.
 - State/SRAM: `saves/<rom>.<core>.slotN.state` and `saves/<rom>.sav`; the core
-  never touches the filesystem. States carry an `UNKOST16` header, a ROM
+  never touches the filesystem. States carry an `UNKOST17` header, a ROM
   fingerprint and the mapper state, so a state cannot be loaded into a
   different image or core. The former TetaNES state files are ignored.
 - Audio playback is active through cpal; the Audio page reports the actual

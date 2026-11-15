@@ -82,9 +82,12 @@ The main effort is now the reference-parity accuracy core. Details in
       selects the eye, the core latches it at the field boundary and the
       frontend combines consecutive left/right fields into a red/cyan
       anaglyph. **Karaoke Studio** (mapper 188) reads its A/B buttons and
-      active-low 1-bit microphone at `$6000-$7FFF`. Remaining: VS. System /
-      PlayChoice-10 (blocked on ROMs and palette/security data), Miracle
-      Piano MIDI replies, and validation against real PAL/NSF content. The FDS `$4030.D1`
+      active-low 1-bit microphone at `$6000-$7FFF`. **Miracle Piano** replies
+      to SysEx 4 and SysEx 11 with the documented version/memory-test messages,
+      and the **Datach** adapter's external 128-byte X24C01 (Battle Rush) is
+      modelled on `$8000-$8003` bit 3 with a 384-byte save. Remaining:
+      VS. System / PlayChoice-10 (blocked on ROMs and palette/security data)
+      and validation against real PAL/NSF content. The FDS `$4030.D1`
       DRAM-refresh watchdog matches the hardware capture (`67FF`/`6E25`).
 - [ ] **A7** differential harness, hardware captures, performance pass.
       The differential harness is complete: per-frame RGBA, audio and
@@ -184,7 +187,7 @@ The main effort is now the reference-parity accuracy core. Details in
       (mapper 157, UPC-A/EAN-13 modules at the documented 1000-cycle rate).
       The piano's MIDI replies and the Datach EEPROM need their real-ROM
       validation; both transports have synthetic tests. Device state is part
-      of `UNKOST16` save states; the Controllers tab selects a device per
+      of `UNKOST17` save states; the Controllers tab selects a device per
       port.
 - [x] FDS (user BIOS, never bundled): core/CLI/app loading, side menu,
       disk-write persistence, 1/2/4/8x disk speed and opt-in auto side swap.

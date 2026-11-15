@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **652 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **656 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -79,10 +79,11 @@ passes with the alternate selector. The selector is exposed as
 
 `Mmc3` gained serialized PRG-RAM protection state, `FdsAudio` was rewritten,
 the FDS watchdog gained serialized reload state, the mouse added serialized
-port state, the Famicom 3D System added its field latch, and Karaoke Studio
-added mapper-188 microphone state, so the save-state magic is now
-**`UNKOST16`**; `UNKOST15` and older states are rejected by the normal
-bad-magic check. See `docs/accuracy-divergences.md` for the open
+port state, the Famicom 3D System added its field latch, Karaoke Studio added
+mapper-188 microphone state, the Miracle Piano added its SysEx parser and
+firmware bytes, and the Datach adapter added the external X24C01 array, so the
+save-state magic is now **`UNKOST17`**; `UNKOST16` and older states are rejected
+by the normal bad-magic check. See `docs/accuracy-divergences.md` for the open
 mapper-suite items.
 
 ## Peripherals — SNES/Subor mouse (2026-11-15)
@@ -113,7 +114,7 @@ records every `$4016` write and samples OUT1 at the frame boundary, after the
 previous vertical blank and just before the next visible field, so each
 completed frame is tagged with the eye it was rendered for. The eye is exposed
 through `System::stereo_eye`; `Core::set_stereo_glasses` attaches or detaches
-the glasses. `UNKOST16` save states carry the attachment flag, latch and
+the glasses. `UNKOST17` save states carry the attachment flag, latch and
 current eye, so rewind and NetPlay rollback keep the correct eye.
 
 The desktop frontend offers **Settings → Video → Famicom 3D glasses** and
@@ -169,10 +170,50 @@ input (0 while sound is detected) and bits 7-3 are CPU open bus. The mapper now
 claims that window, so reads reach the board instead of returning open bus.
 `System::set_bandai_microphone` reports the ADC state; the A/B bits follow
 controller port 1. The mapper serializes both buttons, the ADC state and its
-open-bus latch in `UNKOST16` states. Unit tests cover the exact bit mapping,
+open-bus latch in `UNKOST17` states. Unit tests cover the exact bit mapping,
 the open-bus high bits, the CPU-bus path and a state round trip. No Karaoke
 Studio ROM is present locally, so this is validated against the NESdev protocol
 description rather than a title.
+
+## Peripherals — Miracle Piano MIDI replies (2026-11-15)
+
+The Miracle Piano transport now recognises the documented MIDI replies instead
+of requiring a firmware ROM. The clocked-byte parser accumulates a SysEx
+message and answers two requests:
+
+- `F0 00 00 42 01 04` (firmware version) returns
+  `F0 00 00 42 01 05 <major> <minor> F7`; the default is 2.03 and
+  `System::set_piano_firmware` selects another pair.
+- `F0 00 00 42 01 0B` (memory test) returns
+  `F0 00 00 42 01 0B 01 F7` (pass).
+
+The reply bytes are queued on the same polled shift register the piano uses;
+`push_piano_rx` remains available for tests and external injection. The
+transport now returns to idle after each transmitted byte, so multi-byte
+requests work. This follows the message set documented in the NESdev
+reverse-engineering thread and the NESdev wiki transport description; it is
+protocol-level behaviour, not a firmware emulation. Unit tests send both
+requests through the real transport and assert the complete replies, including
+the 1.10 version bytes.
+
+## Peripherals — Datach external X24C01 (2026-11-15)
+
+Battle Rush's cartridge adds a 128-byte Xicor X24C01 next to the adapter's
+256-byte X24C02. The X24C01 has no device-select byte: the first byte after
+START is a combined 7-bit word address and R/W bit, shifted **LSB-first** with
+data also LSB-first. Writes wrap within a four-byte page; reads walk all 128
+bytes. Its SCL is `$8000-$8003` bit 3, while SDA (`$800D` bit 6), the read
+direction (`$800D` bit 7) and the `$6000` bit 4 input are shared with the
+internal chip; the two open-drain outputs are ANDed. This matches the attached
+X24C01 datasheet and the reference emulator behaviour used by Battle Rush.
+
+The save image is now 384 bytes: the internal 256-byte X24C02 followed by the
+cartridge's 128-byte X24C01. A legacy 256-byte `datach.eeprom` still loads and
+leaves the external chip erased. The core instantiates the optional X24C01 for
+every mapper-157 image; titles that do not have it never address the window,
+and its open-drain output stays high. Unit tests cover LSB-first address/data,
+four-byte page wrap, sequential read, the `$8000`/`$800D` bit-banged wiring,
+the `$6000` read path and the snapshot round trip.
 
 ## CPU dummy fetches for RTS/RTI (2026-11-15)
 
@@ -2408,7 +2449,8 @@ The 256-byte array is part of the mapper save state and is persisted to
 adapter. Tests bit-bang a write of two bytes, a random read with auto-
 increment, a foreign-address NACK and a save-state round trip. A 600-frame
 trace of Crayon Shin-chan (Datach) runs without errors. The external X24C01
-(Battle Rush) and the Miracle Piano MIDI replies remain unimplemented.
+(Battle Rush) and the Miracle Piano MIDI replies are now implemented as
+described in the 2026-11-15 sections above.
 
 ### 2026-11-13 — shader/EEPROM/movie regression pass
 

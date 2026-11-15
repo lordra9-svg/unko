@@ -76,9 +76,9 @@ Public mapper-specific status:
 | Subor/Dendy keyboard | **Verified** |
 | Famicom microphone | **Implemented** (manual checkbox + default system input via a peak gate; no analog ADC capture) |
 | Data recorder tape loopback | **Synthetic/partial** |
-| Miracle Piano transport | **Transport only**; MIDI replies need firmware |
+| Miracle Piano transport | **Implemented** (transport plus the documented SysEx 4 version and SysEx 11 memory-test replies; default firmware 2.03) |
 | Datach scanner + internal X24C02 | **Verified** (synthetic I2C tests + real-ROM smoke) |
-| Datach external X24C01 | **Not implemented** (Battle Rush only) |
+| Datach external X24C01 | **Implemented** (128-byte X24C01 on `$8000-$8003` bit 3, shared SDA; 384-byte save) |
 | SNES/Subor mouse | **Verified** (32-bit report, buttons, sensitivity and sign-magnitude motion in unit tests) |
 | Famicom 3D glasses | **Implemented** (expansion-port `$4016` bit 1 (OUT1) field latch; red/cyan anaglyph output; unit-tested, no hardware capture) |
 | Karaoke Studio | **Implemented** (mapper 188 mic A/B + 1-bit ADC at `$6000-$7FFF`; A/B from controller port 1; unit-tested, no local ROM) |
@@ -111,7 +111,7 @@ Public mapper-specific status:
 | x0000 APU write-window tests | 10/10 pass |
 | NESdev archive | 137 pass / 11 fail / 115 visual/audio/input-only; PAL APU timing leaves 4 failures, adding the alternate MMC3 selector leaves only `read_joy3/count_errors` |
 | RustyNES test tree | 159 pass / 11 fail / 171 visual/audio/input-only; 166 / 4 with PAL APU in PAL mode, 1 with the alternate MMC3 selector too |
-| Workspace tests | 652 pass, 0 failed |
+| Workspace tests | 656 pass, 0 failed |
 
 The actionable accuracy failures are tracked in
 [`accuracy-divergences.md`](accuracy-divergences.md); the ROM/BIOS inventory is
@@ -124,5 +124,3 @@ in [`test-rom-inventory.md`](test-rom-inventory.md).
 | `disksys.rom` | FDS; local copies exist, never bundled |
 | VS. System BIOS + 2C03/2C04/2C05 palette/security data + VS ROMs | VS compatibility |
 | PlayChoice-10 game ROMs | PC10 compatibility (BIOS already available) |
-| Miracle Piano firmware | MIDI replies |
-| Datach external X24C01 dump | Battle Rush external EEPROM |

@@ -31,7 +31,7 @@ Scope decisions from this pass:
 | 5 | GPU shader pipeline (glow/wgpu) and built-in presets | 1 | Hard | renderer abstraction | **done (glow; iOS keeps the overlay fallback)** |
 | 6 | NTSC Budget/Premium + brightness/sharpness as shader presets | 1 | Hard | #5 | **done** |
 | 7 | FDS disk speed and automatic side swap | 2 | Hard | local `disksys.rom` | **done** (loading, BIOS, side menu, disk persistence, 1/2/4/8x speed and opt-in auto-swap) |
-| 8 | Miracle Piano MIDI replies and Datach EEPROM (X24C02) | 2 | Hard | real test ROMs | **partial (X24C02 done and persisted; MIDI replies still need firmware)** |
+| 8 | Miracle Piano MIDI replies and Datach EEPROM (X24C02) | 2 | Hard | real test ROMs | **done** (X24C02 + external X24C01 persisted; documented SysEx 4/11 replies, no firmware ROM) |
 | 9 | Input movies/TAS recording and playback | 3 | Medium-hard | rewind input log | **done** |
 | 10 | Lua scripting (sandboxed 5.4) | 3 | Hard | scripting host API | **deferred** (needs an embedded interpreter dependency, a sandbox policy and API surface; out of this pass) |
 | 11 | RetroAchievements | 3 | Hard | network + memory hashes | **blocked** (requires RA credentials/network and achievement hashing; no offline validation) |

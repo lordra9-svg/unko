@@ -463,7 +463,7 @@ enum PianoMode {
     Send,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct MiraclePiano {
     out_high: bool,
     rise_cycle: u64,
@@ -479,6 +479,31 @@ struct MiraclePiano {
     status_ready: bool,
     /// Bytes clocked in from the software, for diagnostics/tests.
     tx_log: Vec<u8>,
+    /// SysEx bytes seen since the last `F0`, used to answer the documented
+    /// firmware-version and memory-test requests.
+    sysex: Vec<u8>,
+    /// Advertised firmware version in the SysEx 5 reply (major, minor).
+    firmware: [u8; 2],
+}
+
+impl Default for MiraclePiano {
+    fn default() -> Self {
+        Self {
+            out_high: false,
+            rise_cycle: 0,
+            mode: PianoMode::Idle,
+            data_bit: false,
+            tx_shift: 0,
+            tx_bits: 0,
+            rx: std::collections::VecDeque::new(),
+            rx_shift: 0,
+            rx_bits: 0,
+            status_ready: false,
+            tx_log: Vec::new(),
+            sysex: Vec::new(),
+            firmware: [2, 3],
+        }
+    }
 }
 
 impl MiraclePiano {
@@ -512,17 +537,64 @@ impl MiraclePiano {
         }
     }
 
+    fn handle_tx_byte(&mut self, byte: u8) {
+        if self.tx_log.len() < 256 {
+            self.tx_log.push(byte);
+        }
+        if byte == 0xF0 {
+            self.sysex.clear();
+            self.sysex.push(byte);
+            return;
+        }
+        if self.sysex.is_empty() {
+            return;
+        }
+        self.sysex.push(byte);
+        if self.sysex.len() == 6 {
+            match self.sysex.as_slice() {
+                [0xF0, 0x00, 0x00, 0x42, 0x01, 0x04] => {
+                    self.queue_reply(&[
+                        0xF0,
+                        0x00,
+                        0x00,
+                        0x42,
+                        0x01,
+                        0x05,
+                        self.firmware[0],
+                        self.firmware[1],
+                        0xF7,
+                    ]);
+                }
+                [0xF0, 0x00, 0x00, 0x42, 0x01, 0x0B] => {
+                    self.queue_reply(&[0xF0, 0x00, 0x00, 0x42, 0x01, 0x0B, 0x01, 0xF7]);
+                }
+                _ => {}
+            }
+        }
+        if byte == 0xF7 || self.sysex.len() >= 16 {
+            self.sysex.clear();
+        }
+    }
+
+    fn queue_reply(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            if self.rx.len() < 256 {
+                self.rx.push_back(*byte);
+            }
+        }
+    }
+
     fn read(&mut self) -> u8 {
         match self.mode {
             PianoMode::Send => {
                 self.tx_shift = (self.tx_shift << 1) | u8::from(self.data_bit);
                 self.tx_bits += 1;
                 if self.tx_bits == 8 {
-                    if self.tx_log.len() < 256 {
-                        self.tx_log.push(self.tx_shift);
-                    }
+                    let byte = self.tx_shift;
                     self.tx_bits = 0;
                     self.tx_shift = 0;
+                    self.mode = PianoMode::Idle;
+                    self.handle_tx_byte(byte);
                 }
                 u8::from(self.data_bit)
             }
@@ -949,6 +1021,12 @@ impl System {
         }
     }
 
+    /// Selects the firmware version advertised in the Miracle Piano SysEx 5
+    /// reply. The default is 2.03.
+    pub fn set_piano_firmware(&mut self, major: u8, minor: u8) {
+        self.peripherals.piano.firmware = [major, minor];
+    }
+
     /// Bytes clocked in from the Miracle Piano software (diagnostics).
     #[must_use]
     pub fn piano_tx_log(&self) -> &[u8] {
@@ -1242,7 +1320,7 @@ impl System {
     #[cfg(feature = "save-states")]
     pub fn save_state(&self) -> Result<Vec<u8>, String> {
         let mut out = Vec::new();
-        out.extend_from_slice(b"UNKOST16");
+        out.extend_from_slice(b"UNKOST17");
         out.extend_from_slice(&self.cart.fingerprint().to_le_bytes());
         let mut cart_state = Vec::new();
         self.cart.save_state(&mut cart_state)?;
@@ -1290,7 +1368,7 @@ impl System {
     /// Restores a state produced by [`System::save_state`].
     #[cfg(feature = "save-states")]
     pub fn load_state(&mut self, data: &[u8]) -> Result<(), String> {
-        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST16" {
+        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST17" {
             return Err("not an Unko state (bad magic/version)".into());
         }
         let fingerprint = u64::from_le_bytes(
@@ -3013,6 +3091,62 @@ mod tests {
     }
 
     #[test]
+    fn miracle_piano_answers_firmware_and_memory_test_sysex() {
+        let rom = synthetic_nrom(0);
+        let mut system = System::from_ines(&rom).expect("load");
+        system.set_port_device(0, PortDevice::MiraclePiano);
+
+        for byte in [0xF0, 0x00, 0x00, 0x42, 0x01, 0x04] {
+            piano_send(&mut system, byte);
+        }
+        let reply: Vec<u8> = (0..9).filter_map(|_| piano_poll(&mut system)).collect();
+        assert_eq!(
+            reply,
+            vec![0xF0, 0x00, 0x00, 0x42, 0x01, 0x05, 0x02, 0x03, 0xF7]
+        );
+
+        system.set_piano_firmware(1, 0x0A);
+        for byte in [0xF0, 0x00, 0x00, 0x42, 0x01, 0x0B] {
+            piano_send(&mut system, byte);
+        }
+        let reply: Vec<u8> = (0..8).filter_map(|_| piano_poll(&mut system)).collect();
+        assert_eq!(reply, vec![0xF0, 0x00, 0x00, 0x42, 0x01, 0x0B, 0x01, 0xF7]);
+        assert_eq!(
+            system.piano_tx_log(),
+            &[0xF0, 0x00, 0x00, 0x42, 0x01, 0x04, 0xF0, 0x00, 0x00, 0x42, 0x01, 0x0B]
+        );
+    }
+
+    fn piano_send(system: &mut System, byte: u8) {
+        system.write(0x4016, 1);
+        for _ in 0..80 {
+            system.cycle_count += 1;
+        }
+        system.write(0x4016, 0);
+        for bit in 0..8 {
+            let value = (byte >> (7 - bit)) & 1;
+            system.write(0x4016, value);
+            system.read(0x4016);
+        }
+    }
+
+    fn piano_poll(system: &mut System) -> Option<u8> {
+        system.write(0x4016, 1);
+        for _ in 0..12 {
+            system.cycle_count += 1;
+        }
+        system.write(0x4016, 0);
+        if system.read(0x4016) & 1 == 0 {
+            return None;
+        }
+        let mut byte = 0u8;
+        for _ in 0..8 {
+            byte = (byte << 1) | ((system.read(0x4016) & 1) ^ 1);
+        }
+        Some(byte)
+    }
+
+    #[test]
     fn tape_recorder_loops_back_written_bits() {
         let rom = synthetic_nrom(0);
         let mut system = System::from_ines(&rom).expect("load");
@@ -3698,7 +3832,7 @@ mod tests {
     fn state_magic_is_current() {
         let system = System::from_ines(&synthetic_nrom(0)).expect("load");
         let state = system.save_state().expect("state");
-        assert_eq!(&state[..8], b"UNKOST16");
+        assert_eq!(&state[..8], b"UNKOST17");
         let mut restored = System::from_ines(&synthetic_nrom(0)).expect("load");
         restored.load_state(&state).expect("restore");
     }

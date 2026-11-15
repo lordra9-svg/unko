@@ -24,7 +24,7 @@ emulator's scope.
 | VS. System / PlayChoice | VS | VS | VS (fixed list) | VS + PlayChoice-10 | VS | VS Uni + Dual | VS + PlayChoice-10 | **No** |
 | PAL / Dendy | region models | Yes | Yes (NTSC-PAL hybrid too) | Yes | Yes | Yes | Yes | **Yes** |
 | Expansion audio | VRC6/7, MMC5, N163, 5B, FDS, EPSM | VRC6/7, MMC5, N163, 5B, FDS, EPSM | VRC6/7, MMC5, N163, 5B, FDS | VRC6/7, MMC5, N163, 5B, FDS | VRC7, MMC5, N163, 5B, FDS (DLLs) | VRC6/7, MMC5, N163, 5B, FDS | VRC6/7, MMC5, N163, 5B, FDS | **VRC6/7, MMC5, N163, 5B, FDS** |
-| Devices | gamepad, Zapper, Family BASIC keyboard, data recorder | pad, Zapper, Power Pad, Four Score, paddle, keyboard, microphone, more | pad, Four Score, Zapper, Power Pad, Arkanoid, Space Shadow, Family Keyboard | pad, Zapper, Power Pad, Four Score, exotic peripherals | pad, Zapper, Four Score, Game Genie | pad, Zapper, Power Pad, paddle, Family/Subor keyboard, tape, microphone | Four Score, Zapper, paddle, Power Pad, keyboards, mouse | **pad, Zapper, Paddle, Power Pad + Family Trainer, Four Score, Family BASIC keyboard, Subor keyboard, microphone, tape loopback, Miracle Piano transport, Datach scanner + X24C02 EEPROM** |
+| Devices | gamepad, Zapper, Family BASIC keyboard, data recorder | pad, Zapper, Power Pad, Four Score, paddle, keyboard, microphone, more | pad, Four Score, Zapper, Power Pad, Arkanoid, Space Shadow, Family Keyboard | pad, Zapper, Power Pad, Four Score, exotic peripherals | pad, Zapper, Four Score, Game Genie | pad, Zapper, Power Pad, paddle, Family/Subor keyboard, tape, microphone | Four Score, Zapper, paddle, Power Pad, keyboards, mouse | **pad, Zapper, Paddle, Power Pad + Family Trainer, Four Score, Family BASIC keyboard, Subor keyboard, microphone, tape loopback, Miracle Piano transport with SysEx replies, Datach scanner + X24C02/X24C01 EEPROMs** |
 | Overclocking | No | Yes | No | 2x option | No | PPU overclock | speed control | No |
 | Sprite-limit toggle | No | Yes | No (sprite limit disable via CLI) | Yes | No | No | Yes (enhancement) | No |
 
@@ -126,9 +126,10 @@ matrix above is the comparison; this list is the work queue.
   ares ISC colorimetry).
 - Output scaling/aspect/supersampling, window presets and scanline/LCD/CRT
   output presets.
-- Microphone, Family BASIC tape loopback, Miracle Piano MIDI transport and
-  Datach barcode scanner and internal X24C02 EEPROM (bit-banged protocol
-  unit-tested; real Datach ROM smoke-tested, save-screen validation pending).
+- Microphone, Family BASIC tape loopback, Miracle Piano transport with SysEx
+  replies, and the Datach barcode scanner with its internal X24C02 and
+  cartridge X24C01 EEPROMs (bit-banged protocol unit-tested; real Datach ROM
+  smoke-tested, save-screen validation pending).
 - MiSTer accuracy options: PPU reset behaviour, RAM clear, audio source,
   overscan, edge masking, and the NES 2.0 missing-header warning.
 - Per-system library roots (NES scanned), grid/list columns, detachable
@@ -156,9 +157,9 @@ matrix above is the comparison; this list is the work queue.
    still missing.
 4. **FDS depth**: loading, BIOS selection, side switching, disk-write
    persistence, 1/2/4/8x disk speed and opt-in auto side swap are in.
-5. **Peripherals**: Miracle Piano MIDI replies (firmware) and the Datach
-   external X24C01 (Battle Rush). The SNES/Subor mouse, Famicom 3D System
-   (anaglyph display model) and Karaoke Studio microphone (mapper 188) are
+5. **Peripherals**: the SNES/Subor mouse, Famicom 3D System (anaglyph
+   display model), Karaoke Studio microphone (mapper 188), Miracle Piano
+   SysEx replies and the Datach external X24C01 (Battle Rush) are
    implemented.
 6. **Optional accuracy knobs**: sprite-per-line limit / extra sprites,
    CPU/PPU overclock. Deliberately not added (not accuracy-preserving).
