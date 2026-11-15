@@ -136,7 +136,7 @@ vertical or four-screen), `BATR`, `TVCI` (NTSC/PAL/dual) and `VROR`
 MMC1 (`S*ROM`), MMC3 (`T*ROM`, `B4`, HKROM), AxROM (`A*ROM`), CPROM, BNROM
 UNROM-512, plus common third-party names (VRC7, Namcot 163, Sunsoft FME-7,
 Bandai FCG/LZ93D50, Jaleco JF, Sachen 8259/74LS374N, Waixing FS005/FW01,
-DreamTech01, 3D-Block and RET-CUFROM). Mappers above 255 and boards with a
+DreamTech01, CoolBoy/MindKids, Konami QTAI, Bandai LZ93D50 and FK23C). Mappers above 255 and boards with a
 submapper (UNROM 2, AxROM 1/2, FS005 2) emit a NES 2.0 header. Unknown `MAPR`
 names are rejected instead of guessing a mapper.
 Loose `.unif` files and members of ZIP/7z/RAR archives are discovered, shown in

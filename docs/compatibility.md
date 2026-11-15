@@ -33,7 +33,7 @@ test, or a smoke audit covers it; a dash means no verdict yet.
 | Raw `.fds`, loose or in ZIP/7z/RAR | **Supported** |
 | `.zip`, `.7z`, `.rar` containers | **Supported** (no extraction to disk) |
 | IPS / BPS soft patches | **Not implemented** |
-| UNIF | **Implemented** (UNIF chunks to iNES 1.0/NES 2.0; Nintendo and common third-party boards, `MIRR`/`BATR`/`TVCI`/`VROR`; unknown boards are rejected) |
+| UNIF | **Implemented** (UNIF chunks to iNES 1.0/NES 2.0; Nintendo and common third-party/licensed boards, `MIRR`/`BATR`/`TVCI`/`VROR`; unknown boards are rejected) |
 | Per-game region, port-device and mapper override | **Supported** (`Tools → Game properties…`, stored as `<stem>.game`) |
 | NES 2.0 header editor / repair database | **Not implemented** (missing-header warning only) |
 

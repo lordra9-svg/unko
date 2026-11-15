@@ -279,7 +279,9 @@ fn region(value: Option<u8>) -> &'static str {
 
 fn board_submapper(board: &str) -> Option<u8> {
     let board = board.to_ascii_uppercase();
-    if board.contains("WAIXING-FS005") {
+    if board.contains("MINDKIDS") {
+        Some(1)
+    } else if board.contains("WAIXING-FS005") {
         Some(2)
     } else if board.contains("BANDAI-LZ93D50") {
         Some(5)
@@ -330,6 +332,8 @@ fn board_mapper(board: &str) -> Option<u16> {
         ("JALECO-JF02", 0),
         ("JALECO-JF03", 0),
         ("JALECO-JF04", 0),
+        ("BANDAI-LZ93D50+24C01", 159),
+        ("BANDAI-LZ93D50+24C02", 16),
         ("BANDAI-FCG", 16),
         ("BANDAI-LZ93D50", 16),
         ("IREM-FCG-1", 16),
@@ -345,6 +349,11 @@ fn board_mapper(board: &str) -> Option<u16> {
         ("SUNSOFT-FME7", 69),
         ("VRC7", 85),
         ("VRC-7", 85),
+        ("COOLBOY", 268),
+        ("MINDKIDS", 268),
+        ("KONAMI-QTAI", 547),
+        ("FK23CA", 176),
+        ("FK23C", 176),
     ];
     for (name, mapper) in SPECIFIC {
         if board.contains(name) {
@@ -506,6 +515,11 @@ mod tests {
             ("DREAMTECH01", 521),
             ("3D-BLOCK", 355),
             ("RET-CUFROM", 29),
+            ("COOLBOY", 268),
+            ("MINDKIDS", 268),
+            ("KONAMI-QTAI", 547),
+            ("BANDAI-LZ93D50+24C01", 159),
+            ("FK23C", 176),
         ] {
             let mapr = format!("{board}\0");
             let bytes = unif(&[(b"MAPR", mapr.as_bytes()), (b"PRG0", &[0u8; 0x8000])]);
