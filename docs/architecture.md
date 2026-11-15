@@ -112,7 +112,9 @@ datagrams to public peers and reports when bidirectional traffic is confirmed;
 `relay` is a simplified TURN-style server (`unko-relay`) that assigns clients
 to a room and forwards `DATA` frames between members, used when punching
 stalls. A manual public-endpoint field covers everything else. Live Internet
-validation remains future work.
+validation is reproducible with the two-host harness in `docs/netplay.md`
+(direct, hole punch and relay paths already pass on a real LAN; a true
+Internet run needs two networks).
 
 `unko-rom-manager` is a separate, non-emulator feature core: DAT auditing,
 1G1R selection, fixdat/CSV reports and safe rebuilding. It has no dependency

@@ -407,6 +407,23 @@ fn peers_converge_over_a_relay() {
     });
     let a_inputs = [10u16, 11, 12, 13];
     let b_inputs = [20u16, 21, 22, 23];
+    let mut received_a = 0usize;
+    let mut received_b = 0usize;
+
+    fn drain(
+        transport: &mut RelayTransport,
+        session: &mut RollbackSession,
+        core: &mut TestCore,
+        received: &mut usize,
+    ) {
+        while let Some(bytes) = transport.recv().expect("recv") {
+            let message = InputFrame::decode(&bytes).expect("frame");
+            session
+                .receive_remote(core, message.player, message.frame, message.input)
+                .expect("remote");
+            *received += 1;
+        }
+    }
 
     for frame in 0..4usize {
         let a_frame = a_session
@@ -433,30 +450,26 @@ fn peers_converge_over_a_relay() {
             .encode(),
         )
         .expect("b send");
-
-        // Allow the relay hop, then drain both directions.
-        for _ in 0..20 {
-            let mut progressed = false;
-            while let Some(bytes) = a.recv().expect("a recv") {
-                let message = InputFrame::decode(&bytes).expect("frame");
-                a_session
-                    .receive_remote(&mut a_core, message.player, message.frame, message.input)
-                    .expect("a remote");
-                progressed = true;
-            }
-            while let Some(bytes) = b.recv().expect("b recv") {
-                let message = InputFrame::decode(&bytes).expect("frame");
-                b_session
-                    .receive_remote(&mut b_core, message.player, message.frame, message.input)
-                    .expect("b remote");
-                progressed = true;
-            }
-            if progressed {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(2));
-        }
+        drain(&mut a, &mut a_session, &mut a_core, &mut received_a);
+        drain(&mut b, &mut b_session, &mut b_core, &mut received_b);
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
+
+    // The relay hop can deliver after the frame loop; wait for every input and
+    // let the resulting rollbacks settle before hashing the state.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while received_a < 4 || received_b < 4 {
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
+        drain(&mut a, &mut a_session, &mut a_core, &mut received_a);
+        drain(&mut b, &mut b_session, &mut b_core, &mut received_b);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(
+        received_a >= 4 && received_b >= 4,
+        "all relayed inputs arrived"
+    );
 
     let mut expected = TestCore::default();
     for frame in [

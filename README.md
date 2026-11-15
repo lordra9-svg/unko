@@ -69,8 +69,10 @@ paused during the handshake, and only starts the session after bidirectional
 traffic is confirmed. If punching stalls, a **relay** server (included as
 `unko-relay`) forwards the same input messages between room members. The
 window shows frame, sent/received/rollbacks, predicted frames and the deepest
-rollback. Netplay disables rewind, movies and run-ahead. Live Internet
-validation remains outstanding.
+rollback. Netplay disables rewind, movies and run-ahead. Direct UDP, hole
+punching and the relay were validated over a real LAN with the two-host
+harness; a true Internet run needs two networks. See
+[`docs/netplay.md`](docs/netplay.md) for the harness commands and results.
 
 ## Project stats
 
@@ -123,6 +125,7 @@ docs/
   decisions.md           # license/stack/scope decisions
   emulator-tooling.md    # installed reference emulators and toolchains
   frontend.md            # desktop UX blueprint and the GPL boundary
+  netplay.md             # transports, session model and two-host harness
 ```
 
 Target order: **NES → SNES (ares) → N64 (ares) → optional external Dolphin**.

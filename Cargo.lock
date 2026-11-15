@@ -4153,7 +4153,10 @@ dependencies = [
 name = "unko-nes-dev"
 version = "0.1.0"
 dependencies = [
+ "unko-core",
  "unko-nes",
+ "unko-nes-host",
+ "unko-netplay",
 ]
 
 [[package]]
