@@ -63,7 +63,7 @@ that matters for a playable library:
 
 - Logiqx XML DAT ingestion (No-Intro/MAME-style `datafile`, `game`, `rom`,
   parent/clone ids, category/status, size/CRC/MD5/SHA1).
-- Loose-file and ZIP scanning, with CRC32/MD5/SHA1 hashes.
+- Loose-file, ZIP, 7z and RAR scanning, with CRC32/MD5/SHA1 hashes.
 - NES headerless matching: a `.nes` file is hashed both whole and with its
   16-byte iNES header removed, so a headered library can match a headerless
   DAT and vice versa.
@@ -78,7 +78,7 @@ that matters for a playable library:
   default.
 - Persistent hash cache keyed by path, size and modification time, so repeated
   audits only hash changed files and ZIP members.
-- TorrentZip/RVZSTD, 7z/RAR/CHD, patching and DAT download remain future work.
+- TorrentZip/RVZSTD, CHD, patching and DAT download remain future work.
 
 The app exposes this as a **ROM Manager** window; the same library is usable
 without the app. The design follows the project rule used for the NES core:

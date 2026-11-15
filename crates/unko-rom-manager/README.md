@@ -8,7 +8,7 @@ Rust project or used through the `unko-app` ROM Manager window.
 
 - Logiqx XML DAT parsing (No-Intro/MAME-style `datafile`, `game`, `rom`,
   parent/clone ids, categories, size/CRC/MD5/SHA1/status).
-- Loose-file and ZIP scanning with CRC-32, MD5 and SHA-1.
+- Loose-file, ZIP, 7z and RAR scanning with CRC-32, MD5 and SHA-1.
 - iNES headerless matching: a `.nes` file is hashed whole and with its 16-byte
   header removed.
 - Complete/partial/missing game status, unknown files and duplicates.
@@ -52,7 +52,7 @@ cargo run -p unko-rom-manager -- \
 
 ## Current limits
 
-ZIP is the only archive format read today. Rebuilt sets can be written as
-deterministic ZIPs (not TorrentZip/RVZSTD), 7z/RAR/CHD input, ROM patching,
-DAT download/update are future work.
+ZIP, 7z and RAR containers can be read; rebuilt sets can be written as
+deterministic ZIPs (not TorrentZip/RVZSTD). CHD input, ROM patching and DAT
+download/update are future work.
 The rebuild operation only copies; it never deletes or moves source files.

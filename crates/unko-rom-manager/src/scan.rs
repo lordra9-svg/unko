@@ -87,6 +87,15 @@ pub enum Origin {
         /// Member name.
         member: String,
     },
+    /// A member of a 7z or RAR archive.
+    Archive {
+        /// Archive path.
+        archive: PathBuf,
+        /// Member index (RAR); 7z members are read by name.
+        index: Option<usize>,
+        /// Member name.
+        member: String,
+    },
 }
 
 impl Origin {
@@ -96,6 +105,9 @@ impl Origin {
         match self {
             Self::File(path) => path.display().to_string(),
             Self::Zip {
+                archive, member, ..
+            }
+            | Self::Archive {
                 archive, member, ..
             } => format!("{}/{}", archive.display(), member),
         }
@@ -142,6 +154,11 @@ impl ScannedRom {
                     .map_err(|err| Error::Io(format!("{member_name}: {err}")))?;
                 Ok(bytes)
             }
+            Origin::Archive {
+                archive,
+                index,
+                member,
+            } => load_archive_member(archive, *index, member),
         }
     }
 
@@ -223,9 +240,15 @@ fn walk(
             scan_zip(&path, options, out, stats, progress, cache)?;
             continue;
         }
+        if options.include_archives && extension == "7z" {
+            scan_7z(&path, options, out, stats, progress, cache)?;
+            continue;
+        }
+        if options.include_archives && extension == "rar" {
+            scan_rar(&path, options, out, stats, progress, cache)?;
+            continue;
+        }
         if extension == "7z" || extension == "rar" {
-            stats.current = format!("{}: archive not supported yet", path.display());
-            progress(stats);
             continue;
         }
         if !options.accepts(&path) {
@@ -360,6 +383,199 @@ fn scan_zip(
     Ok(())
 }
 
+fn load_archive_member(archive: &Path, index: Option<usize>, member: &str) -> Result<Vec<u8>> {
+    let extension = archive
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "7z" => {
+            let mut reader =
+                sevenz_rust2::ArchiveReader::open(archive, sevenz_rust2::Password::empty())
+                    .map_err(|err| Error::Zip(format!("{}: {err}", archive.display())))?;
+            reader
+                .read_file(member)
+                .map_err(|err| Error::Zip(format!("{}: {err}", archive.display())))
+        }
+        "rar" => {
+            let reader = rars::ArchiveReader::read_path(archive)
+                .map_err(|err| Error::Zip(format!("{}: {err}", archive.display())))?;
+            let bytes = match index {
+                Some(index) => reader.read_member_at(index, None),
+                None => reader.read_member(member.as_bytes(), None),
+            }
+            .map_err(|err| Error::Zip(format!("{}: {err}", archive.display())))?;
+            bytes.ok_or_else(|| {
+                Error::Zip(format!("{}: member {member} missing", archive.display()))
+            })
+        }
+        _ => Err(Error::Zip(format!(
+            "{}: unsupported archive format",
+            archive.display()
+        ))),
+    }
+}
+
+fn scan_7z(
+    archive: &Path,
+    options: &ScanOptions,
+    out: &mut Vec<ScannedRom>,
+    stats: &mut ScanProgress,
+    progress: &mut dyn FnMut(&ScanProgress),
+    cache: &mut Option<ScanCache>,
+) -> Result<()> {
+    let Ok(reader) = sevenz_rust2::ArchiveReader::open(archive, sevenz_rust2::Password::empty())
+    else {
+        stats.current = format!("{}: cannot open 7z", archive.display());
+        progress(stats);
+        return Ok(());
+    };
+    let files: Vec<(String, u64)> = reader
+        .archive()
+        .files
+        .iter()
+        .filter(|file| !file.is_directory())
+        .map(|file| (file.name().to_string(), file.size()))
+        .collect();
+    drop(reader);
+    let modified = modified_secs(archive);
+    for (name, size) in files {
+        let member_path = Path::new(&name);
+        if !options.accepts(member_path) {
+            continue;
+        }
+        let Some(file_name) = member_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+        else {
+            continue;
+        };
+        let key = format!("{}::7z::{name}", archive.display());
+        let cached = cache
+            .as_mut()
+            .and_then(|cache| cache.lookup(&key, size, modified));
+        let (hashes, headerless) = if let Some(cached) = cached {
+            stats.members += 1;
+            cached
+        } else {
+            let Ok(bytes) = load_archive_member(archive, None, &name) else {
+                continue;
+            };
+            let hashes = hash_bytes(&bytes);
+            let extension = member_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let headerless = headerless_hashes(&bytes, &extension);
+            stats.members += 1;
+            stats.bytes += bytes.len() as u64;
+            if let Some(cache) = cache.as_mut() {
+                cache.store(key, hashes.size, modified, hashes, headerless);
+            }
+            (hashes, headerless)
+        };
+        stats.current = format!("{}/{}", archive.display(), name);
+        progress(stats);
+        out.push(ScannedRom {
+            origin: Origin::Archive {
+                archive: archive.to_path_buf(),
+                index: None,
+                member: name,
+            },
+            file_name,
+            hashes,
+            headerless,
+            modified,
+        });
+    }
+    Ok(())
+}
+
+fn scan_rar(
+    archive: &Path,
+    options: &ScanOptions,
+    out: &mut Vec<ScannedRom>,
+    stats: &mut ScanProgress,
+    progress: &mut dyn FnMut(&ScanProgress),
+    cache: &mut Option<ScanCache>,
+) -> Result<()> {
+    let Ok(reader) = rars::ArchiveReader::read_path(archive) else {
+        stats.current = format!("{}: cannot open RAR", archive.display());
+        progress(stats);
+        return Ok(());
+    };
+    let members: Vec<(usize, String, u64, bool)> = reader
+        .members()
+        .enumerate()
+        .map(|(index, member)| {
+            (
+                index,
+                String::from_utf8_lossy(&member.meta.name).into_owned(),
+                member.meta.unpacked_size,
+                member.meta.is_directory,
+            )
+        })
+        .collect();
+    drop(reader);
+    let modified = modified_secs(archive);
+    for (index, name, size, is_directory) in members {
+        if is_directory {
+            continue;
+        }
+        let member_path = Path::new(&name);
+        if !options.accepts(member_path) {
+            continue;
+        }
+        let Some(file_name) = member_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+        else {
+            continue;
+        };
+        let key = format!("{}::rar::{index}::{name}", archive.display());
+        let cached = cache
+            .as_mut()
+            .and_then(|cache| cache.lookup(&key, size, modified));
+        let (hashes, headerless) = if let Some(cached) = cached {
+            stats.members += 1;
+            cached
+        } else {
+            let Ok(bytes) = load_archive_member(archive, Some(index), &name) else {
+                continue;
+            };
+            let hashes = hash_bytes(&bytes);
+            let extension = member_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let headerless = headerless_hashes(&bytes, &extension);
+            stats.members += 1;
+            stats.bytes += bytes.len() as u64;
+            if let Some(cache) = cache.as_mut() {
+                cache.store(key, hashes.size, modified, hashes, headerless);
+            }
+            (hashes, headerless)
+        };
+        stats.current = format!("{}/{}", archive.display(), name);
+        progress(stats);
+        out.push(ScannedRom {
+            origin: Origin::Archive {
+                archive: archive.to_path_buf(),
+                index: Some(index),
+                member: name,
+            },
+            file_name,
+            hashes,
+            headerless,
+            modified,
+        });
+    }
+    Ok(())
+}
+
 fn headerless_hashes(bytes: &[u8], extension: &str) -> Option<Hashes> {
     if extension != "nes" {
         return None;
@@ -421,6 +637,31 @@ mod tests {
             .find(|rom| rom.file_name == "inside.nes")
             .expect("zip");
         assert_eq!(packed.headerless.expect("headerless").size, 7);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scans_7z_members_and_reads_them_back() {
+        let dir = std::env::temp_dir().join(format!("unko-rm-7z-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let src = dir.join("src");
+        fs::create_dir_all(&src).expect("src");
+        let mut nes = vec![0u8; 16];
+        nes[..4].copy_from_slice(b"NES\x1a");
+        nes.extend_from_slice(b"payload");
+        fs::write(src.join("game.nes"), &nes).expect("rom");
+        let archive = dir.join("set.7z");
+        sevenz_rust2::compress_to_path(&src, &archive).expect("compress");
+
+        let mut progress = |_: &ScanProgress| {};
+        let (roms, _) = scan_path(&dir, &ScanOptions::default(), &mut progress).expect("scan");
+        let rom = roms
+            .iter()
+            .find(|rom| rom.file_name == "game.nes")
+            .expect("7z member");
+        assert!(matches!(rom.origin, Origin::Archive { .. }));
+        assert_eq!(rom.load().expect("load"), nes);
+        assert_eq!(rom.hashes, hash_bytes(&nes));
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -3648,6 +3648,8 @@ dependencies = [
  "crc32fast",
  "md-5",
  "quick-xml 0.41.0",
+ "rars",
+ "sevenz-rust2",
  "sha1",
  "zip",
 ]
