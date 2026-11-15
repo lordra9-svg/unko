@@ -105,10 +105,11 @@ impl ControllerAction {
     }
 }
 
-const PORT_DEVICES: [PortDevice; 11] = [
+const PORT_DEVICES: [PortDevice; 12] = [
     PortDevice::Gamepad,
     PortDevice::Zapper,
     PortDevice::Paddle,
+    PortDevice::Mouse,
     PortDevice::PowerPad,
     PortDevice::FamilyTrainer,
     PortDevice::FamilyKeyboard,
@@ -124,6 +125,7 @@ fn port_device_label(device: PortDevice) -> &'static str {
         PortDevice::Gamepad => "Gamepad",
         PortDevice::Zapper => "Zapper",
         PortDevice::Paddle => "Paddle",
+        PortDevice::Mouse => "Mouse",
         PortDevice::PowerPad => "Power Pad",
         PortDevice::FamilyTrainer => "Family Trainer",
         PortDevice::FamilyKeyboard => "Family BASIC keyboard",
@@ -2579,7 +2581,7 @@ impl App {
                  Explicit Connected choices take precedence.",
             );
             ui.label("Gamepads: routed through the matrix above when Connected is Auto.");
-            ui.label("Zapper, paddle, Power Pad and Family BASIC use the port's device.");
+            ui.label("Zapper, paddle, mouse, Power Pad and Family BASIC use the port's device.");
             ui.add_space(10.0);
             ui.separator();
             ui.heading("Datach barcode");
@@ -3757,7 +3759,10 @@ impl eframe::App for App {
         for (port, input) in inputs.iter().enumerate() {
             match input {
                 PortInput::Auto => keyboard_ports[port] = port == 0,
-                PortInput::None | PortInput::MouseZapper | PortInput::MousePaddle => {}
+                PortInput::None
+                | PortInput::MouseZapper
+                | PortInput::MousePaddle
+                | PortInput::Mouse => {}
                 PortInput::Keyboard => keyboard_ports[port] = true,
                 PortInput::Gamepad(slot) => {
                     let slot = (*slot).min(3);
@@ -3857,6 +3862,13 @@ impl eframe::App for App {
             } else {
                 None
             };
+            let mouse_port = if enabled[0] && port1 == PortDevice::Mouse {
+                Some(0)
+            } else if enabled[1] && port2 == PortDevice::Mouse {
+                Some(1)
+            } else {
+                None
+            };
             let power_pad_port = if enabled[0]
                 && (port1 == PortDevice::PowerPad || port1 == PortDevice::FamilyTrainer)
             {
@@ -3894,6 +3906,7 @@ impl eframe::App for App {
                     mask_edges: self.settings.mask_edges,
                     zapper_port,
                     paddle_port,
+                    mouse_port,
                     power_pad_port,
                     input: self.input_states,
                     show_input: self.settings.show_input_display,
@@ -3905,6 +3918,9 @@ impl eframe::App for App {
             player.set_touch(view.touch);
             if let (Some(port), Some((position, fire))) = (paddle_port, view.paddle) {
                 player.set_paddle(port, position, fire);
+            }
+            if let (Some(port), Some((dx, dy, left, right))) = (mouse_port, view.mouse) {
+                player.set_mouse(port, dx, dy, left, right);
             }
             if let (Some(port), Some(mask)) = (power_pad_port, view.power_pad) {
                 player.set_power_pad(port, mask);
@@ -4153,6 +4169,7 @@ struct ViewportOptions {
     mask_edges: MaskEdges,
     zapper_port: Option<usize>,
     paddle_port: Option<usize>,
+    mouse_port: Option<usize>,
     power_pad_port: Option<usize>,
     input: [unko_core::InputState; 4],
     show_input: bool,
@@ -4163,6 +4180,8 @@ struct ViewportOptions {
 struct ViewportInput {
     touch: unko_core::InputState,
     paddle: Option<(u8, bool)>,
+    /// Mouse movement in mickeys (right/up positive) and its two buttons.
+    mouse: Option<(i32, i32, bool, bool)>,
     power_pad: Option<u16>,
 }
 
@@ -4185,6 +4204,7 @@ fn viewport(
         mask_edges,
         zapper_port,
         paddle_port,
+        mouse_port,
         power_pad_port,
         input,
         show_input,
@@ -4194,6 +4214,7 @@ fn viewport(
     #[cfg(target_os = "ios")]
     let _ = (brightness, sharpness);
     let mut paddle = None;
+    let mut mouse = None;
     let mut power_pad = None;
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.fill(Color32::BLACK))
@@ -4243,6 +4264,31 @@ fn viewport(
                         None => (128, false),
                     },
                 );
+            }
+            if mouse_port.is_some() {
+                // The mouse reports movement since the previous report, so use
+                // egui's per-frame pointer delta rather than an absolute
+                // position. Movement and clicks outside the viewport are
+                // ignored so the surrounding UI stays usable.
+                let inside = ctx
+                    .pointer_latest_pos()
+                    .is_some_and(|position| target.contains(position));
+                let (delta, buttons) = ctx.input(|input| {
+                    (
+                        input.pointer.delta(),
+                        (input.pointer.primary_down(), input.pointer.secondary_down()),
+                    )
+                });
+                mouse = Some(if inside {
+                    (
+                        delta.x.round() as i32,
+                        -delta.y.round() as i32,
+                        buttons.0,
+                        buttons.1,
+                    )
+                } else {
+                    (0, 0, false, false)
+                });
             }
             player.set_texture_options(if linear_filter || supersample > 1 {
                 egui::TextureOptions::LINEAR
@@ -4420,6 +4466,7 @@ fn viewport(
     ViewportInput {
         touch,
         paddle,
+        mouse,
         power_pad,
     }
 }
@@ -5288,6 +5335,13 @@ fn controllers_tab(
                 .weak()
                 .small(),
         ),
+        (PortDevice::Mouse, _) | (_, PortDevice::Mouse) => ui.label(
+            RichText::new(
+                "Mouse: move and click inside the viewport for the SNES/Subor 32-bit report.",
+            )
+            .weak()
+            .small(),
+        ),
         (PortDevice::PowerPad | PortDevice::FamilyTrainer, _)
         | (_, PortDevice::PowerPad | PortDevice::FamilyTrainer) => ui.label(
             RichText::new("Power Pad: click the 12-pad overlay in the viewport.")
@@ -5437,7 +5491,7 @@ fn controllers_tab(
     ui.add_space(8.0);
     ui.label(
         RichText::new(
-            "Device changes apply immediately. Zapper and paddle follow the mouse inside the viewport.",
+            "Device changes apply immediately. Zapper, paddle and mouse follow the pointer inside the viewport.",
         )
         .weak()
         .small(),
@@ -5465,6 +5519,7 @@ fn port_input_description(input: PortInput, names: &[Option<String>; 4]) -> Stri
         },
         PortInput::MouseZapper => "Mouse (Zapper)".into(),
         PortInput::MousePaddle => "Mouse (Paddle)".into(),
+        PortInput::Mouse => "Mouse (SNES/Subor)".into(),
     }
 }
 
@@ -5487,6 +5542,7 @@ fn port_input_combo(
                 PortInput::Gamepad(3),
                 PortInput::MouseZapper,
                 PortInput::MousePaddle,
+                PortInput::Mouse,
             ] {
                 ui.selectable_value(input, option, port_input_description(option, names));
             }
@@ -5514,9 +5570,16 @@ fn apply_port_input(settings: &mut Settings, port: usize) {
             settings.port_disabled[port] = false;
             *device = PortDevice::Paddle;
         }
+        PortInput::Mouse => {
+            settings.port_disabled[port] = false;
+            *device = PortDevice::Mouse;
+        }
         PortInput::Auto | PortInput::Keyboard | PortInput::Gamepad(_) => {
             settings.port_disabled[port] = false;
-            if matches!(*device, PortDevice::Zapper | PortDevice::Paddle) {
+            if matches!(
+                *device,
+                PortDevice::Zapper | PortDevice::Paddle | PortDevice::Mouse
+            ) {
                 *device = PortDevice::Gamepad;
             }
         }
@@ -5528,6 +5591,7 @@ fn device_label(device: PortDevice) -> &'static str {
         PortDevice::Gamepad => "Gamepad",
         PortDevice::Zapper => "Zapper",
         PortDevice::Paddle => "Paddle",
+        PortDevice::Mouse => "Mouse (SNES/Subor)",
         PortDevice::PowerPad => "Power Pad",
         PortDevice::FamilyTrainer => "Family Trainer",
         PortDevice::FamilyKeyboard => "Family BASIC keyboard",
@@ -5548,6 +5612,7 @@ fn device_combo(ui: &mut egui::Ui, id: &str, device: &mut PortDevice) {
                 PortDevice::Gamepad,
                 PortDevice::Zapper,
                 PortDevice::Paddle,
+                PortDevice::Mouse,
                 PortDevice::PowerPad,
                 PortDevice::FamilyTrainer,
                 PortDevice::FamilyKeyboard,
@@ -5771,7 +5836,7 @@ fn advanced_tab(ui: &mut egui::Ui, settings: &mut Settings) {
     ui.heading("Advanced");
     ui.add_space(8.0);
     ui.label("Core: Unko NES accuracy core");
-    ui.label("State format: UNKOST13, ROM-fingerprinted and core-tagged");
+    ui.label("State format: UNKOST14, ROM-fingerprinted and core-tagged");
     ui.label("Settings file: unko.conf");
     ui.add_space(10.0);
     ui.separator();

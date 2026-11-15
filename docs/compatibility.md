@@ -79,7 +79,8 @@ Public mapper-specific status:
 | Miracle Piano transport | **Transport only**; MIDI replies need firmware |
 | Datach scanner + internal X24C02 | **Verified** (synthetic I2C tests + real-ROM smoke) |
 | Datach external X24C01 | **Not implemented** (Battle Rush only) |
-| SNES mouse, Famicom 3D glasses | **Not implemented** |
+| SNES/Subor mouse | **Verified** (32-bit report, buttons, sensitivity and sign-magnitude motion in unit tests) |
+| Famicom 3D glasses | **Not implemented** (needs an expansion-port output model) |
 | Karaoke Studio | **Not implemented** |
 
 ## Player features
@@ -109,7 +110,7 @@ Public mapper-specific status:
 | x0000 APU write-window tests | 10/10 pass |
 | NESdev archive | 136 pass / 12 fail / 115 visual/audio/input-only; 5 failures with PAL APU in PAL mode and the alternate MMC3 selector |
 | RustyNES test tree | 157 pass / 13 fail / 171 visual/audio/input-only; 164 / 6 with PAL APU in PAL mode |
-| Workspace tests | 628 pass, 0 failed |
+| Workspace tests | 631 pass, 0 failed |
 
 The actionable accuracy failures are tracked in
 [`accuracy-divergences.md`](accuracy-divergences.md); the ROM/BIOS inventory is

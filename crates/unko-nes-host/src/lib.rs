@@ -223,6 +223,7 @@ fn port_device(value: PortDevice) -> NesPortDevice {
         PortDevice::Gamepad => NesPortDevice::Gamepad,
         PortDevice::Zapper => NesPortDevice::Zapper,
         PortDevice::Paddle => NesPortDevice::Paddle,
+        PortDevice::Mouse => NesPortDevice::Mouse,
         PortDevice::PowerPad => NesPortDevice::PowerPad,
         PortDevice::FamilyTrainer => NesPortDevice::FamilyTrainer,
         PortDevice::FamilyKeyboard => NesPortDevice::FamilyKeyboard,
@@ -527,6 +528,12 @@ impl Core for AccuracyCore {
     fn set_paddle(&mut self, port: usize, position: u8, fire: bool) {
         if let Some(system) = self.system.as_mut() {
             system.set_paddle(port, position, fire);
+        }
+    }
+
+    fn set_mouse(&mut self, port: usize, dx: i32, dy: i32, left: bool, right: bool) {
+        if let Some(system) = self.system.as_mut() {
+            system.set_mouse(port, dx, dy, left, right);
         }
     }
 

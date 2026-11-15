@@ -219,6 +219,8 @@ pub enum PortDevice {
     Zapper,
     /// Arkanoid "Vaus" paddle (8-bit position plus fire).
     Paddle,
+    /// Super NES / Subor style mouse: a 32-bit report on `$4016` D0.
+    Mouse,
     /// Power Pad / Family Trainer mat (12 membrane buttons).
     PowerPad,
     /// Family Trainer variant of the Power Pad (same serial protocol).
@@ -245,6 +247,7 @@ impl PortDevice {
             Self::Gamepad => "gamepad",
             Self::Zapper => "zapper",
             Self::Paddle => "paddle",
+            Self::Mouse => "mouse",
             Self::PowerPad => "powerpad",
             Self::FamilyTrainer => "familytrainer",
             Self::FamilyKeyboard => "keyboard",
@@ -262,6 +265,7 @@ impl PortDevice {
         match name.trim() {
             "zapper" => Self::Zapper,
             "paddle" => Self::Paddle,
+            "mouse" | "snesmouse" | "snes-mouse" => Self::Mouse,
             "powerpad" => Self::PowerPad,
             "familytrainer" | "family-trainer" => Self::FamilyTrainer,
             "keyboard" => Self::FamilyKeyboard,

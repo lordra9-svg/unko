@@ -112,6 +112,7 @@ fn parse_port(value: &str) -> Option<PortDevice> {
         PortDevice::Gamepad,
         PortDevice::Zapper,
         PortDevice::Paddle,
+        PortDevice::Mouse,
         PortDevice::PowerPad,
         PortDevice::FamilyTrainer,
         PortDevice::FamilyKeyboard,

@@ -35,7 +35,7 @@ verified against the public reference suites:
 - `ppu_vbl_nmi` **12/12**, `ppu_sprites` **19/19**, blargg APU/DMC **13/13**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **628 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **631 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **136 pass / 12 fail / 115 visual-or-input-only** (5 PAL APU failures pass when PAL timing is selected)
 - RustyNES test tree: **157 pass / 13 fail / 171 visual-or-input-only** (164 / 6 with PAL APU in PAL mode)
 
@@ -86,7 +86,7 @@ harness; a true Internet run needs two networks. See
 |---|---:|
 | Workspace crates | 9 |
 | First-party Rust lines | ~78,900 |
-| Workspace tests | 628 pass, 0 failed |
+| Workspace tests | 631 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 
@@ -190,9 +190,9 @@ overrides rewrite the iNES/NES 2.0 header, so a mislabelled dump can boot
 without editing the file on disk.
 
 Settings → Controllers has a **Connected** dropdown per port: Auto, None,
-Keyboard, Gamepad 1-4, Mouse (Zapper) or Mouse (Paddle), plus the NES protocol
-dropdown and **Restore default controls**. Explicit port choices override the
-gamepad matrix for that port.
+Keyboard, Gamepad 1-4, Mouse (Zapper), Mouse (Paddle) or Mouse (SNES/Subor),
+plus the NES protocol dropdown and **Restore default controls**. Explicit port
+choices override the gamepad matrix for that port.
 
 A connected gamepad can navigate the UI: D-pad selects in the library, A plays
 the selected game, B clears the selection, Select toggles grid/list, and
@@ -308,9 +308,10 @@ Playback and capture: 25-300% speed presets, frame advance, exact rewind
 Game Genie and raw-RAM cheats, WAV/PNG/GIF capture, and screenshots.
 
 Per-port devices (Settings -> Controllers): NES Zapper, Arkanoid paddle,
-Power Pad / Family Trainer, Family BASIC keyboard, Subor/Dendy keyboard,
-Famicom microphone, data-recorder tape loopback, Miracle Piano transport,
-Datach scanner with a persisted X24C02 EEPROM, and the Four Score adapter.
+SNES/Subor mouse, Power Pad / Family Trainer, Family BASIC keyboard,
+Subor/Dendy keyboard, Famicom microphone, data-recorder tape loopback, Miracle
+Piano transport, Datach scanner with a persisted X24C02 EEPROM, and the Four
+Score adapter.
 
 The debugger window (`Emulation -> Debugger`, or `--debug` on the command
 line) shows CPU registers and disassembly, PPU timing/palette/OAM, APU channel

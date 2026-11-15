@@ -157,7 +157,8 @@ matrix above is the comparison; this list is the work queue.
 4. **FDS depth**: loading, BIOS selection, side switching, disk-write
    persistence, 1/2/4/8x disk speed and opt-in auto side swap are in.
 5. **Peripherals**: Miracle Piano MIDI replies (firmware), Datach external
-   X24C01 (Battle Rush), Karaoke Studio, SNES mouse and Famicom 3D glasses.
+   X24C01 (Battle Rush), Karaoke Studio and Famicom 3D glasses (the SNES/Subor
+   mouse protocol is implemented).
 6. **Optional accuracy knobs**: sprite-per-line limit / extra sprites,
    CPU/PPU overclock. Deliberately not added (not accuracy-preserving).
 7. **Creator/community**: TAStudio-style movie editing, netplay (rollback

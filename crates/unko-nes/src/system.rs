@@ -191,6 +191,11 @@ pub enum PortDevice {
     /// MSB-first) plus the fire button on bit 3, latched by the `$4016`
     /// strobe.
     Paddle,
+    /// Super NES / Subor style mouse: a 32-bit MSB-first report on bit 0 with
+    /// buttons, sensitivity and sign-magnitude displacement since the last
+    /// read. The latch resets the report; a read while the latch is high
+    /// advances the sensitivity.
+    Mouse,
     /// Power Pad / Family Trainer mat: 12 membrane buttons read two bits at a
     /// time on bits 3 (low half) and 4 (high half).
     PowerPad,
@@ -225,6 +230,101 @@ pub struct Paddle {
     pub fire: bool,
     /// Serial shift register, reloaded on the strobe.
     shift: u8,
+}
+
+/// Mouse state for one port.
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+pub struct Mouse {
+    /// Accumulated horizontal motion since the last latch (right positive).
+    pending_x: i32,
+    /// Accumulated vertical motion since the last latch (up positive).
+    pending_y: i32,
+    /// Left button held.
+    pub left: bool,
+    /// Right button held.
+    pub right: bool,
+    /// Sensitivity setting cycled by a read while the latch is high.
+    sensitivity: u8,
+    /// Four report bytes, shifted out MSB-first.
+    report: [u8; 4],
+    /// Bit index into `report` (0..=32; 32 repeats 1).
+    index: u8,
+    /// Sign of the last non-zero horizontal displacement.
+    last_x_negative: bool,
+    /// Sign of the last non-zero vertical displacement.
+    last_y_negative: bool,
+}
+
+impl Mouse {
+    /// Applies motion and button updates from the host.
+    fn update(&mut self, dx: i32, dy: i32, left: bool, right: bool) {
+        self.pending_x = self.pending_x.saturating_add(dx).clamp(-4096, 4096);
+        self.pending_y = self.pending_y.saturating_add(dy).clamp(-4096, 4096);
+        self.left = left;
+        self.right = right;
+    }
+
+    /// Advances the sensitivity setting (0 low, 1 medium, 2 high).
+    fn cycle_sensitivity(&mut self) {
+        self.sensitivity = (self.sensitivity + 1) % 3;
+    }
+
+    /// Latches a fresh report and consumes the accumulated motion.
+    fn latch(&mut self) {
+        let (x_negative, x_magnitude) = sign_magnitude(self.pending_x, &mut self.last_x_negative);
+        let (y_negative, y_magnitude) = sign_magnitude(self.pending_y, &mut self.last_y_negative);
+        self.report = [
+            0,
+            (u8::from(self.right) << 7)
+                | (u8::from(self.left) << 6)
+                | (self.sensitivity << 4)
+                | 0x01,
+            (u8::from(y_negative) << 7) | scale_displacement(y_magnitude, self.sensitivity),
+            (u8::from(x_negative) << 7) | scale_displacement(x_magnitude, self.sensitivity),
+        ];
+        self.index = 0;
+        self.pending_x = 0;
+        self.pending_y = 0;
+    }
+
+    /// Clocks one report bit out; after 32 bits the line stays high.
+    fn read(&mut self) -> bool {
+        if self.index >= 32 {
+            return true;
+        }
+        let byte = self.report[usize::from(self.index / 8)];
+        let bit = (byte >> (7 - (self.index % 8))) & 1 != 0;
+        self.index += 1;
+        bit
+    }
+}
+
+/// Splits motion into a sign and magnitude, repeating the previous sign for a
+/// zero displacement as the hardware does.
+fn sign_magnitude(value: i32, last_negative: &mut bool) -> (bool, u8) {
+    let magnitude = value.unsigned_abs().min(127) as u8;
+    if value < 0 {
+        *last_negative = true;
+    } else if value > 0 {
+        *last_negative = false;
+    }
+    (*last_negative, magnitude)
+}
+
+/// Maps a raw displacement through the mouse's sensitivity setting.
+///
+/// Low sensitivity is linear. The higher settings apply the published SNES
+/// mouse table for raw counts 0-7 and clamp at its maximum; the wiki does not
+/// list values above 7 because they are increasingly hard to produce.
+fn scale_displacement(magnitude: u8, sensitivity: u8) -> u8 {
+    const MEDIUM: [u8; 8] = [0, 1, 2, 3, 8, 10, 12, 21];
+    const HIGH: [u8; 8] = [0, 1, 4, 9, 12, 20, 24, 28];
+    let index = usize::from(magnitude.min(7));
+    match sensitivity {
+        1 => MEDIUM[index].max(u8::from(magnitude > 7) * 21),
+        2 => HIGH[index].max(u8::from(magnitude > 7) * 28),
+        _ => magnitude,
+    }
 }
 
 /// Power Pad state for one port.
@@ -307,6 +407,7 @@ impl FamilyKeyboard {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct Peripherals {
     paddle: [Paddle; 2],
+    mouse: [Mouse; 2],
     power_pad: [PowerPad; 2],
     keyboard: FamilyKeyboard,
     subor: SuborKeyboard,
@@ -806,6 +907,16 @@ impl System {
         }
     }
 
+    /// Adds mouse motion (right/up positive, in mickeys) and buttons.
+    ///
+    /// Motion accumulates until the next `$4016` latch, matching the mouse's
+    /// "displacement since last read" report.
+    pub fn set_mouse(&mut self, port: usize, dx: i32, dy: i32, left: bool, right: bool) {
+        if port < 2 {
+            self.peripherals.mouse[port].update(dx, dy, left, right);
+        }
+    }
+
     /// Selects a display palette preset.
     pub fn set_palette(&mut self, variant: crate::ppu::PaletteVariant) {
         self.ppu.set_palette_variant(variant);
@@ -1052,7 +1163,7 @@ impl System {
     #[cfg(feature = "save-states")]
     pub fn save_state(&self) -> Result<Vec<u8>, String> {
         let mut out = Vec::new();
-        out.extend_from_slice(b"UNKOST13");
+        out.extend_from_slice(b"UNKOST14");
         out.extend_from_slice(&self.cart.fingerprint().to_le_bytes());
         let mut cart_state = Vec::new();
         self.cart.save_state(&mut cart_state)?;
@@ -1096,7 +1207,7 @@ impl System {
     /// Restores a state produced by [`System::save_state`].
     #[cfg(feature = "save-states")]
     pub fn load_state(&mut self, data: &[u8]) -> Result<(), String> {
-        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST13" {
+        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST14" {
             return Err("not an Unko state (bad magic/version)".into());
         }
         let fingerprint = u64::from_le_bytes(
@@ -1511,6 +1622,18 @@ impl System {
                 let serial = paddle.shift & 1;
                 paddle.shift = (paddle.shift << 1) | serial;
                 (self.open_bus & 0xE0) | 0x40 | (data << 4) | (u8::from(paddle.fire) << 3)
+            }
+            PortDevice::Mouse => {
+                // A read while the latch is high clocks the sensitivity
+                // setting; otherwise each read shifts one report bit out.
+                let mouse = &mut self.peripherals.mouse[port];
+                let bit = if self.strobe {
+                    mouse.cycle_sensitivity();
+                    true
+                } else {
+                    mouse.read()
+                };
+                (self.open_bus & 0xE0) | 0x40 | u8::from(bit)
             }
             PortDevice::PowerPad | PortDevice::FamilyTrainer => {
                 let pad = &mut self.peripherals.power_pad[port];
@@ -2145,6 +2268,7 @@ impl CpuBus for System {
                     if self.devices.contains(&PortDevice::MiraclePiano) {
                         self.peripherals.piano.write(value, self.cycle_count);
                     }
+                    let strobe_before = self.strobe;
                     self.strobe = value & 1 != 0;
                     self.peripherals.keyboard.write(value);
                     self.peripherals.subor.write(value);
@@ -2154,6 +2278,11 @@ impl CpuBus for System {
                             if self.devices[port] == PortDevice::Paddle {
                                 self.peripherals.paddle[port].shift =
                                     self.peripherals.paddle[port].position;
+                            }
+                            // The mouse reloads its 32-bit report on the rising
+                            // latch edge and consumes the accumulated motion.
+                            if !strobe_before && self.devices[port] == PortDevice::Mouse {
+                                self.peripherals.mouse[port].latch();
                             }
                             if matches!(
                                 self.devices[port],
@@ -3450,6 +3579,90 @@ mod tests {
         }
         // 0x12 = 0001_0010, MSB-first and inverted.
         assert_eq!(bits, vec![1, 1, 1, 0, 1, 1, 0, 1]);
+    }
+
+    fn read_mouse_report(system: &mut System, register: u16) -> [u8; 4] {
+        let mut report = [0u8; 4];
+        for byte in &mut report {
+            for _ in 0..8 {
+                *byte = (*byte << 1) | (CpuBus::read(system, register) & 1);
+            }
+        }
+        report
+    }
+
+    #[cfg(feature = "save-states")]
+    #[test]
+    fn state_magic_is_current() {
+        let system = System::from_ines(&synthetic_nrom(0)).expect("load");
+        let state = system.save_state().expect("state");
+        assert_eq!(&state[..8], b"UNKOST14");
+        let mut restored = System::from_ines(&synthetic_nrom(0)).expect("load");
+        restored.load_state(&state).expect("restore");
+    }
+
+    #[test]
+    fn mouse_report_is_msb_first_with_sign_magnitude_motion() {
+        let mut system = System::from_ines(&synthetic_nrom(0)).expect("load");
+        system.set_port_device(1, PortDevice::Mouse);
+        system.set_mouse(1, 100, 50, true, false);
+        strobe(&mut system);
+        let report = read_mouse_report(&mut system, 0x4017);
+        assert_eq!(report[0], 0x00, "first byte is the zero signature");
+        assert_eq!(
+            report[1], 0x41,
+            "left button on bit 6, low sensitivity, 0001 signature"
+        );
+        assert_eq!(report[2], 0x32, "50 mickeys up");
+        assert_eq!(report[3], 0x64, "100 mickeys right");
+        for _ in 0..8 {
+            assert_eq!(
+                CpuBus::read(&mut system, 0x4017) & 1,
+                1,
+                "after the fourth byte the line stays high"
+            );
+        }
+
+        // Negative motion sets the sign bit; a zero displacement repeats the
+        // last sign rather than reporting a phantom direction change.
+        system.set_mouse(1, -10, -5, false, true);
+        strobe(&mut system);
+        let report = read_mouse_report(&mut system, 0x4017);
+        assert_eq!(report[1], 0x81, "right button on bit 7");
+        assert_eq!(report[2], 0x85, "5 mickeys down");
+        assert_eq!(report[3], 0x8A, "10 mickeys left");
+
+        system.set_mouse(1, 0, 0, false, false);
+        strobe(&mut system);
+        let report = read_mouse_report(&mut system, 0x4017);
+        assert_eq!(report[2], 0x80, "zero motion repeats the down sign");
+        assert_eq!(report[3], 0x80, "zero motion repeats the left sign");
+    }
+
+    #[test]
+    fn mouse_sensitivity_cycles_and_scales_motion() {
+        let mut system = System::from_ines(&synthetic_nrom(0)).expect("load");
+        system.set_port_device(0, PortDevice::Mouse);
+
+        // A read while the latch is high advances low -> medium.
+        CpuBus::write(&mut system, 0x4016, 1);
+        CpuBus::read(&mut system, 0x4016);
+        CpuBus::write(&mut system, 0x4016, 0);
+        system.set_mouse(0, 8, 0, false, false);
+        strobe(&mut system);
+        let report = read_mouse_report(&mut system, 0x4016);
+        assert_eq!((report[1] >> 4) & 3, 1, "medium sensitivity");
+        assert_eq!(report[3] & 0x7F, 21, "raw 8 maps to 21 on medium");
+
+        // A second clock selects high sensitivity (raw 8 maps to 28).
+        CpuBus::write(&mut system, 0x4016, 1);
+        CpuBus::read(&mut system, 0x4016);
+        CpuBus::write(&mut system, 0x4016, 0);
+        system.set_mouse(0, 8, 0, false, false);
+        strobe(&mut system);
+        let report = read_mouse_report(&mut system, 0x4016);
+        assert_eq!((report[1] >> 4) & 3, 2, "high sensitivity");
+        assert_eq!(report[3] & 0x7F, 28, "raw 8 maps to 28 on high");
     }
 
     #[test]

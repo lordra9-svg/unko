@@ -101,6 +101,10 @@ pub trait Core {
     /// Sets a paddle's knob position (`0..=255`) and fire button.
     fn set_paddle(&mut self, _port: usize, _position: u8, _fire: bool) {}
 
+    /// Adds mouse motion since the last report (`dx` right, `dy` up, in
+    /// mickeys) and sets the two buttons.
+    fn set_mouse(&mut self, _port: usize, _dx: i32, _dy: i32, _left: bool, _right: bool) {}
+
     /// Sets the pressed Power Pad buttons (bit `i` = button `i + 1`).
     fn set_power_pad(&mut self, _port: usize, _buttons: u16) {}
 

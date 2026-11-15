@@ -79,8 +79,9 @@ The main effort is now the reference-parity accuracy core. Details in
       init/play unit tests. Expansion audio (VRC6, Sunsoft 5B, Namco 163,
       MMC5 and VRC7) is implemented and unit-tested. Remaining: VS. System /
       PlayChoice-10 (blocked on ROMs and palette/security data), Miracle
-      Piano MIDI replies, the Famicom 3D glasses and mouse,
-      and validation against real PAL/NSF content. The FDS `$4030.D1`
+      Piano MIDI replies, the Famicom 3D glasses (needs an expansion-port
+      output model), and validation against real PAL/NSF content. The FDS
+      `$4030.D1`
       DRAM-refresh watchdog matches the hardware capture (`67FF`/`6E25`).
 - [ ] **A7** differential harness, hardware captures, performance pass.
       The differential harness is complete: per-frame RGBA, audio and
@@ -169,6 +170,8 @@ The main effort is now the reference-parity accuracy core. Details in
 - [x] Zapper (core sensor + app mouse aiming/trigger).
 - [x] Other input devices: Four Score (4-player chain with adapter signature),
       Arkanoid paddle (inverted MSB-first position + fire, mouse steering),
+      SNES/Subor mouse (32-bit MSB-first report, buttons, sensitivity cycling
+      and sign-magnitude motion accumulated between latches),
       Power Pad and the Family Trainer variant (12-button two-bit serial read
       with an on-screen mat), the Family BASIC keyboard (9x8 matrix with the
       documented host-key mapping), the Subor/Dendy clone keyboard (13x8
@@ -178,7 +181,7 @@ The main effort is now the reference-parity accuracy core. Details in
       (mapper 157, UPC-A/EAN-13 modules at the documented 1000-cycle rate).
       The piano's MIDI replies and the Datach EEPROM need their real-ROM
       validation; both transports have synthetic tests. Device state is part
-      of `UNKOST13` save states; the Controllers tab selects a device per
+      of `UNKOST14` save states; the Controllers tab selects a device per
       port.
 - [x] FDS (user BIOS, never bundled): core/CLI/app loading, side menu,
       disk-write persistence, 1/2/4/8x disk speed and opt-in auto side swap.

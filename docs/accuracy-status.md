@@ -4,7 +4,7 @@ Measured on the reference-parity core (`unko-nes`, MIT with
 documented ISC adaptations from ares). These are local runs
 against public test ROMs placed in `test-roms/` (gitignored).
 
-## Current summary (2026-11-14)
+## Current summary (2026-11-15)
 
 | Gate | Result |
 |---|---|
@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **628 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **631 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -35,7 +35,7 @@ a completion claim. The current audit, mapper breadth and per-mapper gaps are
 in `docs/mapper-audit.md`; the dated measurements are below.
 
 Performance: `unko bench --synthetic 3000 --min-fps 300` measures **791.6 fps**
-(13.17x real time, 1.263 ms/frame); release save states are 417,054 bytes at
+(13.17x real time, 1.263 ms/frame); release save states are 417,090 bytes at
 172 us save / 237 us restore. Details in `docs/performance.md`.
 
 ## Public test-ROM suite (2026-11-14)
@@ -74,11 +74,31 @@ passes with the alternate selector. The selector is exposed as
 **146/146 non-DRAW**, and the 20/120-frame library audit is unchanged
 (3,897/6,497 rendering).
 
-Because `Mmc3` gained serialized PRG-RAM protection state, `FdsAudio` was
-rewritten and the FDS watchdog gained serialized reload state, the save-state
-magic is now **`UNKOST13`**; `UNKOST12` and older states are rejected by the
-normal bad-magic check. See `docs/accuracy-divergences.md` for the open mapper-suite
-items.
+`Mmc3` gained serialized PRG-RAM protection state, `FdsAudio` was rewritten,
+the FDS watchdog gained serialized reload state, and the mouse added serialized
+port state, so the save-state magic is now **`UNKOST14`**; `UNKOST13` and older
+states are rejected by the normal bad-magic check. See
+`docs/accuracy-divergences.md` for the open mapper-suite items.
+
+## Peripherals — SNES/Subor mouse (2026-11-15)
+
+A mouse protocol device is implemented from the NESdev Super NES Mouse
+description. The latch loads a four-byte report (zero signature, buttons +
+sensitivity + `0001`, vertical then horizontal displacement); reads shift it
+out MSB-first and return high after the 32nd bit. Displacement is accumulated
+between latches and reported as sign-magnitude, repeating the last non-zero
+sign for a zero displacement. A read while the latch is high cycles the
+sensitivity through low/medium/high; medium and high apply the published
+0-7 mapping and clamp at 21/28. The desktop app maps pointer movement and the
+primary/secondary buttons inside the viewport to the selected port.
+
+Unit tests cover the exact 32-bit bytes for both button bits and positive and
+negative motion, the repeated sign on zero motion, the post-report high line,
+and both sensitivity changes with their scaled magnitudes
+(`mouse_report_is_msb_first_with_sign_magnitude_motion`,
+`mouse_sensitivity_cycles_and_scales_motion`). No test ROM was needed; the
+protocol bytes come from the hardware description. The Famicom 3D glasses
+remain unimplemented because they need an expansion-port output model.
 
 ## A1 — 6502
 
@@ -1494,7 +1514,7 @@ reference over 1,200 frames (879,799 samples, 0 differing values). The last
 gap was one extra leading resampler input: the first executed `run_frame`
 cycle precedes the reference's first sampled cycle, so `System` drops that
 single sample. Serializing the one-shot flag keeps save/restore and run-ahead
-phase-aligned (state magic `UNKOST13`).
+phase-aligned (state magic `UNKOST13` at that point).
 
 ### Holy Mapperel board matrix (2026-11-14)
 

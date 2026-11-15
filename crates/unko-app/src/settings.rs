@@ -317,6 +317,8 @@ pub enum PortInput {
     MouseZapper,
     /// Host mouse as the Arkanoid paddle.
     MousePaddle,
+    /// Host mouse as a Super NES / Subor mouse.
+    Mouse,
 }
 
 impl PortInput {
@@ -334,6 +336,7 @@ impl PortInput {
             Self::Gamepad(_) => "gamepad1",
             Self::MouseZapper => "mousezapper",
             Self::MousePaddle => "mousepaddle",
+            Self::Mouse => "mouse",
         }
     }
 
@@ -349,6 +352,7 @@ impl PortInput {
             "gamepad4" | "pad4" => Self::Gamepad(3),
             "mousezapper" | "mouse-zapper" | "zapper-mouse" => Self::MouseZapper,
             "mousepaddle" | "mouse-paddle" | "paddle-mouse" => Self::MousePaddle,
+            "mouse" => Self::Mouse,
             _ => Self::Auto,
         }
     }
@@ -367,6 +371,7 @@ impl PortInput {
             Self::Gamepad(_) => "Gamepad",
             Self::MouseZapper => "Mouse (Zapper)",
             Self::MousePaddle => "Mouse (Paddle)",
+            Self::Mouse => "Mouse (SNES/Subor)",
         }
     }
 }
@@ -1337,16 +1342,19 @@ mod tests {
         let path = std::env::temp_dir().join("unko-settings-port-input.conf");
         let settings = Settings {
             port1_input: PortInput::Keyboard,
-            port2_input: PortInput::Gamepad(2),
+            port2_input: PortInput::Mouse,
+            port2_device: PortDevice::Mouse,
             ..Settings::default()
         };
         settings.save(&path).expect("write");
         let text = fs::read_to_string(&path).expect("read");
         assert!(text.contains("port1_input=keyboard"));
-        assert!(text.contains("port2_input=gamepad3"));
+        assert!(text.contains("port2_input=mouse"));
+        assert!(text.contains("port2_device=mouse"));
         let loaded = Settings::load(&path);
         assert_eq!(loaded.port1_input, PortInput::Keyboard);
-        assert_eq!(loaded.port2_input, PortInput::Gamepad(2));
+        assert_eq!(loaded.port2_input, PortInput::Mouse);
+        assert_eq!(loaded.port2_device, PortDevice::Mouse);
         let _ = fs::remove_file(path);
     }
 

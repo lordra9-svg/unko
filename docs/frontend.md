@@ -70,7 +70,7 @@ Key interaction rules worth keeping:
 | Settings: General/Interface | theme, pause on focus loss, confirm stop, detachable windows, play-time summary + clear, reset-all | now |
 | Settings: Graphics | filter, palette + `.pal` import, aspect, integer scale, supersampling, GPU output shaders (scanlines/LCD/CRT/NTSC Budget/Premium, brightness/sharpness), window presets | now |
 | Settings: Audio | sample rate, latency target, resampler quality, output filter, volume/mute, per-channel mixer | now |
-| Settings: Controllers | per-port Connected source (Auto/None/Keyboard/Gamepad 1-4/Mouse Zapper/Paddle), protocol dropdown, rebinding, Restore default controls | now |
+| Settings: Controllers | per-port Connected source (Auto/None/Keyboard/Gamepad 1-4/Mouse Zapper/Paddle/SNES-Subor), protocol dropdown, rebinding, Restore default controls | now |
 | Settings: Paths | portable data root, ROM dir, save dir, per-system library roots | now |
 | ROM Manager | separate remembered OS window; full virtualized DAT list, 1G1R preferences, fixdat/CSV, read-only verify/audit with per-ROM detail and an in-window **Verify** panel (clean status, matched source/hash/headerless, missing/unknown/duplicate sections), safe copy/rebuild (loose, deterministic ZIP or TorrentZip-style sets) with optional verified move, rebuild and post-rebuild verification on the background worker with write/verify progress, persistent scan cache with entry/size display, a disable toggle and Clear cache | now |
 | Settings: NES page | region, mapper/header info, deterministic RAM | now |
@@ -196,7 +196,9 @@ between machines; see `docs/platforms.md` for the resolution order and the
   shows any combination of system, file, size, region, mapper and modified
   columns.
 - Controller-port devices: each port can be a gamepad, Zapper, Arkanoid
-  paddle (mouse steering + fire), Power Pad or the Family Trainer variant
+  paddle (mouse steering + fire), SNES/Subor mouse (32-bit report with
+  sign-magnitude motion and sensitivity cycling), Power Pad or the Family
+  Trainer variant
   (on-screen 12-pad mat), Family
   BASIC keyboard (host keys map to the documented 9x8 matrix), a Four Score
   adapter (four players across both ports), the Famicom microphone (`$4016`
@@ -235,7 +237,7 @@ between machines; see `docs/platforms.md` for the resolution order and the
 - Recording: WAV audio, numbered PNG frames and animated GIF, written under
   `saves/recordings`; all encoders are pure Rust and work on every target.
 - State/SRAM: `saves/<rom>.<core>.slotN.state` and `saves/<rom>.sav`; the core
-  never touches the filesystem. States carry an `UNKOST13` header, a ROM
+  never touches the filesystem. States carry an `UNKOST14` header, a ROM
   fingerprint and the mapper state, so a state cannot be loaded into a
   different image or core. The former TetaNES state files are ignored.
 - Audio playback is active through cpal; the Audio page reports the actual

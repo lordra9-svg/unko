@@ -1475,6 +1475,11 @@ impl Player {
         self.core.set_paddle(port, position, fire);
     }
 
+    /// Adds mouse motion (right/up positive) and the two buttons.
+    pub fn set_mouse(&mut self, port: usize, dx: i32, dy: i32, left: bool, right: bool) {
+        self.core.set_mouse(port, dx, dy, left, right);
+    }
+
     /// Sets the pressed Power Pad buttons (bit `i` = button `i + 1`).
     pub fn set_power_pad(&mut self, port: usize, buttons: u16) {
         self.core.set_power_pad(port, buttons);

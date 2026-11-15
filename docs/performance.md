@@ -28,8 +28,9 @@ without audio hardware, and the PPU CHR cache is refreshed only when a mapper
 write invalidates it. Pausing on focus loss drops the shell to 4 Hz when the
 window is inactive.
 
-Save-state cost (release, synthetic NROM): 417,054-byte state, **172 us** to
-serialize, **237 us** to restore, 1.28 ms per frame. A rew/rewind keyframe every
+Save-state cost (release, synthetic NROM): 417,090-byte state (the measured
+417,054-byte state plus the 36-byte mouse port state), **172 us** to serialize,
+**237 us** to restore, 1.28 ms per frame. A rew/rewind keyframe every
 30 frames therefore costs about 0.17 ms every half second, and 4-frame
 run-ahead costs two state operations plus three extra frames, about 5.5 ms per
 displayed frame; both stay inside the 16.6 ms budget. The GPU shader path adds
