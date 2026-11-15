@@ -35,7 +35,7 @@ use crate::vsconfig::VsConfig;
 use unko_netplay::{
     add_port_mapping, discover, endpoint, external_ip, local_address_toward, stun_public_address,
     HolePunchTransport, MappingProtocol, MappingRequest, PredictionMode, RelayTransport,
-    SessionConfig, UdpMesh,
+    SessionConfig,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3082,17 +3082,10 @@ impl App {
             }
             return;
         }
-        let transport = UdpMesh::bind(&format!("0.0.0.0:{port}")).and_then(|mut mesh| {
-            for peer in &peers {
-                mesh.add_peer(peer)?;
-            }
-            Ok(mesh)
-        });
-        match transport {
-            Ok(mesh) => {
-                player.start_netplay_with(Box::new(mesh), config);
+        match player.start_ggrs_netplay(port, &peers, config) {
+            Ok(()) => {
                 self.netplay_status = format!(
-                    "{} on UDP {port}, {} player(s), slot {}, peer(s) {}",
+                    "{} with GGRS on UDP {port}, {} player(s), slot {}, peer(s) {}",
                     if self.netplay_host {
                         "Hosting"
                     } else {
@@ -3455,14 +3448,25 @@ impl App {
                     .as_ref()
                     .and_then(crate::player::Player::netplay_stats)
                 {
+                    let engine = self
+                        .player
+                        .as_ref()
+                        .and_then(crate::player::Player::netplay_engine)
+                        .unwrap_or("legacy");
                     let (config, session) = self
                         .player
                         .as_ref()
                         .and_then(crate::player::Player::netplay_session_stats)
                         .unwrap_or_default();
-                    ui.label(format!(
-                        "Frame {frame} · sent {sent} · received {received} · rollbacks {rollbacks}"
-                    ));
+                    if engine == "ggrs" {
+                        ui.label(format!(
+                            "GGRS · frame {frame} · confirmed {received} · rollbacks {rollbacks}"
+                        ));
+                    } else {
+                        ui.label(format!(
+                            "Frame {frame} · sent {sent} · received {received} · rollbacks {rollbacks}"
+                        ));
+                    }
                     ui.label(format!(
                         "Predicted {} · deepest rollback {} · delay {} · {} · {}/{} players, slot {}",
                         session.predicted,
@@ -3478,19 +3482,31 @@ impl App {
                         .as_ref()
                         .and_then(crate::player::Player::netplay_sync_stats)
                         .unwrap_or((0, 0, None));
-                    ui.label(format!(
-                        "State hashes: {checked} checked · {mismatches} mismatch(es)"
-                    ));
+                    if engine == "ggrs" {
+                        ui.label(format!(
+                            "GGRS checksum checks: {mismatches} desync report(s)"
+                        ));
+                    } else {
+                        ui.label(format!(
+                            "State hashes: {checked} checked · {mismatches} mismatch(es)"
+                        ));
+                    }
                     if let Some(info) = last {
+                        let suffix = if engine == "ggrs" {
+                            "stop and restart the session"
+                        } else {
+                            "repairing state"
+                        };
                         ui.colored_label(
                             Color32::LIGHT_RED,
-                            format!("{info} — repairing state"),
+                            format!("{info} — {suffix}"),
                         );
                     }
-                    if self
-                        .player
-                        .as_ref()
-                        .is_some_and(crate::player::Player::netplay_resyncing)
+                    if engine != "ggrs"
+                        && self
+                            .player
+                            .as_ref()
+                            .is_some_and(crate::player::Player::netplay_resyncing)
                     {
                         ui.label("Transferring a save state from the authoritative peer…");
                     }

@@ -1,38 +1,58 @@
 # NetPlay
 
-NetPlay is a peer-to-peer rollback layer in `unko-netplay`. It depends only on
-`unko-core`, so it works with any core that implements `Core` save states.
+NetPlay lives in `unko-netplay` and depends on `unko-core` plus the GGRS
+rollback library, so it works with any core that implements `Core` save
+states.
 
-## Model
+## Engines
+
+| Path | Rollback engine |
+|---|---|
+| Direct UDP | **GGRS** (`gschup/ggrs` 0.13, `ggrs::P2PSession`) |
+| UDP hole punching | legacy `RollbackSession` |
+| `unko-relay` room | legacy `RollbackSession` |
+
+`GgrsNetplay` implements `ggrs::Config` (`Input = u16`, `State = Vec<u8>`,
+`Address = SocketAddr`) and translates GGRS requests into `Core` calls:
+
+- `SaveGameState` serializes the core state and passes a 128-bit FNV-1a
+  checksum to GGRS for desync detection.
+- `LoadGameState` restores the requested state before GGRS resimulates.
+- `AdvanceFrame` applies every player's input to its controller port and runs
+  one core frame.
+
+The app resets the core when a GGRS session starts and does not advance frames
+until the handshake reaches `Running`, so both peers begin at frame 0 from the
+same power-on state. GGRS handles input exchange, repeat-last prediction,
+rollback scheduling, time synchronization and checksum comparison. The window
+reports the active engine, frame, confirmed frame, rollbacks, predicted
+port-frames, deepest rollback and desync reports. GGRS cannot repair a desync:
+the session pauses and must be restarted.
+
+The legacy engine is retained for the transports that do not expose GGRS's
+per-peer source address yet:
 
 - One instance owns one controller slot; 2-4 players are supported. Input
   messages carry the sender's player tag (`UNKOI2`), and each session keeps a
   per-peer history and merges the four-port frame every tick.
 - Missing remote input is predicted with **last input** or **neutral**.
 - A fixed **input delay** (0-16 frames) maps simulation frame `s` to input
-  frame `s-delay` on every peer, trading responsiveness for fewer rollbacks.
+  frame `s-delay` on every peer.
 - Late inputs restore a saved state, truncate the newer states and resimulate.
-  Counters: rollbacks, predicted port-frames, deepest rollback.
-- **Desync detection**: each peer hashes the pre-frame save state it already
-  writes for rollback (no extra serialization), and exchanges hashes only for
-  frames that fell out of the rollback buffer, where no late input can change
-  them. Both sides compare the hashes; the first mismatch per frame/peer is
-  reported and the app pauses with the frame, local and remote values.
+- **Desync detection**: peers hash the pre-frame save state and exchange hashes
+  for frames that fell out of the rollback buffer.
 - **In-session repair**: on a mismatch the lowest-numbered player streams a
   save state in 1024-byte chunks (`StateChunk`, frame + length + FNV-1a
-  checksum). It sends the newest **buffered** state whose preceding inputs are
-  all known (`transfer_snapshot`), never a live state that may still contain a
-  predicted remote input that a later rollback would have corrected. Each
-  receiver reassembles (`StateReassembler`), verifies the checksum, loads the
-  state, discards its rollback/input history (`RollbackSession::resync`) and
-  acknowledges (`StateAck`). The sender stops on the ack and both continue
-  from the shared frame — no restart, no lost session.
+  checksum), sends the newest fully-known buffered state
+  (`transfer_snapshot`), and the receiver reassembles it, loads it, discards
+  its history (`RollbackSession::resync`) and acknowledges (`StateAck`).
 
 ## Transports
 
 | Transport | Use |
 |---|---|
-| `UdpMesh` | Direct UDP to one peer per player (LAN or forwarded port) |
+| GGRS UDP socket | Direct UDP to one peer per player (LAN or forwarded port) |
+| `UdpMesh` | Legacy direct/mesh transport used by the legacy engine and tests |
 | UPnP-IGD | Ask the router to open the UDP port and report the public endpoint |
 | STUN (RFC 5389) | Discover the external IP when UPnP is unavailable |
 | `HolePunchTransport` | Exchange `PUNCH`/`PONG` datagrams; start only after bidirectional traffic |
@@ -41,13 +61,16 @@ NetPlay is a peer-to-peer rollback layer in `unko-netplay`. It depends only on
 
 The window is **Tools → NetPlay…**: role, players, slot, ports, peers, public
 endpoint, UPnP/STUN detection, hole punch, relay server/room, prediction and
-input delay. The console is paused during a hole-punch handshake so both peers
-start from the same frame.
+input delay. Direct UDP starts GGRS and resets the core; the console is paused
+during a hole-punch handshake so both legacy peers start from the same frame.
 
 ## Two-host harness
 
 `crates/unko-nes-dev/src/bin/netplay_harness.rs` runs one side of a real UDP
-session on the actual NES core. It builds a synthetic NROM whose RAM
+session on the actual NES core using the legacy transport engine. The GGRS
+path has a loopback integration test in `unko-netplay` (two GGRS sessions, a
+`Core` test double with save/load/input semantics, 90 simulated frames and an
+identical final state). It builds a synthetic NROM whose RAM
 accumulates both controller ports, runs a deterministic input sequence,
 prints the final save-state hash, and compares it with an independent local
 run of the true input sequence. No commercial ROM is needed.

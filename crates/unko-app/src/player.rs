@@ -22,8 +22,9 @@ use crate::slots::{
     default_slot_name, now_unix, sanitize_slot_name, SlotInfo, SlotMeta, SlotStore,
 };
 use unko_netplay::{
-    DesyncInfo, DesyncMonitor, InputFrame, PredictionMode, RollbackSession, SessionConfig,
-    SessionStats, StateAck, StateChunk, StateHash, StateReassembler, StateSender, Transport,
+    DesyncInfo, DesyncMonitor, GgrsNetplay, InputFrame, PredictionMode, RollbackSession,
+    SessionConfig, SessionStats, StateAck, StateChunk, StateHash, StateReassembler, StateSender,
+    Transport,
 };
 
 /// Maximum frames emulated in one UI update. When the desktop stalls the
@@ -304,8 +305,10 @@ pub struct Player {
     stereo: StereoDisplay,
     /// Last frame handed to the renderer, after stereo composition.
     last_display: Option<(Vec<u8>, u32, u32)>,
-    /// Active rollback netplay session, when hosting or joining.
+    /// Active legacy rollback netplay session, when hosting or joining.
     netplay: Option<Netplay>,
+    /// Active GGRS rollback session (direct UDP).
+    ggrs: Option<GgrsNetplay>,
 }
 
 /// A running netplay session.
@@ -583,6 +586,7 @@ impl Player {
             run_ahead: settings.run_ahead,
             fds_disk,
             netplay: None,
+            ggrs: None,
         };
         player.push_rewind_keyframe();
         Ok(player)
@@ -595,7 +599,11 @@ impl Player {
         // hashes and state chunks without advancing the core.
         let (desync, resolved) = self.poll_netplay();
         if let Some(desync) = desync {
-            self.message = format!("NetPlay {desync} — repairing state");
+            self.message = if self.netplay_engine() == Some("ggrs") {
+                format!("NetPlay {desync} — stop and restart the session")
+            } else {
+                format!("NetPlay {desync} — repairing state")
+            };
             self.paused = true;
         }
         if resolved {
@@ -631,7 +639,7 @@ impl Player {
             && self.movie_record.is_none()
             && self.movie_playback.is_none()
             && self.debug.breakpoints.is_empty()
-            && self.netplay.is_none()
+            && !self.netplay_active()
         {
             self.run_ahead
         } else {
@@ -644,15 +652,28 @@ impl Player {
             if !self.consume_movie_input() {
                 break;
             }
-            if self.rewind_enabled && self.netplay.is_none() {
+            if self.rewind_enabled && !self.netplay_active() {
                 self.rewind.push_input(self.frames + 1, self.last_input);
             }
-            if self.netplay.is_none() {
+            if !self.netplay_active() {
                 if let Some(record) = &mut self.movie_record {
                     record.push(self.last_input.map(unko_core::InputState::bits));
                 }
             }
-            if let Some(netplay) = self.netplay.as_mut() {
+            let mut advanced = true;
+            if let Some(ggrs) = self.ggrs.as_mut() {
+                let slot = usize::from(ggrs.config().local_player);
+                match ggrs.step(self.core.as_core(), self.last_input[slot].bits()) {
+                    Ok(true) => {}
+                    Ok(false) => advanced = false,
+                    Err(err) => {
+                        self.message = err;
+                        self.paused = true;
+                        self.next_repaint = Duration::from_millis(250);
+                        advanced = false;
+                    }
+                }
+            } else if let Some(netplay) = self.netplay.as_mut() {
                 let player = netplay.session.config().local_player;
                 let local = self.last_input[usize::from(player)].bits();
                 let ports = self.last_input.map(unko_core::InputState::bits);
@@ -714,6 +735,9 @@ impl Player {
                         break;
                     }
                 }
+            }
+            if !advanced {
+                break;
             }
             self.frames += 1;
             done += 1;
@@ -1206,6 +1230,23 @@ impl Player {
         );
     }
 
+    /// Starts a GGRS direct-UDP session. The core resets so both peers begin
+    /// from the same power-on state; frames do not advance until GGRS has
+    /// completed its handshake.
+    pub fn start_ggrs_netplay(
+        &mut self,
+        bind_port: u16,
+        peers: &[String],
+        config: SessionConfig,
+    ) -> Result<(), String> {
+        self.core.reset().map_err(|err| err.to_string())?;
+        self.ggrs = Some(GgrsNetplay::start(bind_port, peers, config)?);
+        self.netplay = None;
+        self.frames = 0;
+        self.paused = false;
+        Ok(())
+    }
+
     /// Starts a rollback netplay session with explicit tuning.
     ///
     /// Movies, rewind and run-ahead are disabled while netplay is active.
@@ -1247,17 +1288,39 @@ impl Player {
     /// Stops netplay and returns to local input.
     pub fn stop_netplay(&mut self) {
         self.netplay = None;
+        self.ggrs = None;
     }
 
     /// Whether a netplay session is active.
     #[must_use]
     pub const fn netplay_active(&self) -> bool {
-        self.netplay.is_some()
+        self.netplay.is_some() || self.ggrs.is_some()
+    }
+
+    /// Rollback engine in use, when a session is active.
+    #[must_use]
+    pub const fn netplay_engine(&self) -> Option<&'static str> {
+        if self.ggrs.is_some() {
+            Some("ggrs")
+        } else if self.netplay.is_some() {
+            Some("legacy")
+        } else {
+            None
+        }
     }
 
     /// `(session frame, sent, received, rollbacks)` when netplay is active.
     #[must_use]
     pub fn netplay_stats(&self) -> Option<(u32, u32, u32, u32)> {
+        if let Some(ggrs) = &self.ggrs {
+            let stats = ggrs.stats();
+            return Some((
+                stats.frame,
+                stats.frame,
+                ggrs.confirmed_frame(),
+                stats.rollbacks,
+            ));
+        }
         self.netplay.as_ref().map(|netplay| {
             let (sent, received, rollbacks) = netplay.stats();
             (netplay.frame(), sent, received, rollbacks)
@@ -1268,6 +1331,9 @@ impl Player {
     /// active.
     #[must_use]
     pub fn netplay_session_stats(&self) -> Option<(SessionConfig, SessionStats)> {
+        if let Some(ggrs) = &self.ggrs {
+            return Some((ggrs.config(), ggrs.stats()));
+        }
         self.netplay.as_ref().map(Netplay::session_stats)
     }
 
@@ -1281,16 +1347,27 @@ impl Player {
     /// active.
     #[must_use]
     pub fn netplay_sync_stats(&self) -> Option<(u64, u64, Option<DesyncInfo>)> {
+        if let Some(ggrs) = &self.ggrs {
+            let (reports, last) = ggrs.desync_stats();
+            return Some((0, reports, last));
+        }
         self.netplay.as_ref().map(Netplay::sync_stats)
     }
 
     /// Last netplay transport/rollback error, if any.
     #[must_use]
     pub fn netplay_error(&self) -> Option<&str> {
+        if let Some(ggrs) = &self.ggrs {
+            return ggrs.last_error();
+        }
         self.netplay.as_ref().and_then(Netplay::last_error)
     }
 
     fn poll_netplay(&mut self) -> (Option<DesyncInfo>, bool) {
+        if let Some(ggrs) = self.ggrs.as_mut() {
+            ggrs.poll();
+            return (ggrs.take_desync(), false);
+        }
         let Some(netplay) = self.netplay.as_mut() else {
             return (None, false);
         };

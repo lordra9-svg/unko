@@ -98,7 +98,7 @@ Public mapper-specific status:
 | GPU shader presets (scanlines/LCD/CRT/NTSC Budget/Premium) | **Done** (glow; iOS fallback) |
 | Arbitrary GLSL/WGSL/slang shaders | **Not implemented** |
 | IPS/BPS patches, header repair DB | **Not implemented** |
-| Netplay (rollback, 2-4 players) | **Done** (direct/UDP/hole-punch/relay; LAN-validated with two hosts, Internet path implemented) |
+| Netplay (rollback, 2-4 players) | **Partial** (direct UDP uses GGRS; hole-punch/relay still use the legacy engine; LAN-validated with two hosts, Internet path implemented) |
 | Lua, RetroAchievements, HD packs | **Not implemented** |
 
 ## Evidence
@@ -111,7 +111,7 @@ Public mapper-specific status:
 | x0000 APU write-window tests | 10/10 pass |
 | NESdev archive | 137 pass / 11 fail / 115 visual/audio/input-only; PAL APU timing leaves 4 failures, adding the alternate MMC3 selector leaves only `read_joy3/count_errors` |
 | RustyNES test tree | 159 pass / 11 fail / 171 visual/audio/input-only; 166 / 4 with PAL APU in PAL mode, 1 with the alternate MMC3 selector too |
-| Workspace tests | 687 pass, 0 failed |
+| Workspace tests | 689 pass, 0 failed |
 
 The actionable accuracy failures are tracked in
 [`accuracy-divergences.md`](accuracy-divergences.md); the ROM/BIOS inventory is

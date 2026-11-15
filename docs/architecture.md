@@ -116,29 +116,29 @@ NES-shaped; moving them is the second half of roadmap **A8**.
 
 ## ROM manager core
 
-`unko-netplay` is a host-side foundation for rollback netplay. It depends only
-on `unko-core` and provides framed per-player input messages, a `Transport` trait
-(in-process channel pair, a connected `UdpTransport`, and a `UdpMesh` /
-`MeshTransport` for 2-4 player meshes), a bounded serialized-state
-`RollbackBuffer`, and a `RollbackSession` that restores and resimulates when a
-late remote input arrives. Each instance owns one controller slot; the session
-keeps a per-peer input history and merges the four-port frame every tick.
-`SessionConfig` selects the player count, local slot, prediction mode (last
-input or neutral) and a fixed input delay applied identically to every player;
-the session reports rollback count, predicted frames and the deepest rollback.
-The app drives it from `Player::step` and exposes a host/join window with
-player/slot selection. `upnp` adds a std-only UPnP-IGD client (SSDP discovery,
-device-description fetch, `AddPortMapping`, `GetExternalIPAddress`) used from a
-worker thread; `stun` adds an RFC 5389 binding client that supplies the
-external IP when the router has no UPnP; `holepunch` retries `PUNCH`/`PONG`
-datagrams to public peers and reports when bidirectional traffic is confirmed;
-`sync` exchanges pre-frame state hashes for frames that left the rollback
-window, reports the first mismatch, and carries the chunked checksummed
-save-state transfer plus `StateReassembler`/`StateAck` used to repair a
-diverged peer; `RollbackSession::resync` discards the old timeline;
-`relay` is a simplified TURN-style server (`unko-relay`) that assigns clients
-to a room and forwards `DATA` frames between members, used when punching
-stalls. A manual public-endpoint field covers everything else. Live Internet
+`unko-netplay` provides two rollback engines. **Direct UDP uses GGRS**
+(`ggrs::P2PSession`): `GgrsNetplay` implements the GGRS `Config` for the NES
+input/state shape, maps `SaveGameState`/`LoadGameState`/`AdvanceFrame` requests
+onto `Core`, and uses GGRS checksum desync detection. The app resets the core
+and keeps frames frozen until the handshake completes. The legacy engine
+provides framed per-player input messages, a `Transport` trait (in-process
+channel pair, connected `UdpTransport`, and `UdpMesh`/`MeshTransport` for 2-4
+player meshes), a serialized-state `RollbackBuffer`, and `RollbackSession`.
+Hole punching and the `unko-relay` room server still use that engine because
+their transports do not expose GGRS's per-peer source address yet.
+
+`SessionConfig` selects the player count, local slot, prediction and input
+delay. GGRS uses repeat-last prediction; the legacy engine also offers neutral.
+`upnp` adds a std-only UPnP-IGD client (SSDP discovery, device-description
+fetch, `AddPortMapping`, `GetExternalIPAddress`) used from a worker thread;
+`stun` adds an RFC 5389 binding client that supplies the external IP when the
+router has no UPnP; `holepunch` retries `PUNCH`/`PONG` datagrams to public
+peers and reports when bidirectional traffic is confirmed; `sync` exchanges
+pre-frame state hashes, reports the first mismatch, and carries the chunked
+checksummed save-state transfer plus `StateReassembler`/`StateAck` used to
+repair a diverged legacy peer; `relay` is a simplified TURN-style server
+(`unko-relay`) that assigns clients to a room and forwards `DATA` frames
+between members. A manual public-endpoint field covers the rest. Live Internet
 validation is reproducible with the two-host harness in `docs/netplay.md`
 (direct, hole punch and relay paths already pass on a real LAN; a true
 Internet run needs two networks).

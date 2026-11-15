@@ -18,6 +18,9 @@ Desktop input and audio use:
 - gif (https://github.com/image-rs/image-gif), MIT OR Apache-2.0
 - directories (https://github.com/dirs-dev/directories-rs), MIT OR Apache-2.0
 
+Netplay rollback uses GGRS (https://github.com/gschup/ggrs),
+Copyright (c) GGRS contributors, MIT OR Apache-2.0.
+
 Archive reading uses:
 - zip (https://github.com/zip-rs/zip2), MIT
 - sevenz-rust2 (https://github.com/hasenbanck/sevenz-rust), Apache-2.0

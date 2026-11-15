@@ -1,22 +1,15 @@
-//! Netplay foundation: frame transport and rollback state storage.
+//! Netplay: GGRS rollback plus legacy transport and state primitives.
 //!
-//! This crate is deliberately independent of the frontend and of any specific
-//! emulator core. It provides the two pieces that rollback netplay needs
-//! before a session loop can exist:
-//!
-//! - [`Transport`] for exchanging encoded [`InputFrame`] messages, with an
-//!   in-process channel pair for tests;
-//! - [`RollbackBuffer`] for storing a serialized core state plus the input for
-//!   the frame that follows it, so a late remote input can restore an older
-//!   frame and resimulate.
-//!
-//! A [`UdpTransport`] exchanges the same messages over the network. The app
-//! wiring and prediction tuning are follow-up work; this crate defines the
-//! pieces they build on and is covered by unit tests.
+//! This crate is independent of the frontend and of any specific emulator
+//! core. Direct UDP sessions run [`ggrs_session::GgrsNetplay`], which maps
+//! GGRS save/load/advance requests onto [`unko_core::Core`]. The transport,
+//! rollback-buffer and session modules remain for hole-punch and relay paths
+//! that do not expose GGRS's per-peer source address yet.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod ggrs_session;
 pub mod holepunch;
 pub mod input;
 pub mod relay;
@@ -28,6 +21,7 @@ pub mod transport;
 pub mod udp;
 pub mod upnp;
 
+pub use ggrs_session::{GgrsConfig, GgrsNetplay};
 pub use holepunch::{HolePunchTransport, PunchPeer};
 pub use input::{InputFrame, INPUT_MESSAGE_LEN};
 pub use relay::{room_token, RelayServer, RelayTransport};

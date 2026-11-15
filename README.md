@@ -42,7 +42,7 @@ verified against the public reference suites:
   swap and `$2002` security IDs: implemented and unit-tested
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **687 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **689 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **137 pass / 11 fail / 115 visual-or-input-only** (PAL APU timing leaves 4 failures; the alternate MMC3 selector leaves only `read_joy3/count_errors`)
 - RustyNES test tree: **159 pass / 11 fail / 171 visual-or-input-only** (166 / 4 with PAL APU in PAL mode; 1 with the alternate MMC3 selector too)
 
@@ -60,31 +60,27 @@ Compatibility from the local licensed 7,101-image NES audit:
 
 ## Netplay foundations
 
-Netplay lives in `unko-netplay` and is wired into the shell: framed four-port
-input messages, in-process and non-blocking UDP transports, a serialized-state
-rollback buffer and a session loop that resimulates after a late remote input.
-The library tracks **per-game play time** (accumulated only while a game is
-running, persisted in the save folder, shown in the Played column and Game
-properties). Tools → **NetPlay…** hosts or joins a **2-4 player** mesh over UDP. Each
-instance picks a unique player slot and lists the other players' addresses;
-input messages are tagged with the owning port and merged per frame. Missing
-remote input is predicted with **last input** or **neutral**, and a **fixed
-input delay** (0-16 frames, applied identically to every player) trades
-responsiveness for fewer rollbacks. For internet play the window can ask the
-router for a **UPnP-IGD** UDP mapping (non-blocking, with the mapped public
-endpoint filled in), fall back to a **STUN** binding request for the external
-IP when UPnP is unavailable, or take a **manual public endpoint**. A **Hole
-punch** mode exchanges punch packets with public peers, keeps the console
-paused during the handshake, and only starts the session after bidirectional
-traffic is confirmed. If punching stalls, a **relay** server (included as
-`unko-relay`) forwards the same input messages between room members. Peers
-also exchange **state hashes** for frames that have left the rollback window;
-a mismatch pauses the session, reports the frame and both hashes, and the
-authoritative peer streams a checksummed save-state transfer of the newest
-fully-settled buffered state so play resumes from the shared frame. The window shows frame, sent/received/rollbacks,
-predicted frames, the deepest rollback and hash-check counters. Netplay disables rewind, movies and run-ahead. Direct UDP, hole
-punching and the relay were validated over a real LAN with the two-host
-harness; a true Internet run needs two networks. See
+Netplay lives in `unko-netplay` and is wired into the shell. **Direct UDP uses
+GGRS** (`gschup/ggrs`): GGRS owns input exchange, repeat-last prediction,
+rollback scheduling, time synchronization and checksum desync detection, while
+`unko-netplay` maps its save/load/advance requests onto `Core`. Tools →
+**NetPlay…** hosts or joins a **2-4 player** session; each instance picks a
+unique player slot, lists the other players' addresses, and both sides reset
+the core so frame 0 starts from the same power-on state. Frames do not advance
+until the GGRS handshake completes. A **fixed input delay** (0-16 frames) is
+applied identically to every player.
+
+For internet play the window can ask the router for a **UPnP-IGD** UDP mapping
+(non-blocking, with the mapped public endpoint filled in), fall back to a
+**STUN** binding request for the external IP when UPnP is unavailable, or take
+a **manual public endpoint**. A **Hole punch** mode and the `unko-relay` room
+server still use the legacy transport/session engine (input framing, last-input
+or neutral prediction, state-hash exchange and chunked state-transfer repair)
+until GGRS gains a `NonBlockingSocket` adapter for those transports. The window
+reports the active engine, frame, confirmed frame, rollbacks, predicted frames,
+the deepest rollback and GGRS desync reports. Netplay disables rewind, movies
+and run-ahead. Direct UDP, hole punching and the relay were validated over a
+real LAN with the two-host harness; a true Internet run needs two networks. See
 [`docs/netplay.md`](docs/netplay.md) for the harness commands and results.
 
 ## Project stats
@@ -92,8 +88,8 @@ harness; a true Internet run needs two networks. See
 | Metric | Value |
 |---|---:|
 | Workspace crates | 10 |
-| First-party Rust lines | ~82,300 |
-| Workspace tests | 687 pass, 0 failed |
+| First-party Rust lines | ~82,900 |
+| Workspace tests | 689 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 
@@ -120,7 +116,7 @@ crates/
   unko-nes-host/     # Core + NesCore adapter between unko-nes and unko-core
   unko-nes-dev/      # AccuracyCoin battery and development harnesses
   unko-rom-manager/  # standalone DAT audit, 1G1R, fixdat and rebuild core
-  unko-netplay/      # input framing, transport and rollback session (foundation)
+  unko-netplay/      # GGRS direct rollback + legacy transports/session
   unko-cli/          # headless runner: info, scan, run, verify, trace, diff, bench, corpus
   unko-app/          # desktop shell (Dolphin-inspired UX)
 docs/
