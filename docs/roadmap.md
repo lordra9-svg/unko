@@ -78,11 +78,10 @@ The main effort is now the reference-parity accuracy core. Details in
       (INIT once, PLAY from the NMI) and is covered by header, image-layout and
       init/play unit tests. Expansion audio (VRC6, Sunsoft 5B, Namco 163,
       MMC5 and VRC7) is implemented and unit-tested. Remaining: VS. System /
-      PlayChoice-10 (blocked on ROMs and palette/security data), FDS audio
-      parity, Miracle Piano MIDI replies, the Famicom 3D glasses and mouse,
+      PlayChoice-10 (blocked on ROMs and palette/security data), Miracle
+      Piano MIDI replies, the Famicom 3D glasses and mouse,
       and validation against real PAL/NSF content. The FDS `$4030.D1`
-      DRAM-refresh watchdog is modelled with a one-cycle residual on the
-      second captured return address.
+      DRAM-refresh watchdog matches the hardware capture (`67FF`/`6E25`).
 - [ ] **A7** differential harness, hardware captures, performance pass.
       The differential harness is complete: per-frame RGBA, audio and
       palette-independent geometry hashes are compared against RustyNES, and
@@ -179,7 +178,7 @@ The main effort is now the reference-parity accuracy core. Details in
       (mapper 157, UPC-A/EAN-13 modules at the documented 1000-cycle rate).
       The piano's MIDI replies and the Datach EEPROM need their real-ROM
       validation; both transports have synthetic tests. Device state is part
-      of `UNKOST12` save states; the Controllers tab selects a device per
+      of `UNKOST13` save states; the Controllers tab selects a device per
       port.
 - [x] FDS (user BIOS, never bundled): core/CLI/app loading, side menu,
       disk-write persistence, 1/2/4/8x disk speed and opt-in auto side swap.

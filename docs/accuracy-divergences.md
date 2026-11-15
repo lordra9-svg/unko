@@ -20,16 +20,16 @@ None in AccuracyCoin. All non-DRAW rows pass.
 
 ### FDS (2026-11-14)
 
-- **`$4030.D1` DRAM-refresh watchdog IRQ** — modelled from the documented
-  7-bit refresh counter and 12-bit timer (reload 3245). `FDS-4030D1-Addr`
-  renders `67FF`/`6E24`; a Sharp Twin Famicom capture shows `67FF`/`6E25`.
-  The second return address is one byte early. Experiments on 2026-11-15
-  (reload 3246 instead of 3245; skipping the timer on the `$4030` acknowledge
-  cycle) each lengthen the measured IRQ interval by one cycle but leave the
-  displayed address unchanged, so the residual is in interrupt
-  recognition/return-address capture rather than the refresh/timer edge.
-  Resolving it needs a cycle-level hardware CPU trace around the second IRQ.
-  Responsible module: `cart.rs` (`Fds::clock_watchdog`).
+- **`$4030.D1` DRAM-refresh watchdog IRQ** — **resolved**. Instrumenting the
+  IRQ dispatch showed the second captured return address was pushed one NOP
+  too early. The refresh counter overflow is detected at the end of a cycle,
+  so the 3245 reload takes effect on the **following** cycle; `Fds` now models
+  that one-cycle reload latency (`watchdog_reload_pending`) instead of
+  reloading and counting in the same cycle. `FDS-4030D1-Addr` now renders
+  **`67FF`/`6E25`**, exactly matching the Sharp Twin Famicom capture, and the
+  first address is unchanged. Unit test:
+  `fds_watchdog_reload_follows_the_refresh_overflow`. Responsible module:
+  `cart.rs` (`Fds::clock_watchdog`).
 - `FDS-4023-Test` and `FDS-Audio-Registers` are display-only dumps with no
   pass/fail line; their register dumps are captured but have no oracle yet.
 - **FDS audio synthesis** — the model and its clock are verified against the

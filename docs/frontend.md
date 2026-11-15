@@ -234,7 +234,7 @@ between machines; see `docs/platforms.md` for the resolution order and the
 - Recording: WAV audio, numbered PNG frames and animated GIF, written under
   `saves/recordings`; all encoders are pure Rust and work on every target.
 - State/SRAM: `saves/<rom>.<core>.slotN.state` and `saves/<rom>.sav`; the core
-  never touches the filesystem. States carry an `UNKOST12` header, a ROM
+  never touches the filesystem. States carry an `UNKOST13` header, a ROM
   fingerprint and the mapper state, so a state cannot be loaded into a
   different image or core. The former TetaNES state files are ignored.
 - Audio playback is active through cpal; the Audio page reports the actual

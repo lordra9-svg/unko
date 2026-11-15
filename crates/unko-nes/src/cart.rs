@@ -32811,6 +32811,8 @@ pub struct Fds {
     watchdog_timer: u16,
     /// Address of the CPU cycle being clocked (for the refresh counter).
     cpu_access: Option<u16>,
+    /// A refresh-counter overflow reloads the timer on the following cycle.
+    watchdog_reload_pending: bool,
 }
 
 impl Fds {
@@ -32862,6 +32864,7 @@ impl Fds {
             refresh_counter: 0,
             watchdog_timer: 0x0FFF,
             cpu_access: None,
+            watchdog_reload_pending: false,
         };
         fds.rebuild_wire();
         fds
@@ -33083,12 +33086,25 @@ impl Fds {
             self.watchdog_irq = false;
             return;
         }
+        let reload_now = self.watchdog_reload_pending;
+        self.watchdog_reload_pending = false;
         let prg_ram = matches!(self.cpu_access, Some(0x6000..=0xDFFF));
+        let mut overflowed = false;
         if !prg_ram {
             self.refresh_counter = self.refresh_counter.wrapping_add(1) & 0x7F;
             if self.refresh_counter == 0 {
-                self.watchdog_timer = 3245;
+                // The overflow is detected at the end of this cycle; the
+                // reload takes effect on the next one, so the timer starts
+                // counting one cycle after the counter wraps.
+                overflowed = true;
             }
+        }
+        if reload_now {
+            self.watchdog_timer = 3245;
+            return;
+        }
+        if overflowed {
+            self.watchdog_reload_pending = true;
         }
         if self.watchdog_timer == 0 {
             self.watchdog_timer = 0x0FFF;
@@ -33233,6 +33249,7 @@ impl Mapper for Fds {
                     self.ext_con = 0x7F;
                     self.watchdog_timer = 0x0FFF;
                     self.refresh_counter = 0;
+                    self.watchdog_reload_pending = false;
                     self.watchdog_irq = false;
                 }
                 self.update_transfer_state();
@@ -41185,6 +41202,28 @@ pub(crate) mod tests {
         }
         assert_eq!(cart.cpu_read(0x8000), 32);
         assert_eq!(cart.cpu_read(0xC000), 62);
+    }
+
+    #[test]
+    fn fds_watchdog_reload_follows_the_refresh_overflow() {
+        let bios = vec![0xEAu8; 0x2000];
+        let disk = vec![0u8; 65500];
+        let mut fds = Fds::new(&disk, &bios);
+        fds.prg_write(0x4023, 0x83); // disk I/O and watchdog IRQs enabled
+        for _ in 0..128 {
+            // $E000 is BIOS, i.e. outside the PRG-RAM window, so it counts as
+            // a refresh cycle.
+            fds.set_cpu_access(Some(0xE000));
+            fds.clock_cpu();
+        }
+        assert!(
+            fds.watchdog_reload_pending,
+            "overflow detected: counter {} timer {}",
+            fds.refresh_counter, fds.watchdog_timer
+        );
+        fds.set_cpu_access(Some(0xE000));
+        fds.clock_cpu();
+        assert_eq!(fds.watchdog_timer, 3245, "reload applied, not decremented");
     }
 
     #[test]

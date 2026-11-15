@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **569 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **570 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -74,9 +74,10 @@ passes with the alternate selector. The selector is exposed as
 **146/146 non-DRAW**, and the 20/120-frame library audit is unchanged
 (3,897/6,497 rendering).
 
-Because `Mmc3` gained serialized PRG-RAM protection state and `FdsAudio` was
-rewritten, the save-state magic is now **`UNKOST12`**; `UNKOST11` and older
-states are rejected by the normal bad-magic check. See `docs/accuracy-divergences.md` for the open mapper-suite
+Because `Mmc3` gained serialized PRG-RAM protection state, `FdsAudio` was
+rewritten and the FDS watchdog gained serialized reload state, the save-state
+magic is now **`UNKOST13`**; `UNKOST12` and older states are rejected by the
+normal bad-magic check. See `docs/accuracy-divergences.md` for the open mapper-suite
 items.
 
 ## A1 — 6502
@@ -1445,16 +1446,15 @@ Ran the released FDS test images against the `rp2c33a-01a` BIOS
 | `FDS-Mirroring-Test` v1.1 | **3/3 pass** (`$4025.D3 W`, `$4030.D3 R`, `$4023.D0=0`) |
 | `FDS-4023-Test` v1.0 | display-only: `$4020-$409F` dump captured, no pass/fail line |
 | `FDS-Audio-Registers` v1.2 | display-only: `$4090-$4097` dump captured |
-| `FDS-4030D1-Addr` v1.0 | `$4030.D1` DRAM-refresh watchdog modelled; renders `67FF`/`6E24` against hardware `67FF`/`6E25` (one cycle on the second address) |
+| `FDS-4030D1-Addr` v1.0 | `$4030.D1` DRAM-refresh watchdog modelled; renders **`67FF`/`6E25`**, exactly matching the Sharp Twin Famicom capture |
 
 The mirroring suite exposed a real bug: `$4025.D3` was only copied to the PPU
 by the once-per-frame cartridge sync, so a nametable check in the same frame
 still saw the previous arrangement. `System` now syncs mirroring on every
 cartridge write. The watchdog follows the documented 7-bit refresh counter
-and 12-bit timer (3245 reload); the first captured return address matches the
-hardware exactly and the second is one byte early. Reload-value and ack-cycle
-experiments move the interval by a cycle without moving that address, which
-places the residual in interrupt recognition rather than the refresh edge.
+and 12-bit timer. A cycle-level IRQ-dispatch trace showed the reload has to
+take effect on the cycle **after** the refresh overflow; with that one-cycle
+latency both captured return addresses match the hardware capture.
 
 ### FDS audio oracle comparison (2026-11-15)
 
@@ -1494,7 +1494,7 @@ reference over 1,200 frames (879,799 samples, 0 differing values). The last
 gap was one extra leading resampler input: the first executed `run_frame`
 cycle precedes the reference's first sampled cycle, so `System` drops that
 single sample. Serializing the one-shot flag keeps save/restore and run-ahead
-phase-aligned (state magic `UNKOST12`).
+phase-aligned (state magic `UNKOST13`).
 
 ### Holy Mapperel board matrix (2026-11-14)
 

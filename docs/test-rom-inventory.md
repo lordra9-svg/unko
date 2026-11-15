@@ -135,8 +135,8 @@ PAL APU singles in PAL mode, `dma_4016_read` and `5-branch_delays_irq`.
 
 - **FDS**: `FdsIrqTests` **21/21 pass**, `FDS-Mirroring-Test` **3/3 pass**,
   `FDS-4023-Test` and `FDS-Audio-Registers` are display-only dumps,
-  `FDS-4030D1-Addr` renders `67FF`/`6E24` against hardware `67FF`/`6E25`
-  (one-cycle residual on the second address). The images were fetched from
+  `FDS-4030D1-Addr` renders `67FF`/`6E25`, exactly matching the hardware
+  capture. The images were fetched from
   their public releases for this run; they are not committed. See the dated
   entry in `docs/accuracy-status.md`.
 - **Mapper-specific**: `BNTest`, `bxrom_512k_test`, `Holy Mapperel`,
