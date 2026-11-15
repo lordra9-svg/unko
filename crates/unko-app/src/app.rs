@@ -23,6 +23,7 @@ use crate::gamepad::{
     button_name, mapping_from_text, mapping_to_text, Gamepads, NesButton, PadMapping,
 };
 use crate::library::{self, GameEntry};
+use crate::microphone::MicrophoneInput;
 use crate::paths;
 use crate::player::{self, Player};
 use crate::playtime::{format_duration, PlayStats};
@@ -215,6 +216,8 @@ pub struct App {
     cheat_value: String,
     cheat_error: Option<String>,
     microphone: bool,
+    microphone_input: Option<MicrophoneInput>,
+    microphone_error: Option<String>,
     datach_code: String,
     confirm_reset: bool,
     rom_manager: RomManager,
@@ -373,6 +376,8 @@ impl App {
             cheat_value: String::new(),
             cheat_error: None,
             microphone: false,
+            microphone_input: None,
+            microphone_error: None,
             datach_code: String::new(),
             confirm_reset: false,
             rom_manager,
@@ -411,6 +416,9 @@ impl App {
             gpu_shader,
         };
         app.status_until = Some(Instant::now() + Duration::from_secs(6));
+        if app.settings.microphone_input {
+            app.open_microphone();
+        }
         if args.settings {
             app.settings_open = true;
         }
@@ -859,6 +867,24 @@ impl App {
         }
     }
 
+    fn open_microphone(&mut self) {
+        match MicrophoneInput::new() {
+            Ok(input) => {
+                self.microphone_input = Some(input);
+                self.microphone_error = None;
+            }
+            Err(err) => {
+                self.microphone_input = None;
+                self.microphone_error = Some(err);
+            }
+        }
+    }
+
+    fn close_microphone(&mut self) {
+        self.microphone_input = None;
+        self.microphone_error = None;
+    }
+
     fn apply_settings(&mut self, ctx: &egui::Context, old: &Settings) {
         if old.save_dir != self.settings.save_dir {
             self.play_stats = PlayStats::load(&self.play_stats_path());
@@ -930,6 +956,13 @@ impl App {
             audio.set_muted(self.settings.muted);
             if self.settings.audio_latency_ms != old.audio_latency_ms {
                 audio.set_latency_ms(self.settings.audio_latency_ms);
+            }
+        }
+        if self.settings.microphone_input != old.microphone_input {
+            if self.settings.microphone_input {
+                self.open_microphone();
+            } else {
+                self.close_microphone();
             }
         }
         apply_theme(ctx, self.settings.theme);
@@ -2482,6 +2515,7 @@ impl App {
             .player
             .as_ref()
             .is_some_and(|player| player.mapper() == 188);
+        let microphone_error = self.microphone_error.clone();
         let mut body = |ui: &mut egui::Ui| {
             ui.heading("NES ports");
             ui.label(
@@ -2520,11 +2554,27 @@ impl App {
             {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    ui.checkbox(
-                        &mut microphone,
-                        "Microphone input (hold while making noise)",
-                    );
+                    ui.add_enabled_ui(!settings.microphone_input, |ui| {
+                        ui.checkbox(
+                            &mut microphone,
+                            "Microphone input (hold while making noise)",
+                        );
+                    });
+                    ui.checkbox(&mut settings.microphone_input, "Use system microphone");
                 });
+                if settings.microphone_input {
+                    ui.label(
+                        RichText::new(
+                            "System input uses a peak gate (about -34 dBFS) with a short \
+                             hold; the analog ADC is not modelled.",
+                        )
+                        .weak()
+                        .small(),
+                    );
+                }
+                if let Some(err) = &microphone_error {
+                    ui.label(RichText::new(err).weak().small());
+                }
                 if karaoke {
                     ui.label(
                         RichText::new(
@@ -3832,7 +3882,11 @@ impl eframe::App for App {
             for (port, enabled) in enabled.iter().enumerate() {
                 player.set_port_enabled(port, *enabled);
             }
-            player.set_microphone(self.microphone);
+            let microphone = self
+                .microphone_input
+                .as_ref()
+                .map_or(self.microphone, MicrophoneInput::active);
+            player.set_microphone(microphone);
             player.step(ctx, audio);
         }
 

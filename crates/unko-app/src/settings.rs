@@ -451,6 +451,9 @@ pub struct Settings {
     /// Attach Famicom 3D shutter glasses and present consecutive fields as a
     /// red/cyan anaglyph.
     pub famicom_3d: bool,
+    /// Feed the Famicom/Karaoke microphone from the default system input
+    /// device instead of the manual Devices checkbox.
+    pub microphone_input: bool,
     /// Device attached to controller port 1.
     pub port1_device: PortDevice,
     /// Device attached to controller port 2.
@@ -565,6 +568,7 @@ impl Default for Settings {
             linear_filter: false,
             zapper_port2: false,
             famicom_3d: false,
+            microphone_input: false,
             port1_device: PortDevice::Gamepad,
             port2_device: PortDevice::Gamepad,
             port1_input: PortInput::Auto,
@@ -713,6 +717,7 @@ impl Settings {
                 "linear_filter" => settings.linear_filter = parse_bool(value),
                 "zapper_port2" => settings.zapper_port2 = parse_bool(value),
                 "famicom_3d" => settings.famicom_3d = parse_bool(value),
+                "microphone_input" => settings.microphone_input = parse_bool(value),
                 "port1_device" => settings.port1_device = PortDevice::from_name(value),
                 "port2_device" => {
                     settings.port2_device = PortDevice::from_name(value);
@@ -894,6 +899,7 @@ port1_input={}
 port2_input={}
 zapper_port2={}
 famicom_3d={}
+microphone_input={}
 theme={}
 pause_on_focus_loss={}
 confirm_stop={}
@@ -969,6 +975,7 @@ layout_main={}
             self.port2_input.name(),
             self.port2_device == PortDevice::Zapper,
             self.famicom_3d,
+            self.microphone_input,
             match self.theme {
                 Theme::Dark => "dark",
                 Theme::Light => "light",
@@ -1175,6 +1182,7 @@ mod tests {
             theme: Theme::Light,
             palette: Palette::Consumer,
             famicom_3d: true,
+            microphone_input: true,
             ..Settings::default()
         };
         settings.save(&path).expect("writes");

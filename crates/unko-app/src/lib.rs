@@ -23,6 +23,7 @@ mod gamepad;
 #[allow(unsafe_code)] // OpenGL shader setup is inherently unsafe
 mod gpu_shader;
 mod library;
+mod microphone;
 mod movie;
 mod paths;
 mod player;

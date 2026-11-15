@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **649 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **651 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -145,6 +145,20 @@ Unit tests cover an NROM image with CHR-ROM and vertical mirroring, an MMC1
 board with CHR-RAM and a battery flag, the third-party board table, NES 2.0
 headers, unknown boards, truncated chunks, gapped PRG chunks and the
 probe/load path.
+
+## System microphone input (2026-11-15)
+
+The Famicom microphone (`$4016` bit 2) and the Karaoke Studio ADC are now
+driven either by the Devices checkbox or by the default system input device.
+The capture path opens cpal's default input, converts F32/I16/U16 samples to a
+peak level, and asserts the bit while the peak is at least 0.02 (~-34 dBFS),
+holding it for 12 callbacks after the last loud buffer. This is a presentation
+input model, not a hardware analog ADC capture; the threshold and hold are
+constants in `crates/unko-app/src/microphone.rs` and do not touch the core's
+audio or timing. Opening the device is optional: if no input exists the app
+keeps the manual checkbox and reports the error in the Devices window. Unit
+tests cover the gate's attack/hold/release behavior; a device test skips
+cleanly when CI has no microphone.
 
 ## Peripherals — Bandai Karaoke Studio (2026-11-15)
 
