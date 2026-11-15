@@ -30,7 +30,8 @@ use crate::rom_manager::RomManager;
 use crate::settings::{Aspect, HotkeyAction, PortInput, Settings, ShaderPreset, Theme};
 use unko_netplay::{
     add_port_mapping, discover, endpoint, external_ip, local_address_toward, stun_public_address,
-    HolePunchTransport, MappingProtocol, MappingRequest, PredictionMode, SessionConfig, UdpMesh,
+    HolePunchTransport, MappingProtocol, MappingRequest, PredictionMode, RelayTransport,
+    SessionConfig, UdpMesh,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,7 +219,10 @@ pub struct App {
     netplay_upnp_status: String,
     netplay_stun_server: String,
     netplay_hole_punch: bool,
-    netplay_pending_punch: Option<(HolePunchTransport, SessionConfig)>,
+    netplay_relay_server: String,
+    netplay_room: String,
+    netplay_punch_deadline: Option<Instant>,
+    netplay_pending_punch: Option<(HolePunchTransport, SessionConfig, u16)>,
     /// The game was running when the handshake started and should resume.
     netplay_resume_after_punch: bool,
     netplay_upnp_rx: Option<std::sync::mpsc::Receiver<Result<(String, String), String>>>,
@@ -359,6 +363,9 @@ impl App {
             netplay_upnp_status: String::new(),
             netplay_stun_server: "stun.l.google.com:19302".into(),
             netplay_hole_punch: false,
+            netplay_relay_server: String::new(),
+            netplay_room: "unko".into(),
+            netplay_punch_deadline: None,
             netplay_pending_punch: None,
             netplay_resume_after_punch: false,
             netplay_upnp_rx: None,
@@ -2669,6 +2676,30 @@ impl App {
             self.netplay_status = "Local port must be a number.".into();
             return;
         };
+        let config = SessionConfig {
+            buffer_frames: 8,
+            input_delay: self.netplay_delay,
+            prediction: self.netplay_prediction,
+            players,
+            local_player: slot,
+        };
+        let relay = self.netplay_relay_server.trim().to_string();
+        let room = self.netplay_room.trim().to_string();
+        if !self.netplay_hole_punch && !relay.is_empty() {
+            if room.is_empty() {
+                self.netplay_status = "Relay rooms need a name.".into();
+                return;
+            }
+            match RelayTransport::bind(&format!("0.0.0.0:{port}"), &relay, &room) {
+                Ok(transport) => {
+                    player.start_netplay_with(Box::new(transport), config);
+                    self.netplay_status =
+                        format!("Relay room {room} on {relay}, UDP {port} local.");
+                }
+                Err(err) => self.netplay_status = format!("Relay setup failed: {err}"),
+            }
+            return;
+        }
         let peers: Vec<String> = self
             .netplay_peer
             .split(',')
@@ -2684,13 +2715,6 @@ impl App {
             );
             return;
         }
-        let config = SessionConfig {
-            buffer_frames: 8,
-            input_delay: self.netplay_delay,
-            prediction: self.netplay_prediction,
-            players,
-            local_player: slot,
-        };
         if self.netplay_hole_punch {
             let mut endpoints = Vec::with_capacity(peers.len());
             for peer in &peers {
@@ -2707,7 +2731,8 @@ impl App {
                 Ok(transport) => {
                     self.netplay_status =
                         format!("Hole punching UDP {port} to {} peer(s)…", endpoints.len());
-                    self.netplay_pending_punch = Some((transport, config));
+                    self.netplay_pending_punch = Some((transport, config, port));
+                    self.netplay_punch_deadline = Some(Instant::now() + Duration::from_secs(6));
                     // Do not advance the console while the peers agree on
                     // connectivity: both sides must start the session from
                     // the same frame.
@@ -2801,9 +2826,36 @@ impl App {
     /// Advances a pending hole-punch handshake and starts the session once
     /// every peer is confirmed.
     fn poll_hole_punch(&mut self) {
-        let Some((transport, _)) = self.netplay_pending_punch.as_mut() else {
+        let Some((transport, _, _)) = self.netplay_pending_punch.as_mut() else {
             return;
         };
+        let relay = self.netplay_relay_server.trim().to_string();
+        let room = self.netplay_room.trim().to_string();
+        let expired = self
+            .netplay_punch_deadline
+            .is_some_and(|deadline| Instant::now() >= deadline);
+        if expired && !relay.is_empty() {
+            let (_, config, port) = self
+                .netplay_pending_punch
+                .take()
+                .expect("pending hole punch");
+            self.netplay_punch_deadline = None;
+            match RelayTransport::bind(&format!("0.0.0.0:{port}"), &relay, &room) {
+                Ok(relay_transport) => {
+                    if let Some(player) = &mut self.player {
+                        player.start_netplay_with(Box::new(relay_transport), config);
+                        player.paused = !self.netplay_resume_after_punch;
+                    }
+                    self.netplay_status =
+                        format!("Hole punch timed out; relaying via {relay} room {room}.");
+                }
+                Err(err) => {
+                    self.netplay_status =
+                        format!("Hole punch failed and relay setup failed: {err}");
+                }
+            }
+            return;
+        }
         transport.punch();
         if let Some(player) = &mut self.player {
             // Keep the console frozen for the whole handshake even if the
@@ -2813,10 +2865,11 @@ impl App {
         let confirmed = transport.confirmed();
         let total = transport.peers().len();
         if transport.connected() {
-            let (transport, config) = self
+            let (transport, config, _) = self
                 .netplay_pending_punch
                 .take()
                 .expect("pending hole punch");
+            self.netplay_punch_deadline = None;
             if let Some(player) = &mut self.player {
                 player.start_netplay_with(Box::new(transport), config);
                 player.paused = !self.netplay_resume_after_punch;
@@ -2965,6 +3018,20 @@ impl App {
                             .desired_width(240.0),
                     );
                 });
+                ui.horizontal(|ui| {
+                    ui.label("Relay");
+                    ui.add_enabled(
+                        !active && self.netplay_pending_punch.is_none(),
+                        egui::TextEdit::singleline(&mut self.netplay_relay_server)
+                            .hint_text("host:port")
+                            .desired_width(200.0),
+                    );
+                    ui.label("Room");
+                    ui.add_enabled(
+                        !active && self.netplay_pending_punch.is_none(),
+                        egui::TextEdit::singleline(&mut self.netplay_room).desired_width(100.0),
+                    );
+                });
                 if !self.netplay_upnp_status.is_empty() {
                     ui.label(&self.netplay_upnp_status);
                 }
@@ -3034,6 +3101,7 @@ impl App {
                             player.stop_netplay();
                         }
                         self.netplay_pending_punch = None;
+                        self.netplay_punch_deadline = None;
                         if let Some(player) = &mut self.player {
                             player.paused = !self.netplay_resume_after_punch;
                         }

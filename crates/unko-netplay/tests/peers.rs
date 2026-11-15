@@ -6,6 +6,7 @@ use unko_core::{
 };
 use unko_netplay::holepunch::HolePunchTransport;
 use unko_netplay::input::InputFrame;
+use unko_netplay::relay::{RelayServer, RelayTransport};
 use unko_netplay::session::{PredictionMode, RollbackSession, SessionConfig};
 use unko_netplay::transport::{channel_pair, ChannelTransport, MeshTransport};
 use unko_netplay::Transport;
@@ -374,4 +375,99 @@ fn peers_converge_over_a_hole_punched_transport() {
     }
     assert_eq!(a_core.state(), expected.state());
     assert_eq!(b_core.state(), expected.state());
+}
+
+#[test]
+fn peers_converge_over_a_relay() {
+    let mut server = RelayServer::spawn("127.0.0.1:0").expect("relay");
+    let relay = server.local_addr().to_string();
+    let mut a = RelayTransport::bind("127.0.0.1:0", &relay, "test").expect("a");
+    let mut b = RelayTransport::bind("127.0.0.1:0", &relay, "test").expect("b");
+    for _ in 0..100 {
+        a.pump();
+        b.pump();
+        if a.joined() && b.joined() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(a.joined() && b.joined(), "relay join");
+
+    let config = SessionConfig {
+        buffer_frames: 8,
+        players: 2,
+        ..SessionConfig::default()
+    };
+    let mut a_core = TestCore::default();
+    let mut b_core = TestCore::default();
+    let mut a_session = RollbackSession::with_config(config);
+    let mut b_session = RollbackSession::with_config(SessionConfig {
+        local_player: 1,
+        ..config
+    });
+    let a_inputs = [10u16, 11, 12, 13];
+    let b_inputs = [20u16, 21, 22, 23];
+
+    for frame in 0..4usize {
+        let a_frame = a_session
+            .step(&mut a_core, [a_inputs[frame], 0, 0, 0])
+            .expect("a step");
+        a.send(
+            &InputFrame {
+                frame: a_frame,
+                player: 0,
+                input: a_inputs[frame],
+            }
+            .encode(),
+        )
+        .expect("a send");
+        let b_frame = b_session
+            .step(&mut b_core, [0, b_inputs[frame], 0, 0])
+            .expect("b step");
+        b.send(
+            &InputFrame {
+                frame: b_frame,
+                player: 1,
+                input: b_inputs[frame],
+            }
+            .encode(),
+        )
+        .expect("b send");
+
+        // Allow the relay hop, then drain both directions.
+        for _ in 0..20 {
+            let mut progressed = false;
+            while let Some(bytes) = a.recv().expect("a recv") {
+                let message = InputFrame::decode(&bytes).expect("frame");
+                a_session
+                    .receive_remote(&mut a_core, message.player, message.frame, message.input)
+                    .expect("a remote");
+                progressed = true;
+            }
+            while let Some(bytes) = b.recv().expect("b recv") {
+                let message = InputFrame::decode(&bytes).expect("frame");
+                b_session
+                    .receive_remote(&mut b_core, message.player, message.frame, message.input)
+                    .expect("b remote");
+                progressed = true;
+            }
+            if progressed {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    let mut expected = TestCore::default();
+    for frame in [
+        [10, 20, 0, 0],
+        [11, 21, 0, 0],
+        [12, 22, 0, 0],
+        [13, 23, 0, 0],
+    ] {
+        expected.run(frame);
+    }
+    assert_eq!(a_core.state(), expected.state());
+    assert_eq!(b_core.state(), expected.state());
+    server.shutdown();
 }
