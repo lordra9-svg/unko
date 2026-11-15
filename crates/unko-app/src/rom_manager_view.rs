@@ -17,10 +17,18 @@ use unko_rom_manager::{
 /// # Errors
 ///
 /// Returns a scan error when the folder cannot be read.
-pub fn verify_folder(report: &MatchReport, folder: &Path) -> Result<VerifyView, String> {
-    let mut progress = |_: &ScanProgress| {};
+/// Audits a rebuilt output folder, forwarding scan progress to the caller.
+///
+/// # Errors
+///
+/// Returns a scan error when the folder cannot be read.
+pub fn verify_folder_with_progress(
+    report: &MatchReport,
+    folder: &Path,
+    progress: &mut dyn FnMut(&ScanProgress),
+) -> Result<VerifyView, String> {
     let (scanned, _) =
-        scan_path(folder, &ScanOptions::default(), &mut progress).map_err(|err| err.to_string())?;
+        scan_path(folder, &ScanOptions::default(), progress).map_err(|err| err.to_string())?;
     let matched = Catalog::new(report.dat.clone()).match_all(scanned);
     Ok(VerifyView::from_report(&VerifyReport::build(&matched)))
 }
@@ -307,7 +315,7 @@ mod tests {
         );
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         assert!(result.written > 0, "nothing was rebuilt");
-        let view = verify_folder(&report, &output).expect("verify");
+        let view = verify_folder_with_progress(&report, &output, &mut |_| {}).expect("verify");
         assert!(view.clean, "{}", view.summary);
         assert_eq!(view.found, 1);
         assert_eq!(view.total, 1);
@@ -330,7 +338,7 @@ mod tests {
         unknown[5] = 1;
         unknown.extend_from_slice(b"not-in-the-dat");
         fs::write(output.join("unknown.nes"), unknown).expect("unknown rom");
-        let view = verify_folder(&report, &output).expect("verify");
+        let view = verify_folder_with_progress(&report, &output, &mut |_| {}).expect("verify");
         assert!(!view.clean);
         assert_eq!(view.found, 0);
         assert_eq!(view.total, 1);

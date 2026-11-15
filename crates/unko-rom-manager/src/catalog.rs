@@ -80,6 +80,7 @@ pub struct Summary {
 }
 
 /// A DAT plus its match report.
+#[derive(Clone)]
 pub struct MatchReport {
     /// The DAT that was audited.
     pub dat: Dat,

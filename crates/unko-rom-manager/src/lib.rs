@@ -44,7 +44,10 @@ pub use dat::{parse_dat_path, parse_dat_str, Dat, DatRom, Game};
 pub use fetch::fetch_dat;
 pub use hash::{hash_bytes, Hashes};
 pub use one_g1r::{parse_tags, OneGameOneRom, Tags};
-pub use rebuild::{rebuild, OutputFormat, RebuildOptions, RebuildReport};
+pub use rebuild::{
+    rebuild, rebuild_with_progress, OutputFormat, RebuildOptions, RebuildPhase, RebuildProgress,
+    RebuildReport,
+};
 pub use report::{summary_line, write_csv, write_fixdat};
 pub use scan::{scan_path, Origin, ScanOptions, ScanProgress, ScannedRom};
 pub use verify::{GameVerify, RomVerify, VerifyOptions, VerifyReport};

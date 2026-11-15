@@ -63,6 +63,45 @@ impl Default for RebuildOptions {
     }
 }
 
+/// Rebuild phase reported to a progress callback.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RebuildPhase {
+    /// Games are being written.
+    #[default]
+    Writing,
+    /// A frontend is verifying the finished output.
+    Verifying,
+    /// The rebuild loop (and any frontend verification) finished.
+    Done,
+}
+
+/// Snapshot passed to [`rebuild_with_progress`] after each game.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RebuildProgress {
+    /// Current phase.
+    pub phase: RebuildPhase,
+    /// Selected games processed so far.
+    pub games_done: usize,
+    /// Selected games in this request.
+    pub games_total: usize,
+    /// Game just processed.
+    pub current: String,
+    /// Files written so far.
+    pub written: usize,
+    /// Archives written so far.
+    pub archives: usize,
+    /// Loose sources removed so far.
+    pub moved: usize,
+    /// Files skipped so far.
+    pub skipped: usize,
+    /// Errors recorded so far.
+    pub errors: usize,
+    /// Files scanned by a frontend's post-rebuild verification.
+    pub verified_files: usize,
+    /// Bytes scanned by a frontend's post-rebuild verification.
+    pub verified_bytes: u64,
+}
+
 /// Result of a rebuild.
 #[derive(Debug, Clone, Default)]
 pub struct RebuildReport {
@@ -96,20 +135,42 @@ pub fn rebuild(
     selected: &[usize],
     options: &RebuildOptions,
 ) -> RebuildReport {
+    rebuild_with_progress(report, selected, options, &mut |_| {})
+}
+
+/// Like [`rebuild`], reporting progress after each selected game.
+#[must_use]
+pub fn rebuild_with_progress(
+    report: &MatchReport,
+    selected: &[usize],
+    options: &RebuildOptions,
+    progress: &mut dyn FnMut(&RebuildProgress),
+) -> RebuildReport {
     let mut result = RebuildReport::default();
+    let mut state = RebuildProgress {
+        games_total: selected.len(),
+        ..RebuildProgress::default()
+    };
+    progress(&state);
     if options.move_files && options.format != OutputFormat::Loose {
         result
             .errors
             .push("move requires loose output; archive output keeps the source files".into());
+        state.phase = RebuildPhase::Done;
+        state.errors = result.errors.len();
+        progress(&state);
         return result;
     }
     if let Err(err) = fs::create_dir_all(&options.output) {
         result
             .errors
             .push(format!("create {}: {err}", options.output.display()));
+        state.phase = RebuildPhase::Done;
+        state.errors = result.errors.len();
+        progress(&state);
         return result;
     }
-    for &game_index in selected {
+    for (done, &game_index) in selected.iter().enumerate() {
         let Some(game) = report.dat.games.get(game_index) else {
             continue;
         };
@@ -136,7 +197,17 @@ pub fn rebuild(
                 write_archive(&mut result, options, &game.name, &entries);
             }
         }
+        state.games_done = done + 1;
+        state.current = game.name.clone();
+        state.written = result.written;
+        state.archives = result.archives;
+        state.moved = result.moved;
+        state.skipped = result.skipped;
+        state.errors = result.errors.len();
+        progress(&state);
     }
+    state.phase = RebuildPhase::Done;
+    progress(&state);
     result
 }
 
@@ -664,6 +735,31 @@ mod tests {
         assert_eq!(result.archives, 0);
         assert!(result.errors[0].contains("move requires loose"));
         assert!(output.join("source.bin").exists());
+        let _ = fs::remove_dir_all(&output);
+    }
+
+    #[test]
+    fn rebuild_reports_progress_per_game() {
+        let (report, output) = fixture();
+        let options = RebuildOptions {
+            output: output.clone(),
+            overwrite: true,
+            ..RebuildOptions::default()
+        };
+        let mut states = Vec::new();
+        let result = rebuild_with_progress(&report, &[0], &options, &mut |state| {
+            states.push(state.clone());
+        });
+        assert_eq!(result.written, 2);
+        assert!(!states.is_empty());
+        assert_eq!(states.first().expect("start").games_total, 1);
+        assert_eq!(states.first().expect("start").games_done, 0);
+        let last = states.last().expect("end");
+        assert_eq!(last.phase, RebuildPhase::Done);
+        assert_eq!(last.games_done, 1);
+        assert_eq!(last.current, "Game (USA)");
+        assert_eq!(last.written, 2);
+        assert_eq!(last.errors, 0);
         let _ = fs::remove_dir_all(&output);
     }
 }

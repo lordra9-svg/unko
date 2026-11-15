@@ -18,7 +18,8 @@ Rust project or used through the `unko-app` ROM Manager window.
 - Read-only **verify/audit** mode: hashes an existing library or rebuilt
   folder against the DAT, prints per-ROM missing/unknown/duplicate detail and
   exits nonzero unless every game is complete.
-- Safe copy/rebuild with per-file hash verification.
+- Safe copy/rebuild with per-file hash verification and an optional
+  `rebuild_with_progress` callback (per-game counters for a frontend).
 - Optional verified **move** (`--move`): a loose source file is deleted only
   after the destination copy is written successfully; archive members are
   never removed from their container.

@@ -8,14 +8,31 @@ use std::thread;
 
 use egui::{Color32, RichText};
 use unko_rom_manager::{
-    clear_cache_file, parse_dat_path, rebuild, scan_path, summary_line, write_csv, write_fixdat,
-    Catalog, MatchReport, MatchStatus, OneGameOneRom, OutputFormat, RebuildOptions, ScanCache,
-    ScanOptions, ScanProgress, VerifyReport,
+    clear_cache_file, parse_dat_path, rebuild_with_progress, scan_path, summary_line, write_csv,
+    write_fixdat, Catalog, MatchReport, MatchStatus, OneGameOneRom, OutputFormat, RebuildOptions,
+    RebuildPhase, RebuildProgress, RebuildReport, ScanCache, ScanOptions, ScanProgress,
+    VerifyReport,
 };
 
-use crate::rom_manager_view::VerifyView;
+use crate::rom_manager_view::{verify_folder_with_progress, VerifyView};
 
-type Job = std::result::Result<Vec<MatchReport>, String>;
+type ScanJob = std::result::Result<Vec<MatchReport>, String>;
+
+struct RebuildOutcome {
+    result: RebuildReport,
+    verify: Option<std::result::Result<VerifyView, String>>,
+}
+
+enum WorkerMessage {
+    Scan(ScanJob),
+    Rebuild(std::result::Result<Box<RebuildOutcome>, String>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BusyKind {
+    Scan,
+    Rebuild,
+}
 
 /// ROM Manager state.
 pub struct RomManager {
@@ -45,7 +62,9 @@ pub struct RomManager {
     busy: bool,
     status: String,
     progress: Arc<Mutex<ScanProgress>>,
-    rx: Option<Receiver<Job>>,
+    rebuild_progress: Arc<Mutex<RebuildProgress>>,
+    busy_kind: BusyKind,
+    rx: Option<Receiver<WorkerMessage>>,
     reports: Vec<MatchReport>,
     selected: usize,
     verify: Option<VerifyView>,
@@ -84,6 +103,8 @@ impl RomManager {
             busy: false,
             status: "Choose one or more DAT files and a source folder, then scan.".into(),
             progress: Arc::new(Mutex::new(ScanProgress::default())),
+            rebuild_progress: Arc::new(Mutex::new(RebuildProgress::default())),
+            busy_kind: BusyKind::Scan,
             rx: None,
             reports: Vec::new(),
             selected: 0,
@@ -122,7 +143,7 @@ impl RomManager {
             return;
         };
         match rx.try_recv() {
-            Ok(Ok(reports)) => {
+            Ok(WorkerMessage::Scan(Ok(reports))) => {
                 self.reports = reports;
                 self.selected = 0;
                 self.verify = None;
@@ -138,7 +159,40 @@ impl RomManager {
                     self.status = "No DAT produced a report.".into();
                 }
             }
-            Ok(Err(error)) => {
+            Ok(WorkerMessage::Scan(Err(error))) => {
+                self.busy = false;
+                self.rx = None;
+                self.status = error;
+            }
+            Ok(WorkerMessage::Rebuild(Ok(outcome))) => {
+                self.busy = false;
+                self.rx = None;
+                self.status = format!(
+                    "Rebuilt {} files in {} archives, {} moved ({} skipped, {} errors) into {}",
+                    outcome.result.written,
+                    outcome.result.archives,
+                    outcome.result.moved,
+                    outcome.result.skipped,
+                    outcome.result.errors.len(),
+                    self.output.display()
+                );
+                if let Some(error) = outcome.result.errors.first() {
+                    self.status.push_str(&format!(" — {error}"));
+                }
+                if let Some(verify) = outcome.verify {
+                    match verify {
+                        Ok(view) => {
+                            self.status =
+                                format!("{} — verification: {}", self.status, view.status_label());
+                            self.verify = Some(view);
+                        }
+                        Err(err) => {
+                            self.status = format!("{} — verification failed: {err}", self.status);
+                        }
+                    }
+                }
+            }
+            Ok(WorkerMessage::Rebuild(Err(error))) => {
                 self.busy = false;
                 self.rx = None;
                 self.status = error;
@@ -332,18 +386,52 @@ impl RomManager {
                 self.start_scan();
             }
             if self.busy {
-                let progress = self
-                    .progress
-                    .lock()
-                    .map(|progress| progress.clone())
-                    .unwrap_or_default();
                 ui.spinner();
-                ui.label(format!(
-                    "{} files, {} members, {:.1} MiB",
-                    progress.files,
-                    progress.members,
-                    progress.bytes as f64 / (1024.0 * 1024.0)
-                ));
+                match self.busy_kind {
+                    BusyKind::Scan => {
+                        let progress = self
+                            .progress
+                            .lock()
+                            .map(|progress| progress.clone())
+                            .unwrap_or_default();
+                        ui.label(format!(
+                            "{} files, {} members, {:.1} MiB",
+                            progress.files,
+                            progress.members,
+                            progress.bytes as f64 / (1024.0 * 1024.0)
+                        ));
+                    }
+                    BusyKind::Rebuild => {
+                        let progress = self
+                            .rebuild_progress
+                            .lock()
+                            .map(|progress| progress.clone())
+                            .unwrap_or_default();
+                        let detail = match progress.phase {
+                            RebuildPhase::Writing => format!(
+                                "Writing {}/{} games · {} written, {} archives, {} skipped, {} errors{}",
+                                progress.games_done,
+                                progress.games_total,
+                                progress.written,
+                                progress.archives,
+                                progress.skipped,
+                                progress.errors,
+                                if progress.current.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" — {}", progress.current)
+                                }
+                            ),
+                            RebuildPhase::Verifying => format!(
+                                "Verifying output · {} files, {:.1} MiB",
+                                progress.verified_files,
+                                progress.verified_bytes as f64 / (1024.0 * 1024.0)
+                            ),
+                            RebuildPhase::Done => "Finishing…".into(),
+                        };
+                        ui.label(detail);
+                    }
+                }
             }
         });
         ui.label(&self.status);
@@ -505,7 +593,7 @@ impl RomManager {
             Some(Action::Csv) => self.export_csv(report_index),
             Some(Action::Rebuild) => {
                 let selected = self.selected_games(report_index);
-                self.rebuild(report_index, &selected);
+                self.start_rebuild(report_index, &selected);
             }
             Some(Action::Verify) => {
                 if let Some(report) = self.reports.get(report_index) {
@@ -550,10 +638,12 @@ impl RomManager {
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
         self.verify = None;
+        self.rebuild_progress = Arc::new(Mutex::new(RebuildProgress::default()));
+        self.busy_kind = BusyKind::Scan;
         self.busy = true;
         self.status = "Scanning…".into();
         thread::spawn(move || {
-            let result = (|| -> Job {
+            let result = (|| -> ScanJob {
                 let mut report_progress = |scan: &ScanProgress| {
                     if let Ok(mut current) = progress.lock() {
                         *current = scan.clone();
@@ -569,7 +659,7 @@ impl RomManager {
                 }
                 Ok(reports)
             })();
-            let _ = tx.send(result);
+            let _ = tx.send(WorkerMessage::Scan(result));
         });
     }
 
@@ -616,53 +706,69 @@ impl RomManager {
         };
     }
 
-    fn rebuild(&mut self, report_index: usize, selected: &[usize]) {
-        let Some(report) = self.reports.get(report_index) else {
+    /// Starts a rebuild and its post-verify on the worker thread.
+    pub fn start_rebuild(&mut self, report_index: usize, selected: &[usize]) {
+        if self.busy {
+            return;
+        }
+        let Some(report) = self.reports.get(report_index).cloned() else {
             return;
         };
-        let result = rebuild(
-            report,
-            selected,
-            &RebuildOptions {
-                output: self.output.clone(),
-                move_files: self.move_files && !self.zip_sets,
-                format: if self.zip_sets && self.torrentzip {
-                    OutputFormat::TorrentZip
-                } else if self.zip_sets {
-                    OutputFormat::Zip
-                } else {
-                    OutputFormat::Loose
-                },
-                ..RebuildOptions::default()
+        let selected = selected.to_vec();
+        let options = RebuildOptions {
+            output: self.output.clone(),
+            move_files: self.move_files && !self.zip_sets,
+            format: if self.zip_sets && self.torrentzip {
+                OutputFormat::TorrentZip
+            } else if self.zip_sets {
+                OutputFormat::Zip
+            } else {
+                OutputFormat::Loose
             },
-        );
-        self.status = format!(
-            "Rebuilt {} files in {} archives, {} moved ({} skipped, {} errors) into {}",
-            result.written,
-            result.archives,
-            result.moved,
-            result.skipped,
-            result.errors.len(),
-            self.output.display()
-        );
-        if let Some(error) = result.errors.first() {
-            self.status.push_str(&format!(" — {error}"));
-        }
-        if result.errors.is_empty() {
-            // Verify the fresh output with the DAT that produced it. The scan
-            // deliberately bypasses the cache, so this cannot report a stale
-            // source hash as a rebuilt file.
-            match crate::rom_manager_view::verify_folder(report, &self.output) {
-                Ok(view) => {
-                    self.status =
-                        format!("{} — verification: {}", self.status, view.status_label());
-                    self.verify = Some(view);
+            ..RebuildOptions::default()
+        };
+        let output = self.output.clone();
+        let progress = Arc::new(Mutex::new(RebuildProgress {
+            games_total: selected.len(),
+            ..RebuildProgress::default()
+        }));
+        let worker_progress = Arc::clone(&progress);
+        let (tx, rx) = mpsc::channel();
+        self.rx = Some(rx);
+        self.rebuild_progress = progress;
+        self.busy_kind = BusyKind::Rebuild;
+        self.verify = None;
+        self.busy = true;
+        self.status = "Rebuilding…".into();
+        thread::spawn(move || {
+            let mut report_progress = |state: &RebuildProgress| {
+                if let Ok(mut current) = worker_progress.lock() {
+                    *current = state.clone();
                 }
-                Err(err) => {
-                    self.status = format!("{} — verification failed: {err}", self.status);
+            };
+            let result = rebuild_with_progress(&report, &selected, &options, &mut report_progress);
+            let verify = if result.errors.is_empty() {
+                if let Ok(mut current) = worker_progress.lock() {
+                    current.phase = RebuildPhase::Verifying;
+                    current.current = "Verifying output".into();
                 }
+                Some(verify_folder_with_progress(&report, &output, &mut |scan| {
+                    if let Ok(mut current) = worker_progress.lock() {
+                        current.verified_files = scan.files + scan.members;
+                        current.verified_bytes = scan.bytes;
+                    }
+                }))
+            } else {
+                None
+            };
+            if let Ok(mut current) = worker_progress.lock() {
+                current.phase = RebuildPhase::Done;
             }
-        }
+            let _ = tx.send(WorkerMessage::Rebuild(Ok(Box::new(RebuildOutcome {
+                result,
+                verify,
+            }))));
+        });
     }
 
     fn suggested_path(&self, report_index: usize, suffix: &str) -> PathBuf {
@@ -841,7 +947,7 @@ mod tests {
     use unko_rom_manager::{hash_bytes, parse_dat_str};
 
     #[test]
-    fn rebuild_opens_the_verification_panel() {
+    fn rebuild_runs_on_the_worker_and_verifies() {
         let dir = std::env::temp_dir().join(format!("unko-rm-postverify-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let source = dir.join("source");
@@ -869,7 +975,15 @@ mod tests {
         let mut manager = RomManager::new(dir.join("saves"), source);
         manager.output = output.clone();
         manager.reports = vec![report];
-        manager.rebuild(0, &[0]);
+        manager.start_rebuild(0, &[0]);
+        assert!(manager.busy);
+        assert_eq!(manager.busy_kind, BusyKind::Rebuild);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while manager.busy && std::time::Instant::now() < deadline {
+            manager.poll();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(!manager.busy, "worker did not finish: {}", manager.status);
         let view = manager.verify.as_ref().expect("auto verification panel");
         assert!(view.clean, "{}", view.summary);
         assert_eq!(view.found, 1);
@@ -878,6 +992,12 @@ mod tests {
             "status was {}",
             manager.status
         );
+        let progress = manager.rebuild_progress.lock().expect("progress");
+        assert_eq!(progress.phase, RebuildPhase::Done);
+        assert_eq!(progress.games_done, 1);
+        assert!(progress.written > 0);
+        assert!(progress.verified_files > 0);
+        drop(progress);
         let _ = fs::remove_dir_all(dir);
     }
 }
