@@ -79,6 +79,7 @@ pub struct AccuracyCore {
     ppu_reset: NesPpuResetBehavior,
     mmc3_alternate: bool,
     stereo_glasses: bool,
+    bandai_microphone: bool,
     cheats: Vec<NesCheat>,
 }
 
@@ -102,6 +103,7 @@ impl AccuracyCore {
             ppu_reset: NesPpuResetBehavior::Famicom,
             mmc3_alternate: false,
             stereo_glasses: false,
+            bandai_microphone: false,
             cheats: Vec::new(),
         }
     }
@@ -121,6 +123,7 @@ impl AccuracyCore {
     ) -> Result<(), CoreError> {
         system.set_mmc3_alternate(self.mmc3_alternate);
         system.set_famicom_3d_glasses(self.stereo_glasses);
+        system.set_bandai_microphone(self.bandai_microphone);
         // `Auto` keeps the timing the header declares; an explicit choice
         // overrides it.
         match options.region {
@@ -505,6 +508,13 @@ impl Core for AccuracyCore {
         }
     }
 
+    fn set_bandai_microphone(&mut self, pressed: bool) {
+        self.bandai_microphone = pressed;
+        if let Some(system) = self.system.as_mut() {
+            system.set_bandai_microphone(pressed);
+        }
+    }
+
     fn stereo_eye(&self) -> Option<unko_core::StereoEye> {
         self.system.as_ref().and_then(|system| {
             system.stereo_eye().map(|eye| match eye {
@@ -713,6 +723,31 @@ mod tests {
         rom[vector] = 0x00;
         rom[vector + 1] = 0x80;
         rom
+    }
+
+    #[test]
+    fn bandai_microphone_reaches_mapper_188_through_the_core_trait() {
+        let prg = 256 * 1024;
+        let mut rom = vec![0xFFu8; 16 + prg];
+        rom[0..4].copy_from_slice(b"NES\x1a");
+        rom[4] = 16;
+        rom[5] = 0;
+        rom[6] = 0xC0;
+        rom[7] = 0xB0;
+        let mut core = AccuracyCore::new();
+        core.load(&rom, &LoadOptions::default()).expect("load");
+        core.set_input(0, InputState::from_bits(0x01)); // A
+        core.set_bandai_microphone(true);
+        assert_eq!(
+            core.debug_peek(DebugSpace::Cpu, 0x6000).expect("read") & 0x07,
+            0b010
+        );
+        core.set_input(0, InputState::from_bits(0x02)); // B
+        core.set_bandai_microphone(false);
+        assert_eq!(
+            core.debug_peek(DebugSpace::Cpu, 0x6000).expect("read") & 0x07,
+            0b101
+        );
     }
 
     #[test]

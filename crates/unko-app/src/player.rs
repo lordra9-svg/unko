@@ -265,6 +265,8 @@ pub struct Player {
     pub stem: String,
     /// Core id, so state files never cross between implementations.
     pub core_id: String,
+    /// Effective mapper number (per-game override or header).
+    pub mapper: u16,
     /// Where states/SRAM live.
     pub save_dir: PathBuf,
     /// Last operator-facing message.
@@ -536,6 +538,10 @@ impl Player {
         }
 
         let core_id = core.info().id.to_string();
+        let mapper = properties
+            .mapper
+            .or_else(|| entry.header.as_ref().map(|header| header.mapper))
+            .unwrap_or(0);
         let mut message = String::new();
         if !entry.is_fds()
             && settings.region == Region::Auto
@@ -553,6 +559,7 @@ impl Player {
             title: entry.title.clone(),
             stem,
             core_id,
+            mapper,
             save_dir,
             message,
             texture_options: egui::TextureOptions::NEAREST,
@@ -1665,6 +1672,13 @@ impl Player {
     /// Reports the Famicom microphone state (`$4016` bit 2).
     pub fn set_microphone(&mut self, pressed: bool) {
         self.core.set_microphone(pressed);
+        self.core.set_bandai_microphone(pressed);
+    }
+
+    /// Effective mapper number (per-game override or header).
+    #[must_use]
+    pub const fn mapper(&self) -> u16 {
+        self.mapper
     }
 
     /// Replaces the active cheat overlay.

@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **639 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **643 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -79,9 +79,10 @@ passes with the alternate selector. The selector is exposed as
 
 `Mmc3` gained serialized PRG-RAM protection state, `FdsAudio` was rewritten,
 the FDS watchdog gained serialized reload state, the mouse added serialized
-port state, and the Famicom 3D System added its field latch, so the save-state
-magic is now **`UNKOST15`**; `UNKOST14` and older states are rejected by the
-normal bad-magic check. See `docs/accuracy-divergences.md` for the open
+port state, the Famicom 3D System added its field latch, and Karaoke Studio
+added mapper-188 microphone state, so the save-state magic is now
+**`UNKOST16`**; `UNKOST15` and older states are rejected by the normal
+bad-magic check. See `docs/accuracy-divergences.md` for the open
 mapper-suite items.
 
 ## Peripherals — SNES/Subor mouse (2026-11-15)
@@ -112,7 +113,7 @@ records every `$4016` write and samples OUT1 at the frame boundary, after the
 previous vertical blank and just before the next visible field, so each
 completed frame is tagged with the eye it was rendered for. The eye is exposed
 through `System::stereo_eye`; `Core::set_stereo_glasses` attaches or detaches
-the glasses. `UNKOST15` save states carry the attachment flag, latch and
+the glasses. `UNKOST16` save states carry the attachment flag, latch and
 current eye, so rewind and NetPlay rollback keep the correct eye.
 
 The desktop frontend offers **Settings → Video → Famicom 3D glasses** and
@@ -123,6 +124,19 @@ tools, not a shutter-glasses timing model; the game still runs at its normal
 60 Hz field rate. Unit tests cover the exact `$4016` bit-1 mapping for both
 eyes, the field-boundary sample, the attachment toggle, the state round trip
 and the anaglyph channel mapping.
+
+## Peripherals — Bandai Karaoke Studio (2026-11-15)
+
+Mapper 188 exposes the cartridge microphone at `$6000-$7FFF`: bit 0 is the A
+button (active low), bit 1 the B button (active low), bit 2 the 1-bit ADC
+input (0 while sound is detected) and bits 7-3 are CPU open bus. The mapper now
+claims that window, so reads reach the board instead of returning open bus.
+`System::set_bandai_microphone` reports the ADC state; the A/B bits follow
+controller port 1. The mapper serializes both buttons, the ADC state and its
+open-bus latch in `UNKOST16` states. Unit tests cover the exact bit mapping,
+the open-bus high bits, the CPU-bus path and a state round trip. No Karaoke
+Studio ROM is present locally, so this is validated against the NESdev protocol
+description rather than a title.
 
 ## CPU dummy fetches for RTS/RTI (2026-11-15)
 

@@ -63,6 +63,8 @@ pub struct System {
     stereo_latch: bool,
     /// Eye of the most recently completed field.
     stereo_eye: StereoEye,
+    /// Bandai Karaoke Studio microphone input (`$6000-$7FFF` bit 2).
+    bandai_microphone: bool,
     /// Regional timing (NTSC/PAL/Dendy).
     timing: Timing,
     /// Master-clock credit for fractional PPU dots per CPU cycle.
@@ -134,6 +136,7 @@ struct SystemStateRef<'a> {
     stereo_enabled: bool,
     stereo_latch: bool,
     stereo_eye: StereoEye,
+    bandai_microphone: bool,
     timing: Timing,
     ppu_credit: u32,
     phase: bool,
@@ -171,6 +174,7 @@ struct SystemState {
     stereo_enabled: bool,
     stereo_latch: bool,
     stereo_eye: StereoEye,
+    bandai_microphone: bool,
     timing: Timing,
     ppu_credit: u32,
     phase: bool,
@@ -774,6 +778,7 @@ impl System {
             stereo_enabled: false,
             stereo_latch: false,
             stereo_eye: StereoEye::Left,
+            bandai_microphone: false,
             timing,
             ppu_credit: 0,
             phase: false,
@@ -898,6 +903,24 @@ impl System {
         self.peripherals.microphone = pressed;
     }
 
+    /// Reports the Bandai Karaoke Studio microphone (`$6000-$7FFF` bit 2).
+    ///
+    /// The cartridge's A/B buttons are read from controller port 1; both are
+    /// synchronised here so a mapper 188 board sees the current input.
+    pub fn set_bandai_microphone(&mut self, pressed: bool) {
+        self.bandai_microphone = pressed;
+        self.sync_bandai_microphone();
+    }
+
+    fn sync_bandai_microphone(&mut self) {
+        let input = self.controllers[0];
+        self.cart.set_bandai_microphone(
+            input & 0x01 != 0,
+            input & 0x02 != 0,
+            self.bandai_microphone,
+        );
+    }
+
     /// Loads a Datach barcode for a mapper 157 cartridge.
     pub fn set_datach_barcode(&mut self, code: &str) -> bool {
         self.cart.set_datach_barcode(code)
@@ -947,6 +970,9 @@ impl System {
     pub fn set_controller(&mut self, port: usize, bits: u16) {
         if port < 4 {
             self.controllers[port] = bits as u8;
+            if port == 0 {
+                self.sync_bandai_microphone();
+            }
         }
     }
 
@@ -1216,7 +1242,7 @@ impl System {
     #[cfg(feature = "save-states")]
     pub fn save_state(&self) -> Result<Vec<u8>, String> {
         let mut out = Vec::new();
-        out.extend_from_slice(b"UNKOST15");
+        out.extend_from_slice(b"UNKOST16");
         out.extend_from_slice(&self.cart.fingerprint().to_le_bytes());
         let mut cart_state = Vec::new();
         self.cart.save_state(&mut cart_state)?;
@@ -1236,6 +1262,7 @@ impl System {
             stereo_enabled: self.stereo_enabled,
             stereo_latch: self.stereo_latch,
             stereo_eye: self.stereo_eye,
+            bandai_microphone: self.bandai_microphone,
             timing: self.timing,
             ppu_credit: self.ppu_credit,
             phase: self.phase,
@@ -1263,7 +1290,7 @@ impl System {
     /// Restores a state produced by [`System::save_state`].
     #[cfg(feature = "save-states")]
     pub fn load_state(&mut self, data: &[u8]) -> Result<(), String> {
-        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST15" {
+        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST16" {
             return Err("not an Unko state (bad magic/version)".into());
         }
         let fingerprint = u64::from_le_bytes(
@@ -1300,6 +1327,7 @@ impl System {
         self.stereo_enabled = state.stereo_enabled;
         self.stereo_latch = state.stereo_latch;
         self.stereo_eye = state.stereo_eye;
+        self.bandai_microphone = state.bandai_microphone;
         self.timing = state.timing;
         self.ppu_credit = state.ppu_credit;
         self.phase = state.phase;
@@ -3670,7 +3698,7 @@ mod tests {
     fn state_magic_is_current() {
         let system = System::from_ines(&synthetic_nrom(0)).expect("load");
         let state = system.save_state().expect("state");
-        assert_eq!(&state[..8], b"UNKOST15");
+        assert_eq!(&state[..8], b"UNKOST16");
         let mut restored = System::from_ines(&synthetic_nrom(0)).expect("load");
         restored.load_state(&state).expect("restore");
     }
@@ -3973,6 +4001,48 @@ mod tests {
         assert!(other.famicom_3d_glasses());
         assert_eq!(other.stereo_eye(), Some(StereoEye::Right));
         assert_eq!(saved, other.save_state().expect("re-save"));
+    }
+
+    #[test]
+    fn bandai_188_microphone_reaches_the_cpu_bus() {
+        let prg_len = 256 * 1024;
+        let mut rom = vec![0xFFu8; 16 + prg_len];
+        rom[0..4].copy_from_slice(b"NES\x1a");
+        rom[4] = 16;
+        rom[5] = 0;
+        rom[6] = 0xC0; // mapper 188 low nibble
+        rom[7] = 0xB0;
+        let mut system = System::from_ines(&rom).expect("load");
+        system.set_controller(0, 0x01); // A
+        system.set_bandai_microphone(true);
+        // A pressed -> bit 0 low, B released -> bit 1 high, ADC active low.
+        assert_eq!(CpuBus::read(&mut system, 0x6000) & 0x07, 0b010);
+        system.set_controller(0, 0x02); // B
+        system.set_bandai_microphone(false);
+        assert_eq!(CpuBus::read(&mut system, 0x6000) & 0x07, 0b101);
+    }
+
+    #[cfg(feature = "save-states")]
+    #[test]
+    fn bandai_188_microphone_round_trips_through_a_save_state() {
+        let prg_len = 256 * 1024;
+        let mut rom = vec![0xFFu8; 16 + prg_len];
+        rom[0..4].copy_from_slice(b"NES\x1a");
+        rom[4] = 16;
+        rom[5] = 0;
+        rom[6] = 0xC0;
+        rom[7] = 0xB0;
+        let mut system = System::from_ines(&rom).expect("load");
+        system.set_controller(0, 0x01);
+        system.set_bandai_microphone(true);
+        let saved = system.save_state().expect("save");
+        let mut other = System::from_ines(&rom).expect("load");
+        other.load_state(&saved).expect("load");
+        assert_eq!(
+            CpuBus::read(&mut other, 0x6000) & 0x07,
+            0b010,
+            "A and the microphone survive the state"
+        );
     }
 
     #[test]

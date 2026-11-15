@@ -838,6 +838,9 @@ pub trait Mapper: fmt::Debug + MapperState {
         false
     }
 
+    /// Sets the Bandai Karaoke Studio microphone and its A/B buttons.
+    fn set_bandai_microphone(&mut self, _a: bool, _b: bool, _microphone: bool) {}
+
     /// Datach X24C02 contents (256 bytes; empty for other boards).
     fn datach_eeprom(&self) -> Vec<u8> {
         Vec::new()
@@ -1463,6 +1466,11 @@ impl Cartridge {
     #[must_use]
     pub fn datach_eeprom(&self) -> Vec<u8> {
         self.mapper.datach_eeprom()
+    }
+
+    /// Sets the Bandai Karaoke Studio microphone and A/B buttons.
+    pub fn set_bandai_microphone(&mut self, a: bool, b: bool, microphone: bool) {
+        self.mapper.set_bandai_microphone(a, b, microphone);
     }
 
     /// Restores the Datach X24C02 contents.
@@ -15597,6 +15605,10 @@ pub struct Bandai188 {
     chr: Vec<u8>,
     prg_bank: u8,
     mirroring: Mirroring,
+    a_pressed: bool,
+    b_pressed: bool,
+    microphone: bool,
+    open_bus: u8,
 }
 
 impl Bandai188 {
@@ -15606,6 +15618,10 @@ impl Bandai188 {
             chr,
             prg_bank: 0,
             mirroring: header.mirroring,
+            a_pressed: false,
+            b_pressed: false,
+            microphone: false,
+            open_bus: 0xFF,
         }
     }
 
@@ -15621,7 +15637,13 @@ impl Bandai188 {
 impl Mapper for Bandai188 {
     fn prg_read(&self, address: u16) -> u8 {
         match address {
-            0x6000..=0x7FFF => 0xFF,
+            0x6000..=0x7FFF => {
+                // Bits 0/1 are active-low A/B; bit 2 is the 1-bit ADC, which
+                // reads 0 while sound is detected. Bits 7-3 are open bus.
+                let buttons = u8::from(!self.a_pressed) | (u8::from(!self.b_pressed) << 1);
+                let adc = if self.microphone { 0 } else { 0x04 };
+                (self.open_bus & 0xF8) | buttons | adc
+            }
             0x8000..=0xBFFF => self.prg_16k(usize::from(self.prg_bank), address),
             0xC000..=0xFFFF => self.prg_16k(7, address),
             _ => 0,
@@ -15659,6 +15681,20 @@ impl Mapper for Bandai188 {
 
     fn mirroring(&self) -> Mirroring {
         self.mirroring
+    }
+
+    fn prg_rom_at_6000(&self) -> bool {
+        true
+    }
+
+    fn set_open_bus(&mut self, value: u8) {
+        self.open_bus = value;
+    }
+
+    fn set_bandai_microphone(&mut self, a: bool, b: bool, microphone: bool) {
+        self.a_pressed = a;
+        self.b_pressed = b;
+        self.microphone = microphone;
     }
 
     fn number(&self) -> u16 {
@@ -38293,6 +38329,22 @@ pub(crate) mod tests {
         assert_eq!(cart.cpu_read(0xC000), 14);
         cart.cpu_write(0x8020, 0x30);
         assert_eq!(cart.mirroring(), Mirroring::Horizontal);
+    }
+
+    #[test]
+    fn bandai_188_karaoke_microphone_reads_buttons_and_adc() {
+        let rom = synth_banked_ff(188, 256, 0);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        assert!(cart.prg_rom_at_6000());
+        cart.set_open_bus(0b1010_0101);
+        // Idle: A/B released (bits 0/1 high), ADC high, high bits open bus.
+        assert_eq!(cart.cpu_read(0x6000), 0b1010_0111);
+        // A is active-low on bit 0.
+        cart.set_bandai_microphone(true, false, false);
+        assert_eq!(cart.cpu_read(0x6000), 0b1010_0110);
+        // B is active-low on bit 1 and the ADC reads 0 while sound is present.
+        cart.set_bandai_microphone(false, true, true);
+        assert_eq!(cart.cpu_read(0x6000), 0b1010_0001);
     }
 
     #[test]

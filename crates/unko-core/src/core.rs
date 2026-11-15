@@ -98,6 +98,12 @@ pub trait Core {
     /// Reports the Famicom microphone state (`$4016` bit 2).
     fn set_microphone(&mut self, _pressed: bool) {}
 
+    /// Reports the Bandai Karaoke Studio microphone (`$6000-$7FFF` bit 2).
+    ///
+    /// The A/B buttons come from controller port 1. Cores without a mapper
+    /// 188 cartridge ignore it.
+    fn set_bandai_microphone(&mut self, _pressed: bool) {}
+
     /// Loads a Datach barcode for a mapper 157 cartridge.
     fn set_datach_barcode(&mut self, _code: &str) -> bool {
         false

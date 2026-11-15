@@ -2478,6 +2478,10 @@ impl App {
         let mut datach_code = self.datach_code.clone();
         let mut datach_scan = false;
         let has_player = self.player.is_some();
+        let karaoke = self
+            .player
+            .as_ref()
+            .is_some_and(|player| player.mapper() == 188);
         let mut body = |ui: &mut egui::Ui| {
             ui.heading("NES ports");
             ui.label(
@@ -2512,6 +2516,7 @@ impl App {
             }
             if settings.port1_device == PortDevice::Microphone
                 || settings.port2_device == PortDevice::Microphone
+                || karaoke
             {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
@@ -2520,6 +2525,16 @@ impl App {
                         "Microphone input (hold while making noise)",
                     );
                 });
+                if karaoke {
+                    ui.label(
+                        RichText::new(
+                            "Karaoke Studio: the cartridge microphone maps here; A/B \
+                             buttons come from controller port 1.",
+                        )
+                        .weak()
+                        .small(),
+                    );
+                }
             }
             ui.add_space(10.0);
             ui.separator();
@@ -5852,7 +5867,7 @@ fn advanced_tab(ui: &mut egui::Ui, settings: &mut Settings) {
     ui.heading("Advanced");
     ui.add_space(8.0);
     ui.label("Core: Unko NES accuracy core");
-    ui.label("State format: UNKOST15, ROM-fingerprinted and core-tagged");
+    ui.label("State format: UNKOST16, ROM-fingerprinted and core-tagged");
     ui.label("Settings file: unko.conf");
     ui.add_space(10.0);
     ui.separator();
