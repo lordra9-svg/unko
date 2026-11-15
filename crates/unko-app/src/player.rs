@@ -1669,6 +1669,21 @@ impl Player {
         self.core.set_sample_rate(rate);
     }
 
+    /// Whether the loaded image is a Vs. System cabinet board.
+    pub fn is_vs_system(&self) -> bool {
+        self.core.is_vs_system()
+    }
+
+    /// Sets Vs. System service/DIP/primary input.
+    pub fn set_vs_input(&mut self, service: bool, dips: u8, primary: bool) {
+        self.core.set_vs_input(service, dips, primary);
+    }
+
+    /// Inserts a Vs. System coin into slot 0 or 1.
+    pub fn insert_vs_coin(&mut self, slot: usize) {
+        self.core.insert_vs_coin(slot);
+    }
+
     /// Sends a Miracle Piano note toward the NES software (`on` = Note On).
     pub fn set_piano_note(&mut self, note: u8, on: bool) {
         self.core.set_piano_note(note, if on { 0x50 } else { 0 });

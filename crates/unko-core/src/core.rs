@@ -104,6 +104,17 @@ pub trait Core {
     /// 188 cartridge ignore it.
     fn set_bandai_microphone(&mut self, _pressed: bool) {}
 
+    /// Whether the loaded image is a Vs. System cabinet board.
+    fn is_vs_system(&self) -> bool {
+        false
+    }
+
+    /// Sets the Vs. System service button, DIP switches and CPU side.
+    fn set_vs_input(&mut self, _service: bool, _dips: u8, _primary: bool) {}
+
+    /// Inserts a Vs. System coin into slot 0 (left) or 1 (right).
+    fn insert_vs_coin(&mut self, _slot: usize) {}
+
     /// Sends a Miracle Piano note toward the NES software.
     ///
     /// `velocity` 0 is a Note Off; a non-zero value is a Note On on channel 0.

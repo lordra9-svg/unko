@@ -65,6 +65,12 @@ pub struct System {
     stereo_eye: StereoEye,
     /// Bandai Karaoke Studio microphone input (`$6000-$7FFF` bit 2).
     bandai_microphone: bool,
+    /// Vs. System coin/service/DIP state.
+    vs_input: VsInput,
+    /// Last `$4020-$5FFF` coin-counter latch (Vs. System).
+    vs_coin_latch: bool,
+    /// Frames remaining on the Vs. coin contact pulse.
+    vs_coin_frames: u8,
     /// Regional timing (NTSC/PAL/Dendy).
     timing: Timing,
     /// Master-clock credit for fractional PPU dots per CPU cycle.
@@ -137,6 +143,9 @@ struct SystemStateRef<'a> {
     stereo_latch: bool,
     stereo_eye: StereoEye,
     bandai_microphone: bool,
+    vs_input: VsInput,
+    vs_coin_latch: bool,
+    vs_coin_frames: u8,
     timing: Timing,
     ppu_credit: u32,
     phase: bool,
@@ -175,6 +184,9 @@ struct SystemState {
     stereo_latch: bool,
     stereo_eye: StereoEye,
     bandai_microphone: bool,
+    vs_input: VsInput,
+    vs_coin_latch: bool,
+    vs_coin_frames: u8,
     timing: Timing,
     ppu_credit: u32,
     phase: bool,
@@ -235,6 +247,19 @@ pub enum PortDevice {
     /// Miracle Piano MIDI transport (controller port 1): OUT0 direction is
     /// selected by the strobe duration and each read clocks one serial bit.
     MiraclePiano,
+}
+
+/// Vs. System coin/service/DIP input state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct VsInput {
+    /// Coin inputs: bit 0 = left/coin 1, bit 1 = right/coin 2.
+    pub coins: u8,
+    /// Service button.
+    pub service: bool,
+    /// DIP switches 1-8, bit 0 = switch 1.
+    pub dips: u8,
+    /// True when this machine is the primary CPU (bit 7 of `$4016` = 0).
+    pub primary: bool,
 }
 
 /// Eye selected by the Famicom 3D System on the expansion port.
@@ -851,6 +876,12 @@ impl System {
             stereo_latch: false,
             stereo_eye: StereoEye::Left,
             bandai_microphone: false,
+            vs_input: VsInput {
+                primary: true,
+                ..VsInput::default()
+            },
+            vs_coin_latch: false,
+            vs_coin_frames: 0,
             timing,
             ppu_credit: 0,
             phase: false,
@@ -882,7 +913,7 @@ impl System {
             dma: None,
         };
         let header = system.cart.header();
-        system.ppu.set_ppu_model(if header.console_type == 1 {
+        system.ppu.set_ppu_model(if system.is_vs_system() {
             PpuModel::from_vs_nibble(header.vs_ppu)
         } else if header.console_type == 2 {
             // PlayChoice-10 uses the 2C03 RGB PPU.
@@ -940,6 +971,9 @@ impl System {
         if self.ppu_reset == PpuResetBehavior::Nes {
             self.ppu.soft_reset_registers();
         }
+        self.vs_coin_latch = false;
+        self.vs_coin_frames = 0;
+        self.vs_input.coins = 0;
         self.apply_ram_cheats();
     }
 
@@ -979,6 +1013,16 @@ impl System {
         self.stereo_enabled.then_some(self.stereo_eye)
     }
 
+    /// Whether the image is a Vs. System cabinet board.
+    ///
+    /// iNES 1.0 marks Vs. in flags-7 bits 0-1; mapper 99 is only used by Vs.
+    /// boards, so an unmarked mapper-99 image still counts.
+    #[must_use]
+    pub fn is_vs_system(&self) -> bool {
+        let header = self.cart.header();
+        header.console_type == 1 || self.cart.mapper() == 99
+    }
+
     /// Sets the Famicom microphone report (`$4016` bit 2).
     pub fn set_microphone(&mut self, pressed: bool) {
         self.peripherals.microphone = pressed;
@@ -991,6 +1035,48 @@ impl System {
     pub fn set_bandai_microphone(&mut self, pressed: bool) {
         self.bandai_microphone = pressed;
         self.sync_bandai_microphone();
+    }
+
+    /// Sets the Vs. System service button, DIP switches and CPU side.
+    ///
+    /// Coin contacts are separate events: see [`Self::insert_vs_coin`].
+    pub fn set_vs_input(&mut self, service: bool, dips: u8, primary: bool) {
+        self.vs_input.service = service;
+        self.vs_input.dips = dips;
+        self.vs_input.primary = primary;
+    }
+
+    /// Inserts a coin into slot 0 (left) or 1 (right).
+    ///
+    /// The contact stays closed for four frames (~67 ms at 60 Hz), matching
+    /// the 40-70 ms the hardware coin acceptor reports. Games that see a coin
+    /// bit held too long refuse the credit.
+    pub fn insert_vs_coin(&mut self, slot: usize) {
+        self.set_vs_coin(slot, true);
+        if slot < 2 {
+            self.vs_coin_frames = 4;
+        }
+    }
+
+    /// Drives one Vs. System coin-slot contact without a timeout.
+    pub fn set_vs_coin(&mut self, slot: usize, inserted: bool) {
+        if slot < 2 {
+            if inserted {
+                self.vs_input.coins |= 1 << slot;
+            } else {
+                self.vs_input.coins &= !(1 << slot);
+            }
+        }
+    }
+
+    /// Ages the coin contacts; they read true for four frames.
+    fn tick_vs_coins(&mut self) {
+        if self.vs_coin_frames > 0 {
+            self.vs_coin_frames -= 1;
+            if self.vs_coin_frames == 0 {
+                self.vs_input.coins = 0;
+            }
+        }
     }
 
     fn sync_bandai_microphone(&mut self) {
@@ -1339,7 +1425,7 @@ impl System {
     #[cfg(feature = "save-states")]
     pub fn save_state(&self) -> Result<Vec<u8>, String> {
         let mut out = Vec::new();
-        out.extend_from_slice(b"UNKOST19");
+        out.extend_from_slice(b"UNKOST20");
         out.extend_from_slice(&self.cart.fingerprint().to_le_bytes());
         let mut cart_state = Vec::new();
         self.cart.save_state(&mut cart_state)?;
@@ -1360,6 +1446,9 @@ impl System {
             stereo_latch: self.stereo_latch,
             stereo_eye: self.stereo_eye,
             bandai_microphone: self.bandai_microphone,
+            vs_input: self.vs_input,
+            vs_coin_latch: self.vs_coin_latch,
+            vs_coin_frames: self.vs_coin_frames,
             timing: self.timing,
             ppu_credit: self.ppu_credit,
             phase: self.phase,
@@ -1387,7 +1476,7 @@ impl System {
     /// Restores a state produced by [`System::save_state`].
     #[cfg(feature = "save-states")]
     pub fn load_state(&mut self, data: &[u8]) -> Result<(), String> {
-        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST19" {
+        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST20" {
             return Err("not an Unko state (bad magic/version)".into());
         }
         let fingerprint = u64::from_le_bytes(
@@ -1425,6 +1514,9 @@ impl System {
         self.stereo_latch = state.stereo_latch;
         self.stereo_eye = state.stereo_eye;
         self.bandai_microphone = state.bandai_microphone;
+        self.vs_input = state.vs_input;
+        self.vs_coin_latch = state.vs_coin_latch;
+        self.vs_coin_frames = state.vs_coin_frames;
         self.timing = state.timing;
         self.ppu_credit = state.ppu_credit;
         self.phase = state.phase;
@@ -1488,6 +1580,7 @@ impl System {
         // Tag the completed field with the eye sampled at its start.
         if self.ppu.frames != start {
             self.stereo_eye = field_eye;
+            self.tick_vs_coins();
         }
         self.ppu.present();
         self.resampler.drain_into(&mut self.audio);
@@ -1774,6 +1867,23 @@ impl System {
                     }
                 }
             }
+        }
+    }
+
+    fn read_controller_input(&mut self, port: usize) -> u8 {
+        let value = self.read_controller(port);
+        if !self.is_vs_system() {
+            return value;
+        }
+        let bit = value & 0x01;
+        if port == 0 {
+            let mut high = u8::from(!self.vs_input.primary) << 7;
+            high |= (self.vs_input.coins & 0x03) << 5;
+            high |= (self.vs_input.dips & 0x03) << 3;
+            high |= u8::from(self.vs_input.service) << 2;
+            high | bit
+        } else {
+            (self.vs_input.dips & 0xFC) | bit
         }
     }
 
@@ -2257,10 +2367,14 @@ impl System {
             0x0000..=0x1FFF => self.ram[usize::from(address) & 0x07FF],
             0x2000..=0x3FFF => self.ppu.read_register(address),
             0x4015 => self.apu.read_status(),
-            0x4016 => self.read_controller(0),
-            0x4017 => self.read_controller(1),
+            0x4016 => self.read_controller_input(0),
+            0x4017 => self.read_controller_input(1),
             0x4018..=0x401F => self.open_bus,
             0x4020..=0x5FFF => {
+                // Reading the Vs. coin-counter port latches open bus bit 0.
+                if self.cart.mapper() == 99 {
+                    self.vs_coin_latch = self.open_bus & 0x01 != 0;
+                }
                 if address == 0x5204 {
                     let value = self.cart.cpu_read(address);
                     self.cart.acknowledge_irq();
@@ -2354,11 +2468,16 @@ impl CpuBus for System {
                 let status = self.apu.read_status();
                 (status & 0xDF) | (self.internal_bus & 0x20)
             }
-            0x4016 => self.read_controller(0),
-            0x4017 => self.read_controller(1),
+            0x4016 => self.read_controller_input(0),
+            0x4017 => self.read_controller_input(1),
             0x4018..=0x401F => self.open_bus,
             0x4020..=0x5FFF => {
-                if address == 0x5204 {
+                if self.is_vs_system() {
+                    // Reading the coin-counter port latches open bus bit 0.
+                    self.vs_coin_latch = self.open_bus & 0x01 != 0;
+                    drives_bus = false;
+                    self.open_bus
+                } else if address == 0x5204 {
                     let value = self.cart.cpu_read(address);
                     self.cart.acknowledge_irq();
                     value
@@ -2469,6 +2588,7 @@ impl CpuBus for System {
                     // The 3D System listens to OUT1: bit 1 = 0 selects the
                     // left eye, 1 the right eye. OUT0 is the pad strobe.
                     self.stereo_latch = value & 0x02 != 0;
+                    self.cart.write_4016(value);
                     self.peripherals.keyboard.write(value);
                     self.peripherals.subor.write(value);
                     if self.strobe {
@@ -2495,6 +2615,9 @@ impl CpuBus for System {
                         self.peripherals.four_score_pads = self.controllers;
                     }
                 }
+            }
+            0x4020..=0x5FFF if self.is_vs_system() => {
+                self.vs_coin_latch = value & 0x01 != 0;
             }
             0x4020..=0xFFFF => {
                 #[cfg(feature = "apu-trace")]
@@ -3864,7 +3987,7 @@ mod tests {
     fn state_magic_is_current() {
         let system = System::from_ines(&synthetic_nrom(0)).expect("load");
         let state = system.save_state().expect("state");
-        assert_eq!(&state[..8], b"UNKOST19");
+        assert_eq!(&state[..8], b"UNKOST20");
         let mut restored = System::from_ines(&synthetic_nrom(0)).expect("load");
         restored.load_state(&state).expect("restore");
     }
@@ -4170,6 +4293,78 @@ mod tests {
     }
 
     #[test]
+    fn vs_input_reports_coins_service_and_dips() {
+        let rom = synthetic_vs(32);
+        let mut system = System::from_ines(&rom).expect("load");
+        assert_eq!(system.read(0x4016) & 0xFE, 0);
+        assert_eq!(system.read(0x4017) & 0xFE, 0);
+
+        // DIP1=1, DIP3=1, DIP6=1, DIP8=1; secondary CPU and service on.
+        system.set_vs_input(true, 0b1010_0101, false);
+        assert_eq!(system.read(0x4016) & 0xFE, 0x8C);
+        assert_eq!(system.read(0x4017) & 0xFE, 0xA4);
+
+        // The default harness wires both acceptors to $4016 bit 5; the second
+        // slot is separately wired as bit 6.
+        system.insert_vs_coin(0);
+        assert_eq!(system.read(0x4016) & 0xFE, 0xAC);
+        system.insert_vs_coin(1);
+        assert_eq!(system.read(0x4016) & 0xFE, 0xEC);
+    }
+
+    #[test]
+    fn vs_coin_contact_expires_after_four_frames() {
+        let rom = synthetic_vs(32);
+        let mut system = System::from_ines(&rom).expect("load");
+        // The power-on presentation frame runs no CPU cycles.
+        system.run_frame();
+        system.insert_vs_coin(0);
+        assert_ne!(system.read(0x4016) & 0x20, 0);
+        for _ in 0..4 {
+            system.run_frame();
+        }
+        assert_eq!(system.read(0x4016) & 0x60, 0);
+    }
+
+    #[test]
+    fn vs_coin_counter_latches_open_bus_bit_zero() {
+        let rom = synthetic_vs(32);
+        let mut system = System::from_ines(&rom).expect("load");
+        // Reading internal RAM puts a known value on the open bus.
+        system.write(0x0010, 1);
+        assert_eq!(system.read(0x0010), 1);
+        assert_eq!(system.read(0x4020), 1, "undriven port keeps open bus");
+        assert!(system.vs_coin_latch);
+        system.write(0x0010, 0);
+        assert_eq!(system.read(0x0010), 0);
+        assert_eq!(system.read(0x4020), 0);
+        assert!(!system.vs_coin_latch);
+
+        // A write sets the counter latch; reset clears it.
+        system.write(0x5FFF, 1);
+        assert!(system.vs_coin_latch);
+        system.reset();
+        assert!(!system.vs_coin_latch);
+    }
+
+    #[cfg(feature = "save-states")]
+    #[test]
+    fn vs_input_and_coin_latch_round_trip_in_the_state() {
+        let rom = synthetic_vs(32);
+        let mut system = System::from_ines(&rom).expect("load");
+        system.set_vs_input(true, 0x5A, false);
+        system.insert_vs_coin(1);
+        system.write(0x4020, 1);
+        let state = system.save_state().expect("save");
+
+        let mut restored = System::from_ines(&rom).expect("load");
+        restored.load_state(&state).expect("restore");
+        assert_eq!(restored.vs_input, system.vs_input);
+        assert!(restored.vs_coin_latch);
+        assert_eq!(restored.vs_coin_frames, 4);
+    }
+
+    #[test]
     fn vs_nes2_header_selects_the_rgb_ppu_model() {
         let mut rom = synthetic_nrom(0);
         rom[7] = (rom[7] & 0xFC) | 0x09; // NES 2.0, VS. System
@@ -4180,6 +4375,23 @@ mod tests {
         rom[7] = (rom[7] & 0xFC) | 0x0A; // NES 2.0, PlayChoice-10
         let pc10 = System::from_ines(&rom).expect("load");
         assert_eq!(pc10.ppu.ppu_model(), PpuModel::Ppu2C03);
+
+        // An unmarked iNES mapper-99 board is still a Vs. System and defaults
+        // to the common 2C03 RGB PPU (no PRG/CHR hash table is available).
+        let vs99 = System::from_ines(&synthetic_vs(32)).expect("load");
+        assert!(vs99.is_vs_system());
+        assert_eq!(vs99.ppu.ppu_model(), PpuModel::Ppu2C03);
+    }
+
+    #[test]
+    fn vs_marked_nrom_boards_get_cabinet_input() {
+        let mut rom = synthetic_nrom(0);
+        rom[7] = (rom[7] & 0xFC) | 0x01; // iNES console type: Vs. System
+        let mut system = System::from_ines(&rom).expect("load");
+        assert!(system.is_vs_system());
+        assert_eq!(system.cart.mapper(), 0);
+        system.set_vs_input(false, 0x01, true);
+        assert_eq!(system.read(0x4016) & 0x08, 0x08, "DIP 1 on a Vs. NROM");
     }
 
     #[test]
@@ -4247,6 +4459,27 @@ mod tests {
             error < 8.0,
             "cycle accounting drifted by {error}: {elapsed} vs {expected}"
         );
+    }
+
+    /// A mapper-99 image whose PRG/RAM/stack area loops forever.
+    fn synthetic_vs(prg_kib: usize) -> Vec<u8> {
+        let prg_len = prg_kib * 1024;
+        let mut rom = vec![0u8; 16 + prg_len + 8 * 1024];
+        rom[0..4].copy_from_slice(b"NES\x1a");
+        rom[4] = (prg_len / (16 * 1024)) as u8;
+        rom[5] = 1;
+        rom[6] = 0x30;
+        rom[7] = 0x60;
+        for byte in &mut rom[16..16 + prg_len] {
+            *byte = 0xEA;
+        }
+        rom[16] = 0x4C;
+        rom[17] = 0x00;
+        rom[18] = 0x80;
+        let vector = 16 + prg_len - 4;
+        rom[vector] = 0x00;
+        rom[vector + 1] = 0x80;
+        rom
     }
 
     fn synthetic_nrom(seed: u8) -> Vec<u8> {

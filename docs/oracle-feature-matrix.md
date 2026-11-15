@@ -21,7 +21,7 @@ emulator's scope.
 | AccuracyCoin | — (not claimed) | 100% claimed (v2.x) | not claimed | not claimed | test-ROM reference testbed | ranked high | 146/146 | **146/146 non-DRAW (146/151, 5 DRAW)** |
 | Mappers | many boards; NES core subset | 290+ | broad | broad + NstDatabase | NRS: all NES 2.0 mappers | broad + UNIF | 208 families | **245 implementations incl. 446** |
 | FDS | Yes | Yes | Yes | Yes | Yes | Yes (QD too) | Yes (real BIOS) | **core/CLI/desktop loading with a real BIOS; disk speed and auto-swap queued** |
-| VS. System / PlayChoice | VS | VS | VS (fixed list) | VS + PlayChoice-10 | VS | VS Uni + Dual | VS + PlayChoice-10 | **Partial** (RGB PPUs/security; mapper 99/input pending) |
+| VS. System / PlayChoice | VS | VS | VS (fixed list) | VS + PlayChoice-10 | VS | VS Uni + Dual | VS + PlayChoice-10 | **Partial** (mapper 99, input and RGB PPUs; DualSystem sub-CPU/PC10 assets pending) |
 | PAL / Dendy | region models | Yes | Yes (NTSC-PAL hybrid too) | Yes | Yes | Yes | Yes | **Yes** |
 | Expansion audio | VRC6/7, MMC5, N163, 5B, FDS, EPSM | VRC6/7, MMC5, N163, 5B, FDS, EPSM | VRC6/7, MMC5, N163, 5B, FDS | VRC6/7, MMC5, N163, 5B, FDS | VRC7, MMC5, N163, 5B, FDS (DLLs) | VRC6/7, MMC5, N163, 5B, FDS | VRC6/7, MMC5, N163, 5B, FDS | **VRC6/7, MMC5, N163, 5B, FDS** |
 | Devices | gamepad, Zapper, Family BASIC keyboard, data recorder | pad, Zapper, Power Pad, Four Score, paddle, keyboard, microphone, more | pad, Four Score, Zapper, Power Pad, Arkanoid, Space Shadow, Family Keyboard | pad, Zapper, Power Pad, Four Score, exotic peripherals | pad, Zapper, Four Score, Game Genie | pad, Zapper, Power Pad, paddle, Family/Subor keyboard, tape, microphone | Four Score, Zapper, paddle, Power Pad, keyboards, mouse | **pad, Zapper, Paddle, Power Pad + Family Trainer, Four Score, Family BASIC keyboard, Subor keyboard, microphone, tape loopback, Miracle Piano transport with SysEx replies and a 49-key input, Datach scanner + X24C02/X24C01 EEPROMs** |
@@ -151,10 +151,11 @@ matrix above is the comparison; this list is the work queue.
    composite signal model.
 2. **IPS/BPS soft-patching and a NES 2.0 header editor/repair database**
    (missing-header warning only today).
-3. **VS. System / PlayChoice-10**: the 2C03/2C04-xxxx/2C05 palettes, RGB
-   emphasis, 2C05 register swap and `$2002` security identifiers are in.
-   Remaining: mapper 99/VS input, coin/service/DIP switches, VS BIOS/ROMs and
-   PC10 game ROMs. PlayChoice-10 BIOS is available.
+3. **VS. System / PlayChoice-10**: mapper 99 banking, four-screen VRAM,
+   OUT1-gated work RAM, coin/service/DIP input, the coin counter, the
+   2C03/2C04-xxxx/2C05 palettes and 2C05 security are in. Remaining: VS
+   BIOS/ROM boot validation, per-title DIP defaults, the DualSystem
+   sub-CPU/watchdog and PC10 game ROMs/input. PlayChoice-10 BIOS is available.
 4. **FDS depth**: loading, BIOS selection, side switching, disk-write
    persistence, 1/2/4/8x disk speed and opt-in auto side swap are in.
 5. **Peripherals**: the SNES/Subor mouse, Famicom 3D System (anaglyph

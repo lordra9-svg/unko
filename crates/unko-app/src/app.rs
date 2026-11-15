@@ -218,6 +218,9 @@ pub struct App {
     microphone: bool,
     piano_last: Option<u8>,
     piano_key_held: [bool; 128],
+    vs_service: bool,
+    vs_dips: u8,
+    vs_primary: bool,
     microphone_input: Option<MicrophoneInput>,
     microphone_devices: Vec<String>,
     microphone_error: Option<String>,
@@ -381,6 +384,9 @@ impl App {
             microphone: false,
             piano_last: None,
             piano_key_held: [false; 128],
+            vs_service: false,
+            vs_dips: 0,
+            vs_primary: true,
             microphone_input: None,
             microphone_devices: Vec::new(),
             microphone_error: None,
@@ -2552,6 +2558,14 @@ impl App {
         let microphone_devices = self.microphone_devices.clone();
         let mut piano_last = self.piano_last;
         let mut piano_events = Vec::new();
+        let vs_system = self
+            .player
+            .as_ref()
+            .is_some_and(|player| player.is_vs_system());
+        let mut vs_service = self.vs_service;
+        let mut vs_coin_events = Vec::new();
+        let mut vs_dips = self.vs_dips;
+        let mut vs_primary = self.vs_primary;
         let mut body = |ui: &mut egui::Ui| {
             ui.heading("NES ports");
             ui.label(
@@ -2669,6 +2683,51 @@ impl App {
                 ui.checkbox(&mut settings.piano_keyboard, "Computer keyboard input");
                 piano_events = crate::piano::keyboard(ui, &mut piano_last);
             }
+            if vs_system {
+                ui.add_space(10.0);
+                ui.separator();
+                ui.heading("Vs. System");
+                ui.label(
+                    RichText::new(
+                        "Each coin press closes the acceptor contact for about \
+                         67 ms, as on the arcade harness. DIP 1-8 and the \
+                         primary-CPU bit feed $4016/$4017.",
+                    )
+                    .weak()
+                    .small(),
+                );
+                ui.horizontal(|ui| {
+                    if ui.button("Coin 1").clicked() {
+                        vs_coin_events.push(0);
+                    }
+                    if ui.button("Coin 2").clicked() {
+                        vs_coin_events.push(1);
+                    }
+                    ui.checkbox(&mut vs_service, "Service");
+                    ui.checkbox(&mut vs_primary, "Primary CPU");
+                });
+                egui::Grid::new("vs-dips")
+                    .num_columns(4)
+                    .spacing([8.0, 2.0])
+                    .show(ui, |ui| {
+                        for index in 0..8 {
+                            let mut set = (vs_dips >> index) & 1 != 0;
+                            if ui
+                                .checkbox(&mut set, format!("DIP {}", index + 1))
+                                .changed()
+                            {
+                                if set {
+                                    vs_dips |= 1 << index;
+                                } else {
+                                    vs_dips &= !(1 << index);
+                                }
+                            }
+                            if index % 4 == 3 {
+                                ui.end_row();
+                            }
+                        }
+                    });
+            }
             ui.add_space(10.0);
             ui.separator();
             ui.heading("Gamepads");
@@ -2784,6 +2843,15 @@ impl App {
         }
         self.microphone = microphone;
         self.piano_last = piano_last;
+        self.vs_service = vs_service;
+        self.vs_dips = vs_dips;
+        self.vs_primary = vs_primary;
+        if let Some(player) = &mut self.player {
+            player.set_vs_input(vs_service, vs_dips, vs_primary);
+            for slot in vs_coin_events {
+                player.insert_vs_coin(slot);
+            }
+        }
         if !piano_events.is_empty() {
             if let Some(player) = &mut self.player {
                 for (note, on) in piano_events {
@@ -6038,7 +6106,7 @@ fn advanced_tab(ui: &mut egui::Ui, settings: &mut Settings) {
     ui.heading("Advanced");
     ui.add_space(8.0);
     ui.label("Core: Unko NES accuracy core");
-    ui.label("State format: UNKOST19, ROM-fingerprinted and core-tagged");
+    ui.label("State format: UNKOST20, ROM-fingerprinted and core-tagged");
     ui.label("Settings file: unko.conf");
     ui.add_space(10.0);
     ui.separator();

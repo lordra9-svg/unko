@@ -80,6 +80,7 @@ pub struct AccuracyCore {
     mmc3_alternate: bool,
     stereo_glasses: bool,
     bandai_microphone: bool,
+    vs_input: (bool, u8, bool),
     cheats: Vec<NesCheat>,
 }
 
@@ -104,6 +105,7 @@ impl AccuracyCore {
             mmc3_alternate: false,
             stereo_glasses: false,
             bandai_microphone: false,
+            vs_input: (false, 0, true),
             cheats: Vec::new(),
         }
     }
@@ -124,6 +126,7 @@ impl AccuracyCore {
         system.set_mmc3_alternate(self.mmc3_alternate);
         system.set_famicom_3d_glasses(self.stereo_glasses);
         system.set_bandai_microphone(self.bandai_microphone);
+        system.set_vs_input(self.vs_input.0, self.vs_input.1, self.vs_input.2);
         // `Auto` keeps the timing the header declares; an explicit choice
         // overrides it.
         match options.region {
@@ -512,6 +515,25 @@ impl Core for AccuracyCore {
         self.bandai_microphone = pressed;
         if let Some(system) = self.system.as_mut() {
             system.set_bandai_microphone(pressed);
+        }
+    }
+
+    fn is_vs_system(&self) -> bool {
+        self.system
+            .as_ref()
+            .is_some_and(unko_nes::System::is_vs_system)
+    }
+
+    fn set_vs_input(&mut self, service: bool, dips: u8, primary: bool) {
+        self.vs_input = (service, dips, primary);
+        if let Some(system) = self.system.as_mut() {
+            system.set_vs_input(service, dips, primary);
+        }
+    }
+
+    fn insert_vs_coin(&mut self, slot: usize) {
+        if let Some(system) = self.system.as_mut() {
+            system.insert_vs_coin(slot);
         }
     }
 

@@ -841,6 +841,9 @@ pub trait Mapper: fmt::Debug + MapperState {
     /// Sets the Bandai Karaoke Studio microphone and its A/B buttons.
     fn set_bandai_microphone(&mut self, _a: bool, _b: bool, _microphone: bool) {}
 
+    /// Handles a `$4016` write (Vs. System CHR/PRG bank select).
+    fn write_4016(&mut self, _value: u8) {}
+
     /// Datach EEPROM contents (256-byte X24C02 plus 128-byte X24C01 for
     /// mapper 157; empty for other boards).
     fn datach_eeprom(&self) -> Vec<u8> {
@@ -1020,6 +1023,7 @@ impl Cartridge {
         let prg_ram = vec![0; header.prg_ram_size.max(0x2000)];
         let mut mapper: Box<dyn Mapper> = match header.mapper {
             0 => Box::new(Nrom::new(prg_rom, chr, header)),
+            99 => Box::new(VsSystem::new(prg_rom, chr)),
             1 => Box::new(Mmc1::new(prg_rom, chr, prg_ram, header)),
             2 => Box::new(UxRom::new(prg_rom, chr, header)),
             3 => Box::new(CnRom::new(prg_rom, chr, header)),
@@ -1484,6 +1488,11 @@ impl Cartridge {
         self.mapper.set_bandai_microphone(a, b, microphone);
     }
 
+    /// Handles a `$4016` write (Vs. System CHR/PRG bank select).
+    pub fn write_4016(&mut self, value: u8) {
+        self.mapper.write_4016(value);
+    }
+
     /// Restores the Datach X24C02 contents.
     pub fn load_datach_eeprom(&mut self, bytes: &[u8]) {
         self.mapper.load_datach_eeprom(bytes);
@@ -1904,6 +1913,127 @@ impl Mapper for Nrom {
 
     fn number(&self) -> u16 {
         0
+    }
+}
+
+/// Nintendo Vs. System (mapper 99).
+///
+/// One 8 KiB PRG bank sits at `$8000` and three fixed 8 KiB banks at
+/// `$A000-$FFFF`. `$4016` bit 2 selects both the CHR bank and, on the 40 KiB
+/// *Vs. Gumshoe* image, the second PRG bank. The 2 KiB work RAM at
+/// `$6000-$7FFF` is mirrored across the window and only visible while `$4016`
+/// OUT1 is high. Nametables are always four-screen; there is no IRQ.
+///
+/// An undersized image leaves unpopulated sockets undriven, so reads from the
+/// missing PRG/CHR regions return the open bus instead of mirroring.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct VsSystem {
+    prg: Vec<u8>,
+    chr: Vec<u8>,
+    chr_ram: bool,
+    wram: Vec<u8>,
+    /// `$4016` bit 2: shared PRG/CHR bank select.
+    select: u8,
+    /// `$4016` OUT1: the primary CPU owns the `$6000` work RAM while high.
+    out1: bool,
+    open_bus: u8,
+}
+
+impl VsSystem {
+    fn new(prg: Vec<u8>, chr: Vec<u8>) -> Self {
+        let chr_ram = chr.is_empty();
+        Self {
+            prg,
+            chr: if chr_ram { vec![0; 0x2000] } else { chr },
+            chr_ram,
+            wram: vec![0; 0x800],
+            select: 0,
+            out1: false,
+            open_bus: 0,
+        }
+    }
+
+    fn prg_byte(&self, bank: usize, address: u16) -> u8 {
+        self.prg
+            .get(bank * 0x2000 + usize::from(address & 0x1FFF))
+            .copied()
+            .unwrap_or(self.open_bus)
+    }
+}
+
+impl Mapper for VsSystem {
+    fn prg_read(&self, address: u16) -> u8 {
+        match address {
+            0x6000..=0x7FFF => {
+                if self.out1 {
+                    self.wram[usize::from(address - 0x6000) & 0x07FF]
+                } else {
+                    self.open_bus
+                }
+            }
+            0x8000..=0x9FFF => {
+                // Only the 40 KiB image wires OUT2 to A13; smaller images keep
+                // bank 0 fixed here.
+                let bank = if self.prg.len() > 0x8000 {
+                    usize::from(self.select) << 2
+                } else {
+                    0
+                };
+                self.prg_byte(bank, address)
+            }
+            0xA000..=0xBFFF => self.prg_byte(1, address),
+            0xC000..=0xDFFF => self.prg_byte(2, address),
+            0xE000..=0xFFFF => self.prg_byte(3, address),
+            _ => self.open_bus,
+        }
+    }
+
+    fn prg_write(&mut self, address: u16, value: u8) {
+        if (0x6000..=0x7FFF).contains(&address) && self.out1 {
+            self.wram[usize::from(address - 0x6000) & 0x07FF] = value;
+        }
+    }
+
+    fn write_4016(&mut self, value: u8) {
+        self.out1 = value & 0x02 != 0;
+        self.select = (value >> 2) & 0x01;
+    }
+
+    fn prg_ram(&self) -> &[u8] {
+        if self.out1 {
+            &self.wram
+        } else {
+            &[]
+        }
+    }
+
+    fn chr_read(&self, address: u16) -> u8 {
+        if self.chr_ram {
+            return self.chr[usize::from(address & 0x1FFF)];
+        }
+        self.chr
+            .get(usize::from(self.select) * 0x2000 + usize::from(address & 0x1FFF))
+            .copied()
+            .unwrap_or(self.open_bus)
+    }
+
+    fn chr_write(&mut self, address: u16, value: u8) {
+        if self.chr_ram {
+            self.chr[usize::from(address & 0x1FFF)] = value;
+        }
+    }
+
+    fn mirroring(&self) -> Mirroring {
+        // The Vs. board always provides 4 KiB of nametable RAM.
+        Mirroring::FourScreen
+    }
+
+    fn set_open_bus(&mut self, value: u8) {
+        self.open_bus = value;
+    }
+
+    fn number(&self) -> u16 {
+        99
     }
 }
 
@@ -44407,6 +44537,68 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn vs_system_banks_chr_from_4016_and_keeps_prg_fixed() {
+        let rom = synth_banked(99, 32, 16);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        assert_eq!(cart.mapper(), 99);
+        assert_eq!(cart.mirroring(), Mirroring::FourScreen);
+        assert_eq!(cart.cpu_read(0x8000), 0);
+        assert_eq!(cart.cpu_read(0xA000), 1);
+        assert_eq!(cart.cpu_read(0xC000), 2);
+        assert_eq!(cart.cpu_read(0xE000), 3);
+        assert_eq!(cart.ppu_read(0x0000), 0x80);
+        // Bit 2 selects the second 8 KiB CHR bank; a 32 KiB image keeps bank 0
+        // at $8000.
+        cart.write_4016(0x04);
+        assert_eq!(cart.ppu_read(0x0000), 0x88);
+        assert_eq!(cart.cpu_read(0x8000), 0);
+    }
+
+    #[test]
+    fn vs_system_40k_image_switches_the_outer_prg_bank() {
+        // Vs. Gumshoe pads its 40 KiB PRG to 48 KiB (banks 0-4 plus an empty
+        // socket); bit 2 selects bank 0 or the alternate bank 4 at $8000.
+        let rom = synth_banked(99, 48, 8);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        assert_eq!(cart.cpu_read(0x8000), 0);
+        assert_eq!(cart.cpu_read(0xE000), 3);
+        cart.write_4016(0x04);
+        assert_eq!(cart.cpu_read(0x8000), 4);
+        assert_eq!(cart.cpu_read(0xA000), 1);
+        assert_eq!(cart.cpu_read(0xE000), 3);
+    }
+
+    #[test]
+    fn vs_system_wram_is_gated_by_out1_and_mirrored() {
+        let rom = synth_banked(99, 32, 8);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        cart.cpu_write(0x6000, 0x5A);
+        assert!(cart.prg_ram().is_empty(), "OUT1 low hides the work RAM");
+        cart.write_4016(0x02);
+        assert_eq!(cart.prg_ram().len(), 0x800);
+        cart.cpu_write(0x6000, 0x5A);
+        assert_eq!(cart.cpu_read(0x6000), 0x5A);
+        assert_eq!(cart.cpu_read(0x6800), 0x5A, "2 KiB mirrored across 8 KiB");
+        cart.write_4016(0x00);
+        cart.set_open_bus(0x3C);
+        assert_eq!(cart.cpu_read(0x6000), 0x3C);
+    }
+
+    #[test]
+    fn vs_system_undersize_chr_reads_the_open_bus() {
+        let rom = synth_banked(99, 32, 8);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        cart.set_open_bus(0xA5);
+        assert_eq!(cart.ppu_read(0x0000), 0x80);
+        cart.write_4016(0x04);
+        assert_eq!(
+            cart.ppu_read(0x0000),
+            0xA5,
+            "the unpopulated CHR socket is undriven"
+        );
+    }
+
+    #[test]
     fn axrom_switches_32k_bank_and_mirroring() {
         let mut rom = synth_banked(7, 64, 8);
         // AxROM has bus conflicts; make one write address readable as $FF so the
@@ -44968,6 +45160,7 @@ mapper_states!(
     Unrom517,
     UxRom,
     Vrc,
+    VsSystem,
     Vrc1,
     Vrc183,
     Vrc3_73,

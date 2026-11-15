@@ -14,9 +14,10 @@ Scope decisions from this pass:
 - Video: GPU shader pipeline first, then the NTSC presets on top of it.
 - Extra sprites and overclock: **not added** (deliberately not
   accuracy-preserving).
-- VS. System / PlayChoice-10: **partial**. The 2C03/2C04/2C05 RGB
-  palettes, RGB emphasis, 2C05 register swap and `$2002` security identifiers
-  are implemented; mapper 99, coins/DIPs, VS BIOS and game ROMs are still
+- VS. System / PlayChoice-10: **partial**. Mapper 99 banking, four-screen
+  VRAM, OUT1-gated work RAM, coin/service/DIP input, the coin counter and the
+  2C03/2C04/2C05 RGB palettes with 2C05 security are implemented; VS BIOS/game
+  ROMs, per-title DIP defaults, the DualSystem sub-CPU and PC10 input are still
   missing.
 - Peripherals: quick wins, then FDS, then the protocol-ROM items.
 - Tier 3 is now in scope following the latest "all three tiers" directive;
@@ -51,8 +52,9 @@ the transports and scanner are already synthetic-tested (see
   out of this pass (interpreter sandbox, credentials/network, pack format,
   rollback transport).
 - Extra sprites / sprite-limit toggle and CPU/PPU overclock.
-- VS. System / PlayChoice-10: remaining mapper 99, DIPs, coins and assets;
-  RGB PPU palettes and 2C05 security are now implemented.
+- VS. System / PlayChoice-10: remaining VS BIOS/game ROMs, per-title DIP
+  defaults, the DualSystem sub-CPU/watchdog and PC10 input; mapper 99, cabinet
+  input, RGB PPU palettes and 2C05 security are now implemented.
 - NES 2.0 header editor, repair database and IPS/BPS soft-patching (owner
   deferred the decision). The warning for missing NES 2.0 headers is in.
 

@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **671 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **680 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -81,9 +81,10 @@ passes with the alternate selector. The selector is exposed as
 the FDS watchdog gained serialized reload state, the mouse added serialized
 port state, the Famicom 3D System added its field latch, Karaoke Studio added
 mapper-188 microphone state, the Miracle Piano added its SysEx parser and
-firmware bytes, the Datach adapter added the external X24C01 array, and the PPU
-added its hardware model, so the save-state magic is now **`UNKOST19`**;
-`UNKOST18` and older states are rejected by the normal bad-magic check. See `docs/accuracy-divergences.md` for the open
+firmware bytes, the Datach adapter added the external X24C01 array, the PPU
+added its hardware model, and the Vs. System added mapper 99 plus coin/DIP
+input, so the save-state magic is now **`UNKOST20`**; `UNKOST19` and older
+states are rejected by the normal bad-magic check. See `docs/accuracy-divergences.md` for the open
 mapper-suite items.
 
 ## Peripherals — SNES/Subor mouse (2026-11-15)
@@ -114,7 +115,7 @@ records every `$4016` write and samples OUT1 at the frame boundary, after the
 previous vertical blank and just before the next visible field, so each
 completed frame is tagged with the eye it was rendered for. The eye is exposed
 through `System::stereo_eye`; `Core::set_stereo_glasses` attaches or detaches
-the glasses. `UNKOST19` save states carry the attachment flag, latch and
+the glasses. `UNKOST20` save states carry the attachment flag, latch and
 current eye, so rewind and NetPlay rollback keep the correct eye.
 
 The desktop frontend offers **Settings → Video → Famicom 3D glasses** and
@@ -129,8 +130,8 @@ and the anaglyph channel mapping.
 ## VS. System RGB PPUs (2026-11-15)
 
 The PPU now carries a hardware model selected from the NES 2.0 console type
-and VS. PPU-model nibble (byte 13 low nibble). iNES VS images without that
-nibble default to 2C03. The public NESdev palette tables are implemented
+and VS. PPU-model nibble (byte 13 low nibble). iNES VS images, including
+unmarked mapper-99 boards, default to 2C03. The public NESdev palette tables are implemented
 directly:
 
 - **2C03** — the documented 64-entry RGB DAC table (including black `$0D`,
@@ -147,11 +148,48 @@ directly:
 The tables and identifiers are transcribed from the public NESdev
 `PPU_palettes` and `PPU_registers` pages; tests pin the 2C03 DAC values, the
 first entries of all four 2C04 permutations, RGB emphasis, the register swap,
-the status identifiers and the NES 2.0 header selection. This is palette and
-copy-protection data only: **mapper 99, VS coins/DIPs, the VS BIOS and game
-ROMs are still missing**, so no VS title has been booted yet. The header parser
-also ignores VS system type beyond the PPU nibble, and the RGB PPUs' OAM/palette
+the status identifiers and the NES 2.0 header selection. The board and cabinet
+input are covered in the next section; the **VS BIOS and game ROMs are still
+missing**, so no VS title has been booted yet. The header parser also ignores
+the VS system-type nibble beyond the PPU model, and the RGB PPUs' OAM/palette
 readback quirks are not modelled.
+
+## VS. System mapper 99 and cabinet input (2026-11-15)
+
+Mapper 99 now loads a Vs. board directly from its iNES/NES 2.0 image:
+
+- **PRG** — one 8 KiB switchable bank at `$8000` and three fixed 8 KiB banks at
+  `$A000-$FFFF`. The 40 KiB *Vs. Gumshoe* image is padded to 48 KiB and `$4016`
+  bit 2 selects bank 0 or the alternate bank 4; smaller images keep bank 0.
+- **CHR** — `$4016` bit 2 selects between the two 8 KiB CHR sockets. An
+  undersized image leaves the missing socket undriven, so reads return the
+  open bus instead of mirroring.
+- **Work RAM** — 2 KiB at `$6000-$7FFF`, mirrored across the window, visible
+  only while `$4016` OUT1 is high; otherwise `$6000` reads open bus.
+- **Nametables** — fixed four-screen, matching the board's 4 KiB VRAM.
+- **Registers** — no IRQ and no `$8000` bank register; the shared bit lives in
+  the `$4016` write latch.
+
+The cabinet input is keyed on the console type, so Vs. NROM, MMC1, UNROM,
+Sunsoft-3, VRC1 and Namco-108 titles get the same `$4016`/`$4017` overlay; only
+the `$4016` banking latch belongs to mapper 99 itself. It is modelled from the
+public NESdev `Vs. System` register tables. `$4016` reads `PCCD DS0B`: secondary-CPU flag, two coin contacts, DIP
+1-2, service and the right-stick button; `$4017` reads `DDDD DD0B` with DIP 3-8
+and the left-stick button. `$4020-$5FFF` is the coin counter: a write latches
+bit 0, a read latches open-bus bit 0 as documented, and reset clears it. The
+Devices window adds a Vs. System section with Coin 1/2, Service, the eight DIP
+switches and the primary-CPU flag; a coin press closes the acceptor contact for
+four frames (~67 ms, the hardware's 40-70 ms window) so games do not reject a
+held credit.
+
+Tests pin the PRG/CHR bank bit, the Gumshoe outer bank, the OUT1 RAM gate and
+mirroring, the undriven CHR socket, every `$4016`/`$4017` bit, the four-frame
+coin pulse, the coin-counter latch/reset and the state round trip. Still open:
+no Vs. BIOS or game ROM is available locally, so no title has booted; per-title
+DIP defaults are unknown; and the DualSystem sub-CPU, its shared-RAM handoff
+and the watchdog are not implemented (the Primary CPU flag only feeds bit 7).
+The NES 2.0 VS system-type nibble is likewise not used to choose DualSystem
+behaviour, and PlayChoice-10 coin/service input is still absent.
 
 ## ROM loading — UNIF (2026-11-15)
 
@@ -201,7 +239,7 @@ input (0 while sound is detected) and bits 7-3 are CPU open bus. The mapper now
 claims that window, so reads reach the board instead of returning open bus.
 `System::set_bandai_microphone` reports the ADC state; the A/B bits follow
 controller port 1. The mapper serializes both buttons, the ADC state and its
-open-bus latch in `UNKOST19` states. Unit tests cover the exact bit mapping,
+open-bus latch in `UNKOST20` states. Unit tests cover the exact bit mapping,
 the open-bus high bits, the CPU-bus path and a state round trip. No Karaoke
 Studio ROM is present locally, so this is validated against the NESdev protocol
 description rather than a title.
@@ -2316,10 +2354,10 @@ Added two controller-port devices with synthetic tests:
   1 Mbit.
 
 Both are save-state fields. Miracle Piano and Datach are now implemented;
-VS. System/PlayChoice-10 remains blocked on ROM/BIOS, mapper 99 and coin/DIP
-input, with the RGB palettes and 2C05 security data implemented. Tests:
-microphone bit 2, tape loopback and readback-disable, device settings
-round-trip.
+VS. System/PlayChoice-10 now have mapper 99, cabinet input, the RGB palettes
+and 2C05 security, with only the ROM/BIOS assets and DualSystem/PC10 depth
+outstanding. Tests: microphone bit 2, tape loopback and readback-disable,
+device settings round-trip.
 
 ### 2026-11-13 — Miracle Piano and Datach transports
 

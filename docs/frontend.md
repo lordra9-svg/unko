@@ -214,7 +214,10 @@ between machines; see `docs/platforms.md` for the resolution order and the
   reads through `$6000-$7FFF`. **Use system microphone** opens the selected
   cpal input and gates its peak through a configurable threshold (default
   -34 dBFS, short hold) into the same bit; the Devices window lists input
-  devices and persists the choice.
+  devices and persists the choice. Vs. System mapper-99 carts add a
+  **Vs. System** section to the Devices window: Coin 1/2 pulse the acceptor
+  contact for four frames, and Service, DIP 1-8 and the primary-CPU flag map
+  directly onto `$4016`/`$4017`.
 - Audio: cpal output with a lock-free ring buffer, device-rate resampling,
   volume/mute and underrun statistics. The stream is opened once at startup
   and fed one mono sample per emulated frame. The Audio page selects the
@@ -247,7 +250,7 @@ between machines; see `docs/platforms.md` for the resolution order and the
 - Recording: WAV audio, numbered PNG frames and animated GIF, written under
   `saves/recordings`; all encoders are pure Rust and work on every target.
 - State/SRAM: `saves/<rom>.<core>.slotN.state` and `saves/<rom>.sav`; the core
-  never touches the filesystem. States carry an `UNKOST19` header, a ROM
+  never touches the filesystem. States carry an `UNKOST20` header, a ROM
   fingerprint and the mapper state, so a state cannot be loaded into a
   different image or core. The former TetaNES state files are ignored.
 - Audio playback is active through cpal; the Audio page reports the actual
