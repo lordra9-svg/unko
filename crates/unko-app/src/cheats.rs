@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::Path;
 
-use unko_core::Cheat;
+use unko_nes_api::Cheat;
 
 /// One editable cheat row.
 #[derive(Debug, Clone, PartialEq, Eq)]

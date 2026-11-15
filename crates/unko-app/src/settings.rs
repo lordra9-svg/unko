@@ -6,9 +6,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use unko_core::{
-    AudioFilterModel, AudioQuality, AudioSource, MaskEdges, Overscan, Palette, PortDevice,
-    PpuResetBehavior, RamClear, Region, VideoFilter,
+use unko_core::{AudioQuality, Region};
+use unko_nes_api::{
+    AudioFilterModel, AudioSource, MaskEdges, Overscan, Palette, PortDevice, PpuResetBehavior,
+    RamClear, VideoFilter,
 };
 
 use crate::gamepad::{button_name, NesButton, PadMapping};

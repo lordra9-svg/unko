@@ -21,6 +21,7 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use unko_core::{Core, InputState, LoadOptions};
+use unko_nes_api::NesButtons;
 use unko_nes_host::AccuracyCore;
 use unko_netplay::holepunch::HolePunchTransport;
 use unko_netplay::input::InputFrame;

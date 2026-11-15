@@ -8,6 +8,7 @@
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use unko_core::InputState;
+use unko_nes_api::NesButtons;
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 mod mobile;

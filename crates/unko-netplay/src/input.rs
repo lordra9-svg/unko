@@ -104,8 +104,8 @@ mod tests {
 
     #[test]
     fn converts_a_core_state() {
-        let frame = InputFrame::new(9, 1, InputState::from_bits(InputState::A));
-        assert_eq!(frame.input, InputState::A);
+        let frame = InputFrame::new(9, 1, InputState::from_bits(1));
+        assert_eq!(frame.input, 1);
         assert_eq!(InputFrame::decode(&frame.encode()), Some(frame));
     }
 }

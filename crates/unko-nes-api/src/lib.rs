@@ -6,6 +6,10 @@
 //! Vs. System input, the Miracle Piano, Datach, FDS, core-side palettes and
 //! filters, cheats and the PPU/APU debugger — lives on [`NesCore`].
 //!
+//! It also owns the NES-specific shared vocabulary: controller-port devices,
+//! palettes, video/audio filter models, reset policies, overscan/mask options,
+//! cheat codes, the NES button constants and the PPU/APU debugger snapshots.
+//!
 //! `unko-nes-host` implements both traits. The desktop shell stores a
 //! `Box<dyn NesCore>`; future systems implement only [`unko_core::Core`] and
 //! their own extension trait.
@@ -13,11 +17,17 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-use unko_core::debug::{ApuState, CpuState, DebugSpace, Disassembly, PpuState};
-use unko_core::types::{
-    AudioFilterModel, AudioSource, Cheat, Palette, PortDevice, PpuResetBehavior, RamClear,
-    VideoFilter,
+pub mod debug;
+pub mod input;
+pub mod types;
+
+pub use debug::{ApuState, CpuState, DebugSpace, Disassembly, PpuState};
+pub use input::{Button, NesButtons};
+pub use types::{
+    AudioFilterModel, AudioSource, Cheat, MaskEdges, Overscan, Palette, PortDevice,
+    PpuResetBehavior, RamClear, VideoFilter,
 };
+
 use unko_core::{Core, CoreError, LoadOptions, StereoEye};
 
 /// NES-specific host controls layered over [`Core`].

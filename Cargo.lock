@@ -4163,6 +4163,7 @@ version = "0.1.0"
 dependencies = [
  "unko-core",
  "unko-nes",
+ "unko-nes-api",
  "unko-nes-host",
  "unko-netplay",
 ]

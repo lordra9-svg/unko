@@ -1,12 +1,10 @@
 //! Host-facing emulator core interface.
 //!
-//! `unko-core` deliberately contains no emulation code. It defines the
-//! lifecycle, frame/audio/state and debugger contract plus the input and
-//! presentation vocabulary the current cores share. Some of that vocabulary
-//! (`PortDevice`, `Palette`, `VideoFilter`, the PPU/APU snapshots and the FDS,
-//! Zapper, Vs. and other device hooks on [`Core`]) is still NES-shaped; a
-//! second system should not have to implement it as no-ops, so the planned
-//! split is tracked in `docs/roadmap.md`. Frontends and cores meet here.
+//! `unko-core` deliberately contains no emulation code and no console
+//! vocabulary. It defines the generic lifecycle (`load`, `run_frame`, video,
+//! audio, input masks, save states), the registry and presentation types.
+//! NES-only controls and types live in `unko-nes-api`; frontends and cores
+//! meet here.
 //!
 //! ```no_run
 //! use unko_core::{Core, LoadOptions, Registry};
@@ -25,19 +23,16 @@
 #![warn(missing_docs)]
 
 pub mod core;
-pub mod debug;
 pub mod input;
 pub mod registry;
 pub mod stereo;
 pub mod types;
 
 pub use core::{Core, CoreError};
-pub use debug::{ApuState, CpuState, DebugSpace, Disassembly, PpuState};
-pub use input::{Button, InputState};
+pub use input::InputState;
 pub use registry::{CoreRegistration, Factory, Registry};
 pub use stereo::{compose_anaglyph, StereoEye};
 pub use types::{
-    Accuracy, AudioBuffer, AudioFilterModel, AudioQuality, AudioSource, Cheat, CoreInfo, Features,
-    FrameBuffer, FrameStats, LoadOptions, MaskEdges, Overscan, Palette, PixelFormat, PortDevice,
-    PpuResetBehavior, RamClear, Region, SystemId, VideoFilter,
+    Accuracy, AudioBuffer, AudioQuality, CoreInfo, Features, FrameBuffer, FrameStats, LoadOptions,
+    PixelFormat, Region, SystemId,
 };

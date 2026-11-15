@@ -6,7 +6,7 @@
 //! granularity.
 
 use egui::{Color32, RichText};
-use unko_core::{ApuState, CpuState, DebugSpace, Disassembly, PpuState};
+use unko_nes_api::{ApuState, CpuState, DebugSpace, Disassembly, PpuState};
 
 /// Debugger panel selected in the tab bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

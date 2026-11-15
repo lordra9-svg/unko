@@ -9,5 +9,6 @@ license.workspace = true
 [dependencies]
 unko-core = { path = "../unko-core" }
 unko-nes = { path = "../unko-nes" }
+unko-nes-api = { path = "../unko-nes-api" }
 unko-nes-host = { path = "../unko-nes-host" }
 unko-netplay = { path = "../unko-netplay" }

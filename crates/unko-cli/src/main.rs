@@ -11,7 +11,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use unko_core::{Core, LoadOptions, Registry, SystemId};
-use unko_nes_api::NesCore;
+use unko_nes_api::{NesButtons, NesCore, Palette, PortDevice, VideoFilter};
 
 fn main() {
     if let Err(err) = run() {
@@ -457,12 +457,12 @@ fn run() -> Result<(), Box<dyn Error>> {
             let mut dump_ppu = false;
             let mut dump_chr: Option<String> = None;
             let mut break_pc: Option<u16> = None;
-            let mut device1 = unko_core::PortDevice::Gamepad;
-            let mut device2 = unko_core::PortDevice::Gamepad;
+            let mut device1 = PortDevice::Gamepad;
+            let mut device2 = PortDevice::Gamepad;
             let mut paddle: Option<u8> = None;
             let mut paddle_fire = false;
-            let mut filter = unko_core::VideoFilter::Raw;
-            let mut palette = unko_core::Palette::Canonical;
+            let mut filter = VideoFilter::Raw;
+            let mut palette = Palette::Canonical;
             let mut bios_path: Option<String> = None;
             while let Some(flag) = args.next() {
                 match flag.as_str() {
@@ -480,14 +480,12 @@ fn run() -> Result<(), Box<dyn Error>> {
                     "--dump-ppu" => dump_ppu = true,
                     "--dump-chr" => dump_chr = Some(args.next().ok_or("--dump-chr needs a path")?),
                     "--device1" => {
-                        device1 = unko_core::PortDevice::from_name(
-                            &args.next().ok_or("--device1 needs a name")?,
-                        );
+                        device1 =
+                            PortDevice::from_name(&args.next().ok_or("--device1 needs a name")?);
                     }
                     "--device2" => {
-                        device2 = unko_core::PortDevice::from_name(
-                            &args.next().ok_or("--device2 needs a name")?,
-                        );
+                        device2 =
+                            PortDevice::from_name(&args.next().ok_or("--device2 needs a name")?);
                     }
                     "--paddle" => {
                         paddle = Some(
@@ -500,15 +498,13 @@ fn run() -> Result<(), Box<dyn Error>> {
                     "--paddle-fire" => paddle_fire = true,
                     "--filter" => {
                         filter = match args.next().ok_or("--filter needs a name")?.as_str() {
-                            "composite" => unko_core::VideoFilter::Composite,
-                            "crt" => unko_core::VideoFilter::Crt,
-                            _ => unko_core::VideoFilter::Raw,
+                            "composite" => VideoFilter::Composite,
+                            "crt" => VideoFilter::Crt,
+                            _ => VideoFilter::Raw,
                         };
                     }
                     "--palette" => {
-                        palette = unko_core::Palette::from_name(
-                            &args.next().ok_or("--palette needs a name")?,
-                        );
+                        palette = Palette::from_name(&args.next().ok_or("--palette needs a name")?);
                     }
                     "--bios" => bios_path = Some(args.next().ok_or("--bios needs a path")?),
                     "--break" => {
@@ -558,11 +554,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             }
             let registry = registry();
             let mut core = create_core(&registry, core_id.as_deref())?;
-            let options = LoadOptions {
-                video_filter: filter,
-                palette,
-                ..LoadOptions::default()
-            };
+            let options = LoadOptions::default();
             if let Some(bios) = &bios_path {
                 let bios = fs::read(bios)?;
                 core.load_fds(&rom, &bios, &options)?;
@@ -579,11 +571,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             core.set_port_device(0, device1);
             core.set_port_device(1, device2);
             if let Some(position) = paddle {
-                let port = if device2 == unko_core::PortDevice::Paddle {
-                    1
-                } else {
-                    0
-                };
+                let port = if device2 == PortDevice::Paddle { 1 } else { 0 };
                 core.set_paddle(port, position, paddle_fire);
             }
 

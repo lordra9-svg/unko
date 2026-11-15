@@ -9,10 +9,8 @@
 #![warn(missing_docs)]
 
 use unko_core::{
-    Accuracy, ApuState, AudioBuffer, AudioFilterModel, AudioQuality, AudioSource, Cheat, Core,
-    CoreError, CoreInfo, CoreRegistration, CpuState, DebugSpace, Disassembly, Features,
-    FrameBuffer, FrameStats, InputState, LoadOptions, Palette, PixelFormat, PortDevice,
-    PpuResetBehavior, PpuState, RamClear, Region as HostRegion, SystemId, VideoFilter,
+    Accuracy, AudioBuffer, AudioQuality, Core, CoreError, CoreInfo, CoreRegistration, Features,
+    FrameBuffer, FrameStats, InputState, LoadOptions, PixelFormat, Region as HostRegion, SystemId,
 };
 use unko_nes::clock::Region as ClockRegion;
 use unko_nes::{
@@ -21,7 +19,10 @@ use unko_nes::{
     PaletteVariant, PortDevice as NesPortDevice, PpuResetBehavior as NesPpuResetBehavior,
     RamClear as NesRamClear, System,
 };
-use unko_nes_api::NesCore;
+use unko_nes_api::{
+    ApuState, AudioFilterModel, AudioSource, Cheat, CpuState, DebugSpace, Disassembly, NesCore,
+    Palette, PortDevice, PpuResetBehavior, PpuState, RamClear, VideoFilter,
+};
 
 /// Stable id of this core implementation.
 pub const CORE_ID: &str = "nes_accuracy_core";
@@ -136,9 +137,7 @@ impl AccuracyCore {
             HostRegion::Pal => system.set_region(ClockRegion::Pal),
             HostRegion::Dendy => system.set_region(ClockRegion::Dendy),
         }
-        self.filter = options.video_filter;
-        self.palette = options.palette;
-        system.set_palette(palette_variant(options.palette));
+        system.set_palette(palette_variant(self.palette));
         if let Some(table) = self.palette_table {
             system.set_palette_table(table);
         }
@@ -850,14 +849,9 @@ mod tests {
     #[test]
     fn palette_and_crt_filter_change_output_without_breaking_rendering() {
         let mut core = AccuracyCore::new();
-        core.load(
-            &debug_nrom(),
-            &LoadOptions {
-                palette: Palette::Monochrome,
-                ..LoadOptions::default()
-            },
-        )
-        .expect("load");
+        core.load(&debug_nrom(), &LoadOptions::default())
+            .expect("load");
+        core.set_palette(Palette::Monochrome);
         // The first call reports the power-on frame, the second completes the
         // wrap into the first executed frame, and the third renders a full
         // frame with the palette applied.

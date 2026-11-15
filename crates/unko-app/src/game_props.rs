@@ -7,7 +7,8 @@
 use std::fs;
 use std::path::Path;
 
-use unko_core::{PortDevice, Region};
+use unko_core::Region;
+use unko_nes_api::PortDevice;
 
 /// Overrides that apply to one game.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

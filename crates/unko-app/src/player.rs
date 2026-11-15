@@ -5,11 +5,12 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use unko_core::{
-    compose_anaglyph, AudioFilterModel, AudioQuality, AudioSource, CoreError, DebugSpace,
-    InputState, LoadOptions, PortDevice, PpuResetBehavior, RamClear, Region, StereoEye,
-    VideoFilter,
+    compose_anaglyph, AudioQuality, CoreError, InputState, LoadOptions, Region, StereoEye,
 };
-use unko_nes_api::NesCore;
+use unko_nes_api::{
+    AudioFilterModel, AudioSource, Cheat, DebugSpace, NesButtons, NesCore, Palette, PortDevice,
+    PpuResetBehavior, RamClear, VideoFilter,
+};
 
 use crate::audio::AudioOutput;
 use crate::debugger::{Action, DebugView, Debugger};
@@ -459,6 +460,8 @@ impl Player {
             apply_mapper_override(&mut rom, mapper)?;
         }
         let mut core: Box<dyn NesCore> = Box::new(unko_nes_host::AccuracyCore::new());
+        core.set_palette(settings.palette);
+        core.set_video_filter(settings.filter);
         let save_dir = settings.save_dir.clone();
         fs::create_dir_all(&save_dir).map_err(|err| format!("create save dir: {err}"))?;
         // Key saves by a content hash (FNV-1a 64) in addition to the scan CRC so
@@ -467,8 +470,6 @@ impl Player {
         let options = LoadOptions {
             region: properties.region.unwrap_or(settings.region),
             sample_rate: settings.sample_rate,
-            video_filter: settings.filter,
-            palette: settings.palette,
         };
         let fds_disk = if entry.is_fds() {
             let bios_path = &settings.fds_bios;
@@ -516,7 +517,7 @@ impl Player {
         core.set_ppu_reset_behavior(settings.ppu_reset);
         core.set_mmc3_alternate(settings.mmc3_alternate);
         core.set_stereo_glasses(settings.famicom_3d);
-        if settings.palette == unko_core::Palette::Custom {
+        if settings.palette == Palette::Custom {
             if let Some(table) = crate::settings::load_palette(&settings.custom_palette) {
                 core.set_palette_table(table);
             }
@@ -1586,7 +1587,7 @@ impl Player {
     }
 
     /// Changes the display palette and rebuilds the cached colours.
-    pub fn set_palette(&mut self, palette: unko_core::Palette) {
+    pub fn set_palette(&mut self, palette: Palette) {
         self.core.set_palette(palette);
     }
 
@@ -1698,7 +1699,7 @@ impl Player {
     }
 
     /// Replaces the active cheat overlay.
-    pub fn set_cheats(&mut self, cheats: &[unko_core::Cheat]) {
+    pub fn set_cheats(&mut self, cheats: &[Cheat]) {
         self.core.set_cheats(cheats);
     }
 

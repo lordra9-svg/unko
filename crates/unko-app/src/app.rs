@@ -9,9 +9,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Stroke, Vec2};
-use unko_core::{
-    AudioFilterModel, AudioQuality, AudioSource, MaskEdges, Overscan, PortDevice, PpuResetBehavior,
-    RamClear, Region, VideoFilter,
+use unko_core::{AudioQuality, Region};
+use unko_nes_api::{
+    AudioFilterModel, AudioSource, Cheat, MaskEdges, NesButtons, Overscan, Palette, PortDevice,
+    PpuResetBehavior, RamClear, VideoFilter,
 };
 
 use crate::audio::AudioOutput;
@@ -883,7 +884,7 @@ impl App {
     }
 
     fn apply_cheats(&mut self) {
-        let active: Vec<unko_core::Cheat> = self
+        let active: Vec<Cheat> = self
             .cheats
             .iter()
             .filter(|entry| entry.enabled)
@@ -940,7 +941,7 @@ impl App {
         if let Some(player) = &mut self.player {
             player.set_filter(self.settings.filter);
             player.set_palette(self.settings.palette);
-            if self.settings.palette == unko_core::Palette::Custom {
+            if self.settings.palette == Palette::Custom {
                 if let Some(table) = crate::settings::load_palette(&self.settings.custom_palette) {
                     player.set_palette_table(table);
                 }
@@ -2471,7 +2472,7 @@ impl App {
                 match (parse_address, parse_value) {
                     (Ok(addr), Ok(val)) if addr < 0x2000 => {
                         entries.push(CheatEntry {
-                            cheat: unko_core::Cheat::Ram {
+                            cheat: Cheat::Ram {
                                 address: addr,
                                 value: val,
                             },
@@ -5166,15 +5167,15 @@ fn graphics_tab(ui: &mut egui::Ui, settings: &mut Settings, ctx: &egui::Context)
             .selected_text(palette_label(settings.palette))
             .show_ui(ui, |ui| {
                 for palette in [
-                    unko_core::Palette::Canonical,
-                    unko_core::Palette::Consumer,
-                    unko_core::Palette::Rgb,
-                    unko_core::Palette::Monochrome,
-                    unko_core::Palette::Vivid,
-                    unko_core::Palette::Soft,
-                    unko_core::Palette::Pal,
-                    unko_core::Palette::Studio,
-                    unko_core::Palette::Custom,
+                    Palette::Canonical,
+                    Palette::Consumer,
+                    Palette::Rgb,
+                    Palette::Monochrome,
+                    Palette::Vivid,
+                    Palette::Soft,
+                    Palette::Pal,
+                    Palette::Studio,
+                    Palette::Custom,
                 ] {
                     ui.selectable_value(&mut settings.palette, palette, palette_label(palette));
                 }
@@ -5186,7 +5187,7 @@ fn graphics_tab(ui: &mut egui::Ui, settings: &mut Settings, ctx: &egui::Context)
             .changed()
         {
             settings.custom_palette = PathBuf::from(path);
-            settings.palette = unko_core::Palette::Custom;
+            settings.palette = Palette::Custom;
         }
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         if ui.button("Import .pal…").clicked() {
@@ -5195,7 +5196,7 @@ fn graphics_tab(ui: &mut egui::Ui, settings: &mut Settings, ctx: &egui::Context)
                 .pick_file()
             {
                 settings.custom_palette = path;
-                settings.palette = unko_core::Palette::Custom;
+                settings.palette = Palette::Custom;
             }
         }
     });
@@ -5325,17 +5326,17 @@ fn system_label(system: &str) -> &'static str {
     }
 }
 
-fn palette_label(palette: unko_core::Palette) -> &'static str {
+fn palette_label(palette: Palette) -> &'static str {
     match palette {
-        unko_core::Palette::Canonical => "Canonical 2C02",
-        unko_core::Palette::Consumer => "Consumer TV (warm)",
-        unko_core::Palette::Rgb => "RGB monitor (saturated)",
-        unko_core::Palette::Monochrome => "Monochrome",
-        unko_core::Palette::Custom => "Custom (.pal)",
-        unko_core::Palette::Vivid => "Vivid (generated)",
-        unko_core::Palette::Soft => "Soft (generated)",
-        unko_core::Palette::Pal => "PAL-like (generated)",
-        unko_core::Palette::Studio => "Studio (generated)",
+        Palette::Canonical => "Canonical 2C02",
+        Palette::Consumer => "Consumer TV (warm)",
+        Palette::Rgb => "RGB monitor (saturated)",
+        Palette::Monochrome => "Monochrome",
+        Palette::Custom => "Custom (.pal)",
+        Palette::Vivid => "Vivid (generated)",
+        Palette::Soft => "Soft (generated)",
+        Palette::Pal => "PAL-like (generated)",
+        Palette::Studio => "Studio (generated)",
     }
 }
 
@@ -6339,6 +6340,7 @@ mod tests {
 mod controller_chord_tests {
     use super::controller_chord;
     use unko_core::InputState;
+    use unko_nes_api::NesButtons;
 
     #[test]
     fn only_start_and_select_together_open_the_menu() {

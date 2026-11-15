@@ -6,8 +6,8 @@
 use std::fs;
 use std::path::Path;
 
-use unko_core::{Core, LoadOptions, PortDevice, Region, VideoFilter};
-use unko_nes_api::NesCore;
+use unko_core::{Core, LoadOptions, Region};
+use unko_nes_api::{NesCore, PortDevice, VideoFilter};
 use unko_nes_host::AccuracyCore;
 
 fn load_nestest() -> Option<Vec<u8>> {
@@ -33,20 +33,15 @@ fn composite_filter_changes_pixels_and_keeps_geometry() {
         return;
     };
 
-    let options = LoadOptions {
-        video_filter: VideoFilter::Raw,
-        ..LoadOptions::default()
-    };
+    let options = LoadOptions::default();
     let mut raw = AccuracyCore::new();
     raw.load(&rom, &options).expect("load raw");
+    raw.set_video_filter(VideoFilter::Raw);
     let raw_frame = frame_of(&mut raw, 20);
 
-    let options = LoadOptions {
-        video_filter: VideoFilter::Composite,
-        ..LoadOptions::default()
-    };
     let mut composite = AccuracyCore::new();
     composite.load(&rom, &options).expect("load composite");
+    composite.set_video_filter(VideoFilter::Composite);
     let composite_frame = frame_of(&mut composite, 20);
 
     assert_eq!(

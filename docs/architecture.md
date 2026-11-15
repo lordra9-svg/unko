@@ -92,7 +92,7 @@ The `unko-nes-host` adapter:
 - serializes versioned `UNKOST20` save states, including mapper state and a ROM
   fingerprint;
 - maps the host input bits to the NES shift-register order;
-- decodes Game Genie codes into `unko_core::Cheat`, so the desktop shell links
+- decodes Game Genie codes into `unko_nes_api::Cheat`, so the desktop shell links
   `unko-core` and `unko-nes-host` only. `unko-cli` also links `unko-nes`
   directly for its NES-specific analysis commands.
 
