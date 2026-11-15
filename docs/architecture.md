@@ -36,7 +36,7 @@ crate the app and CLI link. The former TetaNES adapter has been retired.
 
 `unko-rom` is a sibling boundary for *input*: it discovers loose ROMs and
 members of `.zip`/`.7z`/`.rar` archives, parses iNES/NES 2.0/UNIF metadata and
-converts UNIF to iNES 1.0, and returns bytes to whichever core is loading. The UI never sees archive libraries.
+converts UNIF to iNES/NES 2.0, and returns bytes to whichever core is loading. The UI never sees archive libraries.
 
 ## The contract
 

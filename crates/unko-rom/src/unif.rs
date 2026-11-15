@@ -76,12 +76,12 @@ pub fn header(bytes: &[u8]) -> Option<Header> {
     })
 }
 
-/// Converts a UNIF image into an iNES 1.0 image.
+/// Converts a UNIF image into an iNES 1.0 or NES 2.0 image.
 ///
 /// # Errors
 ///
 /// Returns a description when the chunk stream is truncated, the board is not
-/// mapped, or a ROM size does not fit the iNES header.
+/// mapped, or a ROM size does not fit the header.
 pub fn to_ines(bytes: &[u8]) -> Result<Vec<u8>, String> {
     if !is_unif(bytes) {
         return Err("not a UNIF image".into());
@@ -99,15 +99,16 @@ pub fn to_ines(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let chunks = parse_chunks(bytes)?;
     let mapper = board_mapper(&chunks.board)
         .ok_or_else(|| format!("UNIF board '{}' is not mapped", chunks.board))?;
-    if mapper > 0xFF {
-        return Err(format!("mapper {mapper} needs a NES 2.0 header"));
-    }
+    let submapper = board_submapper(&chunks.board).unwrap_or(0) & 0x0F;
     let (prg_len, chr_len) = sizes(&chunks).ok_or("PRG/CHR chunks are gapped or misaligned")?;
     let prg_banks = prg_len / 0x4000;
     let chr_banks = chr_len / 0x2000;
-    if prg_banks == 0 || prg_banks > 0xFF || chr_banks > 0xFF {
-        return Err("ROM size does not fit an iNES header".into());
+    if prg_banks == 0 || prg_banks > 0xFFF || chr_banks > 0xFFF {
+        return Err("ROM size does not fit the header".into());
     }
+    // NES 2.0 is required for mappers above 255 and preserves the board's
+    // submapper (UNROM 2, AxROM 1/2, FS005 2, ...).
+    let nes2 = mapper > 0xFF || submapper != 0 || prg_banks > 0xFF || chr_banks > 0xFF;
 
     let mut out = Vec::with_capacity(16 + prg_len + chr_len);
     out.extend_from_slice(b"NES\x1a");
@@ -123,12 +124,24 @@ pub fn to_ines(bytes: &[u8]) -> Result<Vec<u8>, String> {
         flags6 |= 0x01;
     }
     out.push(flags6);
-    out.push((mapper & 0xF0) as u8);
+    let mut flags7 = (mapper & 0xF0) as u8;
+    if nes2 {
+        flags7 |= 0x08;
+    }
+    out.push(flags7);
     out.extend_from_slice(&[0; 8]);
-    // iNES 1.0 has no region byte, but the de-facto byte 9 bit 0 hint is what
-    // the rest of this workspace reads.
-    let pal = chunks.region == Some(1);
-    if pal {
+    if nes2 {
+        out[8] = (submapper << 4) | ((mapper >> 8) & 0x0F) as u8;
+        out[9] = (((chr_banks >> 8) as u8 & 0x0F) << 4) | ((prg_banks >> 8) as u8 & 0x0F);
+        out[10] = 0x07; // 8 KiB volatile PRG-RAM
+        out[12] = match chunks.region {
+            Some(1) => 1,
+            Some(2) => 2,
+            _ => 0,
+        };
+    } else if chunks.region == Some(1) {
+        // iNES 1.0 has no region byte, but the de-facto byte 9 bit 0 hint is
+        // what the rest of this workspace reads.
         out[9] = 1;
     }
     for data in chunks.prg.values() {
@@ -266,7 +279,11 @@ fn region(value: Option<u8>) -> &'static str {
 
 fn board_submapper(board: &str) -> Option<u8> {
     let board = board.to_ascii_uppercase();
-    if board.contains("BNROM") {
+    if board.contains("WAIXING-FS005") {
+        Some(2)
+    } else if board.contains("BANDAI-LZ93D50") {
+        Some(5)
+    } else if board.contains("BNROM") {
         Some(2)
     } else if board.contains("ANROM") || board.contains("AN1ROM") {
         Some(1)
@@ -281,6 +298,59 @@ fn board_submapper(board: &str) -> Option<u8> {
 
 fn board_mapper(board: &str) -> Option<u16> {
     let board = board.trim().to_ascii_uppercase();
+    // Board names from the NESdev UNIF mapping that do not fit the generic
+    // Nintendo suffix checks. Keep this list specific: a wrong mapper is
+    // worse than rejecting an unknown dump.
+    const SPECIFIC: &[(&str, u16)] = &[
+        ("SACHEN-8259A", 141),
+        ("SACHEN-8259B", 138),
+        ("SACHEN-8259C", 139),
+        ("SACHEN-8259D", 137),
+        ("SACHEN-74LS374N", 150),
+        ("SA-NROM", 143),
+        ("SA-72008", 133),
+        ("SA-72007", 145),
+        ("SA-0036", 149),
+        ("SA-0037", 148),
+        ("WAIXING-FS005", 176),
+        ("WAIXING-FW01", 227),
+        ("DREAMTECH01", 521),
+        ("3D-BLOCK", 355),
+        ("RET-CUFROM", 29),
+        ("JALECO-JF23", 18),
+        ("JALECO-JF24", 18),
+        ("JALECO-JF25", 18),
+        ("JALECO-JF27", 18),
+        ("JALECO-JF29", 18),
+        ("JALECO-JF37", 18),
+        ("JALECO-JF40", 18),
+        ("JALECO-JF15", 2),
+        ("JALECO-JF18", 2),
+        ("JALECO-JF01", 0),
+        ("JALECO-JF02", 0),
+        ("JALECO-JF03", 0),
+        ("JALECO-JF04", 0),
+        ("BANDAI-FCG", 16),
+        ("BANDAI-LZ93D50", 16),
+        ("IREM-FCG-1", 16),
+        ("NAMCOT-163", 19),
+        ("NAMCO-163", 19),
+        ("NAMCOT-129", 19),
+        ("NAMCOT-3301", 0),
+        ("NAMCOT-3302", 0),
+        ("NAMCOT-3303", 0),
+        ("NAMCOT-3304", 0),
+        ("NAMCOT-3305", 0),
+        ("SUNSOFT-FME-7", 69),
+        ("SUNSOFT-FME7", 69),
+        ("VRC7", 85),
+        ("VRC-7", 85),
+    ];
+    for (name, mapper) in SPECIFIC {
+        if board.contains(name) {
+            return Some(*mapper);
+        }
+    }
     // Longest / most specific names first: NROM is a substring of UNROM,
     // CNROM, SNROM and TNROM, so a plain `contains("NROM")` must come last.
     if board.contains("SUNSOFT_UNROM") || board.contains("SUNSOFT-UNROM") {
@@ -420,6 +490,32 @@ mod tests {
         assert_eq!(ines[4], 2);
         assert_eq!(ines[5], 0);
         assert_eq!(ines[6] & 0x02, 0x02, "battery flag");
+    }
+
+    #[test]
+    fn maps_common_third_party_boards() {
+        for (board, mapper) in [
+            ("KONAMI-VRC-7", 85),
+            ("NAMCOT-163", 19),
+            ("SUNSOFT-FME-7", 69),
+            ("BANDAI-FCG-1", 16),
+            ("JALECO-JF23", 18),
+            ("SACHEN-8259D", 137),
+            ("SACHEN-74LS374N", 150),
+            ("WAIXING-FS005", 176),
+            ("DREAMTECH01", 521),
+            ("3D-BLOCK", 355),
+            ("RET-CUFROM", 29),
+        ] {
+            let mapr = format!("{board}\0");
+            let bytes = unif(&[(b"MAPR", mapr.as_bytes()), (b"PRG0", &[0u8; 0x8000])]);
+            let info = header(&bytes).unwrap_or_else(|| panic!("{board} header"));
+            assert_eq!(info.mapper, mapper, "{board}");
+            let ines = to_ines(&bytes).unwrap_or_else(|err| panic!("{board}: {err}"));
+            assert_eq!(&ines[..4], b"NES\x1a", "{board}");
+            let parsed = crate::parse_header(&ines).unwrap_or_else(|| panic!("{board} parse"));
+            assert_eq!(parsed.mapper, mapper, "{board} header mapper");
+        }
     }
 
     #[test]

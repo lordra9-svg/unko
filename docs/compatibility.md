@@ -33,7 +33,7 @@ test, or a smoke audit covers it; a dash means no verdict yet.
 | Raw `.fds`, loose or in ZIP/7z/RAR | **Supported** |
 | `.zip`, `.7z`, `.rar` containers | **Supported** (no extraction to disk) |
 | IPS / BPS soft patches | **Not implemented** |
-| UNIF | **Implemented** (UNIF chunks to iNES 1.0; common Nintendo boards, `MIRR`/`BATR`/`TVCI`/`VROR`; unknown boards are rejected) |
+| UNIF | **Implemented** (UNIF chunks to iNES 1.0/NES 2.0; Nintendo and common third-party boards, `MIRR`/`BATR`/`TVCI`/`VROR`; unknown boards are rejected) |
 | Per-game region, port-device and mapper override | **Supported** (`Tools → Game properties…`, stored as `<stem>.game`) |
 | NES 2.0 header editor / repair database | **Not implemented** (missing-header warning only) |
 
@@ -111,7 +111,7 @@ Public mapper-specific status:
 | x0000 APU write-window tests | 10/10 pass |
 | NESdev archive | 137 pass / 11 fail / 115 visual/audio/input-only; PAL APU timing leaves 4 failures, adding the alternate MMC3 selector leaves only `read_joy3/count_errors` |
 | RustyNES test tree | 159 pass / 11 fail / 171 visual/audio/input-only; 166 / 4 with PAL APU in PAL mode, 1 with the alternate MMC3 selector too |
-| Workspace tests | 648 pass, 0 failed |
+| Workspace tests | 649 pass, 0 failed |
 
 The actionable accuracy failures are tracked in
 [`accuracy-divergences.md`](accuracy-divergences.md); the ROM/BIOS inventory is
