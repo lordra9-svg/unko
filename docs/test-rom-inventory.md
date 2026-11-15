@@ -148,7 +148,7 @@ PAL APU singles in PAL mode, `dma_4016_read` and `5-branch_delays_irq`.
 | Asset | Needed for | Notes |
 |---|---|---|
 | `disksys.rom` (FDS BIOS) | `fdsirqtests`, FDS mirroring/`$4023`/audio/`$4030` tests, every `.fds` title | Present locally at `refs/bios/disksys.rom` (two revisions) and in the Myrient BIOS archive; it is **not** in `test-roms/`, and the desktop app reads it from Settings → Paths |
-| VS. System BIOS/game ROMs | `characterize-vs`, VS compatibility | Mapper 99 and cabinet input are implemented; ROMs/BIOS and per-title DIP data are still missing |
+| VS. System BIOS/game ROMs | `characterize-vs`, VS compatibility | Mapper 99, cabinet input and UniSystem/DualSystem type parsing are implemented; ROMs/BIOS, per-title DIP data and DualSystem validation are still missing |
 | PlayChoice-10 BIOS/ROMs | PC10 compatibility | Blocked on assets |
 | Miracle Piano firmware | MIDI replies | Not required: SysEx 4/11 replies are synthesized from the documented message set |
 | Datach external X24C01 dump (Battle Rush) | external EEPROM | Not required: the 128-byte X24C01 is modelled from the Xicor datasheet |

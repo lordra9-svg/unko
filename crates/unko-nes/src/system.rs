@@ -1013,6 +1013,12 @@ impl System {
         self.stereo_enabled.then_some(self.stereo_eye)
     }
 
+    /// NES 2.0 Vs. System cabinet type; unmarked images are UniSystem.
+    #[must_use]
+    pub fn vs_system_type(&self) -> crate::VsSystemType {
+        crate::VsSystemType::from_nibble(self.cart.header().vs_system)
+    }
+
     /// Whether the image is a Vs. System cabinet board.
     ///
     /// iNES 1.0 marks Vs. in flags-7 bits 0-1; mapper 99 is only used by Vs.
@@ -1425,7 +1431,7 @@ impl System {
     #[cfg(feature = "save-states")]
     pub fn save_state(&self) -> Result<Vec<u8>, String> {
         let mut out = Vec::new();
-        out.extend_from_slice(b"UNKOST20");
+        out.extend_from_slice(b"UNKOST21");
         out.extend_from_slice(&self.cart.fingerprint().to_le_bytes());
         let mut cart_state = Vec::new();
         self.cart.save_state(&mut cart_state)?;
@@ -1476,7 +1482,7 @@ impl System {
     /// Restores a state produced by [`System::save_state`].
     #[cfg(feature = "save-states")]
     pub fn load_state(&mut self, data: &[u8]) -> Result<(), String> {
-        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST20" {
+        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST21" {
             return Err("not an Unko state (bad magic/version)".into());
         }
         let fingerprint = u64::from_le_bytes(
@@ -3987,7 +3993,7 @@ mod tests {
     fn state_magic_is_current() {
         let system = System::from_ines(&synthetic_nrom(0)).expect("load");
         let state = system.save_state().expect("state");
-        assert_eq!(&state[..8], b"UNKOST20");
+        assert_eq!(&state[..8], b"UNKOST21");
         let mut restored = System::from_ines(&synthetic_nrom(0)).expect("load");
         restored.load_state(&state).expect("restore");
     }
@@ -4381,6 +4387,27 @@ mod tests {
         let vs99 = System::from_ines(&synthetic_vs(32)).expect("load");
         assert!(vs99.is_vs_system());
         assert_eq!(vs99.ppu.ppu_model(), PpuModel::Ppu2C03);
+    }
+
+    #[test]
+    fn vs_system_type_nibble_is_exposed() {
+        let mut rom = synthetic_vs(48);
+        rom[7] = (rom[7] & 0xF0) | 0x08 | 0x01;
+        rom[13] = 0x10; // DualSystem, 2C03
+        let system = System::from_ines(&rom).expect("load");
+        assert_eq!(system.vs_system_type(), crate::VsSystemType::DualSystem);
+
+        rom[13] = 0x29; // Raid on Bungeling Bay protection, 2C05B
+        let system = System::from_ines(&rom).expect("load");
+        assert_eq!(
+            system.vs_system_type(),
+            crate::VsSystemType::RaidOnBungelingBay
+        );
+        assert_eq!(system.ppu.ppu_model(), PpuModel::Ppu2C05B);
+
+        rom[13] = 0x70; // reserved nibble
+        let system = System::from_ines(&rom).expect("load");
+        assert_eq!(system.vs_system_type(), crate::VsSystemType::Unknown(7));
     }
 
     #[test]

@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **685 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **687 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -82,9 +82,9 @@ the FDS watchdog gained serialized reload state, the mouse added serialized
 port state, the Famicom 3D System added its field latch, Karaoke Studio added
 mapper-188 microphone state, the Miracle Piano added its SysEx parser and
 firmware bytes, the Datach adapter added the external X24C01 array, the PPU
-added its hardware model, and the Vs. System added mapper 99 plus coin/DIP
-input, so the save-state magic is now **`UNKOST20`**; `UNKOST19` and older
-states are rejected by the normal bad-magic check. See `docs/accuracy-divergences.md` for the open
+added its hardware model, and the Vs. System added mapper 99, coin/DIP input
+and the NES 2.0 cabinet type, so the save-state magic is now **`UNKOST21`**;
+`UNKOST20` and older states are rejected by the normal bad-magic check. See `docs/accuracy-divergences.md` for the open
 mapper-suite items.
 
 ## Peripherals — SNES/Subor mouse (2026-11-15)
@@ -115,7 +115,7 @@ records every `$4016` write and samples OUT1 at the frame boundary, after the
 previous vertical blank and just before the next visible field, so each
 completed frame is tagged with the eye it was rendered for. The eye is exposed
 through `System::stereo_eye`; `NesCore::set_stereo_glasses` attaches or detaches
-the glasses. `UNKOST20` save states carry the attachment flag, latch and
+the glasses. `UNKOST21` save states carry the attachment flag, latch and
 current eye, so rewind and NetPlay rollback keep the correct eye.
 
 The desktop frontend offers **Settings → Video → Famicom 3D glasses** and
@@ -161,9 +161,9 @@ Mapper 99 now loads a Vs. board directly from its iNES/NES 2.0 image:
 
 - **PRG** — one 8 KiB switchable bank at `$8000` and three fixed 8 KiB banks at
   `$A000-$FFFF`. The 40 KiB *Vs. Gumshoe* image is padded to 48 KiB in iNES and
-  `$4016` bit 2 selects bank 0 or the alternate bank 4; smaller images keep
-  bank 0. A real 48 KiB DualSystem image uses the same size for two 24 KiB
-  halves and is not distinguished yet.
+  `$4016` bit 2 selects bank 0 or the alternate bank 4; smaller images and
+  DualSystem images keep bank 0. A real 48 KiB DualSystem image uses the same
+  size for two 24 KiB halves; only the main half is mapped.
 - **CHR** — `$4016` bit 2 selects between the two 8 KiB CHR sockets. An
   undersized image leaves the missing socket undriven, so reads return the
   open bus instead of mirroring.
@@ -186,14 +186,21 @@ four frames (~67 ms, the hardware's 40-70 ms window) so games do not reject a
 held credit. DIP and primary-CPU choices are remembered per game in
 `<stem>.vs`; the momentary coin and service contacts always start released.
 
-Tests pin the PRG/CHR bank bit, the Gumshoe outer bank, the OUT1 RAM gate and
-mirroring, the undriven CHR socket, every `$4016`/`$4017` bit, the four-frame
-coin pulse, the coin-counter latch/reset and the state round trip. Still open:
-no Vs. BIOS or game ROM is available locally, so no title has booted; per-title
-DIP defaults are unknown; and the DualSystem sub-CPU, its shared-RAM handoff
-and the watchdog are not implemented (the Primary CPU flag only feeds bit 7).
-The NES 2.0 VS system-type nibble is likewise not used to choose DualSystem
-behaviour, and PlayChoice-10 coin/service input is still absent.
+The NES 2.0 cabinet-type nibble is now parsed into `VsSystemType`
+(`UniSystem`, `DualSystem`, `RaidOnBungelingBay`, `Unknown`) and exposed as
+`System::vs_system_type()`. Mapper 99 carries that flag: the 40 KiB *Vs.
+Gumshoe* outer-bank switch applies only to a UniSystem image, while a
+DualSystem 48 KiB image keeps the main half at `$8000` instead of switching to
+bank 4. iNES images without a NES 2.0 nibble default to UniSystem.
+
+Tests pin the PRG/CHR bank bit, the Gumshoe outer bank, the UniSystem/DualSystem
+distinction, the OUT1 RAM gate and mirroring, the undriven CHR socket, every
+`$4016`/`$4017` bit, the four-frame coin pulse, the coin-counter latch/reset
+and the state round trip. Still open: no Vs. BIOS or game ROM is available
+locally, so no title has booted; per-title DIP defaults are unknown; the
+DualSystem sub-CPU, its 24 KiB half selection, shared-RAM handoff and watchdog
+are not implemented (the Primary CPU flag only feeds bit 7); and
+PlayChoice-10 coin/service input is still absent.
 
 ## ROM loading — UNIF (2026-11-15)
 
@@ -243,7 +250,7 @@ input (0 while sound is detected) and bits 7-3 are CPU open bus. The mapper now
 claims that window, so reads reach the board instead of returning open bus.
 `System::set_bandai_microphone` reports the ADC state; the A/B bits follow
 controller port 1. The mapper serializes both buttons, the ADC state and its
-open-bus latch in `UNKOST20` states. Unit tests cover the exact bit mapping,
+open-bus latch in `UNKOST21` states. Unit tests cover the exact bit mapping,
 the open-bus high bits, the CPU-bus path and a state round trip. No Karaoke
 Studio ROM is present locally, so this is validated against the NESdev protocol
 description rather than a title.

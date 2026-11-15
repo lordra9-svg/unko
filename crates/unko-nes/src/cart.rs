@@ -946,6 +946,34 @@ pub struct Header {
     pub console_type: u8,
     /// NES 2.0 VS. PPU model nibble (byte 13 low nibble).
     pub vs_ppu: u8,
+    /// NES 2.0 VS. system-type nibble (byte 13 high nibble).
+    pub vs_system: u8,
+}
+
+/// NES 2.0 Vs. System cabinet type (header byte 13, high nibble).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum VsSystemType {
+    /// One CPU/PPU pair (the common Vs. cabinet).
+    UniSystem,
+    /// Two linked CPU/PPU pairs.
+    DualSystem,
+    /// UniSystem with the Raid on Bungeling Bay protection board.
+    RaidOnBungelingBay,
+    /// Reserved or vendor-specific nibble.
+    Unknown(u8),
+}
+
+impl VsSystemType {
+    /// Maps the NES 2.0 header nibble.
+    #[must_use]
+    pub const fn from_nibble(nibble: u8) -> Self {
+        match nibble & 0x0F {
+            0 => Self::UniSystem,
+            1 => Self::DualSystem,
+            2 => Self::RaidOnBungelingBay,
+            other => Self::Unknown(other),
+        }
+    }
 }
 
 impl Cartridge {
@@ -979,6 +1007,7 @@ impl Cartridge {
                 raw_flags6: 0,
                 console_type: 0,
                 vs_ppu: 0,
+                vs_system: 0,
             },
         })
     }
@@ -1023,7 +1052,7 @@ impl Cartridge {
         let prg_ram = vec![0; header.prg_ram_size.max(0x2000)];
         let mut mapper: Box<dyn Mapper> = match header.mapper {
             0 => Box::new(Nrom::new(prg_rom, chr, header)),
-            99 => Box::new(VsSystem::new(prg_rom, chr)),
+            99 => Box::new(VsSystem::new(prg_rom, chr, header.vs_system == 1)),
             1 => Box::new(Mmc1::new(prg_rom, chr, prg_ram, header)),
             2 => Box::new(UxRom::new(prg_rom, chr, header)),
             3 => Box::new(CnRom::new(prg_rom, chr, header)),
@@ -1840,6 +1869,11 @@ pub fn parse_header(bytes: &[u8]) -> Result<Header, CartError> {
         } else {
             0
         },
+        vs_system: if nes2 && console_type == 1 {
+            (bytes[13] >> 4) & 0x0F
+        } else {
+            0
+        },
         mirroring: if flags6 & 0x08 != 0 {
             Mirroring::FourScreen
         } else if flags6 & 0x01 != 0 {
@@ -1931,6 +1965,9 @@ pub struct VsSystem {
     prg: Vec<u8>,
     chr: Vec<u8>,
     chr_ram: bool,
+    /// DualSystem images are two 24 KiB programs; the second CPU is not
+    /// emulated, so only the main half is mapped and the Gumshoe switch is off.
+    dual: bool,
     wram: Vec<u8>,
     /// `$4016` bit 2: shared PRG/CHR bank select.
     select: u8,
@@ -1940,12 +1977,13 @@ pub struct VsSystem {
 }
 
 impl VsSystem {
-    fn new(prg: Vec<u8>, chr: Vec<u8>) -> Self {
+    fn new(prg: Vec<u8>, chr: Vec<u8>, dual: bool) -> Self {
         let chr_ram = chr.is_empty();
         Self {
             prg,
             chr: if chr_ram { vec![0; 0x2000] } else { chr },
             chr_ram,
+            dual,
             wram: vec![0; 0x800],
             select: 0,
             out1: false,
@@ -1974,7 +2012,7 @@ impl Mapper for VsSystem {
             0x8000..=0x9FFF => {
                 // Only the 40 KiB image wires OUT2 to A13; smaller images keep
                 // bank 0 fixed here.
-                let bank = if self.prg.len() > 0x8000 {
+                let bank = if self.prg.len() > 0x8000 && !self.dual {
                     usize::from(self.select) << 2
                 } else {
                     0
@@ -44552,6 +44590,39 @@ pub(crate) mod tests {
         cart.write_4016(0x04);
         assert_eq!(cart.ppu_read(0x0000), 0x88);
         assert_eq!(cart.cpu_read(0x8000), 0);
+    }
+
+    /// Marks a synthetic image as a NES 2.0 Vs. board.
+    fn mark_vs_nes2(rom: &mut [u8], system: u8, ppu: u8) {
+        // flags-7: mapper high nibble stays, NES 2.0 magic + Vs. console type.
+        rom[7] = (rom[7] & 0xF0) | 0x08 | 0x01;
+        rom[13] = (system << 4) | (ppu & 0x0F);
+    }
+
+    #[test]
+    fn vs_nes2_system_nibble_distinguishes_universal_and_dual() {
+        let mut universal = synth_banked(99, 48, 8);
+        mark_vs_nes2(&mut universal, 0, 9);
+        let mut cart = Cartridge::from_ines(&universal).expect("cart");
+        assert_eq!(cart.header().vs_system, 0);
+        assert_eq!(cart.header().vs_ppu, 9);
+        cart.write_4016(0x04);
+        assert_eq!(
+            cart.cpu_read(0x8000),
+            4,
+            "the UniSystem Gumshoe image selects its outer bank"
+        );
+
+        let mut dual = synth_banked(99, 48, 8);
+        mark_vs_nes2(&mut dual, 1, 0);
+        let mut cart = Cartridge::from_ines(&dual).expect("cart");
+        assert_eq!(cart.header().vs_system, 1);
+        cart.write_4016(0x04);
+        assert_eq!(
+            cart.cpu_read(0x8000),
+            0,
+            "a DualSystem image keeps the main half at $8000"
+        );
     }
 
     #[test]

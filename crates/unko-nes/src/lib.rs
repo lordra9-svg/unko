@@ -28,7 +28,7 @@ mod vs;
 
 pub use apu::Apu;
 pub use bus::{CpuBus, RamBus};
-pub use cart::{CartError, Cartridge, Header, Mapper, Mirroring};
+pub use cart::{CartError, Cartridge, Header, Mapper, Mirroring, VsSystemType};
 #[cfg(feature = "cheats")]
 pub use cheats::{GameGenie, GenieError};
 pub use clock::{Region, Timing};

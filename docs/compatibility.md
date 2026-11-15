@@ -21,7 +21,7 @@ test, or a smoke audit covers it; a dash means no verdict yet.
 | NES PAL / Dendy | **Partial** | PPU timing implemented; PAL APU frame periods now pass 10/10 in PAL mode |
 | Famicom Disk System | **Verified** | Core, CLI (`--bios`) and desktop loader with a user `disksys.rom`; 1/2/4/8x disk speed, manual side selection and optional auto side-swap; FDS audio is bit-exact against RustyNES for 10.9 s, with a residual at one table upload |
 | NSF / NSFE | **Loads only** | Parser and player wiring are unit-tested; corpus validation pending |
-| VS. System | **Partial** | Mapper 99 banking, four-screen VRAM, 2 KiB OUT1-gated work RAM, coin/service/DIP input, coin counter and the 2C03/2C04/2C05 RGB palettes with 2C05 security implemented; VS BIOS/game ROMs, per-title DIP defaults and the DualSystem sub-CPU are still missing |
+| VS. System | **Partial** | Mapper 99 banking, four-screen VRAM, 2 KiB OUT1-gated work RAM, coin/service/DIP input, coin counter, NES 2.0 UniSystem/DualSystem type parsing and the 2C03/2C04/2C05 RGB palettes with 2C05 security implemented; VS BIOS/game ROMs, per-title DIP defaults, the DualSystem sub-CPU/24 KiB half selection and the watchdog are still missing |
 | PlayChoice-10 | **Partial** | 2C03 RGB palette implemented; PC10 BIOS is present; no PC10 game ROMs or coin/service input |
 | SNES / N64 | **Not started** | ares-based multi-system work is queued |
 
@@ -111,7 +111,7 @@ Public mapper-specific status:
 | x0000 APU write-window tests | 10/10 pass |
 | NESdev archive | 137 pass / 11 fail / 115 visual/audio/input-only; PAL APU timing leaves 4 failures, adding the alternate MMC3 selector leaves only `read_joy3/count_errors` |
 | RustyNES test tree | 159 pass / 11 fail / 171 visual/audio/input-only; 166 / 4 with PAL APU in PAL mode, 1 with the alternate MMC3 selector too |
-| Workspace tests | 685 pass, 0 failed |
+| Workspace tests | 687 pass, 0 failed |
 
 The actionable accuracy failures are tracked in
 [`accuracy-divergences.md`](accuracy-divergences.md); the ROM/BIOS inventory is

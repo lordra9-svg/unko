@@ -152,10 +152,11 @@ matrix above is the comparison; this list is the work queue.
 2. **IPS/BPS soft-patching and a NES 2.0 header editor/repair database**
    (missing-header warning only today).
 3. **VS. System / PlayChoice-10**: mapper 99 banking, four-screen VRAM,
-   OUT1-gated work RAM, coin/service/DIP input, the coin counter, the
-   2C03/2C04-xxxx/2C05 palettes and 2C05 security are in. Remaining: VS
-   BIOS/ROM boot validation, per-title DIP defaults, the DualSystem
-   sub-CPU/watchdog and PC10 game ROMs/input. PlayChoice-10 BIOS is available.
+   OUT1-gated work RAM, coin/service/DIP input, the coin counter, NES 2.0
+   UniSystem/DualSystem type parsing, the 2C03/2C04-xxxx/2C05 palettes and
+   2C05 security are in. Remaining: VS BIOS/ROM boot validation, per-title DIP
+   defaults, the DualSystem sub-CPU/24 KiB half selection/watchdog and PC10
+   game ROMs/input. PlayChoice-10 BIOS is available.
 4. **FDS depth**: loading, BIOS selection, side switching, disk-write
    persistence, 1/2/4/8x disk speed and opt-in auto side swap are in.
 5. **Peripherals**: the SNES/Subor mouse, Famicom 3D System (anaglyph
