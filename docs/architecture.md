@@ -107,8 +107,10 @@ The app drives it from `Player::step` and exposes a host/join window with
 player/slot selection. `upnp` adds a std-only UPnP-IGD client (SSDP discovery,
 device-description fetch, `AddPortMapping`, `GetExternalIPAddress`) used from a
 worker thread; `stun` adds an RFC 5389 binding client that supplies the
-external IP when the router has no UPnP. A manual public-endpoint field covers
-everything else. Hole punching remains future work.
+external IP when the router has no UPnP; `holepunch` retries `PUNCH`/`PONG`
+datagrams to public peers and reports when bidirectional traffic is confirmed.
+A manual public-endpoint field covers everything else. A TURN-style relay
+fallback remains future work.
 
 `unko-rom-manager` is a separate, non-emulator feature core: DAT auditing,
 1G1R selection, fixdat/CSV reports and safe rebuilding. It has no dependency

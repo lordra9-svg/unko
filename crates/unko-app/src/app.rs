@@ -30,7 +30,7 @@ use crate::rom_manager::RomManager;
 use crate::settings::{Aspect, HotkeyAction, PortInput, Settings, ShaderPreset, Theme};
 use unko_netplay::{
     add_port_mapping, discover, endpoint, external_ip, local_address_toward, stun_public_address,
-    MappingProtocol, MappingRequest, PredictionMode, SessionConfig, UdpMesh,
+    HolePunchTransport, MappingProtocol, MappingRequest, PredictionMode, SessionConfig, UdpMesh,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,6 +217,8 @@ pub struct App {
     netplay_upnp: bool,
     netplay_upnp_status: String,
     netplay_stun_server: String,
+    netplay_hole_punch: bool,
+    netplay_pending_punch: Option<(HolePunchTransport, SessionConfig)>,
     netplay_upnp_rx: Option<std::sync::mpsc::Receiver<Result<(String, String), String>>>,
     controller_last: unko_core::InputState,
     controller_repeat: Instant,
@@ -354,6 +356,8 @@ impl App {
             netplay_upnp: false,
             netplay_upnp_status: String::new(),
             netplay_stun_server: "stun.l.google.com:19302".into(),
+            netplay_hole_punch: false,
+            netplay_pending_punch: None,
             netplay_upnp_rx: None,
             controller_last: unko_core::InputState::empty(),
             controller_repeat: Instant::now(),
@@ -2677,6 +2681,35 @@ impl App {
             );
             return;
         }
+        let config = SessionConfig {
+            buffer_frames: 8,
+            input_delay: self.netplay_delay,
+            prediction: self.netplay_prediction,
+            players,
+            local_player: slot,
+        };
+        if self.netplay_hole_punch {
+            let mut endpoints = Vec::with_capacity(peers.len());
+            for peer in &peers {
+                match peer.parse::<std::net::SocketAddr>() {
+                    Ok(endpoint) => endpoints.push(endpoint),
+                    Err(err) => {
+                        self.netplay_status =
+                            format!("Hole punch needs public ip:port peers ({peer}: {err}).");
+                        return;
+                    }
+                }
+            }
+            match HolePunchTransport::bind(&format!("0.0.0.0:{port}"), &endpoints) {
+                Ok(transport) => {
+                    self.netplay_status =
+                        format!("Hole punching UDP {port} to {} peer(s)…", endpoints.len());
+                    self.netplay_pending_punch = Some((transport, config));
+                }
+                Err(err) => self.netplay_status = format!("Bind failed: {err}"),
+            }
+            return;
+        }
         let transport = UdpMesh::bind(&format!("0.0.0.0:{port}")).and_then(|mut mesh| {
             for peer in &peers {
                 mesh.add_peer(peer)?;
@@ -2685,16 +2718,7 @@ impl App {
         });
         match transport {
             Ok(mesh) => {
-                player.start_netplay_with(
-                    Box::new(mesh),
-                    SessionConfig {
-                        buffer_frames: 8,
-                        input_delay: self.netplay_delay,
-                        prediction: self.netplay_prediction,
-                        players,
-                        local_player: slot,
-                    },
-                );
+                player.start_netplay_with(Box::new(mesh), config);
                 self.netplay_status = format!(
                     "{} on UDP {port}, {} player(s), slot {}, peer(s) {}",
                     if self.netplay_host {
@@ -2764,6 +2788,32 @@ impl App {
             };
             let _ = tx.send(result);
         });
+    }
+
+    /// Advances a pending hole-punch handshake and starts the session once
+    /// every peer is confirmed.
+    fn poll_hole_punch(&mut self) {
+        let Some((transport, _)) = self.netplay_pending_punch.as_mut() else {
+            return;
+        };
+        transport.punch();
+        let confirmed = transport.confirmed();
+        let total = transport.peers().len();
+        if transport.connected() {
+            let (transport, config) = self
+                .netplay_pending_punch
+                .take()
+                .expect("pending hole punch");
+            if let Some(player) = &mut self.player {
+                player.start_netplay_with(Box::new(transport), config);
+                self.netplay_status = format!("Hole punch confirmed ({total}/{total}); running.");
+            }
+            if self.netplay_upnp {
+                self.spawn_nat_detect();
+            }
+        } else {
+            self.netplay_status = format!("Hole punching… {confirmed}/{total} peer(s) confirmed.");
+        }
     }
 
     /// Polls the NAT worker without blocking the frame.
@@ -2881,8 +2931,12 @@ impl App {
                         self.spawn_nat_detect();
                     }
                     ui.add_enabled(
-                        !active,
+                        !active && self.netplay_pending_punch.is_none(),
                         egui::Checkbox::new(&mut self.netplay_upnp, "Map on start"),
+                    );
+                    ui.add_enabled(
+                        !active && self.netplay_pending_punch.is_none(),
+                        egui::Checkbox::new(&mut self.netplay_hole_punch, "Hole punch"),
                     );
                     if self.netplay_upnp_rx.is_some() {
                         ui.spinner();
@@ -2949,17 +3003,23 @@ impl App {
                 });
                 ui.separator();
                 ui.horizontal(|ui| {
-                    let can_start = !active && self.player.is_some();
+                    let can_start =
+                        !active && self.netplay_pending_punch.is_none() && self.player.is_some();
                     if ui
                         .add_enabled(can_start, egui::Button::new("Start"))
                         .clicked()
                     {
                         self.start_netplay();
                     }
-                    if ui.add_enabled(active, egui::Button::new("Stop")).clicked() {
+                    let punching = self.netplay_pending_punch.is_some();
+                    if ui
+                        .add_enabled(active || punching, egui::Button::new("Stop"))
+                        .clicked()
+                    {
                         if let Some(player) = &mut self.player {
                             player.stop_netplay();
                         }
+                        self.netplay_pending_punch = None;
                         self.netplay_status = "Stopped".into();
                     }
                 });
@@ -3348,6 +3408,7 @@ impl eframe::App for App {
             audio.set_active(running && !self.settings.muted);
         }
         let detached_windows = self.detached_windows();
+        self.poll_hole_punch();
         let window_generation = self.window_generation;
         let audio = self.audio.as_mut();
         if let Some(player) = &mut self.player {
