@@ -39,10 +39,17 @@ None in AccuracyCoin. All non-DRAW rows pass.
   phase is one cycle into the 16-cycle period at reset; without it the replay
   differs from cycle 19,472,959). The remaining APU-muted, post-resampler
   difference starts at sample 479,795, has identical zero crossings and RMS
-  (3e-7 relative) and correlation 0.999993 at lag 0, so it is in the output /
-  resampler path, not the FDS synthesis model. The phase correction also
-  reduces the post-resampler differing samples from 331,486 to 236,936 and
-  keeps fdsirqtests 21/21 and FDS-Mirroring 3/3.
+  (3e-7 relative) and correlation 0.999993 at lag 0. Isolation test
+  (2026-11-15): feeding the identical pre-resampler stream into Unko's and
+  RustyNES's resamplers produces outputs that differ only by at most one f32
+  ULP (max |diff| 1.49e-8, 149,033 of 871,253 samples), so the resampler is
+  not the cause. The residual is the emulator's per-cycle expansion-audio
+  sampling/clock point relative to CPU register writes (the model replay
+  matches the reference under the replay's sample point). Fixing it requires
+  reordering the expansion audio clock/sample against CPU writes without
+  disturbing the APU path; the phase correction already cuts post-resampler
+  differing samples from 331,486 to 236,936 and keeps fdsirqtests 21/21 and
+  FDS-Mirroring 3/3.
 
 ### Holy Mapperel (2026-11-14)
 

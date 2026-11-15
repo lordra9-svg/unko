@@ -1470,19 +1470,21 @@ emitted FNV-1a hashes of each frame's f32 samples with the same byte layout as
 - **FDS only** (APU channels muted in both: RustyNES mask `0x20`, Unko gains
   `[0,0,0,0,0,1]`): the streams are **bit-identical for 479,795 samples
   (~10.9 s)** on Zelda. They first differ at frame 653, during a wavetable and
-  modulation-table upload; there is no `$4023` sound reset there. The first
-  values differ by fractions of a percent and no sample shift aligns them, so
-  the residual is an envelope/phase detail at that note change.
+  modulation-table upload; there is no `$4023` sound reset there. The residual
+  was later isolated (below): it is not the synthesis model.
 
 The audio unit was rewritten to the documented model (16-CPU-cycle wave and
 modulation clock, integer 24/18-bit accumulators, `$408A` envelope multiplier,
-separate modulation envelope, documented output scaling). This moved the
-FDS-only bit-exact window from the first note to 10.9 s. A pre-resampler replay of the entire register timeline into both audio
-implementations is **bit-identical for 35,360,017 CPU cycles** once the
-wave/mod prescaler starts one cycle into its 16-cycle period at reset. The
-remaining APU-muted, post-resampler difference (first at sample 479,795) has
-identical zero crossings and RMS and correlation 0.999993, so it lies in the
-output/resampler path rather than the FDS synthesis model.
+separate modulation envelope, documented output scaling). A pre-resampler
+replay of the entire register timeline into both audio implementations is
+**bit-identical for 35,360,017 CPU cycles** once the wave/mod prescaler starts
+one cycle into its 16-cycle period at reset. An isolation test then fed the
+identical pre-resampler stream into Unko's and RustyNES's resamplers: their
+outputs differ by at most one f32 ULP (max 1.49e-8), so the resampler is not
+the cause either. The remaining APU-muted, post-resampler difference (first at
+sample 479,795) is the emulator's per-cycle expansion-audio sampling/clock
+point relative to CPU writes; the model replay matches the reference when both
+use the same sample point.
 
 ### Holy Mapperel board matrix (2026-11-14)
 
