@@ -32341,27 +32341,41 @@ impl Vrc7Chr {
 /// attached to an FDS mapper later.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FdsAudio {
+    /// 64-entry, 6-bit wavetable.
     #[serde(with = "serde_big_array::BigArray")]
     wave: [u8; 64],
+    /// 32-entry, 3-bit modulation table.
     mod_table: [u8; 32],
     enabled: bool,
-    wave_pos: f32,
-    frequency: u16,
-    master_volume: u8,
-    volume_gain: u8,
-    volume_speed: u8,
-    volume_increase: bool,
-    envelope_off: bool,
-    volume_timer: u32,
-    mod_pos: f32,
-    mod_frequency: u16,
-    mod_counter: i8,
-    mod_index: u8,
-    mod_unit_off: bool,
-    mod_timer: u32,
+
+    wave_acc: u32,
+    wave_out: u8,
+    wave_pitch: u16,
+    wave_halt: bool,
+    env_halt: bool,
     wave_write: bool,
-    mod_write: bool,
-    output: f32,
+
+    volume_disabled: bool,
+    volume_increase: bool,
+    volume_speed: u8,
+    volume_gain: u8,
+    volume_timer: u32,
+
+    mod_disabled: bool,
+    mod_increase: bool,
+    mod_speed: u8,
+    mod_gain: u8,
+    mod_timer: u32,
+
+    mod_counter: i8,
+    mod_pitch: u16,
+    mod_halt: bool,
+    mod_acc: u32,
+    mod_write_pos: u8,
+
+    master_volume: u8,
+    env_speed: u8,
+    prescaler: u8,
 }
 
 impl Default for FdsAudio {
@@ -32370,23 +32384,30 @@ impl Default for FdsAudio {
             wave: [0; 64],
             mod_table: [0; 32],
             enabled: false,
-            wave_pos: 0.0,
-            frequency: 0,
-            master_volume: 0,
-            volume_gain: 0,
-            volume_speed: 0,
-            volume_increase: false,
-            envelope_off: false,
-            volume_timer: 0,
-            mod_pos: 0.0,
-            mod_frequency: 0,
-            mod_counter: 0,
-            mod_index: 0,
-            mod_unit_off: false,
-            mod_timer: 0,
+            wave_acc: 0,
+            wave_out: 0,
+            wave_pitch: 0,
+            wave_halt: false,
+            env_halt: false,
             wave_write: false,
-            mod_write: false,
-            output: 0.0,
+            volume_disabled: false,
+            volume_increase: false,
+            volume_speed: 0,
+            volume_gain: 0,
+            volume_timer: 0,
+            mod_disabled: false,
+            mod_increase: false,
+            mod_speed: 0,
+            mod_gain: 0,
+            mod_timer: 0,
+            mod_counter: 0,
+            mod_pitch: 0,
+            mod_halt: false,
+            mod_acc: 0,
+            mod_write_pos: 0,
+            master_volume: 0,
+            env_speed: 0xE8,
+            prescaler: 0,
         }
     }
 }
@@ -32399,11 +32420,7 @@ impl FdsAudio {
                 let was = self.enabled;
                 self.enabled = value & 0x02 != 0;
                 if was && !self.enabled {
-                    self.wave_pos = 0.0;
-                    self.mod_pos = 0.0;
-                    self.mod_counter = 0;
-                    self.volume_gain = 0;
-                    self.output = 0.0;
+                    self.reset();
                 }
             }
             0x4040..=0x407F => {
@@ -32412,51 +32429,68 @@ impl FdsAudio {
                 }
             }
             0x4080 => {
-                self.envelope_off = value & 0x80 != 0;
+                self.volume_disabled = value & 0x80 != 0;
                 self.volume_increase = value & 0x40 != 0;
                 self.volume_speed = value & 0x3F;
-                if self.envelope_off {
-                    self.volume_gain = self.volume_speed;
+                if self.volume_disabled {
+                    self.volume_gain = value & 0x3F;
                 }
-                self.volume_timer = 0;
+                self.volume_timer = self.volume_period();
             }
-            0x4082 => self.frequency = (self.frequency & 0x0F00) | u16::from(value),
+            0x4082 => self.wave_pitch = (self.wave_pitch & 0x0F00) | u16::from(value),
             0x4083 => {
-                self.frequency = (self.frequency & 0x00FF) | (u16::from(value & 0x0F) << 8);
-                // Bit 6 disables the envelopes; bit 7 speeds them up and
-                // halts the modulation accumulator.
-                let disable = value & 0x40 != 0;
-                self.envelope_off |= disable;
-                if disable {
-                    self.volume_timer = 0;
+                self.wave_pitch = (self.wave_pitch & 0x00FF) | (u16::from(value & 0x0F) << 8);
+                let halt = value & 0x80 != 0;
+                if halt && !self.wave_halt {
+                    self.wave_acc = 0;
                 }
-                self.mod_unit_off = value & 0x80 != 0;
+                self.wave_halt = halt;
+                self.env_halt = value & 0x40 != 0;
+                if self.env_halt {
+                    self.volume_timer = self.volume_period();
+                    self.mod_timer = self.mod_period();
+                }
             }
             0x4084 => {
-                self.mod_unit_off = value & 0x80 != 0;
-                self.mod_timer = 0;
-            }
-            0x4085 => self.mod_counter = (value & 0x7F) as i8,
-            0x4086 => self.mod_frequency = (self.mod_frequency & 0x0F00) | u16::from(value),
-            0x4087 => {
-                self.mod_frequency = (self.mod_frequency & 0x00FF) | (u16::from(value & 0x0F) << 8);
-                self.mod_write = value & 0x80 != 0;
-                if self.mod_write {
-                    self.mod_pos = 0.0;
+                self.mod_disabled = value & 0x80 != 0;
+                self.mod_increase = value & 0x40 != 0;
+                self.mod_speed = value & 0x3F;
+                if self.mod_disabled {
+                    self.mod_gain = value & 0x3F;
                 }
+                self.mod_timer = self.mod_period();
+            }
+            0x4085 => {
+                let raw = value & 0x7F;
+                self.mod_counter = if raw & 0x40 != 0 {
+                    (raw | 0x80) as i8
+                } else {
+                    raw as i8
+                };
+            }
+            0x4086 => self.mod_pitch = (self.mod_pitch & 0x0F00) | u16::from(value),
+            0x4087 => {
+                self.mod_pitch = (self.mod_pitch & 0x00FF) | (u16::from(value & 0x0F) << 8);
+                let halt = value & 0x80 != 0;
+                if halt {
+                    // Keep the 5-bit table address (bits 13-17), reset the
+                    // fraction and ghost bits.
+                    self.mod_acc &= 0x0003_E000;
+                }
+                self.mod_halt = halt;
             }
             0x4088 => {
-                if self.mod_write {
-                    let index = usize::from(self.mod_index >> 1) & 0x1F;
-                    self.mod_table[index] = value & 0x3F;
-                    self.mod_index = (self.mod_index + 1) & 0x3F;
+                if self.mod_halt {
+                    let pos = usize::from(self.mod_write_pos & 0x1F);
+                    self.mod_table[pos] = value & 0x07;
+                    self.mod_write_pos = (self.mod_write_pos + 1) & 0x1F;
                 }
             }
             0x4089 => {
-                self.master_volume = value & 0x03;
                 self.wave_write = value & 0x80 != 0;
+                self.master_volume = value & 0x03;
             }
-            0x408A => self.volume_speed = value & 0x3F,
+            0x408A => self.env_speed = value,
             _ => {}
         }
     }
@@ -32465,68 +32499,152 @@ impl FdsAudio {
     #[must_use]
     pub fn read(&self, address: u16) -> u8 {
         match address {
-            0x4090 => self.volume_gain,
-            0x4091 => self.volume_speed,
-            0x4092 => self.volume_gain,
-            0x4093 => (self.frequency >> 8) as u8,
-            0x4094 => self.frequency as u8,
-            0x4095 => self.wave[self.wave_index()],
-            0x4096 => self.mod_table[usize::from(self.mod_index >> 1) & 0x1F],
-            0x4097 => self.mod_counter as u8,
+            0x4090 => 0x40 | (self.volume_gain & 0x3F),
+            0x4092 => 0x40 | (self.mod_gain & 0x3F),
+            0x4096 => 0x40 | (self.wave_out & 0x3F),
+            0x4097 => (self.mod_counter as u8) & 0x7F,
             _ => 0,
         }
     }
 
-    fn wave_index(&self) -> usize {
-        let moderated = (self.wave_pos.round() as i32) + i32::from(self.mod_counter);
-        (moderated & 0x3F) as usize
+    fn reset(&mut self) {
+        self.wave_acc = 0;
+        self.wave_out = 0;
+        self.volume_gain = 0;
+        self.volume_timer = 0;
+        self.mod_gain = 0;
+        self.mod_timer = 0;
+        self.mod_counter = 0;
+        self.mod_acc = 0;
+        self.mod_write_pos = 0;
+        self.prescaler = 0;
+    }
+
+    fn volume_period(&self) -> u32 {
+        8 * (u32::from(self.volume_speed) + 1) * (u32::from(self.env_speed) + 1)
+    }
+
+    fn mod_period(&self) -> u32 {
+        8 * (u32::from(self.mod_speed) + 1) * (u32::from(self.env_speed) + 1)
+    }
+
+    fn clock_envelope(timer: &mut u32, gain: &mut u8, disabled: bool, increase: bool, period: u32) {
+        if disabled {
+            return;
+        }
+        if *timer == 0 {
+            *timer = period;
+        }
+        *timer -= 1;
+        if *timer == 0 {
+            *timer = period;
+            if increase {
+                *gain = (*gain + 1).min(32);
+            } else {
+                *gain = gain.saturating_sub(1);
+            }
+        }
+    }
+
+    fn modulated_pitch(&self) -> u32 {
+        let counter = i32::from(self.mod_counter);
+        let gain = i32::from(self.mod_gain);
+        let mut temp = counter * gain;
+        if (temp & 0x0F) != 0 && (temp & 0x800) == 0 {
+            temp += 0x20;
+        }
+        temp += 0x400;
+        temp = (temp >> 4) & 0xFF;
+        u32::from(self.wave_pitch).wrapping_mul(temp as u32) & 0x000F_FFFF
+    }
+
+    fn step_mod(&mut self, entry: u8) {
+        match entry & 0x07 {
+            0 => {}
+            1 => self.mod_counter = self.mod_counter.wrapping_add(1),
+            2 => self.mod_counter = self.mod_counter.wrapping_add(2),
+            3 => self.mod_counter = self.mod_counter.wrapping_add(4),
+            4 => self.mod_counter = 0,
+            5 => self.mod_counter = self.mod_counter.wrapping_sub(4),
+            6 => self.mod_counter = self.mod_counter.wrapping_sub(2),
+            _ => self.mod_counter = self.mod_counter.wrapping_sub(1),
+        }
+        let mut value = i16::from(self.mod_counter);
+        if value > 63 {
+            value -= 128;
+        } else if value < -64 {
+            value += 128;
+        }
+        self.mod_counter = value as i8;
+    }
+
+    fn clock_mod(&mut self) {
+        if self.mod_halt || self.mod_pitch == 0 {
+            return;
+        }
+        let before = self.mod_acc;
+        self.mod_acc = (self.mod_acc + u32::from(self.mod_pitch)) & 0x0003_FFFF;
+        if (before & 0x0FFF) + u32::from(self.mod_pitch) > 0x0FFF {
+            let index = ((self.mod_acc >> 13) & 0x1F) as usize;
+            let entry = self.mod_table[index];
+            self.step_mod(entry);
+        }
+    }
+
+    fn clock_wave(&mut self) {
+        if self.wave_halt || self.wave_write {
+            if self.wave_halt {
+                self.wave_out = self.wave[0] & 0x3F;
+            }
+            return;
+        }
+        let pitch = self.modulated_pitch();
+        self.wave_acc = self.wave_acc.wrapping_add(pitch) & 0x00FF_FFFF;
+        let index = ((self.wave_acc >> 18) & 0x3F) as usize;
+        self.wave_out = self.wave[index] & 0x3F;
     }
 
     /// Advances one CPU cycle.
     pub fn clock(&mut self) {
         if !self.enabled {
-            self.output = 0.0;
             return;
         }
-        // Wave accumulator: the 12-bit frequency selects the step rate.
-        self.wave_pos = (self.wave_pos + f32::from(self.frequency) / 4096.0) % 64.0;
-
-        // Volume envelope, clocked at (speed + 1) * 8 CPU cycles.
-        self.volume_timer += 1;
-        let period = (u32::from(self.volume_speed) + 1) * 8;
-        if self.volume_timer >= period {
-            self.volume_timer = 0;
-            if !self.envelope_off {
-                if self.volume_increase {
-                    self.volume_gain = (self.volume_gain + 1).min(32);
-                } else {
-                    self.volume_gain = self.volume_gain.saturating_sub(1);
-                }
-            }
+        if !self.env_halt && !self.wave_halt && self.env_speed != 0 {
+            let period = self.volume_period();
+            Self::clock_envelope(
+                &mut self.volume_timer,
+                &mut self.volume_gain,
+                self.volume_disabled,
+                self.volume_increase,
+                period,
+            );
+            let period = self.mod_period();
+            Self::clock_envelope(
+                &mut self.mod_timer,
+                &mut self.mod_gain,
+                self.mod_disabled,
+                self.mod_increase,
+                period,
+            );
         }
-
-        // Modulation accumulator: a carry steps the 32-entry table twice.
-        if self.mod_frequency != 0 && !self.mod_unit_off {
-            self.mod_pos = (self.mod_pos + f32::from(self.mod_frequency) / 4096.0) % 1.0;
-            self.mod_timer += 1;
-            if self.mod_timer >= 16 {
-                self.mod_timer = 0;
-                let index = usize::from(self.mod_index >> 1) & 0x1F;
-                let step = (self.mod_table[index] ^ 0x20).wrapping_sub(0x20) as i8;
-                self.mod_counter = self.mod_counter.wrapping_add(step);
-                self.mod_index = (self.mod_index + 1) & 0x3F;
-            }
+        self.prescaler += 1;
+        if self.prescaler >= 16 {
+            self.prescaler = 0;
+            self.clock_mod();
+            self.clock_wave();
         }
-
-        let sample = (f32::from(self.wave[self.wave_index()]) - 32.0) / 32.0;
-        let gain = f32::from(self.volume_gain.min(32)) / 32.0;
-        self.output = sample * gain * (f32::from(self.master_volume) / 3.0);
     }
 
     /// Signed output for the APU mixer.
     #[must_use]
     pub fn mix(&self) -> f32 {
-        self.output * 0.5
+        let gain = u32::from(self.volume_gain.min(32));
+        let sample = u32::from(self.wave_out & 0x3F);
+        let denominator = u32::from(self.master_volume) + 2;
+        let level = sample * gain * 2 / denominator;
+        let midpoint = 32 * gain * 2 / denominator;
+        let centered = level as i32 - midpoint as i32;
+        centered as f32 * 7.0 / 65_536.0
     }
 }
 
@@ -39361,6 +39479,62 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn fds_audio_envelope_uses_the_master_speed_multiplier() {
+        let mut audio = FdsAudio::default();
+        audio.write(0x4023, 0x02); // sound enabled
+        audio.write(0x408A, 0); // envelopes disabled
+        audio.write(0x4080, 0x40); // increase, speed 0
+        for _ in 0..100 {
+            audio.clock();
+        }
+        assert_eq!(audio.read(0x4090) & 0x3F, 0);
+        audio.write(0x408A, 1);
+        audio.write(0x4080, 0x40);
+        for _ in 0..15 {
+            audio.clock();
+        }
+        assert_eq!(audio.read(0x4090) & 0x3F, 0, "first tick is at 16 cycles");
+        audio.clock();
+        assert_eq!(audio.read(0x4090) & 0x3F, 1);
+    }
+
+    #[test]
+    fn fds_audio_direct_gain_and_output_scale() {
+        let mut audio = FdsAudio::default();
+        audio.write(0x4023, 0x02);
+        audio.write(0x4089, 0x83); // wave write enable, master volume 3
+        audio.write(0x4040, 63);
+        audio.write(0x4089, 0x03); // hold released, master volume 3
+        audio.write(0x4080, 0xBF); // envelope disabled, direct gain 63
+        assert_eq!(audio.read(0x4090) & 0x3F, 63);
+        audio.write(0x4083, 0x80); // halt wave: output holds wave[0]
+        for _ in 0..16 {
+            audio.clock();
+        }
+        let value = audio.mix();
+        assert!(value > 0.0, "positive wave sample");
+    }
+
+    #[test]
+    fn fds_audio_mod_table_steps_the_counter() {
+        let mut audio = FdsAudio::default();
+        audio.write(0x4023, 0x02);
+        audio.write(0x4087, 0x80); // halt mod unit, table writable
+        audio.write(0x4088, 3); // +4
+        audio.write(0x4088, 7); // -1
+        audio.write(0x4088, 4); // reset
+        audio.write(0x4085, 5);
+        audio.write(0x4086, 0x10);
+        audio.write(0x4087, 0x00); // run
+        for _ in 0..2000 {
+            audio.clock();
+        }
+        // The counter must remain inside the signed 7-bit range.
+        let raw = audio.read(0x4097);
+        assert!(raw <= 0x7F);
+    }
+
+    #[test]
     fn mmc2_mirroring_bit_zero_is_vertical() {
         let rom = synth_banked(9, 128, 64);
         let mut cart = Cartridge::from_ines(&rom).expect("cart");
@@ -43070,19 +43244,21 @@ pub(crate) mod tests {
     fn fds_wavetable_volume_envelope_and_disable() {
         let mut audio = FdsAudio::default();
         audio.write(0x4023, 0x02); // enable sound registers
-        audio.write(0x4089, 0x83); // master volume 3, wave RAM write enable
+        audio.write(0x4089, 0x80); // master volume 0 (full), wave RAM write enable
         for i in 0..64u16 {
             audio.write(0x4040 + i, if i < 32 { 63 } else { 0 });
         }
-        audio.write(0x4089, 0x03); // master volume 3, writes disabled
-        audio.write(0x4080, 0xBF); // envelope off, gain/speed 63
-        audio.write(0x4082, 0x40);
-        audio.write(0x4083, 0x00);
+        audio.write(0x4089, 0x00); // writes disabled, master volume 0
+        audio.write(0x4080, 0xBF); // envelope off, direct gain 63
+        audio.write(0x4082, 0xFF);
+        audio.write(0x4083, 0x0F); // pitch 0xFFF
         audio.write(0x408A, 0x3F);
 
         let mut peak = 0.0f32;
         let mut trough = 0.0f32;
-        for _ in 0..5000 {
+        // The wave unit advances every 16 CPU cycles; a pitch of 0xFFF takes
+        // ~64 wave ticks (1024 CPU cycles) per table entry.
+        for _ in 0..40_000 {
             audio.clock();
             peak = peak.max(audio.mix());
             trough = trough.min(audio.mix());
@@ -43090,10 +43266,11 @@ pub(crate) mod tests {
         assert!(peak > 0.1, "positive wave half missing: {peak}");
         assert!(trough < -0.1, "negative wave half missing: {trough}");
 
-        // Re-arm a 32-step decreasing envelope; after ~16k cycles it is silent.
-        audio.write(0x4080, 0xA0);
-        audio.write(0x4080, 0x3F);
-        for _ in 0..20_000 {
+        // Re-arm a decreasing envelope: speed 15 with multiplier 1 gives a
+        // 256-cycle step, so 63 steps decay in ~16k cycles.
+        audio.write(0x408A, 0x01);
+        audio.write(0x4080, 0x0F); // envelope on, decrease, speed 15
+        for _ in 0..30_000 {
             audio.clock();
         }
         assert!(audio.mix().abs() < 0.01, "envelope did not decay");

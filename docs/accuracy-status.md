@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **519 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **522 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -74,9 +74,9 @@ passes with the alternate selector. The selector is exposed as
 **146/146 non-DRAW**, and the 20/120-frame library audit is unchanged
 (3,897/6,497 rendering).
 
-Because `Mmc3` gained serialized PRG-RAM protection state, the save-state magic
-is now **`UNKOST10`**; `UNKOST09` and older states are rejected by the normal
-bad-magic check. See `docs/accuracy-divergences.md` for the open mapper-suite
+Because `Mmc3` gained serialized PRG-RAM protection state and `FdsAudio` was
+rewritten, the save-state magic is now **`UNKOST11`**; `UNKOST10` and older
+states are rejected by the normal bad-magic check. See `docs/accuracy-divergences.md` for the open mapper-suite
 items.
 
 ## A1 — 6502
@@ -1455,6 +1455,30 @@ and 12-bit timer (3245 reload); the first captured return address matches the
 hardware exactly and the second is one byte early. Reload-value and ack-cycle
 experiments move the interval by a cycle without moving that address, which
 places the residual in interrupt recognition rather than the refresh edge.
+
+### FDS audio oracle comparison (2026-11-15)
+
+A temporary RustyNES harness (in its own workspace, not committed) loaded the
+same `.fds` and BIOS with `Nes::from_disk_with_sample_rate(…, 44_100)` and
+emitted FNV-1a hashes of each frame's f32 samples with the same byte layout as
+`unko trace`.
+
+- **Full mix**: both Metroid and Zelda first diverge at sample **7,293**
+  (frame 10), before either game writes an FDS audio register; NES Contra also
+  diverges later, and frame-level hashes are confounded by ±1-sample drain
+  boundaries. The full mix therefore does not isolate FDS synthesis.
+- **FDS only** (APU channels muted in both: RustyNES mask `0x20`, Unko gains
+  `[0,0,0,0,0,1]`): the streams are **bit-identical for 479,795 samples
+  (~10.9 s)** on Zelda. They first differ at frame 653, during a wavetable and
+  modulation-table upload; there is no `$4023` sound reset there. The first
+  values differ by fractions of a percent and no sample shift aligns them, so
+  the residual is an envelope/phase detail at that note change.
+
+The audio unit was rewritten to the documented model (16-CPU-cycle wave and
+modulation clock, integer 24/18-bit accumulators, `$408A` envelope multiplier,
+separate modulation envelope, documented output scaling). This moved the
+FDS-only bit-exact window from the first note to 10.9 s; the remaining
+divergence is localized to the frame-653 table upload.
 
 ### Holy Mapperel board matrix (2026-11-14)
 

@@ -39,15 +39,17 @@ The main effort is now the reference-parity accuracy core. Details in
       136/193/197 render 7/7,
       159/165 8/8, 172 4/6, 195 8/8 (Tiexue needs Start on its title screen)
       (`docs/mapper-audit.md`).
-      FDS wavetable/modulation audio is implemented and unit-tested. The raw
+      FDS wavetable/modulation audio is implemented from the documented model
+      and bit-matches RustyNES for 10.9 s with the APU muted; the residual is
+      a table-upload note change. The raw
       loader (`System::from_fds`) and mapper 20 board now map the 8 KiB BIOS,
       32 KiB work RAM, the `$4020-$4032` disk registers/timer IRQ and the
       `$4040-$4097` audio window. The disk is delivered as a synthesized wire
       image (lead-in/inter-block gaps, `$80` start marks, per-block CRC-16) at
       the ~149-cycle byte cadence, and the real BIOS boots a local
       commercial `.fds` title to its licence screen and game title. Remaining
-      FDS work: byte-identical
-      audio parity. MMC5 now covers the full CHR range (the extended-attribute
+      FDS work: the frame-653 table-upload
+      audio residual. MMC5 now covers the full CHR range (the extended-attribute
       path carries physical offsets, so >256 KiB CHR works). The Datach board
       (157) and the previously open six-image ASIC tail are implemented; the
       remaining hardware-dependent checks are tracked in
@@ -177,7 +179,7 @@ The main effort is now the reference-parity accuracy core. Details in
       (mapper 157, UPC-A/EAN-13 modules at the documented 1000-cycle rate).
       The piano's MIDI replies and the Datach EEPROM need their real-ROM
       validation; both transports have synthetic tests. Device state is part
-      of `UNKOST10` save states; the Controllers tab selects a device per
+      of `UNKOST11` save states; the Controllers tab selects a device per
       port.
 - [x] FDS (user BIOS, never bundled): core/CLI/app loading, side menu,
       disk-write persistence, 1/2/4/8x disk speed and opt-in auto side swap.

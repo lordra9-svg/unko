@@ -32,6 +32,11 @@ None in AccuracyCoin. All non-DRAW rows pass.
   Responsible module: `cart.rs` (`Fds::clock_watchdog`).
 - `FDS-4023-Test` and `FDS-Audio-Registers` are display-only dumps with no
   pass/fail line; their register dumps are captured but have no oracle yet.
+- **FDS audio synthesis** — after the documented-model rewrite, an
+  APU-muted comparison against RustyNES is bit-identical for 479,795 samples
+  (~10.9 s) and first differs at frame 653 during a wavetable/mod-table
+  upload. The first differing values are attack/phase-level, with no `$4023`
+  reset. Remaining task: the envelope/phase handling of that table update.
 
 ### Holy Mapperel (2026-11-14)
 
