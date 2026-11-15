@@ -20,6 +20,7 @@
 pub mod input;
 pub mod rollback;
 pub mod session;
+pub mod stun;
 pub mod transport;
 pub mod udp;
 pub mod upnp;
@@ -27,6 +28,7 @@ pub mod upnp;
 pub use input::{InputFrame, INPUT_MESSAGE_LEN};
 pub use rollback::{RollbackBuffer, StoredFrame};
 pub use session::{PredictionMode, RollbackSession, SessionConfig, SessionStats};
+pub use stun::{public_address as stun_public_address, StunError};
 pub use transport::{channel_pair, ChannelTransport, MeshTransport, Transport};
 pub use udp::{UdpMesh, UdpTransport};
 pub use upnp::{

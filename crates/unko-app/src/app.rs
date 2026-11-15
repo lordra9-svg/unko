@@ -29,8 +29,8 @@ use crate::recording::RecordModes;
 use crate::rom_manager::RomManager;
 use crate::settings::{Aspect, HotkeyAction, PortInput, Settings, ShaderPreset, Theme};
 use unko_netplay::{
-    add_port_mapping, discover, endpoint, external_ip, local_address_toward, MappingProtocol,
-    MappingRequest, PredictionMode, SessionConfig, UdpMesh,
+    add_port_mapping, discover, endpoint, external_ip, local_address_toward, stun_public_address,
+    MappingProtocol, MappingRequest, PredictionMode, SessionConfig, UdpMesh,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,7 +216,8 @@ pub struct App {
     netplay_public_endpoint: String,
     netplay_upnp: bool,
     netplay_upnp_status: String,
-    netplay_upnp_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    netplay_stun_server: String,
+    netplay_upnp_rx: Option<std::sync::mpsc::Receiver<Result<(String, String), String>>>,
     controller_last: unko_core::InputState,
     controller_repeat: Instant,
     controller_menu_open: bool,
@@ -352,6 +353,7 @@ impl App {
             netplay_public_endpoint: String::new(),
             netplay_upnp: false,
             netplay_upnp_status: String::new(),
+            netplay_stun_server: "stun.l.google.com:19302".into(),
             netplay_upnp_rx: None,
             controller_last: unko_core::InputState::empty(),
             controller_repeat: Instant::now(),
@@ -2709,12 +2711,12 @@ impl App {
         }
     }
 
-    /// Asks the router for a UDP mapping in a worker thread.
+    /// Detects a public endpoint in a worker thread.
     ///
-    /// Discovery and SOAP calls can take seconds on a slow router, so the UI
-    /// never blocks: the result arrives through a channel and fills the public
-    /// endpoint field.
-    fn spawn_upnp_mapping(&mut self) {
+    /// Tries a UPnP-IGD mapping first (which also opens the port). When the
+    /// router has no UPnP, falls back to a STUN binding request for the
+    /// external IP; the port then still has to be forwarded manually.
+    fn spawn_nat_detect(&mut self) {
         let Ok(port) = self.netplay_local_port.trim().parse::<u16>() else {
             self.netplay_upnp_status = "Local port must be a number.".into();
             return;
@@ -2729,24 +2731,43 @@ impl App {
             .find(|peer| !peer.is_empty())
             .unwrap_or("127.0.0.1:0")
             .to_string();
+        let stun_server = self.netplay_stun_server.trim().to_string();
         let (tx, rx) = std::sync::mpsc::channel();
         self.netplay_upnp_rx = Some(rx);
-        self.netplay_upnp_status = "Looking for a UPnP gateway…".into();
+        self.netplay_upnp_status = "Looking for a UPnP gateway, then STUN…".into();
         std::thread::spawn(move || {
             let local = local_address_toward(&peer);
-            let result = (|| -> Result<String, String> {
+            let upnp = (|| -> Result<String, String> {
                 let device = discover(Duration::from_secs(2)).map_err(|err| err.to_string())?;
                 let ip = external_ip(&device).map_err(|err| err.to_string())?;
                 let request = MappingRequest::new(&local, port, MappingProtocol::Udp);
                 add_port_mapping(&device, &request).map_err(|err| err.to_string())?;
                 Ok(endpoint(&ip, port))
             })();
+            let result = match upnp {
+                Ok(public) => Ok((public, "UPnP mapping active".to_string())),
+                Err(upnp_error) => {
+                    if stun_server.is_empty() {
+                        Err(format!("UPnP: {upnp_error}"))
+                    } else {
+                        match stun_public_address(&stun_server, Duration::from_secs(3)) {
+                            Ok(address) => Ok((
+                                format!("{}:{port}", address.ip()),
+                                "STUN external IP; forward this UDP port on the router".to_string(),
+                            )),
+                            Err(stun_error) => {
+                                Err(format!("UPnP: {upnp_error}; STUN: {stun_error}"))
+                            }
+                        }
+                    }
+                }
+            };
             let _ = tx.send(result);
         });
     }
 
-    /// Polls the UPnP worker without blocking the frame.
-    fn poll_upnp(&mut self) {
+    /// Polls the NAT worker without blocking the frame.
+    fn poll_nat(&mut self) {
         let Some(rx) = self.netplay_upnp_rx.as_ref() else {
             return;
         };
@@ -2760,21 +2781,21 @@ impl App {
         if let Some(result) = outcome {
             self.netplay_upnp_rx = None;
             match result {
-                Ok(public) => {
-                    self.netplay_upnp_status = format!("Mapped. Public endpoint {public}");
+                Ok((public, detail)) => {
+                    self.netplay_upnp_status = format!("{detail}. Public endpoint {public}");
                     self.netplay_public_endpoint = public;
                 }
-                Err(err) => self.netplay_upnp_status = format!("UPnP failed: {err}"),
+                Err(err) => self.netplay_upnp_status = format!("NAT detection failed: {err}"),
             }
         }
     }
 
     fn netplay_window(&mut self, ctx: &egui::Context) {
         if !self.netplay_open {
-            self.poll_upnp();
+            self.poll_nat();
             return;
         }
-        self.poll_upnp();
+        self.poll_nat();
         let mut open = self.netplay_open;
         let active = self
             .player
@@ -2853,11 +2874,11 @@ impl App {
                     if ui
                         .add_enabled(
                             !active && self.netplay_upnp_rx.is_none(),
-                            egui::Button::new("UPnP mapping"),
+                            egui::Button::new("Detect public"),
                         )
                         .clicked()
                     {
-                        self.spawn_upnp_mapping();
+                        self.spawn_nat_detect();
                     }
                     ui.add_enabled(
                         !active,
@@ -2866,6 +2887,15 @@ impl App {
                     if self.netplay_upnp_rx.is_some() {
                         ui.spinner();
                     }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("STUN server");
+                    ui.add_enabled(
+                        !active,
+                        egui::TextEdit::singleline(&mut self.netplay_stun_server)
+                            .hint_text("host:port")
+                            .desired_width(240.0),
+                    );
                 });
                 if !self.netplay_upnp_status.is_empty() {
                     ui.label(&self.netplay_upnp_status);

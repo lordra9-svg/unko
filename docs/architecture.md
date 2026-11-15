@@ -106,8 +106,9 @@ the session reports rollback count, predicted frames and the deepest rollback.
 The app drives it from `Player::step` and exposes a host/join window with
 player/slot selection. `upnp` adds a std-only UPnP-IGD client (SSDP discovery,
 device-description fetch, `AddPortMapping`, `GetExternalIPAddress`) used from a
-worker thread, plus a manual public-endpoint field. STUN and hole punching
-remain future work.
+worker thread; `stun` adds an RFC 5389 binding client that supplies the
+external IP when the router has no UPnP. A manual public-endpoint field covers
+everything else. Hole punching remains future work.
 
 `unko-rom-manager` is a separate, non-emulator feature core: DAT auditing,
 1G1R selection, fixdat/CSV reports and safe rebuilding. It has no dependency

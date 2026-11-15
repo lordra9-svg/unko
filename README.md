@@ -34,7 +34,7 @@ verified against the public reference suites:
 - `ppu_vbl_nmi` **12/12**, `ppu_sprites` **19/19**, blargg APU/DMC **13/13**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **556 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **560 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **136 pass / 12 fail / 115 visual-or-input-only** (5 PAL APU failures pass when PAL timing is selected)
 - RustyNES test tree: **157 pass / 13 fail / 171 visual-or-input-only** (164 / 6 with PAL APU in PAL mode)
 
@@ -62,9 +62,10 @@ remote input is predicted with **last input** or **neutral**, and a **fixed
 input delay** (0-16 frames, applied identically to every player) trades
 responsiveness for fewer rollbacks. For internet play the window can ask the
 router for a **UPnP-IGD** UDP mapping (non-blocking, with the mapped public
-endpoint filled in) or take a **manual public endpoint**. The window shows
-frame, sent/received/rollbacks, predicted frames and the deepest rollback.
-Netplay disables rewind, movies and run-ahead. STUN and hole punching are
+endpoint filled in), fall back to a **STUN** binding request for the external
+IP when UPnP is unavailable, or take a **manual public endpoint**. The window
+shows frame, sent/received/rollbacks, predicted frames and the deepest
+rollback. Netplay disables rewind, movies and run-ahead. Hole punching is
 follow-up work.
 
 ## Project stats
@@ -73,7 +74,7 @@ follow-up work.
 |---|---:|
 | Workspace crates | 9 |
 | First-party Rust lines | ~78,900 |
-| Workspace tests | 556 pass, 0 failed |
+| Workspace tests | 560 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 
