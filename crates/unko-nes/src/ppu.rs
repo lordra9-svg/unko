@@ -1560,8 +1560,11 @@ impl Ppu {
     /// Rebuilds the 32-entry RGB cache for the current PPUMASK emphasis.
     fn refresh_palette_rgb(&mut self) {
         let emph = (self.mask >> 5) & 0x07;
+        let greyscale = self.mask & 0x01 != 0;
         for index in 0..32 {
-            let colour = self.palette[index] & 0x3F;
+            // Greyscale masks the palette index, not the final RGB value; on a
+            // scrambled 2C04 this selects the first column of each row.
+            let colour = self.palette[index] & if greyscale { 0x30 } else { 0x3F };
             let hardware = crate::vs::colour(self.ppu_model, colour);
             let base = if matches!(self.palette_variant, PaletteVariant::Custom) {
                 self.custom_palette
@@ -3204,6 +3207,11 @@ mod tests {
         ppu.mask = 0x40;
         ppu.refresh_palette_rgb();
         assert_eq!(ppu.debug_palette_rgb()[0], [255, 255, 182]);
+        // Greyscale masks the palette index before the 2C04 permutation.
+        ppu.palette[1] = 0x2A;
+        ppu.mask = 0x01;
+        ppu.refresh_palette_rgb();
+        assert_eq!(ppu.debug_palette_rgb()[1], [0, 0, 109]);
         ppu.mask = 0;
         ppu.set_ppu_model(PpuModel::Ppu2C05B);
         ppu.end_warmup();

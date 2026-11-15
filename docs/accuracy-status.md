@@ -137,8 +137,9 @@ directly:
   `$2D` and `$3D`), also used by the 2C05 and PlayChoice-10.
 - **2C04-0001..0004** — the shared 64-entry master palette plus each chip's
   documented permutation LUT.
-- **RGB emphasis** — setting a PPUMASK emphasis bit maxes that channel instead
-  of darkening the other two, as on the RGB PPUs.
+- **RGB emphasis and greyscale** — setting a PPUMASK emphasis bit maxes that
+  channel instead of darkening the other two; the greyscale bit masks the
+  palette **index** (`& $30`) before the 2C04 permutation.
 - **2C05** — A-D swap the meanings of `$2000` and `$2001`; `$2002` bits 4-0
   return the expected identifier (`1B` for A/D, `3D` for B, `1C` for C) and
   `2C05E` keeps normal open bus and no swap.
