@@ -2,14 +2,15 @@
 //!
 //! ```text
 //! unko-rom-manager --dat DAT --input ROMS [--1g1r] [--fixdat FIX.xml]
-//!                  [--csv REPORT.csv] [--copy OUT] [--zip] [--cache FILE]
+//!                  [--csv REPORT.csv] [--copy OUT] [--zip|--torrentzip]
+//!                  [--cache FILE] [--dat-url URL] [--dat-out FILE]
 //!                  [--regions USA,Europe] [--languages En] [--all]
 //! ```
 
 use std::path::PathBuf;
 
 use crate::{
-    audit, rebuild, summary_line, write_csv, write_fixdat, OneGameOneRom, OutputFormat,
+    audit, fetch_dat, rebuild, summary_line, write_csv, write_fixdat, OneGameOneRom, OutputFormat,
     RebuildOptions, ScanOptions, ScanProgress,
 };
 
@@ -20,6 +21,8 @@ use crate::{
 /// Returns a human-readable message for bad arguments or failed I/O.
 pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut dat = None;
+    let mut dat_url = None;
+    let mut dat_out = None;
     let mut input = None;
     let mut fixdat = None;
     let mut csv = None;
@@ -34,6 +37,7 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut languages = vec!["En".to_string()];
     let mut include_bios = false;
     let mut zip_sets = false;
+    let mut torrentzip = false;
     let mut cache = None;
 
     let mut args = args;
@@ -41,6 +45,8 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
         match arg.as_str() {
             "scan" => {}
             "--dat" => dat = args.next().map(PathBuf::from),
+            "--dat-url" => dat_url = args.next(),
+            "--dat-out" => dat_out = args.next().map(PathBuf::from),
             "--input" => input = args.next().map(PathBuf::from),
             "--fixdat" => fixdat = args.next().map(PathBuf::from),
             "--csv" => csv = args.next().map(PathBuf::from),
@@ -66,12 +72,15 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
             }
             "--all" => include_bios = true,
             "--zip" => zip_sets = true,
+            "--torrentzip" => torrentzip = true,
             "--cache" => cache = args.next().map(PathBuf::from),
             "-h" | "--help" => {
                 println!(
                     "usage: unko-rom-manager --dat DAT --input ROMS [options]\n\
                      \n\
-                     options: --1g1r --fixdat FILE --csv FILE --copy DIR --zip --cache FILE\n\
+                     options: --1g1r --fixdat FILE --csv FILE --copy DIR\n\
+                     \x20        --zip | --torrentzip --cache FILE\n\
+                     \x20        --dat-url URL [--dat-out FILE]\n\
                      \x20        --regions USA,Europe,World,Japan --languages En --all\n\
                      \n\
                      --copy writes loose files; --zip writes one archive per game."
@@ -82,7 +91,16 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
         }
     }
 
-    let dat = dat.ok_or("--dat is required")?;
+    if dat.is_some() && dat_url.is_some() {
+        return Err("use either --dat or --dat-url".into());
+    }
+    if let Some(url) = dat_url {
+        let destination = dat_out.unwrap_or_else(|| PathBuf::from("downloaded.dat"));
+        fetch_dat(&url, &destination).map_err(|err| err.to_string())?;
+        println!("dat: downloaded {} -> {}", url, destination.display());
+        dat = Some(destination);
+    }
+    let dat = dat.ok_or("--dat or --dat-url is required")?;
     let input = input.ok_or("--input is required")?;
     let options = ScanOptions {
         cache,
@@ -138,7 +156,9 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
             &selected,
             &RebuildOptions {
                 output: output.clone(),
-                format: if zip_sets {
+                format: if torrentzip {
+                    OutputFormat::TorrentZip
+                } else if zip_sets {
                     OutputFormat::Zip
                 } else {
                     OutputFormat::Loose

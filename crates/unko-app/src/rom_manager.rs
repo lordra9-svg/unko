@@ -30,6 +30,7 @@ pub struct RomManager {
     one_g1r: bool,
     include_bios: bool,
     zip_sets: bool,
+    torrentzip: bool,
     prefer_parent: bool,
     prefer_verified: bool,
     prefer_retail: bool,
@@ -61,6 +62,7 @@ impl RomManager {
             one_g1r: true,
             include_bios: false,
             zip_sets: false,
+            torrentzip: false,
             prefer_parent: true,
             prefer_verified: true,
             prefer_retail: true,
@@ -239,6 +241,10 @@ impl RomManager {
             ui.checkbox(&mut self.one_g1r, "1G1R selection");
             ui.checkbox(&mut self.include_bios, "Include [BIOS] entries");
             ui.checkbox(&mut self.zip_sets, "ZIP sets");
+            ui.add_enabled(
+                self.zip_sets,
+                egui::Checkbox::new(&mut self.torrentzip, "TorrentZip-style"),
+            );
         });
         ui.horizontal(|ui| {
             ui.add_enabled_ui(self.one_g1r, |ui| {
@@ -529,7 +535,9 @@ impl RomManager {
             selected,
             &RebuildOptions {
                 output: self.output.clone(),
-                format: if self.zip_sets {
+                format: if self.zip_sets && self.torrentzip {
+                    OutputFormat::TorrentZip
+                } else if self.zip_sets {
                     OutputFormat::Zip
                 } else {
                     OutputFormat::Loose

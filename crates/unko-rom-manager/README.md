@@ -19,6 +19,11 @@ Rust project or used through the `unko-app` ROM Manager window.
 - Deterministic ZIP output (`--zip`): one archive per game, fixed timestamps.
 - Persistent hash cache (`--cache FILE`): unchanged files and ZIP members are
   reused by size and modification time instead of being read and hashed again.
+- DAT download/update over HTTP (`--dat-url URL`): the body is parsed as a
+  Logiqx DAT before it atomically replaces the destination.
+- TorrentZip-style output (`--torrentzip`): sorted entries, the 1996-12-24
+  23:32 timestamp and no extra fields. It is deterministic but not guaranteed
+  byte-identical to reference TorrentZip (the deflate implementation differs).
 
 ## Usage
 
@@ -47,12 +52,15 @@ The crate also ships `unko-rom-manager`, a small headless CLI:
 cargo run -p unko-rom-manager -- \
   --dat "No-Intro.dat" --input roms --1g1r \
   --fixdat missing.xml --csv report.csv --copy rebuilt --cache scan.tsv
+# Download/update a DAT first
+cargo run -p unko-rom-manager -- --dat-url https://example.test/nes.dat \
+  --dat-out nes.dat --input roms
 # Add --zip to write one deterministic archive per game instead of loose files
 ```
 
 ## Current limits
 
 ZIP, 7z and RAR containers can be read; rebuilt sets can be written as
-deterministic ZIPs (not TorrentZip/RVZSTD). CHD input, ROM patching and DAT
-download/update are future work.
+deterministic ZIPs or TorrentZip-style archives (not byte-exact RVZSTD).
+CHD input and ROM patching are future work.
 The rebuild operation only copies; it never deletes or moves source files.

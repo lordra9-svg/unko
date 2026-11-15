@@ -27,6 +27,7 @@ pub mod cache;
 pub mod catalog;
 pub mod cli;
 pub mod dat;
+pub mod fetch;
 pub mod hash;
 pub mod one_g1r;
 pub mod rebuild;
@@ -39,6 +40,7 @@ use std::path::Path;
 pub use cache::ScanCache;
 pub use catalog::{Catalog, GameMatch, Match, MatchReport, MatchStatus, RomRef, Summary};
 pub use dat::{parse_dat_path, parse_dat_str, Dat, DatRom, Game};
+pub use fetch::fetch_dat;
 pub use hash::{hash_bytes, Hashes};
 pub use one_g1r::{parse_tags, OneGameOneRom, Tags};
 pub use rebuild::{rebuild, OutputFormat, RebuildOptions, RebuildReport};
@@ -60,6 +62,8 @@ pub enum Error {
     Dat(String),
     /// ZIP archive failure.
     Zip(String),
+    /// HTTP transfer failure.
+    Http(String),
 }
 
 impl fmt::Display for Error {
@@ -68,6 +72,7 @@ impl fmt::Display for Error {
             Self::Io(message) => write!(formatter, "I/O error: {message}"),
             Self::Dat(message) => write!(formatter, "DAT error: {message}"),
             Self::Zip(message) => write!(formatter, "ZIP error: {message}"),
+            Self::Http(message) => write!(formatter, "HTTP error: {message}"),
         }
     }
 }

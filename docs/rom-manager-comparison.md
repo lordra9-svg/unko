@@ -78,7 +78,11 @@ that matters for a playable library:
   default.
 - Persistent hash cache keyed by path, size and modification time, so repeated
   audits only hash changed files and ZIP members.
-- TorrentZip/RVZSTD, CHD, patching and DAT download remain future work.
+- DAT download/update over HTTP, validated as a DAT before replacing the local
+  catalog.
+- TorrentZip-style output (sorted entries, fixed timestamp); deterministic but
+  not guaranteed byte-identical to the reference zlib build.
+- Byte-exact TorrentZip/RVZSTD, CHD and patching remain future work.
 
 The app exposes this as a **ROM Manager** window; the same library is usable
 without the app. The design follows the project rule used for the NES core:

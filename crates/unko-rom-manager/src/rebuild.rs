@@ -21,6 +21,10 @@ pub enum OutputFormat {
     Loose,
     /// One deterministic ZIP per selected game (`<game>.zip`).
     Zip,
+    /// TorrentZip-style archive: sorted entries, the TorrentZip timestamp and
+    /// no extra fields. Deflate output is not guaranteed byte-identical to
+    /// the reference zlib build.
+    TorrentZip,
 }
 
 /// Rebuild behaviour.
@@ -107,7 +111,7 @@ pub fn rebuild(
             OutputFormat::Loose => {
                 write_loose(&mut result, options, &game.name, &mut entries);
             }
-            OutputFormat::Zip => {
+            OutputFormat::Zip | OutputFormat::TorrentZip => {
                 write_archive(&mut result, options, &game.name, &entries);
             }
         }
@@ -227,7 +231,8 @@ fn write_archive(
         result.skipped += entries.len();
         return;
     }
-    match archive(destination.as_path(), entries) {
+    let torrentzip = matches!(options.format, OutputFormat::TorrentZip);
+    match archive(destination.as_path(), entries, torrentzip) {
         Ok(()) => {
             result.written += entries.len();
             result.archives += 1;
@@ -236,9 +241,13 @@ fn write_archive(
     }
 }
 
-fn archive(destination: &Path, entries: &[(String, Vec<u8>)]) -> Result<(), String> {
+fn archive(
+    destination: &Path,
+    entries: &[(String, Vec<u8>)],
+    torrentzip: bool,
+) -> Result<(), String> {
     let part = destination.with_extension("zip.part");
-    let result = write_archive_file(&part, entries);
+    let result = write_archive_file(&part, entries, torrentzip);
     match result {
         Ok(()) => fs::rename(&part, destination)
             .map_err(|err| format!("rename {}: {err}", destination.display())),
@@ -249,15 +258,32 @@ fn archive(destination: &Path, entries: &[(String, Vec<u8>)]) -> Result<(), Stri
     }
 }
 
-fn write_archive_file(part: &Path, entries: &[(String, Vec<u8>)]) -> Result<(), String> {
+fn write_archive_file(
+    part: &Path,
+    entries: &[(String, Vec<u8>)],
+    torrentzip: bool,
+) -> Result<(), String> {
     let file = fs::File::create(part).map_err(|err| format!("create {}: {err}", part.display()))?;
     let mut writer = ZipWriter::new(file);
-    let options = SimpleFileOptions::default()
+    let mut ordered: Vec<&(String, Vec<u8>)> = entries.iter().collect();
+    if torrentzip {
+        ordered.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+    let mut options = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Deflated)
-        .last_modified_time(DateTime::default())
-        .unix_permissions(0o644);
+        .last_modified_time(if torrentzip {
+            DateTime::from_date_and_time(1996, 12, 24, 23, 32, 0)
+                .expect("the TorrentZip timestamp is a valid DOS date")
+        } else {
+            DateTime::default()
+        });
+    options = if torrentzip {
+        options.compression_level(Some(9)).unix_permissions(0)
+    } else {
+        options.unix_permissions(0o644)
+    };
     let mut names = HashSet::with_capacity(entries.len());
-    for (name, bytes) in entries {
+    for (name, bytes) in ordered {
         if !names.insert(name.as_str()) {
             return Err(format!("{name}: duplicate entry in the game"));
         }
@@ -433,6 +459,51 @@ mod tests {
         assert_eq!(
             fs::read(first.join("Game (USA).zip")).expect("first"),
             fs::read(second.join("Game (USA).zip")).expect("second")
+        );
+        let _ = fs::remove_dir_all(&output);
+    }
+
+    #[test]
+    fn torrentzip_style_sorts_entries_and_uses_the_fixed_timestamp() {
+        let (report, output) = fixture();
+        let result = rebuild(
+            &report,
+            &[0],
+            &RebuildOptions {
+                output: output.clone(),
+                overwrite: true,
+                format: OutputFormat::TorrentZip,
+                ..RebuildOptions::default()
+            },
+        );
+        assert_eq!(result.archives, 1);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let file = fs::File::open(output.join("Game (USA).zip")).expect("archive");
+        let mut archive = zip::ZipArchive::new(file).expect("zip");
+        // The DAT order is Track 2 first, Game second; TorrentZip sorts them.
+        let names: Vec<String> = (0..archive.len())
+            .map(|index| {
+                archive
+                    .by_index(index)
+                    .expect("member")
+                    .name()
+                    .expect("name")
+                    .into_owned()
+            })
+            .collect();
+        assert_eq!(
+            names,
+            vec!["Game (USA) (Track 2).bin", "Game (USA).bin"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        );
+        let member = archive.by_index(0).expect("member");
+        assert_eq!(
+            member.last_modified(),
+            Some(
+                zip::DateTime::from_date_and_time(1996, 12, 24, 23, 32, 0).expect("valid DOS date")
+            )
         );
         let _ = fs::remove_dir_all(&output);
     }
