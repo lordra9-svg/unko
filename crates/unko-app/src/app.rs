@@ -219,6 +219,8 @@ pub struct App {
     netplay_stun_server: String,
     netplay_hole_punch: bool,
     netplay_pending_punch: Option<(HolePunchTransport, SessionConfig)>,
+    /// The game was running when the handshake started and should resume.
+    netplay_resume_after_punch: bool,
     netplay_upnp_rx: Option<std::sync::mpsc::Receiver<Result<(String, String), String>>>,
     controller_last: unko_core::InputState,
     controller_repeat: Instant,
@@ -358,6 +360,7 @@ impl App {
             netplay_stun_server: "stun.l.google.com:19302".into(),
             netplay_hole_punch: false,
             netplay_pending_punch: None,
+            netplay_resume_after_punch: false,
             netplay_upnp_rx: None,
             controller_last: unko_core::InputState::empty(),
             controller_repeat: Instant::now(),
@@ -2705,6 +2708,11 @@ impl App {
                     self.netplay_status =
                         format!("Hole punching UDP {port} to {} peer(s)…", endpoints.len());
                     self.netplay_pending_punch = Some((transport, config));
+                    // Do not advance the console while the peers agree on
+                    // connectivity: both sides must start the session from
+                    // the same frame.
+                    self.netplay_resume_after_punch = !player.paused;
+                    player.paused = true;
                 }
                 Err(err) => self.netplay_status = format!("Bind failed: {err}"),
             }
@@ -2797,6 +2805,11 @@ impl App {
             return;
         };
         transport.punch();
+        if let Some(player) = &mut self.player {
+            // Keep the console frozen for the whole handshake even if the
+            // user toggles pause in the UI.
+            player.paused = true;
+        }
         let confirmed = transport.confirmed();
         let total = transport.peers().len();
         if transport.connected() {
@@ -2806,6 +2819,7 @@ impl App {
                 .expect("pending hole punch");
             if let Some(player) = &mut self.player {
                 player.start_netplay_with(Box::new(transport), config);
+                player.paused = !self.netplay_resume_after_punch;
                 self.netplay_status = format!("Hole punch confirmed ({total}/{total}); running.");
             }
             if self.netplay_upnp {
@@ -3020,6 +3034,9 @@ impl App {
                             player.stop_netplay();
                         }
                         self.netplay_pending_punch = None;
+                        if let Some(player) = &mut self.player {
+                            player.paused = !self.netplay_resume_after_punch;
+                        }
                         self.netplay_status = "Stopped".into();
                     }
                 });

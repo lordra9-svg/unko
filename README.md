@@ -64,8 +64,9 @@ responsiveness for fewer rollbacks. For internet play the window can ask the
 router for a **UPnP-IGD** UDP mapping (non-blocking, with the mapped public
 endpoint filled in), fall back to a **STUN** binding request for the external
 IP when UPnP is unavailable, or take a **manual public endpoint**. A **Hole
-punch** mode exchanges punch packets with public peers and only starts the
-session after bidirectional traffic is confirmed. The window shows frame,
+punch** mode exchanges punch packets with public peers, keeps the console
+paused during the handshake, and only starts the session after bidirectional
+traffic is confirmed. The window shows frame,
 sent/received/rollbacks, predicted frames and the deepest rollback. Netplay
 disables rewind, movies and run-ahead. A TURN-style relay fallback remains
 future work.
