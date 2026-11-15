@@ -250,8 +250,9 @@ cargo run -p unko-rom-manager -- verify --dat DAT --input rebuilt
 ``` The feature comparison of the bundled managers (igir, RomVault, ClrMamePro,
 RomCenter and Romulus) is in
 [`docs/rom-manager-comparison.md`](docs/rom-manager-comparison.md). Current
-limits: ZIP input only, no 7z/RAR/CHD, no TorrentZip output and no patching
-yet; rebuild only copies and never deletes.
+limits: no CHD input and no soft-patching; TorrentZip output sorts entries and
+uses the fixed timestamp but is not guaranteed byte-identical to the reference
+zlib build; rebuild only copies and never deletes.
 
 ### Portable data folder
 
