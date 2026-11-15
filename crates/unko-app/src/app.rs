@@ -217,6 +217,7 @@ pub struct App {
     cheat_error: Option<String>,
     microphone: bool,
     microphone_input: Option<MicrophoneInput>,
+    microphone_devices: Vec<String>,
     microphone_error: Option<String>,
     datach_code: String,
     confirm_reset: bool,
@@ -377,6 +378,7 @@ impl App {
             cheat_error: None,
             microphone: false,
             microphone_input: None,
+            microphone_devices: Vec::new(),
             microphone_error: None,
             datach_code: String::new(),
             confirm_reset: false,
@@ -868,7 +870,14 @@ impl App {
     }
 
     fn open_microphone(&mut self) {
-        match MicrophoneInput::new() {
+        self.microphone_devices = MicrophoneInput::devices();
+        let device = self.settings.microphone_device.clone();
+        let device = if device.is_empty() {
+            None
+        } else {
+            Some(device.as_str())
+        };
+        match MicrophoneInput::new(device, self.settings.microphone_threshold) {
             Ok(input) => {
                 self.microphone_input = Some(input);
                 self.microphone_error = None;
@@ -958,7 +967,10 @@ impl App {
                 audio.set_latency_ms(self.settings.audio_latency_ms);
             }
         }
-        if self.settings.microphone_input != old.microphone_input {
+        let microphone_changed = self.settings.microphone_input != old.microphone_input
+            || self.settings.microphone_device != old.microphone_device
+            || self.settings.microphone_threshold != old.microphone_threshold;
+        if microphone_changed {
             if self.settings.microphone_input {
                 self.open_microphone();
             } else {
@@ -2516,6 +2528,7 @@ impl App {
             .as_ref()
             .is_some_and(|player| player.mapper() == 188);
         let microphone_error = self.microphone_error.clone();
+        let microphone_devices = self.microphone_devices.clone();
         let mut body = |ui: &mut egui::Ui| {
             ui.heading("NES ports");
             ui.label(
@@ -2563,9 +2576,38 @@ impl App {
                     ui.checkbox(&mut settings.microphone_input, "Use system microphone");
                 });
                 if settings.microphone_input {
+                    ui.horizontal(|ui| {
+                        ui.label("Input");
+                        let selected = if settings.microphone_device.is_empty() {
+                            "System default".to_string()
+                        } else {
+                            settings.microphone_device.clone()
+                        };
+                        egui::ComboBox::from_id_salt("microphone-device")
+                            .selected_text(selected)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut settings.microphone_device,
+                                    String::new(),
+                                    "System default",
+                                );
+                                for name in &microphone_devices {
+                                    ui.selectable_value(
+                                        &mut settings.microphone_device,
+                                        name.clone(),
+                                        name,
+                                    );
+                                }
+                            });
+                    });
+                    ui.add(
+                        egui::Slider::new(&mut settings.microphone_threshold, 0.002..=0.2)
+                            .logarithmic(true)
+                            .text("Mic threshold (peak)"),
+                    );
                     ui.label(
                         RichText::new(
-                            "System input uses a peak gate (about -34 dBFS) with a short \
+                            "System input uses the selected peak threshold with a short \
                              hold; the analog ADC is not modelled.",
                         )
                         .weak()

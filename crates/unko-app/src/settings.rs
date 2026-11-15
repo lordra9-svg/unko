@@ -451,9 +451,13 @@ pub struct Settings {
     /// Attach Famicom 3D shutter glasses and present consecutive fields as a
     /// red/cyan anaglyph.
     pub famicom_3d: bool,
-    /// Feed the Famicom/Karaoke microphone from the default system input
-    /// device instead of the manual Devices checkbox.
+    /// Feed the Famicom/Karaoke microphone from the system input device
+    /// instead of the manual Devices checkbox.
     pub microphone_input: bool,
+    /// Input device name; empty selects the system default.
+    pub microphone_device: String,
+    /// Peak amplitude that asserts the microphone bit.
+    pub microphone_threshold: f32,
     /// Device attached to controller port 1.
     pub port1_device: PortDevice,
     /// Device attached to controller port 2.
@@ -569,6 +573,8 @@ impl Default for Settings {
             zapper_port2: false,
             famicom_3d: false,
             microphone_input: false,
+            microphone_device: String::new(),
+            microphone_threshold: crate::microphone::THRESHOLD,
             port1_device: PortDevice::Gamepad,
             port2_device: PortDevice::Gamepad,
             port1_input: PortInput::Auto,
@@ -718,6 +724,13 @@ impl Settings {
                 "zapper_port2" => settings.zapper_port2 = parse_bool(value),
                 "famicom_3d" => settings.famicom_3d = parse_bool(value),
                 "microphone_input" => settings.microphone_input = parse_bool(value),
+                "microphone_device" => settings.microphone_device = value.trim().to_string(),
+                "microphone_threshold" => {
+                    settings.microphone_threshold = value
+                        .parse::<f32>()
+                        .unwrap_or(crate::microphone::THRESHOLD)
+                        .clamp(0.001, 1.0);
+                }
                 "port1_device" => settings.port1_device = PortDevice::from_name(value),
                 "port2_device" => {
                     settings.port2_device = PortDevice::from_name(value);
@@ -900,6 +913,8 @@ port2_input={}
 zapper_port2={}
 famicom_3d={}
 microphone_input={}
+microphone_device={}
+microphone_threshold={}
 theme={}
 pause_on_focus_loss={}
 confirm_stop={}
@@ -976,6 +991,8 @@ layout_main={}
             self.port2_device == PortDevice::Zapper,
             self.famicom_3d,
             self.microphone_input,
+            self.microphone_device,
+            self.microphone_threshold,
             match self.theme {
                 Theme::Dark => "dark",
                 Theme::Light => "light",
@@ -1183,6 +1200,8 @@ mod tests {
             palette: Palette::Consumer,
             famicom_3d: true,
             microphone_input: true,
+            microphone_device: "Test Microphone".into(),
+            microphone_threshold: 0.05,
             ..Settings::default()
         };
         settings.save(&path).expect("writes");

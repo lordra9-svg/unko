@@ -208,8 +208,10 @@ between machines; see `docs/platforms.md` for the resolution order and the
   device per port and applies it immediately. Mapper 188 (Karaoke Studio)
   presents its own cartridge microphone: the Devices window shows the same
   microphone checkbox, the A/B bits follow controller port 1, and the ADC
-  reads through `$6000-$7FFF`. **Use system microphone** opens the default
-  cpal input and gates its peak (~-34 dBFS, short hold) into the same bit.
+  reads through `$6000-$7FFF`. **Use system microphone** opens the selected
+  cpal input and gates its peak through a configurable threshold (default
+  -34 dBFS, short hold) into the same bit; the Devices window lists input
+  devices and persists the choice.
 - Audio: cpal output with a lock-free ring buffer, device-rate resampling,
   volume/mute and underrun statistics. The stream is opened once at startup
   and fed one mono sample per emulated frame. The Audio page selects the
