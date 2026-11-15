@@ -2447,15 +2447,10 @@ impl App {
             if entries.len() >= 32 {
                 error = Some("32 cheats maximum".into());
             } else {
-                match unko_nes::GameGenie::parse(&code) {
-                    Ok(decoded) => {
+                match unko_nes_host::parse_game_genie(&code) {
+                    Ok(cheat) => {
                         entries.push(CheatEntry {
-                            cheat: unko_core::Cheat::GameGenie {
-                                code: decoded.code().to_string(),
-                                address: decoded.address(),
-                                value: decoded.value(),
-                                compare: decoded.compare(),
-                            },
+                            cheat,
                             enabled: true,
                         });
                         code.clear();

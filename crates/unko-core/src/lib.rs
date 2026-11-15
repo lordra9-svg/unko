@@ -1,7 +1,12 @@
-//! System-agnostic emulator core interface.
+//! Host-facing emulator core interface.
 //!
-//! `unko-core` deliberately contains no emulation code and no console
-//! knowledge beyond a [`SystemId`] tag. Frontends and cores meet here.
+//! `unko-core` deliberately contains no emulation code. It defines the
+//! lifecycle, frame/audio/state and debugger contract plus the input and
+//! presentation vocabulary the current cores share. Some of that vocabulary
+//! (`PortDevice`, `Palette`, `VideoFilter`, the PPU/APU snapshots and the FDS,
+//! Zapper, Vs. and other device hooks on [`Core`]) is still NES-shaped; a
+//! second system should not have to implement it as no-ops, so the planned
+//! split is tracked in `docs/roadmap.md`. Frontends and cores meet here.
 //!
 //! ```no_run
 //! use unko_core::{Core, LoadOptions, Registry};

@@ -1,7 +1,9 @@
-//! System-agnostic types shared by every emulator core and by the host.
+//! Types shared by every emulator core and by the host.
 //!
-//! Nothing in this crate knows about the NES. A core describes what system it
-//! emulates, what it can do, and how the host should consume its output.
+//! A core describes what system it emulates, what it can do, and how the host
+//! should consume its output. The current device, palette, filter and cheat
+//! vocabulary is NES-era; generalising it is tracked in `docs/roadmap.md` so a
+//! second system does not inherit NES-only concepts.
 
 /// A console family the shell knows how to present.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

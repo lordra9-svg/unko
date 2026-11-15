@@ -252,6 +252,20 @@ fn debug_space(value: DebugSpace) -> NesDebugSpace {
     }
 }
 
+/// Decodes a NES Game Genie code into the core-facing cheat form.
+///
+/// The GUI uses this so it never links the NES core directly; parsing stays
+/// inside the adapter that owns the NES implementation.
+pub fn parse_game_genie(code: &str) -> Result<Cheat, String> {
+    let decoded = unko_nes::GameGenie::parse(code).map_err(|err| err.to_string())?;
+    Ok(Cheat::GameGenie {
+        code: decoded.code().to_string(),
+        address: decoded.address(),
+        value: decoded.value(),
+        compare: decoded.compare(),
+    })
+}
+
 fn cheat(value: &Cheat) -> NesCheat {
     match value {
         Cheat::GameGenie {
@@ -723,6 +737,25 @@ impl Core for AccuracyCore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn game_genie_codes_decode_to_the_core_cheat() {
+        match parse_game_genie("SXIOPO").expect("decode") {
+            Cheat::GameGenie {
+                code,
+                address,
+                value,
+                compare,
+            } => {
+                assert_eq!(code, "SXIOPO");
+                assert_eq!(address, 0x91D9);
+                assert_eq!(value, 0xAD);
+                assert_eq!(compare, None);
+            }
+            Cheat::Ram { .. } => panic!("expected a Game Genie cheat"),
+        }
+        assert!(parse_game_genie("nope").is_err());
+    }
 
     #[test]
     fn metadata_is_registered() {

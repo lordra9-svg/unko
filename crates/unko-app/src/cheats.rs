@@ -7,7 +7,6 @@ use std::fs;
 use std::path::Path;
 
 use unko_core::Cheat;
-use unko_nes::GameGenie;
 
 /// One editable cheat row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,18 +57,10 @@ pub fn load(path: &Path) -> Vec<CheatEntry> {
             Some("G") => {
                 let Some(code) = parts.next() else { continue };
                 let enabled = parts.next().is_none_or(|value| value != "0");
-                let Ok(decoded) = GameGenie::parse(code) else {
+                let Ok(cheat) = unko_nes_host::parse_game_genie(code) else {
                     continue;
                 };
-                entries.push(CheatEntry {
-                    cheat: Cheat::GameGenie {
-                        code: decoded.code().to_string(),
-                        address: decoded.address(),
-                        value: decoded.value(),
-                        compare: decoded.compare(),
-                    },
-                    enabled,
-                });
+                entries.push(CheatEntry { cheat, enabled });
             }
             Some("R") => {
                 let (Some(address), Some(value), enabled) = (

@@ -230,6 +230,8 @@ between machines; see `docs/platforms.md` for the resolution order and the
   expansion audio; all values are host preferences, never part of a save
   state. The page also reports the measured queue depth, underruns and
   dropped samples.
+- Cheats: the window accepts Game Genie and raw-RAM rows. Decoding happens in
+  `unko-nes-host`; the GUI itself only links `unko-core` and the host adapter.
 - Debugger: a separate window with CPU registers/flags and a live
   disassembly, PPU timing, palette and OAM views, APU channel meters, a
   hex viewer/editor for CPU/PPU/OAM memory and PC breakpoints. Stepping works

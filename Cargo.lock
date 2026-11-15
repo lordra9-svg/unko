@@ -4117,7 +4117,6 @@ dependencies = [
  "rtrb",
  "sdl3",
  "unko-core",
- "unko-nes",
  "unko-nes-host",
  "unko-netplay",
  "unko-rom",

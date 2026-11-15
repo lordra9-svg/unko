@@ -96,6 +96,13 @@ The main effort is now the reference-parity accuracy core. Details in
       input and validation against real PAL/NSF content. The FDS `$4030.D1`
       DRAM-refresh watchdog matches the hardware capture (`67FF`/`6E25`).
 - [ ] **A7** differential harness, hardware captures, performance pass.
+- [ ] **A8** generalise `unko-core`: split the NES-shaped device, palette,
+      filter, cheat and PPU/APU debug vocabulary out of the base `Core` into a
+      `NesCore` extension trait (implemented by `unko-nes-host`) or a
+      `unko-nes-api` crate, so a second system implements only the generic
+      lifecycle and presentation hooks. The GUI already avoids linking
+      `unko-nes` directly; `unko-cli` keeps its direct dependency for
+      NES-specific analysis commands.
       The differential harness is complete: per-frame RGBA, audio and
       palette-independent geometry hashes are compared against RustyNES, and
       ares/MesenCE captures triage disagreements (`unko trace` / `diff` /

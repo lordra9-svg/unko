@@ -86,10 +86,16 @@ The `unko-nes-host` adapter:
 - exposes RGBA video and mono f32 audio through borrowed buffers;
 - serializes versioned `UNKOST20` save states, including mapper state and a ROM
   fingerprint;
-- maps the host input bits to the NES shift-register order.
+- maps the host input bits to the NES shift-register order;
+- decodes Game Genie codes into `unko_core::Cheat`, so the desktop shell links
+  `unko-core` and `unko-nes-host` only. `unko-cli` also links `unko-nes`
+  directly for its NES-specific analysis commands.
 
 The core is deterministic and has no window, audio-device or filesystem
 dependency. The desktop shell owns SDL3 input, cpal output and all files.
+`unko-core` carries the host contract, but its device/palette/debug vocabulary
+is still NES-shaped; the extension-trait split is queued in `docs/roadmap.md`
+before any second system is added.
 
 ## ROM manager core
 
