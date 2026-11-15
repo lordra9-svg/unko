@@ -2513,6 +2513,90 @@ mod tests {
     }
 
     #[test]
+    fn dmc_dma_controller_conflict_is_modeled_and_deterministic() {
+        // Synthetic NROM: while the DMC loops a one-byte sample at the fastest
+        // rate, the program strobes $4016 and shifts eight reads into a byte.
+        // Without DMC every group is 0x80 (only A is held). With DMC the
+        // sample-fetch GET cycle steals a CPU read and the resumed read clocks
+        // the controller again, so at least one group drops a bit: this is the
+        // documented "DPCM conflict" double-clock, not a bug.
+        fn rom(dmc: u8) -> Vec<u8> {
+            let code: [u8; 82] = [
+                0x78, 0xD8, 0xA2, 0xFF, 0x9A, 0xA9, 0x4F, 0x8D, 0x10, 0x40, 0xA9, 0x00, 0x8D, 0x11,
+                0x40, 0x8D, 0x12, 0x40, 0x8D, 0x13, 0x40, 0xA9, dmc, 0x8D, 0x15, 0x40, 0xA9, 0x00,
+                0x85, 0x00, 0x85, 0x01, 0x85, 0x10, 0xA9, 0x01, 0x8D, 0x16, 0x40, 0xA9, 0x00, 0x8D,
+                0x16, 0x40, 0x85, 0x11, 0xA2, 0x08, 0xA5, 0x11, 0x0A, 0x85, 0x11, 0xAD, 0x16, 0x40,
+                0x29, 0x01, 0x05, 0x11, 0x85, 0x11, 0xCA, 0xD0, 0xEF, 0xC9, 0x80, 0xF0, 0x04, 0xA9,
+                0x01, 0x85, 0x10, 0xE6, 0x00, 0xD0, 0xD5, 0xE6, 0x01, 0x4C, 0x22, 0x80,
+            ];
+            let mut prg = vec![0xEAu8; 0x8000];
+            prg[..code.len()].copy_from_slice(&code);
+            // The DMC sample lives at $C000 (the second 16 KiB bank).
+            prg[0x4000] = 0xAA;
+            prg[0x7FFA] = 0x00;
+            prg[0x7FFB] = 0x80;
+            prg[0x7FFC] = 0x00;
+            prg[0x7FFD] = 0x80;
+            prg[0x7FFE] = 0x00;
+            prg[0x7FFF] = 0x80;
+            let mut rom = vec![0u8; 16 + prg.len() + 0x2000];
+            rom[0..4].copy_from_slice(b"NES\x1a");
+            rom[4] = 2; // 32 KiB PRG
+            rom[5] = 1; // 8 KiB CHR
+            rom[16..16 + prg.len()].copy_from_slice(&prg);
+            rom
+        }
+
+        let mut enabled = System::from_ines(&rom(0x10)).expect("load enabled");
+        let mut disabled = System::from_ines(&rom(0x00)).expect("load disabled");
+        enabled.set_controller(0, 0x01); // A held; bits are 1000_0000
+        disabled.set_controller(0, 0x01);
+        let mut dmc_moved = false;
+        for _ in 0..61 {
+            enabled.run_frame();
+            disabled.run_frame();
+            if enabled.apu.dmc.level != 0 {
+                dmc_moved = true;
+            }
+        }
+        assert!(dmc_moved, "the DMC never changed its output level");
+        let groups = |system: &System| {
+            u16::from(system.read_ram(0x00)) | (u16::from(system.read_ram(0x01)) << 8)
+        };
+        assert!(
+            groups(&disabled) > 1000,
+            "the control ROM ran too briefly: {} groups",
+            groups(&disabled)
+        );
+        assert!(
+            groups(&enabled) > 100,
+            "the DMC ROM ran too briefly: {} groups",
+            groups(&enabled)
+        );
+        assert_eq!(
+            disabled.read_ram(0x10),
+            0,
+            "the control reads did not produce 0x80"
+        );
+        assert_eq!(
+            enabled.read_ram(0x10),
+            1,
+            "the DMC conflict did not clock a controller read ({} groups)",
+            groups(&enabled)
+        );
+        // The conflict is timing-driven but deterministic: an identical second
+        // run must corrupt the same way with the same group count.
+        let mut repeat = System::from_ines(&rom(0x10)).expect("load repeat");
+        repeat.set_controller(0, 0x01);
+        for _ in 0..61 {
+            repeat.run_frame();
+        }
+        assert_eq!(repeat.read_ram(0x00), enabled.read_ram(0x00));
+        assert_eq!(repeat.read_ram(0x01), enabled.read_ram(0x01));
+        assert_eq!(repeat.read_ram(0x10), 1);
+    }
+
+    #[test]
     fn reset_phase_matches_the_reference_calibration() {
         // A trivial NROM loop. The reset phase is parity-tuned: the PPU has
         // completed the power-on frame and sits at (line 0, dot 23) with the

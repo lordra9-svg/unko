@@ -1312,6 +1312,194 @@ mod tests {
     }
 
     #[test]
+    fn frame_counter_periods_and_irq_are_exact() {
+        let mut frame = FrameCounter::default();
+        let (mut quarters, mut halves, mut first_irq) = (Vec::new(), Vec::new(), None);
+        for cycle in 1..=60000 {
+            let events = frame.tick(None);
+            if events.quarter {
+                quarters.push(cycle);
+            }
+            if events.half {
+                halves.push(cycle);
+            }
+            if frame.irq_pending && first_irq.is_none() {
+                first_irq = Some(cycle);
+            }
+        }
+        assert_eq!(quarters, vec![7457, 22371, 37287, 52201]);
+        assert_eq!(halves, vec![14913, 29829, 44743, 59659]);
+        assert_eq!(first_irq, Some(29828), "NTSC 4-step IRQ edge");
+
+        // PAL 2A07 periods.
+        let mut frame = FrameCounter {
+            pal: true,
+            counter: PERIOD4_PAL[0],
+            ..FrameCounter::default()
+        };
+        let (mut quarters, mut halves, mut first_irq) = (Vec::new(), Vec::new(), None);
+        for cycle in 1..=60000 {
+            let events = frame.tick(None);
+            if events.quarter {
+                quarters.push(cycle);
+            }
+            if events.half {
+                halves.push(cycle);
+            }
+            if frame.irq_pending && first_irq.is_none() {
+                first_irq = Some(cycle);
+            }
+        }
+        assert_eq!(quarters, vec![8313, 24939, 41567, 58193]);
+        assert_eq!(halves, vec![16627, 33253, 49881]);
+        assert_eq!(first_irq, Some(33252), "PAL 4-step IRQ edge");
+    }
+
+    #[test]
+    fn frame_counter_inhibit_pulses_the_flag_but_not_the_irq_line() {
+        // The 5-step sequence has no IRQ flag at all.
+        let mut frame = FrameCounter {
+            mode: FrameMode::Five,
+            ..FrameCounter::default()
+        };
+        for _ in 0..60000 {
+            frame.tick(None);
+            assert!(!frame.irq_pending, "5-step mode set the flag");
+        }
+
+        // In 4-step mode with $4017 bit 6 set, the $4015 flag is still visible
+        // for the documented two cycles (29828/29829); only the CPU IRQ line
+        // is suppressed. AccuracyCoin tests I/J/K/L cover this.
+        let mut apu = Apu::new();
+        apu.write(0x4017, 0x40);
+        let mut set_cycles = Vec::new();
+        for cycle in 1..=29840u32 {
+            apu.tick();
+            if apu.frame.irq_pending {
+                set_cycles.push(cycle);
+            }
+            assert!(!apu.irq_line(), "inhibit must gate the CPU IRQ line");
+        }
+        assert_eq!(set_cycles.len(), 2, "the $4015 pulse lasts two cycles");
+        assert_eq!(set_cycles[1], set_cycles[0] + 1);
+        assert!(
+            (29828..=29835).contains(&set_cycles[0]),
+            "pulse at {set_cycles:?}"
+        );
+        assert_eq!(apu.status_peek() & 0x40, 0, "cleared after the pulse");
+    }
+
+    #[test]
+    fn frame_irq_clears_on_the_next_get_cycle() {
+        let mut apu = Apu::new();
+        while !apu.frame_irq {
+            apu.tick();
+        }
+        // Step past the two-cycle set pulse so the clear is isolated.
+        for _ in 0..20 {
+            apu.tick();
+        }
+        assert!(apu.frame_irq);
+        assert!(apu.irq_line());
+        assert_eq!(apu.read_status() & 0x40, 0x40);
+        assert!(apu.frame_irq, "the read only requests the clear");
+        apu.phase_override = Some(true);
+        apu.tick();
+        assert!(apu.frame_irq, "a put cycle must not clear the flag");
+        apu.phase_override = Some(false);
+        apu.tick();
+        assert!(!apu.frame_irq, "the get cycle clears the flag");
+        assert!(!apu.irq_line());
+    }
+
+    #[test]
+    fn envelope_period_boundaries_are_exact() {
+        // Volume 3 means the divider reloads every four quarter clocks; a new
+        // level appears on the fifth clock after the start.
+        let mut pulse = Pulse {
+            enabled: true,
+            ..Pulse::default()
+        };
+        pulse.write(0, 0x80 | 0x03); // duty 2, envelope, period 3
+        pulse.write(3, 0x08); // length index 1, start flag
+        let mut levels = Vec::new();
+        for _ in 0..9 {
+            pulse.clock_quarter();
+            levels.push(pulse.envelope_level);
+        }
+        assert_eq!(levels, vec![15, 15, 15, 15, 14, 14, 14, 14, 13]);
+
+        // Period 0 decays on every clock and holds at zero without halt.
+        let mut pulse = Pulse {
+            enabled: true,
+            ..Pulse::default()
+        };
+        pulse.write(0, 0x80);
+        pulse.write(3, 0x08);
+        pulse.clock_quarter();
+        assert_eq!(pulse.envelope_level, 15);
+        for _ in 0..15 {
+            pulse.clock_quarter();
+        }
+        assert_eq!(pulse.envelope_level, 0);
+        pulse.clock_quarter();
+        assert_eq!(pulse.envelope_level, 0, "no wrap without halt");
+
+        // With halt set the envelope wraps back to 15 at zero.
+        let mut pulse = Pulse {
+            enabled: true,
+            ..Pulse::default()
+        };
+        pulse.write(0, 0x80 | 0x20);
+        pulse.write(3, 0x08);
+        pulse.clock_quarter();
+        for _ in 0..15 {
+            pulse.clock_quarter();
+        }
+        assert_eq!(pulse.envelope_level, 0);
+        pulse.clock_quarter();
+        assert_eq!(pulse.envelope_level, 15, "halt loops the envelope");
+
+        // Constant volume ignores the decayed envelope.
+        let mut pulse = Pulse {
+            enabled: true,
+            ..Pulse::default()
+        };
+        pulse.write(0, 0x80 | 0x10 | 0x07);
+        pulse.write(3, 0x08);
+        pulse.write(2, 0x40); // timer >= 8 so the channel is not muted
+        pulse.duty_step = 1; // the 50% duty sequence starts silent
+        pulse.reload_length();
+        for _ in 0..20 {
+            pulse.clock_quarter();
+        }
+        assert!(pulse.envelope_level < 15, "the envelope still runs");
+        assert_eq!(pulse.output(), 7.0, "constant volume must not decay");
+    }
+
+    #[test]
+    fn frame_quarter_events_drive_the_envelope_at_exact_cycles() {
+        let mut apu = Apu::new();
+        apu.write(0x4015, 0x01);
+        apu.write(0x4000, 0x80); // period 0: decay every quarter
+        apu.write(0x4003, 0x08);
+        let mut quarter = 0u32;
+        for cycle in 1..=38000u32 {
+            apu.tick();
+            match cycle {
+                7457 => assert_eq!(apu.pulse1.envelope_level, 15, "first quarter"),
+                22371 => assert_eq!(apu.pulse1.envelope_level, 14, "second quarter"),
+                37287 => assert_eq!(apu.pulse1.envelope_level, 13, "third quarter"),
+                _ => {}
+            }
+            if apu.pulse1.envelope_level != 0 {
+                quarter += 1;
+            }
+        }
+        assert!(quarter > 0);
+    }
+
+    #[test]
     fn frame_irq_sets_and_clears() {
         let mut apu = Apu::new();
         for _ in 0..30_000 {

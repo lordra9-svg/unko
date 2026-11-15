@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **595 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **601 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -2321,3 +2321,23 @@ The byte-exact re-save contract (where the PPU's cached CHR window is
 deterministic) remains asserted for the ten common mappers by
 `state_round_trips_common_mappers`; the two checks together catch state that
 is missing, mis-serialized or only correct until the next frame.
+
+### 2026-11-15 — APU edge-case sweep
+
+- **Frame counter:** exact NTSC and PAL 4-step quarter/half periods and the
+  first IRQ edge (29828 NTSC, 33252 PAL); 5-step never sets the flag. The
+  inhibit bit is pinned to the hardware behavior AccuracyCoin tests I-L
+  document: `$4015` bit 6 pulses for exactly two cycles while the CPU IRQ line
+  stays low, then follows the inhibit bit. `$4015` clears the flag on the next
+  APU get cycle, not inside the read handler.
+- **Envelope:** start flag, divider-period boundaries (period 3 changes level
+  on the fifth quarter), decay to zero, halt wraparound, constant volume, and
+  the quarter-frame drive at 7457/22371/37287 CPU cycles.
+- **DMC/controller interleave:** a synthetic NROM strobes `$4016` and
+  accumulates eight reads per group while the DMC loops a sample at the
+  fastest rate. The control ROM reads `0x80` in every group; the DMC ROM
+  deterministically drops a bit in at least one group, pinning the documented
+  DPCM conflict double-clock (the sample-fetch GET steals the CPU read and the
+  resumed read clocks the controller again).
+- AccuracyCoin isolated: **146/151 passed, 0 failed, 5 skipped** (199,320
+  frames), unchanged. 601 workspace tests.
