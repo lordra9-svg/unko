@@ -96,13 +96,6 @@ The main effort is now the reference-parity accuracy core. Details in
       input and validation against real PAL/NSF content. The FDS `$4030.D1`
       DRAM-refresh watchdog matches the hardware capture (`67FF`/`6E25`).
 - [ ] **A7** differential harness, hardware captures, performance pass.
-- [ ] **A8** generalise `unko-core`: split the NES-shaped device, palette,
-      filter, cheat and PPU/APU debug vocabulary out of the base `Core` into a
-      `NesCore` extension trait (implemented by `unko-nes-host`) or a
-      `unko-nes-api` crate, so a second system implements only the generic
-      lifecycle and presentation hooks. The GUI already avoids linking
-      `unko-nes` directly; `unko-cli` keeps its direct dependency for
-      NES-specific analysis commands.
       The differential harness is complete: per-frame RGBA, audio and
       palette-independent geometry hashes are compared against RustyNES, and
       ares/MesenCE captures triage disagreements (`unko trace` / `diff` /
@@ -112,6 +105,13 @@ The main effort is now the reference-parity accuracy core. Details in
       CPU hogs. CI enforces a 300 fps synthetic budget, and the Windows/macOS
       check jobs plus the Android/iOS core checks cover the other targets.
       Hardware captures remain outstanding.
+- [ ] **A8** generalise `unko-core`: split the NES-shaped device, palette,
+      filter, cheat and PPU/APU debug vocabulary out of the base `Core` into a
+      `NesCore` extension trait (implemented by `unko-nes-host`) or a
+      `unko-nes-api` crate, so a second system implements only the generic
+      lifecycle and presentation hooks. The GUI already avoids linking
+      `unko-nes` directly; `unko-cli` keeps its direct dependency for
+      NES-specific analysis commands.
 
 ## M0 — core boundary (done)
 
@@ -204,7 +204,8 @@ The main effort is now the reference-parity accuracy core. Details in
       port.
 - [x] FDS (user BIOS, never bundled): core/CLI/app loading, side menu,
       disk-write persistence, 1/2/4/8x disk speed and opt-in auto side swap.
-- [ ] Vs. System / PlayChoice-10 (blocked on ROMs/palette data).
+- [ ] Vs. System / PlayChoice-10 (blocked on VS BIOS/game ROMs,
+      PlayChoice-10 ROMs, per-title DIP data and the DualSystem/PC10 depth).
 - [x] NSF/NSFE parsing and player wiring (unit-tested; corpus validation
       pending).
 - [x] Expansion audio levels and per-channel mixing: independent gain and mute for pulse 1/2, triangle, noise, DMC and expansion audio (host preferences, not save state).

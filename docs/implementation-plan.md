@@ -42,9 +42,9 @@ Scope decisions from this pass:
 | 13 | Generalise `unko-core` (NES extension trait split) | 2 | Medium-hard | a second system, or an explicit cleanup pass | **queued** (the GUI already links only `unko-core` + `unko-nes-host`) |
 | 14 | Netplay (rollback, 2-4 players) | 3 | Very hard | deterministic states + transport | **partial**: `unko-netplay` has per-player input framing, channel/UDP mesh transports, a per-peer rollback session for 2-4 players, last-input/neutral prediction, a fixed input delay with rollback/predicted/depth counters, a host/join window with player/slot selection, and a UPnP-IGD mapping client, an RFC 5389 STUN fallback, UDP hole punching with confirmed bidirectional traffic, a room-based relay server fallback (`unko-relay`), settled-state hash exchange, in-session chunked save-state transfer repair (checksum/reassembly/ack) and a manual public endpoint; direct, hole-punch and relay paths plus desync detection/recovery are validated on a real LAN with the two-host harness (`docs/netplay.md`), and a true Internet run needs two networks |
 
-Items 7 and 8 stay queued until the required ROMs/hardware captures exist;
-the transports and scanner are already synthetic-tested (see
-`docs/accuracy-status.md`).
+The remaining blocked assets are the VS. System BIOS/game ROMs and the
+PlayChoice-10 game images; the transports and scanners are already
+synthetic-tested (see `docs/accuracy-status.md`).
 
 ## Deferred / out of scope
 
