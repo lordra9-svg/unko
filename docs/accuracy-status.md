@@ -194,7 +194,11 @@ requests work. This follows the message set documented in the NESdev
 reverse-engineering thread and the NESdev wiki transport description; it is
 protocol-level behaviour, not a firmware emulation. Unit tests send both
 requests through the real transport and assert the complete replies, including
-the 1.10 version bytes.
+the 1.10 version bytes. The local *Miracle Piano Teaching System (USA)* ROM
+also runs through `unko-nes-dev/examples/miracle_probe.rs`: it exercises the
+transport with the real SysEx 7/SysEx 2/note stream (it does not request the
+version or memory-test replies in its first 6,000 frames, so those replies are
+covered by the protocol tests).
 
 ## Peripherals — Datach external X24C01 (2026-11-15)
 
@@ -213,7 +217,10 @@ leaves the external chip erased. The core instantiates the optional X24C01 for
 every mapper-157 image; titles that do not have it never address the window,
 and its open-drain output stays high. Unit tests cover LSB-first address/data,
 four-byte page wrap, sequential read, the `$8000`/`$800D` bit-banged wiring,
-the `$6000` read path and the snapshot round trip.
+the `$6000` read path and the snapshot round trip. The local *Battle Rush*
+(Japan, Datach) image boots to its title screen with the external chip
+enabled; the mapper-188 *Karaoke Studio* title also boots with the new
+microphone read window.
 
 ## CPU dummy fetches for RTS/RTI (2026-11-15)
 
