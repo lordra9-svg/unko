@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **512 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **513 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -1457,8 +1457,8 @@ approximated.
 ### Holy Mapperel board matrix (2026-11-14)
 
 Ran all 42 Holy Mapperel variants in the RustyNES tree (2400 frames each,
-reading the result line from VRAM). **34 report `0000` (pass).** The matrix
-found six real bugs, all fixed:
+reading the result line from VRAM). **All 42 report `0000` (pass).** The
+matrix found seven real bugs, all fixed:
 
 - MMC3 `$A001`: bit 6 is the PRG-RAM read-only mode and bit 7 removes the chip
   from the bus. Holy Mapperel's `2xxx` WRAM code and the read/write protection
@@ -1478,10 +1478,12 @@ found six real bugs, all fixed:
   registers that back each slot (R0/R1 in 8 KiB mode, R2-R5 in 4 KiB mode),
   not a global mirroring mode. The board now provides that map and updates it
   on the write.
-
-Remaining from the matrix: eight MMC1 CHR-RAM variants report `0003`. The
-4 KiB CHR-window tag test fails in both windows; with only 8 KiB of CHR-RAM
-this may be expected on hardware, and it is unverified without a capture.
+- MMC1 CHR-RAM boards bank the 8 KiB CHR-RAM through the CHR registers, but
+  `Mmc1` reported no map, so the PPU always saw a linear window. The map is
+  now supplied for both 4 KiB and 8 KiB CHR modes; this cleared the last
+  eight `0003` results. The 20/120/240-frame library audit is unchanged
+  (3,897/6,503/6,427 rendering), so the change only affects banking-aware
+  titles and the test suite.
 
 ### Reproducible public-suite run (2026-11-14)
 

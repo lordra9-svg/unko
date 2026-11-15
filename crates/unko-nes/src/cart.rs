@@ -2111,6 +2111,29 @@ impl Mapper for Mmc1 {
         }
     }
 
+    fn chr_ram_map(&self) -> Option<[u8; 8]> {
+        if !self.chr_ram || self.chr.len() != 0x2000 {
+            return None;
+        }
+        let banks = self.chr.len() / 0x1000;
+        let mode = (self.control >> 4) & 1;
+        let mut map = [0u8; 8];
+        if mode == 0 {
+            // 8 KiB mode: one physical 8 KiB bank; the register's low bit is
+            // ignored and the window is contiguous.
+            for (slot, entry) in map.iter_mut().enumerate() {
+                *entry = slot as u8;
+            }
+        } else {
+            let b0 = (usize::from(self.chr0) % banks) * 4;
+            let b1 = (usize::from(self.chr1) % banks) * 4;
+            for (slot, entry) in map.iter_mut().enumerate() {
+                *entry = if slot < 4 { b0 + slot } else { b1 + slot - 4 } as u8;
+            }
+        }
+        Some(map)
+    }
+
     fn mirroring(&self) -> Mirroring {
         if self.four_screen {
             return Mirroring::FourScreen;
@@ -39233,6 +39256,22 @@ pub(crate) mod tests {
         cart.cpu_write(0x6001, 0xA5);
         assert_eq!(cart.cpu_read(0x6000), 0x00);
         assert_eq!(cart.cpu_read(0x6001), 0x00);
+    }
+
+    #[test]
+    fn mmc1_chr_ram_banking_reaches_the_ppu() {
+        let rom = synth_banked(1, 128, 0);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        // 4 KiB CHR mode: slots 0-3 from CHR0, 4-7 from CHR1.
+        mmc1_serial(&mut cart, 0x8000, 0x1C);
+        mmc1_serial(&mut cart, 0xA000, 0x01);
+        mmc1_serial(&mut cart, 0xC000, 0x00);
+        assert_eq!(cart.chr_ram_map(), Some([4, 5, 6, 7, 0, 1, 2, 3]));
+        // 8 KiB CHR mode: the window is contiguous; the low bank bit is
+        // ignored, so the map is the identity over the 8 KiB RAM.
+        mmc1_serial(&mut cart, 0x8000, 0x0C);
+        mmc1_serial(&mut cart, 0xA000, 0x0E);
+        assert_eq!(cart.chr_ram_map(), Some([0, 1, 2, 3, 4, 5, 6, 7]));
     }
 
     #[test]

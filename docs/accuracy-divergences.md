@@ -31,15 +31,10 @@ None in AccuracyCoin. All non-DRAW rows pass.
 
 ### Holy Mapperel (2026-11-14)
 
-34 of 42 variants pass with `0000` after the MMC3 `$A001` read-only mode,
-MMC1 SNROM `$A000.4`, MMC2 mirroring/latch-sync, FME-7 mirroring/`$6000` and
-TxSROM per-slot nametable fixes. Open item:
-
-- **MMC1 CHR-RAM (8 variants, `0003`)** — `mmc1_test_one_chr_window` fails
-  both 4 KiB windows. An 8 KiB CHR-RAM board cannot hold the distinct bank
-  tags the test writes, so this may be expected on SNROM rather than an
-  emulator bug; it is tracked as **unverified** until a hardware capture or
-  the test's own notes settle it.
+All 42 variants pass with `0000` after the MMC3 `$A001` read-only mode, MMC1
+SNROM `$A000.4`, MMC1 CHR-RAM banking, MMC2 mirroring/latch-sync, FME-7
+mirroring/`$6000` and TxSROM per-slot nametable fixes. No open Holy Mapperel
+items remain.
 
 ### NESdev screen-suite status (2026-11-14)
 
