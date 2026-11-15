@@ -58,7 +58,8 @@ Key interaction rules worth keeping:
 | TimePlayed | per-game counter in `<save_dir>/playtime.conf`; accumulated only while the game runs (not paused), flushed every 30 s and on stop/exit; showed in the library **Played** column, in grid view and in Game properties, with per-game and global reset | now |
 | Banner / Description / Maker | not applicable yet | — |
 | MenuBar: File | Open ROM, ROM folder, Rescan, Exit | now |
-| MenuBar: Emulation | Play/Pause, Stop, Reset, States, Screenshot, Fullscreen | now |
+| MenuBar: Emulation | Play/Pause, Stop, Reset, States, Save states…, Screenshot, Fullscreen | now |
+| Save-state manager | Emulation → Save states…: 10 numbered slots per game with custom names, 64×60 thumbnails, frame/time/size metadata, per-slot save/load/delete, orphan pruning and confirmed clear-all; names live in `.meta` sidecars | now |
 | MenuBar: View | List/Grid, status bar, fullscreen | now |
 | MenuBar: Tools | Settings, Controllers, Graphics, ROM Manager | now |
 | MenuBar: Help | About | now |

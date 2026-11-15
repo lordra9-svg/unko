@@ -30,6 +30,7 @@ mod playtime;
 mod recording;
 mod rom_manager;
 mod settings;
+mod slots;
 
 pub use app::{App, Args};
 

@@ -17,8 +17,9 @@ system-agnostic interface.
 ## Status
 
 The shell is usable end-to-end: library scanning, a Dolphin-inspired desktop
-UI, GPU output shaders, speed controls, cheats, save states, exact rewind,
-0-4 frame run-ahead and input-movie (TAS) record/playback. It runs the NES core
+UI, GPU output shaders, speed controls, cheats, save states (10 named slots
+per game with thumbnails and metadata), exact rewind, 0-4 frame run-ahead and
+input-movie (TAS) record/playback. It runs the NES core
 headlessly or in a desktop window, produces RGBA video and f32 audio, plays
 audio through cpal, accepts keyboard, SDL3 gamepad, touch and peripheral input,
 records WAV/PNG/GIF, and verifies determinism. FDS images load with a user-supplied `disksys.rom`
@@ -34,7 +35,7 @@ verified against the public reference suites:
 - `ppu_vbl_nmi` **12/12**, `ppu_sprites` **19/19**, blargg APU/DMC **13/13**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **606 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **613 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **136 pass / 12 fail / 115 visual-or-input-only** (5 PAL APU failures pass when PAL timing is selected)
 - RustyNES test tree: **157 pass / 13 fail / 171 visual-or-input-only** (164 / 6 with PAL APU in PAL mode)
 
@@ -85,7 +86,7 @@ harness; a true Internet run needs two networks. See
 |---|---:|
 | Workspace crates | 9 |
 | First-party Rust lines | ~78,900 |
-| Workspace tests | 606 pass, 0 failed |
+| Workspace tests | 613 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 
@@ -239,8 +240,8 @@ yet; rebuild only copies and never deletes.
 ### Portable data folder
 
 Unko keeps every mutable file under one data root: `unko.conf`, `roms/`,
-`saves/` (states, thumbnails, SRAM, cheats, per-game profiles, FDS writes,
-movies, screenshots and recordings) and the user-supplied `disksys.rom`.
+`saves/` (states with thumbnails and metadata, SRAM, cheats, per-game
+profiles, FDS writes, movies, screenshots and recordings) and the user-supplied `disksys.rom`.
 Copying that folder to another machine keeps the whole setup intact.
 
 The root is resolved in this order:

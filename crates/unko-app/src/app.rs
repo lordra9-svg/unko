@@ -29,6 +29,7 @@ use crate::playtime::{format_duration, PlayStats};
 use crate::recording::RecordModes;
 use crate::rom_manager::RomManager;
 use crate::settings::{Aspect, HotkeyAction, PortInput, Settings, ShaderPreset, Theme};
+use crate::slots::{default_slot_name, size_label, SLOT_COUNT};
 use unko_netplay::{
     add_port_mapping, discover, endpoint, external_ip, local_address_toward, stun_public_address,
     HolePunchTransport, MappingProtocol, MappingRequest, PredictionMode, RelayTransport,
@@ -198,6 +199,9 @@ pub struct App {
     game_props: GameProperties,
     game_props_entry: Option<GameEntry>,
     play_stats: PlayStats,
+    slot_manager_open: bool,
+    slot_clear_confirm: bool,
+    slot_thumbnails: std::collections::HashMap<(String, u8, u64), egui::TextureHandle>,
     /// Library save stem of the running game (play-time key).
     play_stem: Option<String>,
     play_tick: Option<Instant>,
@@ -263,6 +267,8 @@ pub struct Args {
     pub properties: bool,
     /// Open the NetPlay window on launch.
     pub netplay: bool,
+    /// Open the save-state slot manager on launch.
+    pub states: bool,
     /// Portable data folder override (`--data-dir`).
     pub data_dir: Option<PathBuf>,
     /// Use the folder beside the executable as the data root.
@@ -349,6 +355,9 @@ impl App {
             game_props: GameProperties::default(),
             game_props_entry: None,
             play_stats,
+            slot_manager_open: args.states,
+            slot_clear_confirm: false,
+            slot_thumbnails: std::collections::HashMap::new(),
             play_stem: None,
             play_tick: None,
             play_pending: Duration::ZERO,
@@ -1321,6 +1330,13 @@ impl App {
                             });
                         }
                     });
+                    if ui
+                        .add_enabled(has_game, egui::Button::new("Save states..."))
+                        .clicked()
+                    {
+                        self.slot_manager_open = true;
+                        ui.close_menu();
+                    }
                     ui.separator();
                     if ui
                         .add_enabled(has_game, egui::Button::new("Debugger..."))
@@ -3400,6 +3416,198 @@ impl App {
         }
     }
 
+    fn slot_window(&mut self, ctx: &egui::Context) {
+        if !self.slot_manager_open {
+            return;
+        }
+        let mut open = self.slot_manager_open;
+        let Some(player) = self.player.as_ref() else {
+            egui::Window::new("Save states")
+                .open(&mut open)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.label("Load a game to manage its save-state slots.");
+                });
+            self.slot_manager_open = open;
+            self.slot_thumbnails.clear();
+            return;
+        };
+        let stem = player.stem.clone();
+        let title = player.title.clone();
+        let current = player.slot;
+        let infos = player.slot_infos();
+        let mut textures = std::mem::take(&mut self.slot_thumbnails);
+        let mut action: Option<(SlotAction, u8, String)> = None;
+        let mut renames: Vec<(u8, String)> = Vec::new();
+        let mut clear_confirm = self.slot_clear_confirm;
+        egui::Window::new("Save states")
+            .open(&mut open)
+            .default_size([620.0, 560.0])
+            .max_height(620.0)
+            .resizable(true)
+            .show(ctx, |ui| {
+                ui.label(RichText::new(&title).strong());
+                ui.label(
+                    RichText::new(
+                        "Names are stored in a .meta sidecar beside each state.                          Deleting removes the state, thumbnail and metadata.",
+                    )
+                    .small()
+                    .weak(),
+                );
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .max_height(430.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for info in &infos {
+                            ui.horizontal(|ui| {
+                                if info.exists && info.has_thumb {
+                                    match player.thumbnail(info.slot) {
+                                        Some(bytes) if bytes.len() == 64 * 60 * 4 => {
+                                            let key =
+                                                (stem.clone(), info.slot, info.saved_unix);
+                                            let texture =
+                                                textures.entry(key).or_insert_with(|| {
+                                                    let image =
+                                                        egui::ColorImage::from_rgba_unmultiplied(
+                                                            [64, 60], &bytes,
+                                                        );
+                                                    ctx.load_texture(
+                                                        format!(
+                                                            "{stem}-slot-{}-{}",
+                                                            info.slot, info.saved_unix
+                                                        ),
+                                                        image,
+                                                        egui::TextureOptions::NEAREST,
+                                                    )
+                                                });
+                                            ui.image((texture.id(), egui::vec2(64.0, 60.0)));
+                                        }
+                                        _ => slot_placeholder(ui, "bad thumb"),
+                                    }
+                                } else {
+                                    slot_placeholder(
+                                        ui,
+                                        if info.exists { "no thumb" } else { "empty" },
+                                    );
+                                }
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(format!("#{}", info.slot));
+                                        if info.exists {
+                                            let mut name = info.name.clone();
+                                            let response = ui.add(
+                                                egui::TextEdit::singleline(&mut name)
+                                                    .desired_width(220.0),
+                                            );
+                                            if response.changed() {
+                                                renames.push((info.slot, name));
+                                            }
+                                        } else {
+                                            ui.label(
+                                                RichText::new(default_slot_name(info.slot)).weak(),
+                                            );
+                                        }
+                                        if info.slot == current {
+                                            ui.label(RichText::new("active").small().strong());
+                                        }
+                                    });
+                                    if info.exists {
+                                        let when = modified_label(Some(info.saved_unix));
+                                        let size = size_label(info.bytes);
+                                        let detail = if info.frame > 0 {
+                                            format!("frame {} · {when} · {size}", info.frame)
+                                        } else {
+                                            format!("{when} · {size}")
+                                        };
+                                        ui.label(RichText::new(detail).small().weak());
+                                    } else {
+                                        ui.label(RichText::new("no state").small().weak());
+                                    }
+                                    ui.horizontal(|ui| {
+                                        let name = info.name.clone();
+                                        if ui.button("Save").clicked() {
+                                            action =
+                                                Some((SlotAction::Save, info.slot, name));
+                                        }
+                                        if ui
+                                            .add_enabled(
+                                                info.exists,
+                                                egui::Button::new("Load"),
+                                            )
+                                            .clicked()
+                                        {
+                                            action = Some((
+                                                SlotAction::Load,
+                                                info.slot,
+                                                String::new(),
+                                            ));
+                                        }
+                                        if ui
+                                            .add_enabled(
+                                                info.exists,
+                                                egui::Button::new("Delete"),
+                                            )
+                                            .clicked()
+                                        {
+                                            action = Some((
+                                                SlotAction::Delete,
+                                                info.slot,
+                                                String::new(),
+                                            ));
+                                        }
+                                    });
+                                });
+                            });
+                            ui.separator();
+                        }
+                    });
+                ui.horizontal(|ui| {
+                    if ui.button("Prune orphaned files").clicked() {
+                        action = Some((SlotAction::Prune, 0, String::new()));
+                    }
+                    if ui.button("Delete all slots").clicked() {
+                        clear_confirm = true;
+                    }
+                    if clear_confirm {
+                        if ui.button("Confirm delete all").clicked() {
+                            action = Some((SlotAction::ClearAll, 0, String::new()));
+                            clear_confirm = false;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            clear_confirm = false;
+                        }
+                    }
+                    let used = infos.iter().filter(|info| info.exists).count();
+                    ui.label(
+                        RichText::new(format!("{used} of {SLOT_COUNT} slots used"))
+                            .small()
+                            .weak(),
+                    );
+                });
+            });
+        self.slot_manager_open = open;
+        self.slot_thumbnails = textures;
+        let reset_textures = matches!(action, Some((SlotAction::Save | SlotAction::Delete, _, _)));
+        if let Some(player) = &mut self.player {
+            for (slot, name) in renames {
+                player.rename_slot(slot, &name);
+            }
+            if let Some((action, slot, name)) = action {
+                match action {
+                    SlotAction::Save => player.save_state_named(slot, &name),
+                    SlotAction::Load => player.load_state(slot),
+                    SlotAction::Delete => player.delete_state(slot),
+                    SlotAction::Prune => player.prune_slots(),
+                    SlotAction::ClearAll => player.clear_slots(),
+                }
+            }
+        }
+        if reset_textures {
+            self.slot_thumbnails.clear();
+        }
+    }
+
     fn about_window(&mut self, ctx: &egui::Context) {
         if !self.about_open {
             return;
@@ -3733,6 +3941,7 @@ impl eframe::App for App {
         self.devices_window(ctx);
         self.cheats_window(ctx);
         self.game_properties_window(ctx);
+        self.slot_window(ctx);
         self.netplay_window(ctx);
         self.rom_manager_window(ctx);
         self.controller_menu(ctx);
@@ -5644,6 +5853,34 @@ fn advanced_tab(ui: &mut egui::Ui, settings: &mut Settings) {
         RichText::new("Logging, run-ahead and rewind controls land with the next milestone.")
             .weak()
             .small(),
+    );
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SlotAction {
+    Save,
+    Load,
+    Delete,
+    Prune,
+    ClearAll,
+}
+
+fn slot_placeholder(ui: &mut egui::Ui, label: &str) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(64.0, 60.0), egui::Sense::hover());
+    ui.painter()
+        .rect_filled(rect, 3.0, ui.visuals().extreme_bg_color);
+    ui.painter().rect_stroke(
+        rect,
+        3.0,
+        egui::Stroke::new(1.0_f32, Color32::from_gray(60)),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::FontId::proportional(10.0),
+        Color32::GRAY,
     );
 }
 

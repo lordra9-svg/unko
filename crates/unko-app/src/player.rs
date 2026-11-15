@@ -15,6 +15,9 @@ use crate::game_props::{apply_mapper_override, GameProperties};
 use crate::library::GameEntry;
 use crate::recording::{RecordModes, Recorder};
 use crate::settings::Settings;
+use crate::slots::{
+    default_slot_name, now_unix, sanitize_slot_name, SlotInfo, SlotMeta, SlotStore,
+};
 use unko_netplay::{
     DesyncInfo, DesyncMonitor, InputFrame, PredictionMode, RollbackSession, SessionConfig,
     SessionStats, StateAck, StateChunk, StateHash, StateReassembler, StateSender, Transport,
@@ -1638,23 +1641,86 @@ impl Player {
         self.push_rewind_keyframe();
     }
 
-    /// Saves a state into `slot`.
+    /// Slot store for this game.
+    #[must_use]
+    fn slots(&self) -> SlotStore {
+        SlotStore::new(&self.save_dir, &self.stem, &self.core_id)
+    }
+
+    /// Current information for every frontend slot.
+    #[must_use]
+    pub fn slot_infos(&self) -> Vec<SlotInfo> {
+        self.slots().list()
+    }
+
+    /// Saves a state into `slot`, preserving an existing custom name.
     pub fn save_state(&mut self, slot: u8) {
         let mut state = Vec::new();
         match self.core.save_state(&mut state) {
             Ok(()) => {
-                let path = self.state_path(slot);
-                match fs::write(&path, state) {
+                let store = self.slots();
+                match fs::write(store.state_path(slot), state) {
                     Ok(()) => {
                         let thumb = self.thumbnail_bytes();
-                        let _ = fs::write(self.thumb_path(slot), thumb);
+                        let _ = fs::write(store.thumb_path(slot), thumb);
+                        let mut meta = store.read_meta(slot);
+                        meta.frame = self.frames;
+                        meta.saved_unix = now_unix();
+                        let _ = store.write_meta(slot, &meta);
                         self.slot = slot;
-                        self.message = format!("Saved state slot {slot}");
+                        self.message = format!("Saved state slot {slot} ({})", meta.name);
                     }
                     Err(err) => self.message = format!("state write: {err}"),
                 }
             }
             Err(err) => self.message = err.to_string(),
+        }
+    }
+
+    /// Saves a state into `slot` with a new name.
+    pub fn save_state_named(&mut self, slot: u8, name: &str) {
+        self.save_state(slot);
+        if self.slots().state_path(slot).is_file() {
+            self.rename_slot(slot, name);
+        }
+    }
+
+    /// Renames a saved slot. Empty or whitespace-only names reset the default.
+    pub fn rename_slot(&mut self, slot: u8, name: &str) {
+        let store = self.slots();
+        if !store.state_path(slot).is_file() {
+            return;
+        }
+        let mut meta: SlotMeta = store.read_meta(slot);
+        meta.name = sanitize_slot_name(name).unwrap_or_else(|| default_slot_name(slot));
+        match store.write_meta(slot, &meta) {
+            Ok(()) => self.message = format!("Renamed slot {slot} to {}", meta.name),
+            Err(err) => self.message = format!("slot rename: {err}"),
+        }
+    }
+
+    /// Deletes one slot's state, thumbnail and metadata.
+    pub fn delete_state(&mut self, slot: u8) {
+        match self.slots().delete(slot) {
+            Ok(()) => self.message = format!("Deleted state slot {slot}"),
+            Err(err) => self.message = format!("slot delete: {err}"),
+        }
+    }
+
+    /// Deletes every frontend slot for this game.
+    pub fn clear_slots(&mut self) {
+        match self.slots().clear() {
+            Ok(()) => self.message = "Deleted all save-state slots".into(),
+            Err(err) => self.message = format!("slot clear: {err}"),
+        }
+    }
+
+    /// Removes sidecars whose state file is missing.
+    pub fn prune_slots(&mut self) {
+        match self.slots().prune_orphans() {
+            Ok(0) => self.message = "No orphaned save-state files".into(),
+            Ok(pruned) => self.message = format!("Removed {pruned} orphaned save-state file(s)"),
+            Err(err) => self.message = format!("slot prune: {err}"),
         }
     }
 
@@ -1680,8 +1746,7 @@ impl Player {
     /// Path of the saved thumbnail for `slot`.
     #[must_use]
     pub fn thumb_path(&self, slot: u8) -> PathBuf {
-        self.save_dir
-            .join(format!("{}.{}.slot{slot}.thumb", self.stem, self.core_id))
+        self.slots().thumb_path(slot)
     }
 
     /// Saved thumbnail (`64x60` RGBA) for `slot`, if one exists.
@@ -1796,8 +1861,7 @@ impl Player {
     /// Path for a state slot.
     #[must_use]
     pub fn state_path(&self, slot: u8) -> PathBuf {
-        self.save_dir
-            .join(format!("{}.{}.slot{slot}.state", self.stem, self.core_id))
+        self.slots().state_path(slot)
     }
 
     /// Requested sample rate, for the status bar.
