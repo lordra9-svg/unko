@@ -25,7 +25,7 @@ pub mod udp;
 
 pub use input::{InputFrame, INPUT_MESSAGE_LEN};
 pub use rollback::{RollbackBuffer, StoredFrame};
-pub use session::RollbackSession;
+pub use session::{PredictionMode, RollbackSession, SessionConfig, SessionStats};
 pub use transport::{channel_pair, ChannelTransport, Transport};
 pub use udp::UdpTransport;
 

@@ -5,7 +5,7 @@ use unko_core::{
     InputState, LoadOptions, PixelFormat, SystemId, VideoFilter,
 };
 use unko_netplay::input::InputFrame;
-use unko_netplay::session::RollbackSession;
+use unko_netplay::session::{PredictionMode, RollbackSession, SessionConfig};
 use unko_netplay::transport::{channel_pair, ChannelTransport};
 use unko_netplay::Transport;
 
@@ -177,4 +177,56 @@ fn peers_converge_after_a_late_input() {
     assert_eq!(b_core.state(), expected_b.state(), "B converged");
     assert_eq!(a_core.state(), expected_a.state(), "A converged");
     assert_eq!(b.frame(), 6);
+}
+
+#[test]
+fn peers_converge_with_input_delay() {
+    let (mut a_link, mut b_link) = channel_pair();
+    let mut a_core = TestCore::default();
+    let mut b_core = TestCore::default();
+    let config = SessionConfig {
+        buffer_frames: 8,
+        input_delay: 2,
+        prediction: PredictionMode::LastInput,
+    };
+    let mut a = RollbackSession::with_config(config);
+    let mut b = RollbackSession::with_config(config);
+    let a_inputs = [10u16, 11, 12, 13, 14, 15];
+    let b_inputs = [20u16, 21, 22, 23, 24, 25];
+
+    for frame in 0..6u32 {
+        let a_frame = a
+            .step(&mut a_core, [a_inputs[frame as usize], 0, 0, 0])
+            .unwrap();
+        a_link
+            .send(&local_frame(a_frame, a_inputs[frame as usize]))
+            .unwrap();
+        deliver(&mut b_link, &mut b, &mut b_core);
+
+        let b_frame = b
+            .step(&mut b_core, [b_inputs[frame as usize], 0, 0, 0])
+            .unwrap();
+        b_link
+            .send(&local_frame(b_frame, b_inputs[frame as usize]))
+            .unwrap();
+        deliver(&mut a_link, &mut a, &mut a_core);
+    }
+
+    // With delay 2, simulation frame s uses input frame s-2 for BOTH sides.
+    let mut expected_b = TestCore::default();
+    for index in 0..6usize {
+        let local = index.checked_sub(2).map_or(0, |i| b_inputs[i]);
+        let remote = index.checked_sub(2).map_or(0, |i| a_inputs[i]);
+        expected_b.run(local, remote);
+    }
+    let mut expected_a = TestCore::default();
+    for index in 0..6usize {
+        let local = index.checked_sub(2).map_or(0, |i| a_inputs[i]);
+        let remote = index.checked_sub(2).map_or(0, |i| b_inputs[i]);
+        expected_a.run(local, remote);
+    }
+    assert_eq!(b_core.state(), expected_b.state(), "B converged with delay");
+    assert_eq!(a_core.state(), expected_a.state(), "A converged with delay");
+    assert_eq!(a.stats().predicted, 0, "all delayed inputs arrived in time");
+    assert_eq!(b.stats().predicted, 0);
 }

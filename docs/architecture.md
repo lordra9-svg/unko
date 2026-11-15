@@ -97,9 +97,12 @@ dependency. The desktop shell owns SDL3 input, cpal output and all files.
 on `unko-core` and provides framed four-port input messages, a `Transport`
 trait (in-process channel pair for tests and a non-blocking `UdpTransport`), a
 bounded serialized-state `RollbackBuffer`, and a `RollbackSession` that
-restores and resimulates when a late remote input arrives. The app drives it
-from `Player::step` and exposes a host/join UDP window; prediction tuning and
-NAT traversal remain future work.
+restores and resimulates when a late remote input arrives. `SessionConfig`
+selects the prediction mode (last input or neutral) and a fixed input delay
+applied identically to both peers; the session reports rollback count,
+predicted frames and the deepest rollback. The app drives it from
+`Player::step` and exposes a host/join UDP window. NAT traversal and more than
+two peers remain future work.
 
 `unko-rom-manager` is a separate, non-emulator feature core: DAT auditing,
 1G1R selection, fixdat/CSV reports and safe rebuilding. It has no dependency

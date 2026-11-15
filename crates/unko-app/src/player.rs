@@ -15,7 +15,9 @@ use crate::game_props::{apply_mapper_override, GameProperties};
 use crate::library::GameEntry;
 use crate::recording::{RecordModes, Recorder};
 use crate::settings::Settings;
-use unko_netplay::{InputFrame, RollbackSession, Transport};
+use unko_netplay::{
+    InputFrame, PredictionMode, RollbackSession, SessionConfig, SessionStats, Transport,
+};
 
 /// Maximum frames emulated in one UI update. When the desktop stalls the
 /// process, the pacer drops the excess backlog instead of fast-forwarding,
@@ -251,6 +253,12 @@ impl Netplay {
     #[must_use]
     pub const fn stats(&self) -> (u32, u32, u32) {
         (self.sent, self.received, self.rollbacks)
+    }
+
+    /// Session tuning and prediction/rollback counters.
+    #[must_use]
+    pub fn session_stats(&self) -> (SessionConfig, SessionStats) {
+        (self.session.config(), self.session.stats())
     }
 
     /// Last transport or rollback error.
@@ -966,19 +974,47 @@ impl Player {
     /// Starts a rollback netplay session with the given transport.
     ///
     /// Movies, rewind and run-ahead are disabled while netplay is active.
+    #[cfg(test)]
     pub fn start_netplay(&mut self, transport: Box<dyn Transport>, buffer_frames: usize) {
+        self.start_netplay_with(
+            transport,
+            SessionConfig {
+                buffer_frames,
+                ..SessionConfig::default()
+            },
+        );
+    }
+
+    /// Starts a rollback netplay session with explicit tuning.
+    ///
+    /// Movies, rewind and run-ahead are disabled while netplay is active.
+    pub fn start_netplay_with(&mut self, transport: Box<dyn Transport>, config: SessionConfig) {
         self.movie_record = None;
         self.movie_playback = None;
         self.movie_state = None;
         self.rewind_enabled = false;
         self.netplay = Some(Netplay {
-            session: RollbackSession::new(buffer_frames),
+            session: RollbackSession::with_config(config),
             transport,
             sent: 0,
             received: 0,
             rollbacks: 0,
             last_error: None,
         });
+    }
+
+    /// Changes the prediction mode of the active session.
+    pub fn set_netplay_prediction(&mut self, prediction: PredictionMode) {
+        if let Some(netplay) = &mut self.netplay {
+            netplay.session.set_prediction(prediction);
+        }
+    }
+
+    /// Changes the input delay of the active session (clamped to 0..=16).
+    pub fn set_netplay_input_delay(&mut self, delay: u32) {
+        if let Some(netplay) = &mut self.netplay {
+            netplay.session.set_input_delay(delay);
+        }
     }
 
     /// Stops netplay and returns to local input.
@@ -999,6 +1035,13 @@ impl Player {
             let (sent, received, rollbacks) = netplay.stats();
             (netplay.frame(), sent, received, rollbacks)
         })
+    }
+
+    /// Session tuning and prediction/rollback counters when netplay is
+    /// active.
+    #[must_use]
+    pub fn netplay_session_stats(&self) -> Option<(SessionConfig, SessionStats)> {
+        self.netplay.as_ref().map(Netplay::session_stats)
     }
 
     /// Last netplay transport/rollback error, if any.
@@ -1723,6 +1766,46 @@ mod tests {
         rom[vector] = 0x00;
         rom[vector + 1] = 0x80;
         rom
+    }
+
+    #[test]
+    fn netplay_configures_prediction_and_delay() {
+        let dir = std::env::temp_dir().join(format!("unko-netcfg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("netcfg.nes");
+        std::fs::write(&path, minimal_nrom()).expect("write rom");
+        let entry = crate::library::probe_path(&path)
+            .expect("probe")
+            .into_iter()
+            .next()
+            .expect("entry");
+        let settings = Settings {
+            save_dir: dir.join("saves"),
+            ..Settings::default()
+        };
+        let mut player =
+            Player::start_with(&entry, &settings, GameProperties::default()).expect("start");
+        let (transport, _peer) = unko_netplay::channel_pair();
+        player.start_netplay_with(
+            Box::new(transport),
+            SessionConfig {
+                buffer_frames: 4,
+                input_delay: 2,
+                prediction: PredictionMode::Neutral,
+            },
+        );
+        let (config, stats) = player.netplay_session_stats().expect("session");
+        assert_eq!(config.input_delay, 2);
+        assert_eq!(config.prediction, PredictionMode::Neutral);
+        assert_eq!(stats.frame, 0);
+        player.set_netplay_input_delay(5);
+        player.set_netplay_prediction(PredictionMode::LastInput);
+        let (config, _) = player.netplay_session_stats().expect("session");
+        assert_eq!(config.input_delay, 5);
+        assert_eq!(config.prediction, PredictionMode::LastInput);
+        player.stop_netplay();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

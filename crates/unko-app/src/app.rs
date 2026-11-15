@@ -28,7 +28,7 @@ use crate::player::{self, Player};
 use crate::recording::RecordModes;
 use crate::rom_manager::RomManager;
 use crate::settings::{Aspect, HotkeyAction, PortInput, Settings, ShaderPreset, Theme};
-use unko_netplay::UdpTransport;
+use unko_netplay::{PredictionMode, SessionConfig, UdpTransport};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -206,6 +206,8 @@ pub struct App {
     netplay_local_port: String,
     netplay_peer: String,
     netplay_status: String,
+    netplay_delay: u32,
+    netplay_prediction: PredictionMode,
     controller_last: unko_core::InputState,
     controller_repeat: Instant,
     controller_menu_open: bool,
@@ -334,6 +336,8 @@ impl App {
             netplay_local_port: "7777".into(),
             netplay_peer: "127.0.0.1:7778".into(),
             netplay_status: String::new(),
+            netplay_delay: 0,
+            netplay_prediction: PredictionMode::LastInput,
             controller_last: unko_core::InputState::empty(),
             controller_repeat: Instant::now(),
             controller_menu_open: false,
@@ -2647,7 +2651,14 @@ impl App {
         match UdpTransport::bind(&format!("0.0.0.0:{port}")) {
             Ok(mut transport) => match transport.connect(&peer) {
                 Ok(()) => {
-                    player.start_netplay(Box::new(transport), 8);
+                    player.start_netplay_with(
+                        Box::new(transport),
+                        SessionConfig {
+                            buffer_frames: 8,
+                            input_delay: self.netplay_delay,
+                            prediction: self.netplay_prediction,
+                        },
+                    );
                     self.netplay_status = format!(
                         "{} on UDP {port}, peer {peer}",
                         if self.netplay_host {
@@ -2674,7 +2685,7 @@ impl App {
             .is_some_and(crate::player::Player::netplay_active);
         egui::Window::new("NetPlay")
             .open(&mut open)
-            .default_size([440.0, 300.0])
+            .default_size([520.0, 340.0])
             .show(ctx, |ui| {
                 let role_before = self.netplay_host;
                 ui.horizontal(|ui| {
@@ -2706,12 +2717,51 @@ impl App {
                 });
                 ui.label(
                     RichText::new(
-                        "Both peers use complementary local ports and each other's address. \
-                         Netplay disables rewind, movies and run-ahead.",
+                        "Complementary local ports, each other's address. Prediction \
+                         fills a missing remote input; delay trades responsiveness \
+                         for fewer rollbacks. Rewind, movies and run-ahead are off.",
                     )
                     .small()
                     .weak(),
                 );
+                ui.horizontal(|ui| {
+                    ui.label("Prediction");
+                    egui::ComboBox::from_id_salt("netplay-prediction")
+                        .selected_text(match self.netplay_prediction {
+                            PredictionMode::LastInput => "Last input",
+                            PredictionMode::Neutral => "Neutral",
+                        })
+                        .show_ui(ui, |ui| {
+                            for mode in [PredictionMode::LastInput, PredictionMode::Neutral] {
+                                if ui
+                                    .selectable_value(
+                                        &mut self.netplay_prediction,
+                                        mode,
+                                        match mode {
+                                            PredictionMode::LastInput => "Last input",
+                                            PredictionMode::Neutral => "Neutral",
+                                        },
+                                    )
+                                    .changed()
+                                {
+                                    if let Some(player) = &mut self.player {
+                                        player.set_netplay_prediction(mode);
+                                    }
+                                }
+                            }
+                        });
+                    ui.label("Input delay");
+                    let response = ui.add(
+                        egui::DragValue::new(&mut self.netplay_delay)
+                            .range(0..=16)
+                            .suffix(" frames"),
+                    );
+                    if response.changed() {
+                        if let Some(player) = &mut self.player {
+                            player.set_netplay_input_delay(self.netplay_delay);
+                        }
+                    }
+                });
                 ui.separator();
                 ui.horizontal(|ui| {
                     let can_start = !active && self.player.is_some();
@@ -2736,8 +2786,20 @@ impl App {
                     .as_ref()
                     .and_then(crate::player::Player::netplay_stats)
                 {
+                    let (config, session) = self
+                        .player
+                        .as_ref()
+                        .and_then(crate::player::Player::netplay_session_stats)
+                        .unwrap_or_default();
                     ui.label(format!(
                         "Frame {frame} · sent {sent} · received {received} · rollbacks {rollbacks}"
+                    ));
+                    ui.label(format!(
+                        "Predicted {} · deepest rollback {} · delay {} · {}",
+                        session.predicted,
+                        session.max_rollback_depth,
+                        config.input_delay,
+                        config.prediction.name(),
                     ));
                     if let Some(err) = self
                         .player

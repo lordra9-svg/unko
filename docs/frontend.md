@@ -75,7 +75,7 @@ Key interaction rules worth keeping:
 | Settings: NES page | region, mapper/header info, deterministic RAM | now |
 | Settings: Advanced | core id, log level, state format | now |
 | Per-game properties | Tools → Game properties…: timing region, per-port controller devices and header mapper overrides per game, saved as `<stem>.game` and applied on the next load | now |
-| NetPlay | Tools → NetPlay…: host/join over UDP, frame exchange and rollback session; rewind/movies/run-ahead disabled; NAT traversal later | now |
+| NetPlay | Tools → NetPlay…: host/join over UDP, prediction mode, 0-16 frame input delay, rollback/predicted/depth counters; rewind/movies/run-ahead disabled; NAT traversal later | now |
 | Achievements | separate milestone (credentials/network) | blocked |
 
 ## Platforms
