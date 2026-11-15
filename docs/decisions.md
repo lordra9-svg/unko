@@ -95,3 +95,24 @@ Rust, and there is no deadline. The consequences:
 - The bar, oracle hierarchy and milestones are in `docs/accuracy.md`.
 
 This is additive: the shell, ABI and frontend do not change.
+
+## ADR-0009 — rollback netcode: GGRS
+
+Direct-UDP netplay uses **GGRS** (`gschup/ggrs` 0.13, MIT OR Apache-2.0) as the
+rollback engine. `GgrsNetplay` implements `ggrs::Config` for the NES input and
+state shape and maps `SaveGameState`/`LoadGameState`/`AdvanceFrame` requests onto
+`unko_core::Core`, so the core and shell do not depend on GGRS internals.
+
+Consequences:
+
+- GGRS owns input exchange, repeat-last prediction, rollback scheduling, time
+  synchronization and checksum desync detection. The core resets before the
+  handshake and frames stay frozen until GGRS reports `Running`.
+- A GGRS desync is reported and pauses the session; GGRS has no state-transfer
+  repair. The legacy engine keeps its chunked repair for the transports it
+  still serves.
+- UDP hole punching and the `unko-relay` room fallback still use the legacy
+  `RollbackSession` because those transports do not expose GGRS's per-peer
+  source address. A `ggrs::NonBlockingSocket` adapter is the follow-up.
+- The GGRS path is covered by a loopback integration test and the
+  `netplay_harness --engine ggrs` two-host harness on the real NES core.
