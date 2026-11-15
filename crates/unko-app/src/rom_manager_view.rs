@@ -3,7 +3,27 @@
 //! The mapping from [`VerifyReport`] to display rows is kept free of `egui` so
 //! it can be unit-tested; the window only chooses colours and draws the rows.
 
-use unko_rom_manager::{MatchStatus, VerifyReport};
+use std::path::Path;
+
+use unko_rom_manager::{
+    scan_path, Catalog, MatchReport, MatchStatus, ScanOptions, ScanProgress, VerifyReport,
+};
+
+/// Audits a rebuilt output folder with the DAT that produced it.
+///
+/// The output is hashed from scratch (no scan cache), so a post-rebuild pass
+/// cannot reuse stale hashes from the source scan.
+///
+/// # Errors
+///
+/// Returns a scan error when the folder cannot be read.
+pub fn verify_folder(report: &MatchReport, folder: &Path) -> Result<VerifyView, String> {
+    let mut progress = |_: &ScanProgress| {};
+    let (scanned, _) =
+        scan_path(folder, &ScanOptions::default(), &mut progress).map_err(|err| err.to_string())?;
+    let matched = Catalog::new(report.dat.clone()).match_all(scanned);
+    Ok(VerifyView::from_report(&VerifyReport::build(&matched)))
+}
 
 /// One ROM row in the verification panel.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,7 +190,10 @@ impl VerifyView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use unko_rom_manager::{GameVerify, RomVerify, Summary};
+    use std::fs;
+    use unko_rom_manager::{
+        hash_bytes, parse_dat_str, rebuild, GameVerify, RebuildOptions, RomVerify, Summary,
+    };
 
     fn found_rom() -> RomVerify {
         RomVerify {
@@ -240,6 +263,81 @@ mod tests {
                 vec!["/roms/copy.nes".into()]
             },
         }
+    }
+
+    fn rebuild_fixture(name: &str) -> (std::path::PathBuf, MatchReport, std::path::PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("unko-postverify-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let source = dir.join("source");
+        let output = dir.join("out");
+        fs::create_dir_all(&source).expect("source");
+        let payload = b"post-rebuild-payload";
+        let hashes = hash_bytes(payload);
+        let mut file = vec![0u8; 16];
+        file[..4].copy_from_slice(b"NES\x1a");
+        file[4] = 1;
+        file[5] = 1;
+        file.extend_from_slice(payload);
+        fs::write(source.join("a.nes"), file).expect("rom");
+        let dat = parse_dat_str(&format!(
+            "<datafile><header><name>Post</name><version>1</version></header>\
+             <game name=\"Alpha (USA)\"><rom name=\"a.nes\" size=\"{}\" crc=\"{:08x}\" sha1=\"{}\"/></game>\
+             </datafile>",
+            payload.len(),
+            hashes.crc,
+            hashes.sha1_hex()
+        ))
+        .expect("dat");
+        let (scanned, _) = scan_path(&source, &ScanOptions::default(), &mut |_| {}).expect("scan");
+        let report = Catalog::new(dat).match_all(scanned);
+        (dir, report, output)
+    }
+
+    #[test]
+    fn rebuilt_output_verifies_clean() {
+        let (dir, report, output) = rebuild_fixture("clean");
+        let result = rebuild(
+            &report,
+            &[0],
+            &RebuildOptions {
+                output: output.clone(),
+                ..RebuildOptions::default()
+            },
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(result.written > 0, "nothing was rebuilt");
+        let view = verify_folder(&report, &output).expect("verify");
+        assert!(view.clean, "{}", view.summary);
+        assert_eq!(view.found, 1);
+        assert_eq!(view.total, 1);
+        assert_eq!(view.complete_games, 1);
+        assert!(
+            view.rows[0].source.contains("out") && view.rows[0].source.ends_with("a.nes"),
+            "source was {}",
+            view.rows[0].source
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn missing_and_unknown_output_files_are_reported() {
+        let (dir, report, output) = rebuild_fixture("unknown");
+        fs::create_dir_all(&output).expect("out");
+        let mut unknown = vec![0u8; 16];
+        unknown[..4].copy_from_slice(b"NES\x1a");
+        unknown[4] = 1;
+        unknown[5] = 1;
+        unknown.extend_from_slice(b"not-in-the-dat");
+        fs::write(output.join("unknown.nes"), unknown).expect("unknown rom");
+        let view = verify_folder(&report, &output).expect("verify");
+        assert!(!view.clean);
+        assert_eq!(view.found, 0);
+        assert_eq!(view.total, 1);
+        assert_eq!(view.missing.len(), 1);
+        assert_eq!(view.unknown.len(), 1);
+        assert!(view.status_label() == "NOT CLEAN");
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

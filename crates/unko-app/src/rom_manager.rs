@@ -600,6 +600,21 @@ impl RomManager {
         if let Some(error) = result.errors.first() {
             self.status.push_str(&format!(" — {error}"));
         }
+        if result.errors.is_empty() {
+            // Verify the fresh output with the DAT that produced it. The scan
+            // deliberately bypasses the cache, so this cannot report a stale
+            // source hash as a rebuilt file.
+            match crate::rom_manager_view::verify_folder(report, &self.output) {
+                Ok(view) => {
+                    self.status =
+                        format!("{} — verification: {}", self.status, view.status_label());
+                    self.verify = Some(view);
+                }
+                Err(err) => {
+                    self.status = format!("{} — verification failed: {err}", self.status);
+                }
+            }
+        }
     }
 
     fn suggested_path(&self, report_index: usize, suffix: &str) -> PathBuf {
@@ -757,5 +772,53 @@ fn sanitize(value: &str) -> String {
         "dat".into()
     } else {
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use unko_rom_manager::{hash_bytes, parse_dat_str};
+
+    #[test]
+    fn rebuild_opens_the_verification_panel() {
+        let dir = std::env::temp_dir().join(format!("unko-rm-postverify-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let source = dir.join("source");
+        let output = dir.join("out");
+        fs::create_dir_all(&source).expect("source");
+        let payload = b"rom-manager-post-verify";
+        let hashes = hash_bytes(payload);
+        let mut file = vec![0u8; 16];
+        file[..4].copy_from_slice(b"NES\x1a");
+        file[4] = 1;
+        file[5] = 1;
+        file.extend_from_slice(payload);
+        fs::write(source.join("a.nes"), file).expect("rom");
+        let dat = parse_dat_str(&format!(
+            "<datafile><header><name>Post</name><version>1</version></header>\
+             <game name=\"Alpha (USA)\"><rom name=\"a.nes\" size=\"{}\" crc=\"{:08x}\" sha1=\"{}\"/></game>\
+             </datafile>",
+            payload.len(),
+            hashes.crc,
+            hashes.sha1_hex()
+        ))
+        .expect("dat");
+        let (scanned, _) = scan_path(&source, &ScanOptions::default(), &mut |_| {}).expect("scan");
+        let report = Catalog::new(dat).match_all(scanned);
+        let mut manager = RomManager::new(dir.join("saves"), source);
+        manager.output = output.clone();
+        manager.reports = vec![report];
+        manager.rebuild(0, &[0]);
+        let view = manager.verify.as_ref().expect("auto verification panel");
+        assert!(view.clean, "{}", view.summary);
+        assert_eq!(view.found, 1);
+        assert!(
+            manager.status.contains("verification: CLEAN"),
+            "status was {}",
+            manager.status
+        );
+        let _ = fs::remove_dir_all(dir);
     }
 }

@@ -75,7 +75,9 @@ that matters for a playable library:
   that matched and headerless matches), missing/unknown/duplicate files, and
   exits nonzero unless the set is complete; `--max-list` caps the listings.
   The ROM Manager window exposes the same report behind a **Verify** button,
-  and `--rom-verify` opens it after the initial scan.
+  and `--rom-verify` opens it after the initial scan. A rebuild that finishes
+  without errors audits its output folder (fresh hashes, no cache) and opens
+  the same panel automatically.
 - Safe copy/rebuild of matched ROMs into an output folder, with hash
   verification; an optional verified move deletes loose sources only after the
   copy succeeds, and archive members are never removed.
