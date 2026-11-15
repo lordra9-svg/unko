@@ -1,10 +1,11 @@
 //! Netplay: GGRS rollback plus legacy transport and state primitives.
 //!
 //! This crate is independent of the frontend and of any specific emulator
-//! core. Direct UDP sessions run [`ggrs_session::GgrsNetplay`], which maps
-//! GGRS save/load/advance requests onto [`unko_core::Core`]. The transport,
-//! rollback-buffer and session modules remain for hole-punch and relay paths
-//! that do not expose GGRS's per-peer source address yet.
+//! core. Direct UDP, hole-punch and relay sessions run
+//! [`ggrs_session::GgrsNetplay`] through `NonBlockingSocket` adapters, which
+//! map GGRS save/load/advance requests onto [`unko_core::Core`]. The transport,
+//! rollback-buffer and session modules remain as a library fallback and for
+//! the legacy harness path.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
