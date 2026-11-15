@@ -2314,10 +2314,11 @@ Added two controller-port devices with synthetic tests:
   bit stream (the wiki's recommended emulator model). The queue is capped at
   1 Mbit.
 
-Both are save-state fields. Miracle Piano and Datach remain queued until
-protocol test ROMs are available; VS. System/PlayChoice-10 remains blocked on
-ROM and palette/security data. Tests: microphone bit 2, tape loopback and
-readback-disable, device settings round-trip.
+Both are save-state fields. Miracle Piano and Datach are now implemented;
+VS. System/PlayChoice-10 remains blocked on ROM/BIOS, mapper 99 and coin/DIP
+input, with the RGB palettes and 2C05 security data implemented. Tests:
+microphone bit 2, tape loopback and readback-disable, device settings
+round-trip.
 
 ### 2026-11-13 — Miracle Piano and Datach transports
 
