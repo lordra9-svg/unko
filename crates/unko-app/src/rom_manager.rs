@@ -9,8 +9,10 @@ use egui::{Color32, RichText};
 use unko_rom_manager::{
     parse_dat_path, rebuild, scan_path, summary_line, write_csv, write_fixdat, Catalog,
     MatchReport, MatchStatus, OneGameOneRom, OutputFormat, RebuildOptions, ScanOptions,
-    ScanProgress,
+    ScanProgress, VerifyReport,
 };
+
+use crate::rom_manager_view::VerifyView;
 
 type Job = std::result::Result<Vec<MatchReport>, String>;
 
@@ -43,6 +45,8 @@ pub struct RomManager {
     rx: Option<Receiver<Job>>,
     reports: Vec<MatchReport>,
     selected: usize,
+    verify: Option<VerifyView>,
+    verify_after_scan: bool,
 }
 
 impl RomManager {
@@ -76,6 +80,8 @@ impl RomManager {
             rx: None,
             reports: Vec::new(),
             selected: 0,
+            verify: None,
+            verify_after_scan: false,
         }
     }
 
@@ -89,6 +95,11 @@ impl RomManager {
             self.focus_pending = true;
             self.focus_frames = 8;
         }
+    }
+
+    /// Opens the verification report automatically after the next scan.
+    pub fn set_verify_after_scan(&mut self, value: bool) {
+        self.verify_after_scan = value;
     }
 
     /// Opens the manager and asks the OS window to take focus.
@@ -107,10 +118,14 @@ impl RomManager {
             Ok(Ok(reports)) => {
                 self.reports = reports;
                 self.selected = 0;
+                self.verify = None;
                 self.busy = false;
                 self.rx = None;
                 if let Some(report) = self.reports.first() {
                     self.status = summary_line(report);
+                    if self.verify_after_scan {
+                        self.verify = Some(VerifyView::from_report(&VerifyReport::build(report)));
+                    }
                 } else {
                     self.status = "No DAT produced a report.".into();
                 }
@@ -347,98 +362,111 @@ impl RomManager {
                 if ui.button("Rebuild selected…").clicked() {
                     action = Some(Action::Rebuild);
                 }
+                if ui.button("Verify").clicked() {
+                    action = Some(Action::Verify);
+                }
             });
 
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label("Filter");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.filter)
-                        .hint_text("game name")
-                        .desired_width(300.0),
-                );
-            });
-            ui.separator();
-            let filter = self.filter.to_lowercase();
-            let mut order: Vec<usize> = (0..report.dat.games.len()).collect();
-            order.sort_by_key(|index| match report.games[*index].status {
-                MatchStatus::Complete => 0,
-                MatchStatus::Partial => 1,
-                MatchStatus::Missing => 2,
-            });
-            let filtered: Vec<usize> = order
-                .into_iter()
-                .filter(|index| {
-                    filter.is_empty()
-                        || report.dat.games[*index]
-                            .name
-                            .to_lowercase()
-                            .contains(&filter)
-                })
-                .collect();
-            ui.label(format!("{} matching games", filtered.len()));
-            let row_height = ui.spacing().interact_size.y.max(18.0);
-            ui.horizontal(|ui| {
-                ui.add_sized(
-                    [380.0, row_height],
-                    egui::Label::new(RichText::new("Game").strong()),
-                );
-                ui.add_sized(
-                    [90.0, row_height],
-                    egui::Label::new(RichText::new("Status").strong()),
-                );
-                ui.add_sized(
-                    [60.0, row_height],
-                    egui::Label::new(RichText::new("ROMs").strong()),
-                );
-                ui.add_sized(
-                    [ui.available_width(), row_height],
-                    egui::Label::new(RichText::new("Source").strong()),
-                );
-            });
-            egui::ScrollArea::vertical()
-                .max_height(ui.available_height().max(140.0))
-                .auto_shrink([false, false])
-                .show_rows(ui, row_height, filtered.len(), |ui, range| {
-                    for index in filtered[range].iter().copied() {
-                        let game = &report.dat.games[index];
-                        let status = report.games[index];
-                        let color = match status.status {
-                            MatchStatus::Complete => Color32::LIGHT_GREEN,
-                            MatchStatus::Partial => Color32::YELLOW,
-                            MatchStatus::Missing => Color32::GRAY,
-                        };
-                        let source = game
-                            .roms
-                            .iter()
-                            .enumerate()
-                            .find_map(|(rom, _)| {
-                                report
-                                    .flat_index(index, rom)
-                                    .and_then(|flat| report.source(flat))
-                                    .map(|rom| rom.origin.display())
-                            })
-                            .unwrap_or_default();
-                        ui.horizontal(|ui| {
-                            ui.add_sized(
-                                [380.0, row_height],
-                                egui::Label::new(&game.name).truncate(),
-                            );
-                            ui.add_sized(
-                                [90.0, row_height],
-                                egui::Label::new(RichText::new(status.status.label()).color(color)),
-                            );
-                            ui.add_sized(
-                                [60.0, row_height],
-                                egui::Label::new(format!("{}/{}", status.matched, status.total)),
-                            );
-                            ui.add_sized(
-                                [ui.available_width(), row_height],
-                                egui::Label::new(RichText::new(source).small().weak()).truncate(),
-                            );
-                        });
-                    }
+            if let Some(view) = &self.verify {
+                verify_panel(ui, view, &mut action);
+            } else {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label("Filter");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.filter)
+                            .hint_text("game name")
+                            .desired_width(300.0),
+                    );
                 });
+                ui.separator();
+                let filter = self.filter.to_lowercase();
+                let mut order: Vec<usize> = (0..report.dat.games.len()).collect();
+                order.sort_by_key(|index| match report.games[*index].status {
+                    MatchStatus::Complete => 0,
+                    MatchStatus::Partial => 1,
+                    MatchStatus::Missing => 2,
+                });
+                let filtered: Vec<usize> = order
+                    .into_iter()
+                    .filter(|index| {
+                        filter.is_empty()
+                            || report.dat.games[*index]
+                                .name
+                                .to_lowercase()
+                                .contains(&filter)
+                    })
+                    .collect();
+                ui.label(format!("{} matching games", filtered.len()));
+                let row_height = ui.spacing().interact_size.y.max(18.0);
+                ui.horizontal(|ui| {
+                    ui.add_sized(
+                        [380.0, row_height],
+                        egui::Label::new(RichText::new("Game").strong()),
+                    );
+                    ui.add_sized(
+                        [90.0, row_height],
+                        egui::Label::new(RichText::new("Status").strong()),
+                    );
+                    ui.add_sized(
+                        [60.0, row_height],
+                        egui::Label::new(RichText::new("ROMs").strong()),
+                    );
+                    ui.add_sized(
+                        [ui.available_width(), row_height],
+                        egui::Label::new(RichText::new("Source").strong()),
+                    );
+                });
+                egui::ScrollArea::vertical()
+                    .max_height(ui.available_height().max(140.0))
+                    .auto_shrink([false, false])
+                    .show_rows(ui, row_height, filtered.len(), |ui, range| {
+                        for index in filtered[range].iter().copied() {
+                            let game = &report.dat.games[index];
+                            let status = report.games[index];
+                            let color = match status.status {
+                                MatchStatus::Complete => Color32::LIGHT_GREEN,
+                                MatchStatus::Partial => Color32::YELLOW,
+                                MatchStatus::Missing => Color32::GRAY,
+                            };
+                            let source = game
+                                .roms
+                                .iter()
+                                .enumerate()
+                                .find_map(|(rom, _)| {
+                                    report
+                                        .flat_index(index, rom)
+                                        .and_then(|flat| report.source(flat))
+                                        .map(|rom| rom.origin.display())
+                                })
+                                .unwrap_or_default();
+                            ui.horizontal(|ui| {
+                                ui.add_sized(
+                                    [380.0, row_height],
+                                    egui::Label::new(&game.name).truncate(),
+                                );
+                                ui.add_sized(
+                                    [90.0, row_height],
+                                    egui::Label::new(
+                                        RichText::new(status.status.label()).color(color),
+                                    ),
+                                );
+                                ui.add_sized(
+                                    [60.0, row_height],
+                                    egui::Label::new(format!(
+                                        "{}/{}",
+                                        status.matched, status.total
+                                    )),
+                                );
+                                ui.add_sized(
+                                    [ui.available_width(), row_height],
+                                    egui::Label::new(RichText::new(source).small().weak())
+                                        .truncate(),
+                                );
+                            });
+                        }
+                    });
+            }
             action
         };
         match action {
@@ -448,6 +476,13 @@ impl RomManager {
                 let selected = self.selected_games(report_index);
                 self.rebuild(report_index, &selected);
             }
+            Some(Action::Verify) => {
+                if let Some(report) = self.reports.get(report_index) {
+                    self.verify = Some(VerifyView::from_report(&VerifyReport::build(report)));
+                    self.status = "Verification report ready".into();
+                }
+            }
+            Some(Action::CloseVerify) => self.verify = None,
             None => {}
         }
     }
@@ -466,6 +501,7 @@ impl RomManager {
         let progress = Arc::clone(&self.progress);
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
+        self.verify = None;
         self.busy = true;
         self.status = "Scanning…".into();
         thread::spawn(move || {
@@ -582,6 +618,117 @@ enum Action {
     Fixdat,
     Csv,
     Rebuild,
+    Verify,
+    CloseVerify,
+}
+
+fn verify_panel(ui: &mut egui::Ui, view: &VerifyView, action: &mut Option<Action>) {
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        let color = if view.clean {
+            Color32::LIGHT_GREEN
+        } else {
+            Color32::LIGHT_RED
+        };
+        ui.label(RichText::new(view.status_label()).strong().color(color));
+        ui.label(RichText::new(&view.dat).strong());
+        if ui.button("Back to games").clicked() {
+            *action = Some(Action::CloseVerify);
+        }
+    });
+    ui.label(view.summary.as_str());
+    if !view.unknown.is_empty() {
+        verify_section(ui, "Unknown files", &view.unknown);
+    }
+    if !view.duplicates.is_empty() {
+        verify_section(ui, "Duplicate files", &view.duplicates);
+    }
+    if !view.missing.is_empty() {
+        egui::CollapsingHeader::new(format!("Missing ROMs ({})", view.missing.len()))
+            .default_open(true)
+            .show(ui, |ui| {
+                for (game, rom) in view.missing.iter().take(300) {
+                    ui.label(format!("{game}: {rom}"));
+                }
+                if view.missing.len() > 300 {
+                    ui.label(format!("… {} more", view.missing.len() - 300));
+                }
+            });
+    }
+    ui.separator();
+    ui.label(
+        RichText::new(format!(
+            "ROMs: {} found / {} expected",
+            view.found, view.total
+        ))
+        .strong(),
+    );
+    let row_height = ui.spacing().interact_size.y.max(18.0);
+    ui.horizontal(|ui| {
+        ui.add_sized(
+            [250.0, row_height],
+            egui::Label::new(RichText::new("Game").strong()),
+        );
+        ui.add_sized(
+            [220.0, row_height],
+            egui::Label::new(RichText::new("ROM").strong()),
+        );
+        ui.add_sized(
+            [70.0, row_height],
+            egui::Label::new(RichText::new("Status").strong()),
+        );
+        ui.add_sized(
+            [150.0, row_height],
+            egui::Label::new(RichText::new("Hash").strong()),
+        );
+        ui.add_sized(
+            [ui.available_width(), row_height],
+            egui::Label::new(RichText::new("Source").strong()),
+        );
+    });
+    egui::ScrollArea::vertical()
+        .max_height(ui.available_height().max(140.0))
+        .auto_shrink([false, false])
+        .show_rows(ui, row_height, view.rows.len(), |ui, range| {
+            for row in &view.rows[range] {
+                let color = match view.row_status(row) {
+                    MatchStatus::Complete => Color32::LIGHT_GREEN,
+                    MatchStatus::Partial => Color32::YELLOW,
+                    MatchStatus::Missing => Color32::GRAY,
+                };
+                ui.horizontal(|ui| {
+                    ui.add_sized(
+                        [250.0, row_height],
+                        egui::Label::new(row.game.as_str()).truncate(),
+                    );
+                    ui.add_sized(
+                        [220.0, row_height],
+                        egui::Label::new(row.rom.as_str()).truncate(),
+                    );
+                    ui.add_sized(
+                        [70.0, row_height],
+                        egui::Label::new(RichText::new(row.status_text()).color(color)),
+                    );
+                    ui.add_sized([150.0, row_height], egui::Label::new(row.hash_text()));
+                    ui.add_sized(
+                        [ui.available_width(), row_height],
+                        egui::Label::new(RichText::new(row.source_text()).small().weak())
+                            .truncate(),
+                    );
+                });
+            }
+        });
+}
+
+fn verify_section(ui: &mut egui::Ui, title: &str, entries: &[String]) {
+    egui::CollapsingHeader::new(format!("{title} ({})", entries.len())).show(ui, |ui| {
+        for entry in entries.iter().take(300) {
+            ui.monospace(entry);
+        }
+        if entries.len() > 300 {
+            ui.label(format!("… {} more", entries.len() - 300));
+        }
+    });
 }
 
 fn split_list(value: &str) -> Vec<String> {

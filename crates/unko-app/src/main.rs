@@ -26,6 +26,7 @@ fn parse_args() -> Args {
             "--portable" => parsed.portable = true,
             "--print-data-dir" => parsed.print_data_dir = true,
             "--rom-manager" => parsed.rom_manager = true,
+            "--rom-verify" => parsed.rom_verify = true,
             "--dat" => {
                 if let Some(path) = args.next() {
                     parsed.dat.push(PathBuf::from(path));
@@ -40,7 +41,7 @@ fn parse_args() -> Args {
                      usage: unko-app [--roms DIR] [--rom PATH] [--settings] [--debug]\n\
                      \x20      [--properties] [--netplay] [--states]\n\
                      \x20      [--portable | --data-dir DIR] [--print-data-dir]\n\
-                     \x20      [--rom-manager] [--dat FILE]...\n\n\
+                     \x20      [--rom-manager [--rom-verify]] [--dat FILE]...\n\n\
                      Keyboard: arrows = D-pad, X = A, Z = B, Enter = Start,\n\
                      Shift = Select, Space = pause, F5/F8 = save/load state,\n\
                      F9/F10 = step frame/instruction, F11 = fullscreen."

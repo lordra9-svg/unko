@@ -277,6 +277,8 @@ pub struct Args {
     pub print_data_dir: bool,
     /// Open the ROM Manager window on launch.
     pub rom_manager: bool,
+    /// Open the ROM Manager verification report after its initial scan.
+    pub rom_verify: bool,
     /// DAT files to preload in the ROM Manager.
     pub dat: Vec<PathBuf>,
 }
@@ -289,6 +291,7 @@ impl App {
         }
         let mut rom_manager = RomManager::new(settings.save_dir.clone(), settings.rom_dir.clone());
         rom_manager.preload(args.dat.clone(), args.rom_manager);
+        rom_manager.set_verify_after_scan(args.rom_verify);
         if rom_manager.open && !args.dat.is_empty() {
             rom_manager.start_scan();
         }

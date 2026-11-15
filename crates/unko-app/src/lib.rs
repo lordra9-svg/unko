@@ -29,6 +29,7 @@ mod player;
 mod playtime;
 mod recording;
 mod rom_manager;
+mod rom_manager_view;
 mod settings;
 mod slots;
 
