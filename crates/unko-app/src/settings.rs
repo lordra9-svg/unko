@@ -448,6 +448,9 @@ pub struct Settings {
     /// Attach a Zapper light gun to port 2 (kept in sync with
     /// `port2_device` for older config files).
     pub zapper_port2: bool,
+    /// Attach Famicom 3D shutter glasses and present consecutive fields as a
+    /// red/cyan anaglyph.
+    pub famicom_3d: bool,
     /// Device attached to controller port 1.
     pub port1_device: PortDevice,
     /// Device attached to controller port 2.
@@ -561,6 +564,7 @@ impl Default for Settings {
             integer_scale: true,
             linear_filter: false,
             zapper_port2: false,
+            famicom_3d: false,
             port1_device: PortDevice::Gamepad,
             port2_device: PortDevice::Gamepad,
             port1_input: PortInput::Auto,
@@ -708,6 +712,7 @@ impl Settings {
                 "integer_scale" => settings.integer_scale = parse_bool(value),
                 "linear_filter" => settings.linear_filter = parse_bool(value),
                 "zapper_port2" => settings.zapper_port2 = parse_bool(value),
+                "famicom_3d" => settings.famicom_3d = parse_bool(value),
                 "port1_device" => settings.port1_device = PortDevice::from_name(value),
                 "port2_device" => {
                     settings.port2_device = PortDevice::from_name(value);
@@ -888,6 +893,7 @@ port2_device={}
 port1_input={}
 port2_input={}
 zapper_port2={}
+famicom_3d={}
 theme={}
 pause_on_focus_loss={}
 confirm_stop={}
@@ -962,6 +968,7 @@ layout_main={}
             self.port1_input.name(),
             self.port2_input.name(),
             self.port2_device == PortDevice::Zapper,
+            self.famicom_3d,
             match self.theme {
                 Theme::Dark => "dark",
                 Theme::Light => "light",
@@ -1167,6 +1174,7 @@ mod tests {
             rom_dir: PathBuf::from("/games"),
             theme: Theme::Light,
             palette: Palette::Consumer,
+            famicom_3d: true,
             ..Settings::default()
         };
         settings.save(&path).expect("writes");

@@ -915,6 +915,9 @@ impl App {
             if self.settings.mmc3_alternate != old.mmc3_alternate {
                 player.set_mmc3_alternate(self.settings.mmc3_alternate);
             }
+            if self.settings.famicom_3d != old.famicom_3d {
+                player.set_famicom_3d(self.settings.famicom_3d);
+            }
             if self.settings.fds_speed != old.fds_speed {
                 player.set_fds_speed(self.settings.fds_speed);
             }
@@ -4977,6 +4980,19 @@ fn graphics_tab(ui: &mut egui::Ui, settings: &mut Settings, ctx: &egui::Context)
         &mut settings.linear_filter,
         "Smooth (linear) texture filtering",
     );
+    ui.checkbox(
+        &mut settings.famicom_3d,
+        "Famicom 3D glasses (red/cyan anaglyph)",
+    );
+    ui.label(
+        RichText::new(
+            "3D games select the eye through $4016 bit 1 (OUT1). Consecutive left and \
+             right fields are combined into a red/cyan anaglyph; without \
+             shutter glasses the depth is approximate.",
+        )
+        .weak()
+        .small(),
+    );
     ui.horizontal(|ui| {
         ui.label("Output shader");
         egui::ComboBox::from_id_salt("output-shader")
@@ -5836,7 +5852,7 @@ fn advanced_tab(ui: &mut egui::Ui, settings: &mut Settings) {
     ui.heading("Advanced");
     ui.add_space(8.0);
     ui.label("Core: Unko NES accuracy core");
-    ui.label("State format: UNKOST14, ROM-fingerprinted and core-tagged");
+    ui.label("State format: UNKOST15, ROM-fingerprinted and core-tagged");
     ui.label("Settings file: unko.conf");
     ui.add_space(10.0);
     ui.separator();

@@ -35,7 +35,7 @@ pub use cpu::{Cpu, Registers, Status};
 pub use nsf::{Nsf, NsfError, NsfHeader};
 pub use ppu::{PaletteVariant, Ppu};
 pub use resampler::Resampler;
-pub use system::{PortDevice, System};
+pub use system::{PortDevice, StereoEye, System};
 #[cfg(feature = "cheats")]
 pub use types::Cheat;
 #[cfg(feature = "debug")]

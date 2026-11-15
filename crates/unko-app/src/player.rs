@@ -5,8 +5,9 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use unko_core::{
-    AudioFilterModel, AudioQuality, AudioSource, Core, CoreError, DebugSpace, InputState,
-    LoadOptions, PortDevice, PpuResetBehavior, RamClear, Region, Registry, SystemId, VideoFilter,
+    compose_anaglyph, AudioFilterModel, AudioQuality, AudioSource, Core, CoreError, DebugSpace,
+    InputState, LoadOptions, PortDevice, PpuResetBehavior, RamClear, Region, Registry, StereoEye,
+    SystemId, VideoFilter,
 };
 
 use crate::audio::AudioOutput;
@@ -181,6 +182,69 @@ struct PendingVideo {
     width: u32,
     height: u32,
     stride: usize,
+    eye: Option<StereoEye>,
+}
+
+/// Consecutive left/right fields, combined for an anaglyph display.
+struct StereoDisplay {
+    enabled: bool,
+    left: Option<(Vec<u8>, usize, usize)>,
+    right: Option<(Vec<u8>, usize, usize)>,
+}
+
+impl StereoDisplay {
+    fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            left: None,
+            right: None,
+        }
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        if self.enabled != enabled {
+            self.enabled = enabled;
+            self.left = None;
+            self.right = None;
+        }
+    }
+
+    /// Stores the field for `eye` and returns the frame to display.
+    ///
+    /// With both eyes cached, the result is a red/cyan anaglyph: red from the
+    /// left field, green and blue from the right. Until both fields exist (or
+    /// when no eye is reported) the field is shown unchanged.
+    fn compose(
+        &mut self,
+        pixels: Vec<u8>,
+        width: usize,
+        height: usize,
+        eye: Option<StereoEye>,
+    ) -> Vec<u8> {
+        if !self.enabled || width == 0 || height == 0 {
+            return pixels;
+        }
+        let Some(eye) = eye else {
+            return pixels;
+        };
+        match eye {
+            StereoEye::Left => self.left = Some((pixels.clone(), width, height)),
+            StereoEye::Right => self.right = Some((pixels.clone(), width, height)),
+        }
+        let (Some((left, left_width, left_height)), Some((right, right_width, right_height))) =
+            (&self.left, &self.right)
+        else {
+            return pixels;
+        };
+        if (*left_width, *left_height) != (width, height)
+            || (*right_width, *right_height) != (width, height)
+        {
+            return pixels;
+        }
+        let mut out = pixels;
+        compose_anaglyph(left, right, &mut out);
+        out
+    }
 }
 
 /// A loaded machine plus frontend state (pause, slot, counters).
@@ -232,6 +296,10 @@ pub struct Player {
     port_enabled: [bool; 4],
     /// Output supersampling factor (1 = off).
     supersample: u32,
+    /// Famicom 3D field cache and anaglyph composition.
+    stereo: StereoDisplay,
+    /// Last frame handed to the renderer, after stereo composition.
+    last_display: Option<(Vec<u8>, u32, u32)>,
     /// Active rollback netplay session, when hosting or joining.
     netplay: Option<Netplay>,
 }
@@ -449,6 +517,7 @@ impl Player {
         core.set_ram_clear(settings.ram_clear);
         core.set_ppu_reset_behavior(settings.ppu_reset);
         core.set_mmc3_alternate(settings.mmc3_alternate);
+        core.set_stereo_glasses(settings.famicom_3d);
         if settings.palette == unko_core::Palette::Custom {
             if let Some(table) = crate::settings::load_palette(&settings.custom_palette) {
                 core.set_palette_table(table);
@@ -499,6 +568,8 @@ impl Player {
             debug: Debugger::default(),
             port_enabled: [true; 4],
             supersample: settings.supersample,
+            stereo: StereoDisplay::new(settings.famicom_3d),
+            last_display: None,
             last_input: [InputState::empty(); 4],
             rewind: RewindBuffer::new(settings.rewind_mb),
             rewind_enabled: true,
@@ -681,6 +752,7 @@ impl Player {
                             width: video.width,
                             height: video.height,
                             stride: video.stride,
+                            eye: self.core.stereo_eye(),
                         });
                         if let Err(err) = self.core.load_state(&state) {
                             self.message = err.to_string();
@@ -718,6 +790,7 @@ impl Player {
                     video.width as usize,
                     video.height as usize,
                     video.stride,
+                    video.eye,
                 );
             } else {
                 self.upload(ctx);
@@ -890,6 +963,12 @@ impl Player {
     /// Selects the alternate MMC3A/NEC IRQ revision.
     pub fn set_mmc3_alternate(&mut self, alternate: bool) {
         self.core.set_mmc3_alternate(alternate);
+    }
+
+    /// Attaches Famicom 3D shutter glasses and enables anaglyph output.
+    pub fn set_famicom_3d(&mut self, enabled: bool) {
+        self.stereo.set_enabled(enabled);
+        self.core.set_stereo_glasses(enabled);
     }
 
     /// Changes the rewind budget (64, 128 or 256 MiB).
@@ -1344,7 +1423,8 @@ impl Player {
             }
             packed
         };
-        self.upload_packed(ctx, pixels, width, height);
+        let eye = self.core.stereo_eye();
+        self.upload_packed(ctx, pixels, width, height, eye);
     }
 
     /// Uploads a copied core frame (used by run-ahead after its restore).
@@ -1355,6 +1435,7 @@ impl Player {
         width: usize,
         height: usize,
         stride: usize,
+        eye: Option<StereoEye>,
     ) {
         if width == 0 || height == 0 {
             return;
@@ -1369,20 +1450,23 @@ impl Player {
             }
             packed
         };
-        self.upload_packed(ctx, pixels, width, height);
+        self.upload_packed(ctx, pixels, width, height, eye);
     }
 
     /// Uploads an already packed (stride = width * 4) frame.
     fn upload_packed(
         &mut self,
         ctx: &egui::Context,
-        mut pixels: Vec<u8>,
+        pixels: Vec<u8>,
         width: usize,
         height: usize,
+        eye: Option<StereoEye>,
     ) {
         if width == 0 || height == 0 {
             return;
         }
+        let mut pixels = self.stereo.compose(pixels, width, height, eye);
+        self.last_display = Some((pixels.clone(), width as u32, height as u32));
         let mut upload_width = width;
         let mut upload_height = height;
         // Output supersampling: duplicate each pixel 2x/3x and let the linear
@@ -1432,6 +1516,9 @@ impl Player {
     /// Copies the current frame as tightly packed RGBA (for GPU upload).
     #[must_use]
     pub fn frame_rgba(&self) -> Option<(Vec<u8>, u32, u32)> {
+        if let Some((pixels, width, height)) = &self.last_display {
+            return Some((pixels.clone(), *width, *height));
+        }
         let video = self.core.video();
         let width = video.width as usize;
         let height = video.height as usize;
@@ -1903,6 +1990,33 @@ mod tests {
 
     fn pacer_at(start: Instant) -> FramePacer {
         FramePacer::new(start)
+    }
+
+    #[test]
+    fn stereo_display_composes_an_anaglyph_after_both_eyes() {
+        let mut display = StereoDisplay::new(true);
+        let left = vec![10, 20, 30, 255];
+        let right = vec![70, 80, 90, 255];
+        // One eye alone stays mono; the second field supplies cyan.
+        assert_eq!(
+            display.compose(left.clone(), 1, 1, Some(StereoEye::Left)),
+            left
+        );
+        assert_eq!(
+            display.compose(right, 1, 1, Some(StereoEye::Right)),
+            vec![10, 80, 90, 255]
+        );
+        // A later left field reuses the cached right field.
+        assert_eq!(
+            display.compose(vec![1, 2, 3, 255], 1, 1, Some(StereoEye::Left)),
+            vec![1, 80, 90, 255]
+        );
+        display.set_enabled(false);
+        let mono = vec![9, 9, 9, 255];
+        assert_eq!(
+            display.compose(mono.clone(), 1, 1, Some(StereoEye::Left)),
+            mono
+        );
     }
 
     #[test]

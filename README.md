@@ -37,7 +37,7 @@ verified against the public reference suites:
   `cpu_interrupts_v2` singles: pass
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **633 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **639 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **137 pass / 11 fail / 115 visual-or-input-only** (PAL APU timing leaves 4 failures; the alternate MMC3 selector leaves only `read_joy3/count_errors`)
 - RustyNES test tree: **159 pass / 11 fail / 171 visual-or-input-only** (166 / 4 with PAL APU in PAL mode; 1 with the alternate MMC3 selector too)
 
@@ -87,8 +87,8 @@ harness; a true Internet run needs two networks. See
 | Metric | Value |
 |---|---:|
 | Workspace crates | 9 |
-| First-party Rust lines | ~78,900 |
-| Workspace tests | 633 pass, 0 failed |
+| First-party Rust lines | ~79,100 |
+| Workspace tests | 639 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 
@@ -307,7 +307,9 @@ Backspace = rewind while paused, Tab = hold-to-fast-forward, F11 = fullscreen.
 
 Playback and capture: 25-300% speed presets, frame advance, exact rewind
 (64-256 MiB ring), 0-4 frame run-ahead, input-movie (TAS) recording/playback,
-Game Genie and raw-RAM cheats, WAV/PNG/GIF capture, and screenshots.
+Game Genie and raw-RAM cheats, WAV/PNG/GIF capture, and screenshots. The
+Famicom 3D System is modelled from its `$4016` field latch and can be viewed as
+a red/cyan anaglyph (Settings -> Video).
 
 Per-port devices (Settings -> Controllers): NES Zapper, Arkanoid paddle,
 SNES/Subor mouse, Power Pad / Family Trainer, Family BASIC keyboard,

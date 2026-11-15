@@ -57,6 +57,12 @@ pub struct System {
     #[cfg(feature = "apu-trace")]
     expansion_trace: Option<Vec<(u64, u16, u8)>>,
     strobe: bool,
+    /// Famicom 3D shutter glasses attached (`$4016` bit 1 selects the field).
+    stereo_enabled: bool,
+    /// Last bit 1 written to `$4016`; 0 selects the left eye, 1 the right.
+    stereo_latch: bool,
+    /// Eye of the most recently completed field.
+    stereo_eye: StereoEye,
     /// Regional timing (NTSC/PAL/Dendy).
     timing: Timing,
     /// Master-clock credit for fractional PPU dots per CPU cycle.
@@ -125,6 +131,9 @@ struct SystemStateRef<'a> {
     zapper_frame: u64,
     peripherals: &'a Peripherals,
     strobe: bool,
+    stereo_enabled: bool,
+    stereo_latch: bool,
+    stereo_eye: StereoEye,
     timing: Timing,
     ppu_credit: u32,
     phase: bool,
@@ -159,6 +168,9 @@ struct SystemState {
     zapper_frame: u64,
     peripherals: Peripherals,
     strobe: bool,
+    stereo_enabled: bool,
+    stereo_latch: bool,
+    stereo_eye: StereoEye,
     timing: Timing,
     ppu_credit: u32,
     phase: bool,
@@ -219,6 +231,16 @@ pub enum PortDevice {
     /// Miracle Piano MIDI transport (controller port 1): OUT0 direction is
     /// selected by the strobe duration and each read clocks one serial bit.
     MiraclePiano,
+}
+
+/// Eye selected by the Famicom 3D System on the expansion port.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum StereoEye {
+    /// Left eye (`$4016` bit 1 = 0).
+    #[default]
+    Left,
+    /// Right eye (`$4016` bit 1 = 1).
+    Right,
 }
 
 /// Arkanoid paddle state for one port.
@@ -749,6 +771,9 @@ impl System {
             #[cfg(feature = "apu-trace")]
             expansion_trace: None,
             strobe: false,
+            stereo_enabled: false,
+            stereo_latch: false,
+            stereo_eye: StereoEye::Left,
             timing,
             ppu_credit: 0,
             phase: false,
@@ -838,6 +863,34 @@ impl System {
             self.devices[port] = device;
             self.zapper_present = self.devices.contains(&PortDevice::Zapper);
         }
+    }
+
+    /// Attaches or detaches Famicom 3D shutter glasses.
+    ///
+    /// The glasses listen to OUT1 (`$4016` write bit 1), not the controller
+    /// strobe on OUT0. The eye of each field is sampled at the frame boundary,
+    /// after the previous vertical blank has finished.
+    pub fn set_famicom_3d_glasses(&mut self, enabled: bool) {
+        self.stereo_enabled = enabled;
+        if enabled {
+            self.stereo_eye = if self.stereo_latch {
+                StereoEye::Right
+            } else {
+                StereoEye::Left
+            };
+        }
+    }
+
+    /// Whether Famicom 3D shutter glasses are attached.
+    #[must_use]
+    pub fn famicom_3d_glasses(&self) -> bool {
+        self.stereo_enabled
+    }
+
+    /// Eye of the most recently completed field, or `None` without glasses.
+    #[must_use]
+    pub fn stereo_eye(&self) -> Option<StereoEye> {
+        self.stereo_enabled.then_some(self.stereo_eye)
     }
 
     /// Sets the Famicom microphone report (`$4016` bit 2).
@@ -1163,7 +1216,7 @@ impl System {
     #[cfg(feature = "save-states")]
     pub fn save_state(&self) -> Result<Vec<u8>, String> {
         let mut out = Vec::new();
-        out.extend_from_slice(b"UNKOST14");
+        out.extend_from_slice(b"UNKOST15");
         out.extend_from_slice(&self.cart.fingerprint().to_le_bytes());
         let mut cart_state = Vec::new();
         self.cart.save_state(&mut cart_state)?;
@@ -1180,6 +1233,9 @@ impl System {
             zapper_frame: self.zapper_frame,
             peripherals: &self.peripherals,
             strobe: self.strobe,
+            stereo_enabled: self.stereo_enabled,
+            stereo_latch: self.stereo_latch,
+            stereo_eye: self.stereo_eye,
             timing: self.timing,
             ppu_credit: self.ppu_credit,
             phase: self.phase,
@@ -1207,7 +1263,7 @@ impl System {
     /// Restores a state produced by [`System::save_state`].
     #[cfg(feature = "save-states")]
     pub fn load_state(&mut self, data: &[u8]) -> Result<(), String> {
-        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST14" {
+        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST15" {
             return Err("not an Unko state (bad magic/version)".into());
         }
         let fingerprint = u64::from_le_bytes(
@@ -1241,6 +1297,9 @@ impl System {
         self.zapper_frame = state.zapper_frame;
         self.peripherals = state.peripherals;
         self.strobe = state.strobe;
+        self.stereo_enabled = state.stereo_enabled;
+        self.stereo_latch = state.stereo_latch;
+        self.stereo_eye = state.stereo_eye;
         self.timing = state.timing;
         self.ppu_credit = state.ppu_credit;
         self.phase = state.phase;
@@ -1278,6 +1337,14 @@ impl System {
             return 0;
         }
         let start = self.ppu.frames;
+        // OUT1 selects the eye for the field that is about to be rendered.
+        // Games change it during the previous vertical blank, so capture it at
+        // the frame boundary (entry) rather than after this frame's vblank.
+        let field_eye = if self.stereo_latch {
+            StereoEye::Right
+        } else {
+            StereoEye::Left
+        };
         let mut steps = 0u32;
         while self.ppu.frames == start && steps < 2_000_000 {
             #[cfg(feature = "apu-trace")]
@@ -1292,6 +1359,10 @@ impl System {
             if self.cpu.halted {
                 break;
             }
+        }
+        // Tag the completed field with the eye sampled at its start.
+        if self.ppu.frames != start {
+            self.stereo_eye = field_eye;
         }
         self.ppu.present();
         self.resampler.drain_into(&mut self.audio);
@@ -2270,6 +2341,9 @@ impl CpuBus for System {
                     }
                     let strobe_before = self.strobe;
                     self.strobe = value & 1 != 0;
+                    // The 3D System listens to OUT1: bit 1 = 0 selects the
+                    // left eye, 1 the right eye. OUT0 is the pad strobe.
+                    self.stereo_latch = value & 0x02 != 0;
                     self.peripherals.keyboard.write(value);
                     self.peripherals.subor.write(value);
                     if self.strobe {
@@ -3596,7 +3670,7 @@ mod tests {
     fn state_magic_is_current() {
         let system = System::from_ines(&synthetic_nrom(0)).expect("load");
         let state = system.save_state().expect("state");
-        assert_eq!(&state[..8], b"UNKOST14");
+        assert_eq!(&state[..8], b"UNKOST15");
         let mut restored = System::from_ines(&synthetic_nrom(0)).expect("load");
         restored.load_state(&state).expect("restore");
     }
@@ -3845,6 +3919,59 @@ mod tests {
         let saved = system.save_state().expect("save");
         let mut other = System::from_ines(&rom).expect("load");
         other.load_state(&saved).expect("load");
+        assert_eq!(saved, other.save_state().expect("re-save"));
+    }
+
+    fn eye_after_field(write_value: u8) -> Option<StereoEye> {
+        let mut rom = synthetic_nrom(0);
+        // LDA #value ; STA $4016 ; JMP $8000
+        rom[16..24].copy_from_slice(&[0xA9, write_value, 0x8D, 0x16, 0x40, 0x4C, 0x00, 0x80]);
+        let mut system = System::from_ines(&rom).expect("load");
+        system.set_famicom_3d_glasses(true);
+        // The first call reports the power-on field without executing. The
+        // program then selects OUT1 during field 0, so field 1 carries the
+        // requested eye.
+        system.run_frame();
+        system.run_frame();
+        system.run_frame();
+        system.stereo_eye()
+    }
+
+    #[test]
+    fn famicom_3d_glasses_select_the_field_from_4016_bit_1() {
+        // OUT1 selects the field: bit 1 = 0 is left, 1 is right, sampled at
+        // the frame boundary. OUT0 stays available for the pad strobe.
+        assert_eq!(eye_after_field(0), Some(StereoEye::Left));
+        assert_eq!(eye_after_field(2), Some(StereoEye::Right));
+
+        let rom = synthetic_nrom(0);
+        let mut system = System::from_ines(&rom).expect("load");
+        assert_eq!(system.stereo_eye(), None);
+        assert!(!system.famicom_3d_glasses());
+        system.set_famicom_3d_glasses(true);
+        assert!(system.famicom_3d_glasses());
+        assert_eq!(system.stereo_eye(), Some(StereoEye::Left));
+        system.set_famicom_3d_glasses(false);
+        assert_eq!(system.stereo_eye(), None);
+    }
+
+    #[cfg(feature = "save-states")]
+    #[test]
+    fn stereo_glasses_state_round_trips_through_save_states() {
+        let mut rom = synthetic_nrom(0);
+        rom[16..24].copy_from_slice(&[0xA9, 0x02, 0x8D, 0x16, 0x40, 0x4C, 0x00, 0x80]);
+        let mut system = System::from_ines(&rom).expect("load");
+        system.set_famicom_3d_glasses(true);
+        system.run_frame();
+        system.run_frame();
+        system.run_frame();
+        assert_eq!(system.stereo_eye(), Some(StereoEye::Right));
+
+        let saved = system.save_state().expect("save");
+        let mut other = System::from_ines(&rom).expect("load");
+        other.load_state(&saved).expect("load");
+        assert!(other.famicom_3d_glasses());
+        assert_eq!(other.stereo_eye(), Some(StereoEye::Right));
         assert_eq!(saved, other.save_state().expect("re-save"));
     }
 

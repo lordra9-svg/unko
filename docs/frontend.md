@@ -68,7 +68,7 @@ Key interaction rules worth keeping:
 | Controller UI | D-pad/A/B/Start/Select library navigation; Start controller menu; Start+Select pause menu while playing | now |
 | RenderWidget | `egui` texture viewport, aspect-correct | now |
 | Settings: General/Interface | theme, pause on focus loss, confirm stop, detachable windows, play-time summary + clear, reset-all | now |
-| Settings: Graphics | filter, palette + `.pal` import, aspect, integer scale, supersampling, GPU output shaders (scanlines/LCD/CRT/NTSC Budget/Premium, brightness/sharpness), window presets | now |
+| Settings: Graphics | filter, palette + `.pal` import, aspect, integer scale, supersampling, GPU output shaders (scanlines/LCD/CRT/NTSC Budget/Premium, brightness/sharpness), Famicom 3D glasses anaglyph, window presets | now |
 | Settings: Audio | sample rate, latency target, resampler quality, output filter, volume/mute, per-channel mixer | now |
 | Settings: Controllers | per-port Connected source (Auto/None/Keyboard/Gamepad 1-4/Mouse Zapper/Paddle/SNES-Subor), protocol dropdown, rebinding, Restore default controls | now |
 | Settings: Paths | portable data root, ROM dir, save dir, per-system library roots | now |
@@ -237,7 +237,7 @@ between machines; see `docs/platforms.md` for the resolution order and the
 - Recording: WAV audio, numbered PNG frames and animated GIF, written under
   `saves/recordings`; all encoders are pure Rust and work on every target.
 - State/SRAM: `saves/<rom>.<core>.slotN.state` and `saves/<rom>.sav`; the core
-  never touches the filesystem. States carry an `UNKOST14` header, a ROM
+  never touches the filesystem. States carry an `UNKOST15` header, a ROM
   fingerprint and the mapper state, so a state cannot be loaded into a
   different image or core. The former TetaNES state files are ignored.
 - Audio playback is active through cpal; the Audio page reports the actual

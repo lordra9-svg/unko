@@ -80,7 +80,7 @@ Public mapper-specific status:
 | Datach scanner + internal X24C02 | **Verified** (synthetic I2C tests + real-ROM smoke) |
 | Datach external X24C01 | **Not implemented** (Battle Rush only) |
 | SNES/Subor mouse | **Verified** (32-bit report, buttons, sensitivity and sign-magnitude motion in unit tests) |
-| Famicom 3D glasses | **Not implemented** (needs an expansion-port output model) |
+| Famicom 3D glasses | **Implemented** (expansion-port `$4016` bit 1 (OUT1) field latch; red/cyan anaglyph output; unit-tested, no hardware capture) |
 | Karaoke Studio | **Not implemented** |
 
 ## Player features
@@ -110,7 +110,7 @@ Public mapper-specific status:
 | x0000 APU write-window tests | 10/10 pass |
 | NESdev archive | 137 pass / 11 fail / 115 visual/audio/input-only; PAL APU timing leaves 4 failures, adding the alternate MMC3 selector leaves only `read_joy3/count_errors` |
 | RustyNES test tree | 159 pass / 11 fail / 171 visual/audio/input-only; 166 / 4 with PAL APU in PAL mode, 1 with the alternate MMC3 selector too |
-| Workspace tests | 633 pass, 0 failed |
+| Workspace tests | 639 pass, 0 failed |
 
 The actionable accuracy failures are tracked in
 [`accuracy-divergences.md`](accuracy-divergences.md); the ROM/BIOS inventory is

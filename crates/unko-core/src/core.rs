@@ -4,6 +4,7 @@ use std::fmt;
 
 use crate::debug::{ApuState, CpuState, DebugSpace, Disassembly, PpuState};
 use crate::input::InputState;
+use crate::stereo::StereoEye;
 use crate::types::{
     AudioBuffer, AudioFilterModel, AudioQuality, AudioSource, Cheat, CoreInfo, FrameBuffer,
     FrameStats, LoadOptions, Palette, PortDevice, PpuResetBehavior, RamClear, VideoFilter,
@@ -78,6 +79,21 @@ pub trait Core {
 
     /// Attaches a device to a controller port (`Gamepad` by default).
     fn set_port_device(&mut self, _port: usize, _device: PortDevice) {}
+
+    /// Attaches or detaches Famicom 3D shutter glasses.
+    ///
+    /// Cores that support field-sequential output report the eye of each
+    /// completed frame from [`Core::stereo_eye`].
+    fn set_stereo_glasses(&mut self, _enabled: bool) {}
+
+    /// Eye for the most recently completed field, or `None` when no stereo
+    /// device is attached.
+    ///
+    /// Hosts can combine consecutive left and right frames with
+    /// [`crate::stereo::compose_anaglyph`].
+    fn stereo_eye(&self) -> Option<StereoEye> {
+        None
+    }
 
     /// Reports the Famicom microphone state (`$4016` bit 2).
     fn set_microphone(&mut self, _pressed: bool) {}

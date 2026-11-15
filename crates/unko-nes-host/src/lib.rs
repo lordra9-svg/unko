@@ -78,6 +78,7 @@ pub struct AccuracyCore {
     ram_clear: NesRamClear,
     ppu_reset: NesPpuResetBehavior,
     mmc3_alternate: bool,
+    stereo_glasses: bool,
     cheats: Vec<NesCheat>,
 }
 
@@ -100,6 +101,7 @@ impl AccuracyCore {
             ram_clear: NesRamClear::Zero,
             ppu_reset: NesPpuResetBehavior::Famicom,
             mmc3_alternate: false,
+            stereo_glasses: false,
             cheats: Vec::new(),
         }
     }
@@ -118,6 +120,7 @@ impl AccuracyCore {
         options: &LoadOptions,
     ) -> Result<(), CoreError> {
         system.set_mmc3_alternate(self.mmc3_alternate);
+        system.set_famicom_3d_glasses(self.stereo_glasses);
         // `Auto` keeps the timing the header declares; an explicit choice
         // overrides it.
         match options.region {
@@ -495,6 +498,22 @@ impl Core for AccuracyCore {
         }
     }
 
+    fn set_stereo_glasses(&mut self, enabled: bool) {
+        self.stereo_glasses = enabled;
+        if let Some(system) = self.system.as_mut() {
+            system.set_famicom_3d_glasses(enabled);
+        }
+    }
+
+    fn stereo_eye(&self) -> Option<unko_core::StereoEye> {
+        self.system.as_ref().and_then(|system| {
+            system.stereo_eye().map(|eye| match eye {
+                unko_nes::StereoEye::Left => unko_core::StereoEye::Left,
+                unko_nes::StereoEye::Right => unko_core::StereoEye::Right,
+            })
+        })
+    }
+
     fn set_datach_barcode(&mut self, code: &str) -> bool {
         self.system
             .as_mut()
@@ -694,6 +713,31 @@ mod tests {
         rom[vector] = 0x00;
         rom[vector + 1] = 0x80;
         rom
+    }
+
+    #[test]
+    fn stereo_glasses_map_the_field_eye_through_the_core_trait() {
+        let prg = 16 * 1024;
+        let mut rom = vec![0u8; 16 + prg + 8 * 1024];
+        rom[0..4].copy_from_slice(b"NES\x1a");
+        rom[4] = 1;
+        rom[5] = 1;
+        // LDA #2 / STA $4016 / JMP $8000: OUT1 selects the right eye.
+        rom[16..24].copy_from_slice(&[0xA9, 0x02, 0x8D, 0x16, 0x40, 0x4C, 0x00, 0x80]);
+        let vector = 16 + prg - 4;
+        rom[vector] = 0x00;
+        rom[vector + 1] = 0x80;
+
+        let mut core = AccuracyCore::new();
+        core.load(&rom, &LoadOptions::default()).expect("load");
+        assert_eq!(core.stereo_eye(), None);
+        core.set_stereo_glasses(true);
+        core.run_frame().expect("power-on frame");
+        core.run_frame().expect("field 0");
+        core.run_frame().expect("field 1");
+        assert_eq!(core.stereo_eye(), Some(unko_core::StereoEye::Right));
+        core.set_stereo_glasses(false);
+        assert_eq!(core.stereo_eye(), None);
     }
 
     #[test]

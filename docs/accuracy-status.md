@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **633 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **639 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -78,10 +78,11 @@ passes with the alternate selector. The selector is exposed as
 (3,897/6,497 rendering).
 
 `Mmc3` gained serialized PRG-RAM protection state, `FdsAudio` was rewritten,
-the FDS watchdog gained serialized reload state, and the mouse added serialized
-port state, so the save-state magic is now **`UNKOST14`**; `UNKOST13` and older
-states are rejected by the normal bad-magic check. See
-`docs/accuracy-divergences.md` for the open mapper-suite items.
+the FDS watchdog gained serialized reload state, the mouse added serialized
+port state, and the Famicom 3D System added its field latch, so the save-state
+magic is now **`UNKOST15`**; `UNKOST14` and older states are rejected by the
+normal bad-magic check. See `docs/accuracy-divergences.md` for the open
+mapper-suite items.
 
 ## Peripherals — SNES/Subor mouse (2026-11-15)
 
@@ -100,8 +101,28 @@ negative motion, the repeated sign on zero motion, the post-report high line,
 and both sensitivity changes with their scaled magnitudes
 (`mouse_report_is_msb_first_with_sign_magnitude_motion`,
 `mouse_sensitivity_cycles_and_scales_motion`). No test ROM was needed; the
-protocol bytes come from the hardware description. The Famicom 3D glasses
-remain unimplemented because they need an expansion-port output model.
+protocol bytes come from the hardware description.
+
+## Peripherals — Famicom 3D System (2026-11-15)
+
+The Famicom 3D System is modelled from the NESdev description. Its control
+box listens to OUT1 (`$4016` write bit 1), separate from the OUT0 controller
+strobe: 0 selects the left eye for the next field and 1 the right. `System`
+records every `$4016` write and samples OUT1 at the frame boundary, after the
+previous vertical blank and just before the next visible field, so each
+completed frame is tagged with the eye it was rendered for. The eye is exposed
+through `System::stereo_eye`; `Core::set_stereo_glasses` attaches or detaches
+the glasses. `UNKOST15` save states carry the attachment flag, latch and
+current eye, so rewind and NetPlay rollback keep the correct eye.
+
+The desktop frontend offers **Settings → Video → Famicom 3D glasses** and
+combines consecutive left/right fields into a red/cyan anaglyph: red comes from
+the left field, green and blue from the right. Until both eyes have arrived it
+shows the field unchanged. This is a display model for screens and capture
+tools, not a shutter-glasses timing model; the game still runs at its normal
+60 Hz field rate. Unit tests cover the exact `$4016` bit-1 mapping for both
+eyes, the field-boundary sample, the attachment toggle, the state round trip
+and the anaglyph channel mapping.
 
 ## CPU dummy fetches for RTS/RTI (2026-11-15)
 
