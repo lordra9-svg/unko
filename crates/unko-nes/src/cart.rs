@@ -32407,11 +32407,11 @@ impl Default for FdsAudio {
             mod_write_pos: 0,
             master_volume: 0,
             env_speed: 0xE8,
-            // The wave/mod prescaler is free-running; its phase at reset is
-            // one cycle into the 16-cycle period. A pre-resampler replay of
-            // 35.36M cycles against RustyNES is bit-identical with this phase
-            // and differs without it.
-            prescaler: 1,
+            // The wave/mod prescaler is free-running from reset and is not
+            // gated by the sound-enable bit (the 2C33 clocks it regardless).
+            // One extra bus clock runs during the reset alignment, so the
+            // counter starts one step before the 16-cycle boundary.
+            prescaler: 15,
         }
     }
 }
@@ -32521,7 +32521,7 @@ impl FdsAudio {
         self.mod_counter = 0;
         self.mod_acc = 0;
         self.mod_write_pos = 0;
-        self.prescaler = 1;
+        self.prescaler = 15;
     }
 
     fn volume_period(&self) -> u32 {
@@ -32610,10 +32610,7 @@ impl FdsAudio {
 
     /// Advances one CPU cycle.
     pub fn clock(&mut self) {
-        if !self.enabled {
-            return;
-        }
-        if !self.env_halt && !self.wave_halt && self.env_speed != 0 {
+        if self.enabled && !self.env_halt && !self.wave_halt && self.env_speed != 0 {
             let period = self.volume_period();
             Self::clock_envelope(
                 &mut self.volume_timer,
@@ -32631,6 +32628,8 @@ impl FdsAudio {
                 period,
             );
         }
+        // The wave/mod prescaler is free-running from reset; the reference
+        // clocks it regardless of the sound-enable bit.
         self.prescaler += 1;
         if self.prescaler >= 16 {
             self.prescaler = 0;
@@ -32642,6 +32641,9 @@ impl FdsAudio {
     /// Signed output for the APU mixer.
     #[must_use]
     pub fn mix(&self) -> f32 {
+        if !self.enabled {
+            return 0.0;
+        }
         let gain = u32::from(self.volume_gain.min(32));
         let sample = u32::from(self.wave_out & 0x3F);
         let denominator = u32::from(self.master_volume) + 2;
@@ -39480,6 +39482,27 @@ pub(crate) mod tests {
             cart.cpu_write(0x8001, value);
         }
         assert_eq!(cart.nametable_map(), Some([1, 0, 1, 0]));
+    }
+
+    #[test]
+    fn fds_audio_prescaler_runs_while_sound_is_disabled() {
+        let mut audio = FdsAudio::default();
+        audio.write(0x4089, 0x80); // wave RAM write enable
+        audio.write(0x4040, 63);
+        audio.write(0x4089, 0x00);
+        audio.write(0x4082, 0x40);
+        audio.write(0x4083, 0x00);
+        // Sound is still disabled: the 2C33 clocks the wave/mod prescaler
+        // regardless, so enabling must not restart its phase.
+        for _ in 0..15 {
+            audio.clock();
+        }
+        audio.write(0x4023, 0x02);
+        audio.clock();
+        assert_eq!(audio.read(0x4096) & 0x3F, 63, "wave ticked on schedule");
+        audio.write(0x4023, 0x00);
+        audio.clock();
+        assert_eq!(audio.mix(), 0.0, "disabled channel is silent");
     }
 
     #[test]

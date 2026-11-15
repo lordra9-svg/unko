@@ -34,7 +34,7 @@ verified against the public reference suites:
 - `ppu_vbl_nmi` **12/12**, `ppu_sprites` **19/19**, blargg APU/DMC **13/13**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **535 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **536 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **136 pass / 12 fail / 115 visual-or-input-only** (5 PAL APU failures pass when PAL timing is selected)
 - RustyNES test tree: **157 pass / 13 fail / 171 visual-or-input-only** (164 / 6 with PAL APU in PAL mode)
 
@@ -66,7 +66,7 @@ more than two peers are follow-up work.
 |---|---:|
 | Workspace crates | 9 |
 | First-party Rust lines | ~78,900 |
-| Workspace tests | 535 pass, 0 failed |
+| Workspace tests | 536 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 

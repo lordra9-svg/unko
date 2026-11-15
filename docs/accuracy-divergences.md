@@ -32,26 +32,32 @@ None in AccuracyCoin. All non-DRAW rows pass.
   Responsible module: `cart.rs` (`Fds::clock_watchdog`).
 - `FDS-4023-Test` and `FDS-Audio-Registers` are display-only dumps with no
   pass/fail line; their register dumps are captured but have no oracle yet.
-- **FDS audio synthesis** — the model is verified. Replaying the complete
-  1,200-frame register timeline into both `FdsAudio` implementations and
-  comparing the per-CPU-cycle output **before resampling** gives **0 differing
-  samples over 35,360,017 cycles** with the corrected prescaler phase (the
-  phase is one cycle into the 16-cycle period at reset; without it the replay
-  differs from cycle 19,472,959). The remaining APU-muted, post-resampler
-  difference starts at sample 479,795, has identical zero crossings and RMS
-  (3e-7 relative) and correlation 0.999993 at lag 0. Isolation test
-  (2026-11-15): feeding the identical pre-resampler stream into Unko's and
-  RustyNES's resamplers produces outputs that differ only by at most one f32
-  ULP (max |diff| 1.49e-8, 149,033 of 871,253 samples), so the resampler is
-  not the cause. The residual is the emulator's per-cycle expansion-audio
-  sampling/clock point relative to CPU register writes. Two reorderings were
-  tried on 2026-11-15 and rejected: moving the shared APU tick to the end of
-  the CPU cycle hangs the FDS run in the DMC path; splitting the tick from the
-  sample and moving only the expansion clock/sample to end-of-cycle keeps the
-  sample count equal but yields 327,341 differing samples (worse than the
-  236,936 with the prescaler-phase fix). The phase correction remains; the
-  exact reference clock/write semantics need more instrumentation or a
-  hardware capture.
+- **FDS audio synthesis** — the model and its clock are verified against the
+  reference emulator, not just against a replay. Two independent checks on
+  2026-11-15:
+  1. The reference bus was instrumented to log the CPU cycle of every
+     `$4040-$408A`/`$4023` write. The cycles match Unko exactly (for example
+     `19469058 $4089 $80`, `19469064 $4040 $00`, `19472910 $4080 $94`).
+  2. Both emulators' per-CPU-cycle expansion samples were dumped (reference
+     `Mapper::mix_audio`, Unko gain `[0,0,0,0,0,1]`) for 700 frames. After
+     allowing for the reference dump starting one cycle later, the streams are
+     **bit-identical for all 20,816,602 CPU cycles**, including the frame-653
+     note change.
+  This required one model fix: the wave/mod prescaler is free-running from
+  reset and is **not** gated by the sound-enable bit. With that, the phase is
+  `c ≡ 0 (mod 16)` like the reference.
+- **FDS post-resampler residual** — the APU-muted stream still differs first at
+  output sample 479,795, at the first nonzero step edge. Constant stretches
+  (all-zero) match exactly, and the differing values are edge interpolations
+  (identical zero crossings; RMS differs by 3e-7 relative; correlation
+  0.999993 at lag 0). Feeding the identical pre-resampler stream into both
+  resamplers differs by at most one f32 ULP (max 1.49e-8), so the filter
+  kernel is not the cause. The signature is a sub-sample phase/priming offset
+  in the resampler input count (the dump has one extra leading sample). Two
+  clock reorderings were tried and rejected: moving the shared APU tick to
+  end-of-cycle hangs the FDS DMC path; moving only the expansion clock/sample
+  to end-of-cycle gives 327,341 differing samples. Resolving this needs the
+  reference resampler's input priming to be matched exactly.
 
 ### Holy Mapperel (2026-11-14)
 

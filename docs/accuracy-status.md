@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **535 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **536 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -1475,19 +1475,30 @@ emitted FNV-1a hashes of each frame's f32 samples with the same byte layout as
 
 The audio unit was rewritten to the documented model (16-CPU-cycle wave and
 modulation clock, integer 24/18-bit accumulators, `$408A` envelope multiplier,
-separate modulation envelope, documented output scaling). A pre-resampler
-replay of the entire register timeline into both audio implementations is
-**bit-identical for 35,360,017 CPU cycles** once the wave/mod prescaler starts
-one cycle into its 16-cycle period at reset. An isolation test then fed the
-identical pre-resampler stream into Unko's and RustyNES's resamplers: their
-outputs differ by at most one f32 ULP (max 1.49e-8), so the resampler is not
-the cause either. The remaining APU-muted, post-resampler difference (first at
-sample 479,795) is the emulator's per-cycle expansion-audio sampling/clock
-point relative to CPU writes. Moving the shared APU tick to end-of-cycle hangs
-the FDS run in the DMC path; moving only the expansion clock/sample keeps the
-sample count but gives 327,341 differing samples, worse than the 236,936 with
-the prescaler-phase fix. The exact reference clock/write semantics need more
-instrumentation or a hardware capture.
+separate modulation envelope, documented output scaling).
+
+Instrumenting the reference bus on 2026-11-15 closed the model question:
+
+- The reference logs the same CPU cycles for every FDS register write as Unko
+  (`19469058 $4089 $80`, `19469064 $4040 $00`, `19472910 $4080 $94`, …).
+- Dumping both emulators' per-CPU-cycle expansion samples for 700 frames
+  (reference `Mapper::mix_audio`; Unko gain `[0,0,0,0,0,1]`) gives
+  **bit-identical values for all 20,816,602 cycles**, including the frame-653
+  note change, after allowing for the reference dump starting one cycle later.
+- The one model fix this required: the wave/mod prescaler is free-running from
+  reset and is not gated by the sound-enable bit, so the tick phase is
+  `c ≡ 0 (mod 16)` like the reference.
+
+The remaining APU-muted, post-resampler difference starts at output sample
+479,795 (the first nonzero step edge). Constant (all-zero) stretches match
+exactly; the differing values are edge interpolations with identical zero
+crossings, RMS within 3e-7 relative and correlation 0.999993 at lag 0. Feeding
+the identical pre-resampler stream into both resamplers differs by at most one
+f32 ULP (max 1.49e-8), so the kernel is not the cause; the signature is a
+sub-sample phase/priming offset in the resampler's input count. Moving the
+shared APU tick to end-of-cycle hangs the FDS DMC path, and moving only the
+expansion clock/sample gives 327,341 differing samples, so neither reordering
+is the answer.
 
 ### Holy Mapperel board matrix (2026-11-14)
 
