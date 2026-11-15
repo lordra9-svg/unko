@@ -22,17 +22,18 @@ input, audio, screenshot or save-state code.
 └───────────────▲──────────────────────────────┬───────────────┘
                 │ implements                    │ factory()
 ┌───────────────┴──────────────────────────────▼───────────────┐
-│ core crates: unko-nes (standalone) · unko-nes-host (adapter) │
+│ core crates: unko-nes (standalone) · unko-nes-api (NesCore)   │
 │  SNES core · GB core · ...                                   │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-The host never depends on a core crate. It depends on `unko-core` and builds
-a `Registry` from the cores it chooses to link (or, later, load as plugins).
+The host never depends on a core crate. It depends on `unko-core` (plus
+`unko-nes-api` when it wants the NES extension) and builds a `Registry` from
+the cores it chooses to link (or, later, load as plugins).
 `unko-nes` is the only NES backend: it contains the reference-parity system
 itself and has **no** dependency on `unko-core` or the shell. `unko-nes-host`
-is a thin adapter that implements `unko_core::Core` on top of it and is the
-crate the app and CLI link. The former TetaNES adapter has been retired.
+is a thin adapter that implements `unko_core::Core` and
+`unko_nes_api::NesCore` on top of it and is the crate the app and CLI link. The former TetaNES adapter has been retired.
 
 `unko-rom` is a sibling boundary for *input*: it discovers loose ROMs and
 members of `.zip`/`.7z`/`.rar` archives, parses iNES/NES 2.0/UNIF metadata and
@@ -51,9 +52,13 @@ converts UNIF to iNES/NES 2.0, and returns bytes to whichever core is loading. T
 | `video()` | borrow the finished frame (RGBA8, 256×240 for NES) |
 | `audio()` | borrow this frame's f32 samples |
 | `set_input(port, state)` | replace one controller's buttons |
-| `set_sample_rate` / `set_video_filter` | host preferences |
+| `set_sample_rate` / `set_audio_quality` | host preferences |
 | `save_state` / `load_state` | full machine state, opaque bytes |
 | `sram()` / `load_sram` | battery RAM in/out, host owns the files |
+
+`unko_nes_api::NesCore` adds the NES-only controls: port devices, Famicom
+microphone/3D glasses, Vs. System input, Miracle Piano, Datach, FDS sides,
+core-side palettes/filters, cheats, channel gains and the PPU/APU debugger.
 
 Rules that keep the boundary honest:
 
