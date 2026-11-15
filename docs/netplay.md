@@ -67,11 +67,11 @@ during a hole-punch handshake so both legacy peers start from the same frame.
 ## Two-host harness
 
 `crates/unko-nes-dev/src/bin/netplay_harness.rs` runs one side of a real UDP
-session on the actual NES core. `--engine ggrs` validates the direct GGRS path:
-it runs the requested frames plus 30 settling frames, then compares the final
-save-state hash with an independent local run of both deterministic input
-sequences. The GGRS library also has a loopback integration test in
-`unko-netplay` using a `Core` test double. It builds a synthetic NROM whose RAM
+session on the actual NES core. `--engine ggrs` validates the direct GGRS path
+in lockstep mode (no prediction): it runs exactly the requested frames, then
+compares the final save-state hash with an independent local run of both
+deterministic input sequences. The GGRS library also has loopback integration
+tests for rollback and lockstep sessions using a `Core` test double. It builds a synthetic NROM whose RAM
 accumulates both controller ports, runs a deterministic input sequence,
 prints the final save-state hash, and compares it with an independent local
 run of the true input sequence. No commercial ROM is needed.

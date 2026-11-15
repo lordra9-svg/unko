@@ -54,6 +54,24 @@ impl GgrsNetplay {
     /// with the local player's own slot omitted. Both peers must build the
     /// same player list; the local slot comes from `config.local_player`.
     pub fn start(bind_port: u16, peers: &[String], config: SessionConfig) -> Result<Self, String> {
+        Self::start_inner(bind_port, peers, config, false)
+    }
+
+    /// Starts a lockstep session (no prediction) for deterministic validation.
+    pub fn start_lockstep(
+        bind_port: u16,
+        peers: &[String],
+        config: SessionConfig,
+    ) -> Result<Self, String> {
+        Self::start_inner(bind_port, peers, config, true)
+    }
+
+    fn start_inner(
+        bind_port: u16,
+        peers: &[String],
+        config: SessionConfig,
+        lockstep: bool,
+    ) -> Result<Self, String> {
         let mut config = config.normalized();
         // GGRS has one compile-time predictor; the NES adapter uses
         // repeat-last. Direct sessions therefore ignore `PredictionMode`.
@@ -79,7 +97,7 @@ impl GgrsNetplay {
             .with_fps(60)
             .map_err(|err| err.to_string())?
             .with_input_delay(config.input_delay as usize)
-            .with_max_prediction_window(config.buffer_frames)
+            .with_max_prediction_window(if lockstep { 0 } else { config.buffer_frames })
             .with_desync_detection_mode(if config.hash_states {
                 DesyncDetection::On { interval: 30 }
             } else {
@@ -441,6 +459,51 @@ mod tests {
         assert!(a_frames >= 90 && b_frames >= 90, "both peers advanced");
         assert_eq!(core_a.state(), core_b.state());
         assert_eq!(core_a.frame, core_b.frame);
+    }
+
+    #[test]
+    fn lockstep_sessions_reach_the_same_state() {
+        let host_port = 7744;
+        let join_port = 7745;
+        let config = SessionConfig {
+            players: 2,
+            local_player: 0,
+            input_delay: 0,
+            buffer_frames: 8,
+            prediction: PredictionMode::LastInput,
+            hash_states: false,
+        };
+        let mut host =
+            GgrsNetplay::start_lockstep(host_port, &[format!("127.0.0.1:{join_port}")], config)
+                .expect("host session");
+        let mut join = GgrsNetplay::start_lockstep(
+            join_port,
+            &[format!("127.0.0.1:{host_port}")],
+            SessionConfig {
+                local_player: 1,
+                ..config
+            },
+        )
+        .expect("join session");
+
+        let mut core_a = TestCore::default();
+        let mut core_b = TestCore::default();
+        let mut a_frames = 0;
+        let mut b_frames = 0;
+        for _ in 0..8000 {
+            if a_frames < 40 && host.step(&mut core_a, 0x01).unwrap_or(false) {
+                a_frames += 1;
+            }
+            if b_frames < 40 && join.step(&mut core_b, 0x02).unwrap_or(false) {
+                b_frames += 1;
+            }
+            if a_frames >= 40 && b_frames >= 40 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(a_frames >= 40 && b_frames >= 40, "both peers advanced");
+        assert_eq!(core_a.state(), core_b.state());
     }
 
     #[test]

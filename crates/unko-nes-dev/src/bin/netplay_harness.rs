@@ -441,11 +441,11 @@ fn run_ggrs(args: &Args) -> Result<(), String> {
     core.load(&rom, &LoadOptions::default())
         .map_err(|err| err.to_string())?;
     core.reset().map_err(|err| err.to_string())?;
-    let mut session = GgrsNetplay::start(port, &[peer], config)?;
+    let mut session = GgrsNetplay::start_lockstep(port, &[peer], config)?;
 
-    // Keep running past the reported frame so late remote inputs for the last
-    // reported frames arrive and GGRS can roll back to the correct state.
-    let total = args.frames + 30;
+    // Lockstep GGRS only advances when every input is confirmed, so the
+    // requested frame count is also the comparison point.
+    let total = args.frames;
     let deadline = Instant::now() + Duration::from_secs(15);
     let mut frame = 0;
     while frame < total {
@@ -484,10 +484,9 @@ fn run_ggrs(args: &Args) -> Result<(), String> {
         .map_err(|err| err.to_string())?;
     let reference_hash = fnv1a(&reference_state);
     println!(
-        "ggrs role={} frames={} settled={} session={session_hash:016x} reference={reference_hash:016x} match={}",
+        "ggrs role={} frames={} session={session_hash:016x} reference={reference_hash:016x} match={}",
         if args.role == 0 { "host" } else { "join" },
         args.frames,
-        total,
         session_hash == reference_hash
     );
     if session_hash != reference_hash {
