@@ -71,6 +71,9 @@ that matters for a playable library:
 - 1G1R selection with region/language/verified/retail/parent/revision
   preferences.
 - Fixdat and CSV report output.
+- Read-only `verify`/`audit` mode: reports per-ROM matches (including the hash
+  that matched and headerless matches), missing/unknown/duplicate files, and
+  exits nonzero unless the set is complete; `--max-list` caps the listings.
 - Safe copy/rebuild of matched ROMs into an output folder, with hash
   verification; an optional verified move deletes loose sources only after the
   copy succeeds, and archive members are never removed.

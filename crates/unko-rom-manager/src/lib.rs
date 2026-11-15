@@ -33,6 +33,7 @@ pub mod one_g1r;
 pub mod rebuild;
 pub mod report;
 pub mod scan;
+pub mod verify;
 
 use std::fmt;
 use std::path::Path;
@@ -46,6 +47,7 @@ pub use one_g1r::{parse_tags, OneGameOneRom, Tags};
 pub use rebuild::{rebuild, OutputFormat, RebuildOptions, RebuildReport};
 pub use report::{summary_line, write_csv, write_fixdat};
 pub use scan::{scan_path, Origin, ScanOptions, ScanProgress, ScannedRom};
+pub use verify::{GameVerify, RomVerify, VerifyOptions, VerifyReport};
 
 /// Crate version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

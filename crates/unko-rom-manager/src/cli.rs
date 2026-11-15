@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use crate::{
     audit, fetch_dat, rebuild, summary_line, write_csv, write_fixdat, OneGameOneRom, OutputFormat,
-    RebuildOptions, ScanOptions, ScanProgress,
+    RebuildOptions, ScanOptions, ScanProgress, VerifyOptions, VerifyReport,
 };
 
 /// Runs the headless ROM manager with command-line arguments.
@@ -40,11 +40,14 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut torrentzip = false;
     let mut move_files = false;
     let mut cache = None;
+    let mut verify_mode = false;
+    let mut max_list = 50usize;
 
     let mut args = args;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "scan" => {}
+            "verify" | "audit" => verify_mode = true,
             "--dat" => dat = args.next().map(PathBuf::from),
             "--dat-url" => dat_url = args.next(),
             "--dat-out" => dat_out = args.next().map(PathBuf::from),
@@ -76,15 +79,26 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
             "--torrentzip" => torrentzip = true,
             "--move" => move_files = true,
             "--cache" => cache = args.next().map(PathBuf::from),
+            "--max-list" => {
+                max_list = args
+                    .next()
+                    .ok_or("--max-list needs a number")?
+                    .parse()
+                    .map_err(|_| "--max-list needs a number")?;
+            }
             "-h" | "--help" => {
                 println!(
-                    "usage: unko-rom-manager --dat DAT --input ROMS [options]\n\
+                    "usage: unko-rom-manager [scan|verify] --dat DAT --input ROMS [options]\n\
                      \n\
                      options: --1g1r --fixdat FILE --csv FILE --copy DIR\n\
                      \x20        --zip | --torrentzip | --move --cache FILE\n\
                      \x20        --dat-url URL [--dat-out FILE]\n\
                      \x20        --regions USA,Europe,World,Japan --languages En --all\n\
+                     \x20        --max-list N\n\
                      \n\
+                     verify (or audit) hashes and reports the library without writing;\n\
+                     it exits 1 unless every game is complete and there are no unknown\n\
+                     or duplicate files. --max-list caps each listing (0 = unlimited).\n\
                      --copy writes loose files; --zip/--torrentzip write one archive per game;\n\
                      --move deletes loose sources after a verified copy."
                 );
@@ -102,6 +116,9 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
         fetch_dat(&url, &destination).map_err(|err| err.to_string())?;
         println!("dat: downloaded {} -> {}", url, destination.display());
         dat = Some(destination);
+    }
+    if verify_mode && (copy.is_some() || zip_sets || torrentzip || move_files) {
+        return Err("verify is read-only; --copy/--zip/--torrentzip/--move are not allowed".into());
     }
     let dat = dat.ok_or("--dat or --dat-url is required")?;
     let input = input.ok_or("--input is required")?;
@@ -148,6 +165,21 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
         write_csv(&report, &path).map_err(|err| err.to_string())?;
         println!("csv: {}", path.display());
     }
+    if verify_mode {
+        let verify = VerifyReport::build(&report);
+        println!("{}", verify.text(&VerifyOptions { max_list }));
+        if !verify.is_clean() {
+            return Err(format!(
+                "library is not clean: {}/{} games complete, {} missing ROM(s), {} unknown, {} duplicate",
+                verify.summary.complete,
+                verify.summary.games,
+                verify.missing_roms().len(),
+                verify.unknown.len(),
+                verify.duplicates.len()
+            ));
+        }
+        return Ok(());
+    }
     if let Some(output) = copy {
         let selected = if selection.is_empty() {
             (0..report.dat.games.len()).collect::<Vec<_>>()
@@ -184,4 +216,87 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hash::{hash_bytes, hex};
+    use std::fs;
+    use std::path::Path;
+
+    fn write_case(name: &str, extra_game: bool) -> (PathBuf, PathBuf, PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("unko-cli-verify-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let roms = dir.join("roms");
+        fs::create_dir_all(&roms).expect("roms");
+        let payload = b"verify-payload";
+        let hashes = hash_bytes(payload);
+        let mut file = vec![0u8; 16];
+        file[..4].copy_from_slice(b"NES\x1a");
+        file[4] = 1;
+        file[5] = 1;
+        file.extend_from_slice(payload);
+        fs::write(roms.join("a.nes"), file).expect("rom");
+        let mut dat = format!(
+            "<datafile><header><name>Verify</name><version>1</version></header>\n\
+             <game name=\"Alpha (USA)\"><rom name=\"a.nes\" size=\"{}\" crc=\"{:08x}\" sha1=\"{}\"/></game>\n",
+            payload.len(),
+            hashes.crc,
+            hex(&hashes.sha1)
+        );
+        if extra_game {
+            dat.push_str(
+                "<game name=\"Beta (USA)\"><rom name=\"b.nes\" size=\"1\" crc=\"00000000\"/></game>\n",
+            );
+        }
+        dat.push_str("</datafile>\n");
+        let dat_path = dir.join("test.dat");
+        fs::write(&dat_path, dat).expect("dat");
+        (dir, dat_path, roms)
+    }
+
+    fn verify(dat: &Path, roms: &Path, extra: &[&str]) -> Result<(), String> {
+        let mut args = vec![
+            "verify".to_string(),
+            "--dat".to_string(),
+            dat.display().to_string(),
+            "--input".to_string(),
+            roms.display().to_string(),
+        ];
+        args.extend(extra.iter().map(|value| (*value).to_string()));
+        run(args.into_iter())
+    }
+
+    #[test]
+    fn verify_accepts_a_complete_headerless_set() {
+        let (dir, dat, roms) = write_case("clean", false);
+        verify(&dat, &roms, &[]).expect("clean verify");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn verify_rejects_an_incomplete_set() {
+        let (dir, dat, roms) = write_case("missing", true);
+        let err = verify(&dat, &roms, &[]).expect_err("incomplete verify");
+        assert!(err.contains("library is not clean"), "{err}");
+        assert!(err.contains("missing ROM(s)"), "{err}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn verify_refuses_to_write_into_the_library() {
+        let (dir, dat, roms) = write_case("readonly", false);
+        let output = dir.join("out");
+        let err = verify(
+            &dat,
+            &roms,
+            &["--copy", output.to_str().expect("utf8 path")],
+        )
+        .expect_err("copy in verify mode");
+        assert!(err.contains("read-only"), "{err}");
+        assert!(!output.exists(), "verify must not create the output");
+        let _ = fs::remove_dir_all(dir);
+    }
 }

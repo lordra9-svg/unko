@@ -15,6 +15,9 @@ Rust project or used through the `unko-app` ROM Manager window.
 - 1G1R selection with region, language, verified, retail, parent and revision
   preferences.
 - Fixdat and CSV reports.
+- Read-only **verify/audit** mode: hashes an existing library or rebuilt
+  folder against the DAT, prints per-ROM missing/unknown/duplicate detail and
+  exits nonzero unless every game is complete.
 - Safe copy/rebuild with per-file hash verification.
 - Optional verified **move** (`--move`): a loose source file is deleted only
   after the destination copy is written successfully; archive members are
@@ -55,6 +58,9 @@ The crate also ships `unko-rom-manager`, a small headless CLI:
 cargo run -p unko-rom-manager -- \
   --dat "No-Intro.dat" --input roms --1g1r \
   --fixdat missing.xml --csv report.csv --copy rebuilt --move --cache scan.tsv
+
+# Read-only audit: exits 1 unless the set is complete
+unko-rom-manager verify --dat DAT --input rebuilt --max-list 20
 # Download/update a DAT first
 cargo run -p unko-rom-manager -- --dat-url https://example.test/nes.dat \
   --dat-out nes.dat --input roms

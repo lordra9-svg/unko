@@ -35,7 +35,7 @@ verified against the public reference suites:
 - `ppu_vbl_nmi` **12/12**, `ppu_sprites` **19/19**, blargg APU/DMC **13/13**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW rows pass**, 0 failed,
   5 DRAW skips, 0 unrun (199,320 frames)
-- `cargo test --workspace`: **613 passed, 0 failed**; clippy `-D warnings` clean
+- `cargo test --workspace`: **619 passed, 0 failed**; clippy `-D warnings` clean
 - NESdev archive baseline: **136 pass / 12 fail / 115 visual-or-input-only** (5 PAL APU failures pass when PAL timing is selected)
 - RustyNES test tree: **157 pass / 13 fail / 171 visual-or-input-only** (164 / 6 with PAL APU in PAL mode)
 
@@ -86,7 +86,7 @@ harness; a true Internet run needs two networks. See
 |---|---:|
 | Workspace crates | 9 |
 | First-party Rust lines | ~78,900 |
-| Workspace tests | 613 pass, 0 failed |
+| Workspace tests | 619 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images scanned | 7,101 |
 
@@ -230,8 +230,13 @@ cargo run -p unko-rom-manager -- \
 ```
 
 It scans loose files and ZIP, 7z or RAR containers, can download/update a DAT
-over HTTP with `--dat-url`, and can write deterministic ZIP or TorrentZip-style
-sets. The feature comparison of the bundled managers (igir, RomVault, ClrMamePro,
+over HTTP with `--dat-url`, can write deterministic ZIP or TorrentZip-style
+sets, and has a read-only `verify`/`audit` mode that reports per-ROM
+missing/unknown/duplicate detail and exits nonzero unless the set is complete:
+
+```sh
+cargo run -p unko-rom-manager -- verify --dat DAT --input rebuilt
+``` The feature comparison of the bundled managers (igir, RomVault, ClrMamePro,
 RomCenter and Romulus) is in
 [`docs/rom-manager-comparison.md`](docs/rom-manager-comparison.md). Current
 limits: ZIP input only, no 7z/RAR/CHD, no TorrentZip output and no patching
