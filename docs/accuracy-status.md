@@ -1873,17 +1873,6 @@ but the sequence is still misaligned and the pattern reads use the `v` that the
 machine (address latch, idle, read) with the shared octal latch, not an
 immediate buffer update; that experiment was reverted.
 
-### 2026-11-16 — exhaustive functional save-state restore
-
-`every_implemented_mapper_restores_functionally` now covers every mapper that
-constructs from the synthetic banked image: it runs three frames, saves, runs
-two and captures the video frame and audio buffer, restores, runs two again and
-requires byte-identical output. **294 mappers** are exercised and all match.
-The byte-exact re-save contract (where the PPU's cached CHR window is
-deterministic) remains asserted for the ten common mappers by
-`state_round_trips_common_mappers`; the two checks together catch state that
-is missing, mis-serialized or only correct until the next frame.
-
 ### 2026-11-12 — accuracy-core save states; TetaNES retired
 
 The accuracy core now owns the host save-state contract. `UNKOST03` states
@@ -2321,3 +2310,14 @@ trace of Crayon Shin-chan (Datach) runs without errors. The external X24C01
 - A 600-frame trace of Crayon Shin-chan (Datach) completes cleanly with the
   new X24C02 model; the Datach EEPROM protocol is covered by bit-banged I2C
   tests.
+
+### 2026-11-15 — exhaustive functional save-state restore
+
+`every_implemented_mapper_restores_functionally` now covers every mapper that
+constructs from the synthetic banked image: it runs three frames, saves, runs
+two and captures the video frame and audio buffer, restores, runs two again and
+requires byte-identical output. **294 mappers** are exercised and all match.
+The byte-exact re-save contract (where the PPU's cached CHR window is
+deterministic) remains asserted for the ten common mappers by
+`state_round_trips_common_mappers`; the two checks together catch state that
+is missing, mis-serialized or only correct until the next frame.
