@@ -14,7 +14,6 @@ use crate::rollback::{RollbackBuffer, StoredFrame};
 
 /// A rollback session around one core.
 pub struct RollbackSession {
-    core: Box<dyn Core>,
     buffer: RollbackBuffer,
     known_remote: BTreeMap<u32, [u16; 4]>,
     last_remote: [u16; 4],
@@ -24,9 +23,8 @@ pub struct RollbackSession {
 impl RollbackSession {
     /// Creates a session holding `buffer_frames` rollback states.
     #[must_use]
-    pub fn new(core: Box<dyn Core>, buffer_frames: usize) -> Self {
+    pub fn new(buffer_frames: usize) -> Self {
         Self {
-            core,
             buffer: RollbackBuffer::new(buffer_frames),
             known_remote: BTreeMap::new(),
             last_remote: [0; 4],
@@ -45,19 +43,19 @@ impl RollbackSession {
     /// # Errors
     ///
     /// Returns a core save/run error.
-    pub fn step(&mut self, local: [u16; 4]) -> Result<u32, CoreError> {
+    pub fn step(&mut self, core: &mut dyn Core, local: [u16; 4]) -> Result<u32, CoreError> {
         let frame = self.frame;
         let remote = self.known_remote.remove(&frame).unwrap_or(self.last_remote);
         self.last_remote = remote;
         let mut state = Vec::new();
-        self.core.save_state(&mut state)?;
+        core.save_state(&mut state)?;
         self.buffer.push(StoredFrame {
             frame,
             inputs: local,
             state,
         });
-        self.apply(local, remote);
-        self.core.run_frame()?;
+        Self::apply(core, local, remote);
+        core.run_frame()?;
         self.frame = frame + 1;
         Ok(frame)
     }
@@ -68,7 +66,12 @@ impl RollbackSession {
     /// # Errors
     ///
     /// Returns a core save/load error.
-    pub fn receive_remote(&mut self, frame: u32, inputs: [u16; 4]) -> Result<bool, CoreError> {
+    pub fn receive_remote(
+        &mut self,
+        core: &mut dyn Core,
+        frame: u32,
+        inputs: [u16; 4],
+    ) -> Result<bool, CoreError> {
         self.known_remote.insert(frame, inputs);
         let oldest = self.buffer.oldest_frame().unwrap_or(u32::MAX);
         if frame >= self.frame || frame < oldest {
@@ -84,7 +87,7 @@ impl RollbackSession {
             .filter(|entry| entry.frame >= frame)
             .map(|entry| (entry.frame, entry.inputs))
             .collect();
-        self.core.load_state(&state)?;
+        core.load_state(&state)?;
         self.buffer.truncate_from(frame);
         // The last remote input known before the rollback point seeds the
         // prediction for any frame without a real input.
@@ -99,33 +102,24 @@ impl RollbackSession {
                 last = remote;
             }
             let mut state = Vec::new();
-            self.core.save_state(&mut state)?;
+            core.save_state(&mut state)?;
             self.buffer.push(StoredFrame {
                 frame: number,
                 inputs: local,
                 state,
             });
-            self.apply(local, remote);
-            self.core.run_frame()?;
+            Self::apply(core, local, remote);
+            core.run_frame()?;
         }
         self.last_remote = last;
         Ok(true)
     }
 
-    /// Writes the underlying core state (for tests and diagnostics).
-    ///
-    /// # Errors
-    ///
-    /// Returns the core's save-state error.
-    pub fn save_state(&mut self, out: &mut Vec<u8>) -> Result<(), CoreError> {
-        self.core.save_state(out)
-    }
-
-    fn apply(&mut self, local: [u16; 4], remote: [u16; 4]) {
-        self.core.set_input(0, InputState::from_bits(local[0]));
-        self.core.set_input(1, InputState::from_bits(remote[0]));
+    fn apply(core: &mut dyn Core, local: [u16; 4], remote: [u16; 4]) {
+        core.set_input(0, InputState::from_bits(local[0]));
+        core.set_input(1, InputState::from_bits(remote[0]));
         for port in 2..4 {
-            self.core.set_input(port, InputState::empty());
+            core.set_input(port, InputState::empty());
         }
     }
 }
@@ -241,16 +235,18 @@ mod tests {
 
     #[test]
     fn late_remote_input_rolls_back_and_resimulates() {
-        let mut session = RollbackSession::new(Box::new(FakeCore::default()), 8);
+        let mut core = FakeCore::default();
+        let mut session = RollbackSession::new(8);
         let locals = [[10, 0, 0, 0], [11, 0, 0, 0], [12, 0, 0, 0], [13, 0, 0, 0]];
         for local in locals {
-            session.step(local).expect("step");
+            session.step(&mut core, local).expect("step");
         }
         assert_eq!(session.frame(), 4);
-        assert!(session.receive_remote(2, [20, 0, 0, 0]).expect("rollback"));
+        assert!(session
+            .receive_remote(&mut core, 2, [20, 0, 0, 0])
+            .expect("rollback"));
 
-        let mut state = Vec::new();
-        session.save_state(&mut state).expect("state");
+        let state = core.state();
         let expected = expected_state(&locals, &[[0; 4], [0; 4], [20, 0, 0, 0], [20, 0, 0, 0]]);
         assert_eq!(state, expected);
         assert_eq!(session.frame(), 4);
@@ -258,13 +254,18 @@ mod tests {
 
     #[test]
     fn old_or_future_input_does_not_rollback() {
-        let mut session = RollbackSession::new(Box::new(FakeCore::default()), 2);
+        let mut core = FakeCore::default();
+        let mut session = RollbackSession::new(2);
         for frame in 0..6 {
-            session.step([frame as u16, 0, 0, 0]).expect("step");
+            session
+                .step(&mut core, [frame as u16, 0, 0, 0])
+                .expect("step");
         }
         // Frame 0 has fallen out of the two-frame buffer.
-        assert!(!session.receive_remote(0, [1; 4]).expect("late"));
-        assert!(!session.receive_remote(9, [1; 4]).expect("future"));
+        assert!(!session.receive_remote(&mut core, 0, [1; 4]).expect("late"));
+        assert!(!session
+            .receive_remote(&mut core, 9, [1; 4])
+            .expect("future"));
         assert_eq!(session.frame(), 6);
     }
 }

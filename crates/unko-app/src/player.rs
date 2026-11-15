@@ -15,6 +15,7 @@ use crate::game_props::{apply_mapper_override, GameProperties};
 use crate::library::GameEntry;
 use crate::recording::{RecordModes, Recorder};
 use crate::settings::Settings;
+use unko_netplay::{InputFrame, RollbackSession, Transport};
 
 /// Maximum frames emulated in one UI update. When the desktop stalls the
 /// process, the pacer drops the excess backlog instead of fast-forwarding,
@@ -225,6 +226,38 @@ pub struct Player {
     port_enabled: [bool; 4],
     /// Output supersampling factor (1 = off).
     supersample: u32,
+    /// Active rollback netplay session, when hosting or joining.
+    netplay: Option<Netplay>,
+}
+
+/// A running netplay session.
+pub struct Netplay {
+    session: RollbackSession,
+    transport: Box<dyn Transport>,
+    sent: u32,
+    received: u32,
+    rollbacks: u32,
+    last_error: Option<String>,
+}
+
+impl Netplay {
+    /// Session frame number (next frame to run).
+    #[must_use]
+    pub const fn frame(&self) -> u32 {
+        self.session.frame()
+    }
+
+    /// `(sent, received, rollbacks)` counters.
+    #[must_use]
+    pub const fn stats(&self) -> (u32, u32, u32) {
+        (self.sent, self.received, self.rollbacks)
+    }
+
+    /// Last transport or rollback error.
+    #[must_use]
+    pub fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
+    }
 }
 
 impl Player {
@@ -364,6 +397,7 @@ impl Player {
             movie_playback: None,
             run_ahead: settings.run_ahead,
             fds_disk,
+            netplay: None,
         };
         player.push_rewind_keyframe();
         Ok(player)
@@ -376,6 +410,7 @@ impl Player {
             self.next_repaint = Duration::from_millis(250);
             return;
         }
+        self.poll_netplay();
         self.update_rewind_enabled();
         let effective_speed = if self.fast_forward {
             300
@@ -395,6 +430,7 @@ impl Player {
             && self.movie_record.is_none()
             && self.movie_playback.is_none()
             && self.debug.breakpoints.is_empty()
+            && self.netplay.is_none()
         {
             self.run_ahead
         } else {
@@ -407,13 +443,34 @@ impl Player {
             if !self.consume_movie_input() {
                 break;
             }
-            if self.rewind_enabled {
+            if self.rewind_enabled && self.netplay.is_none() {
                 self.rewind.push_input(self.frames + 1, self.last_input);
             }
-            if let Some(record) = &mut self.movie_record {
-                record.push(self.last_input.map(unko_core::InputState::bits));
+            if self.netplay.is_none() {
+                if let Some(record) = &mut self.movie_record {
+                    record.push(self.last_input.map(unko_core::InputState::bits));
+                }
             }
-            if self.debug.breakpoints.is_empty() || !self.core.debug_supported() {
+            if let Some(netplay) = self.netplay.as_mut() {
+                let local = self.last_input[0].bits();
+                let ports = [local, 0, 0, 0];
+                match netplay.session.step(self.core.as_mut(), ports) {
+                    Ok(frame) => {
+                        let message = InputFrame { frame, ports }.encode();
+                        if let Err(err) = netplay.transport.send(&message) {
+                            netplay.last_error = Some(err.to_string());
+                        } else {
+                            netplay.sent += 1;
+                        }
+                    }
+                    Err(err) => {
+                        self.message = err.to_string();
+                        self.paused = true;
+                        self.next_repaint = Duration::from_millis(250);
+                        break;
+                    }
+                }
+            } else if self.debug.breakpoints.is_empty() || !self.core.debug_supported() {
                 if let Err(err) = self.core.run_frame() {
                     self.message = err.to_string();
                     self.paused = true;
@@ -903,6 +960,82 @@ impl Player {
         for (port, state) in pads.iter().enumerate() {
             self.last_input[port] = *state;
             self.core.set_input(port, *state);
+        }
+    }
+
+    /// Starts a rollback netplay session with the given transport.
+    ///
+    /// Movies, rewind and run-ahead are disabled while netplay is active.
+    pub fn start_netplay(&mut self, transport: Box<dyn Transport>, buffer_frames: usize) {
+        self.movie_record = None;
+        self.movie_playback = None;
+        self.movie_state = None;
+        self.rewind_enabled = false;
+        self.netplay = Some(Netplay {
+            session: RollbackSession::new(buffer_frames),
+            transport,
+            sent: 0,
+            received: 0,
+            rollbacks: 0,
+            last_error: None,
+        });
+    }
+
+    /// Stops netplay and returns to local input.
+    pub fn stop_netplay(&mut self) {
+        self.netplay = None;
+    }
+
+    /// Whether a netplay session is active.
+    #[must_use]
+    pub const fn netplay_active(&self) -> bool {
+        self.netplay.is_some()
+    }
+
+    /// `(session frame, sent, received, rollbacks)` when netplay is active.
+    #[must_use]
+    pub fn netplay_stats(&self) -> Option<(u32, u32, u32, u32)> {
+        self.netplay.as_ref().map(|netplay| {
+            let (sent, received, rollbacks) = netplay.stats();
+            (netplay.frame(), sent, received, rollbacks)
+        })
+    }
+
+    /// Last netplay transport/rollback error, if any.
+    #[must_use]
+    pub fn netplay_error(&self) -> Option<&str> {
+        self.netplay.as_ref().and_then(Netplay::last_error)
+    }
+
+    fn poll_netplay(&mut self) {
+        let Some(netplay) = self.netplay.as_mut() else {
+            return;
+        };
+        loop {
+            match netplay.transport.recv() {
+                Ok(Some(bytes)) => {
+                    netplay.received += 1;
+                    match InputFrame::decode(&bytes) {
+                        Some(frame) => {
+                            match netplay.session.receive_remote(
+                                self.core.as_mut(),
+                                frame.frame,
+                                frame.ports,
+                            ) {
+                                Ok(true) => netplay.rollbacks += 1,
+                                Ok(false) => {}
+                                Err(err) => netplay.last_error = Some(err.to_string()),
+                            }
+                        }
+                        None => netplay.last_error = Some("invalid netplay frame".into()),
+                    }
+                }
+                Ok(None) => break,
+                Err(err) => {
+                    netplay.last_error = Some(err.to_string());
+                    break;
+                }
+            }
         }
     }
 
@@ -1526,6 +1659,53 @@ mod tests {
         let view = player.debug_view().expect("debug view");
         assert_eq!(view.cpu.pc, 0x8002);
         assert_eq!(view.cpu.a, 0x10, "the LDA before the breakpoint executed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn netplay_step_sends_frames_and_rolls_back_a_late_input() {
+        let dir = std::env::temp_dir().join(format!("unko-netplay-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("netplay.nes");
+        std::fs::write(&path, minimal_nrom()).expect("write rom");
+        let entry = crate::library::probe_path(&path)
+            .expect("probe")
+            .into_iter()
+            .next()
+            .expect("entry");
+        let settings = Settings {
+            save_dir: dir.join("saves"),
+            ..Settings::default()
+        };
+        let mut player =
+            Player::start_with(&entry, &settings, GameProperties::default()).expect("start");
+        let (transport, mut peer) = unko_netplay::channel_pair();
+        player.start_netplay(Box::new(transport), 8);
+        let ctx = egui::Context::default();
+
+        player.step(&ctx, None);
+        let (frame, sent, _, _) = player.netplay_stats().expect("netplay");
+        assert!(frame >= 1);
+        assert_eq!(sent, frame, "one local input per frame");
+
+        // A remote frame-0 input arrives after frame 1; it must roll back.
+        peer.send(
+            &InputFrame {
+                frame: 0,
+                ports: [InputState::A, 0, 0, 0],
+            }
+            .encode(),
+        )
+        .expect("peer send");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        player.step(&ctx, None);
+        let (frame_after, _, received, rollbacks) = player.netplay_stats().expect("netplay");
+        assert!(frame_after > frame);
+        assert_eq!(received, 1);
+        assert_eq!(rollbacks, 1);
+        player.stop_netplay();
+        assert!(!player.netplay_active());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

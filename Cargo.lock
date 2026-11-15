@@ -4119,6 +4119,7 @@ dependencies = [
  "unko-core",
  "unko-nes",
  "unko-nes-host",
+ "unko-netplay",
  "unko-rom",
  "unko-rom-manager",
  "winit",

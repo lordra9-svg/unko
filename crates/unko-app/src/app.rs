@@ -28,6 +28,7 @@ use crate::player::{self, Player};
 use crate::recording::RecordModes;
 use crate::rom_manager::RomManager;
 use crate::settings::{Aspect, HotkeyAction, PortInput, Settings, ShaderPreset, Theme};
+use unko_netplay::UdpTransport;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -200,6 +201,11 @@ pub struct App {
     datach_code: String,
     confirm_reset: bool,
     rom_manager: RomManager,
+    netplay_open: bool,
+    netplay_host: bool,
+    netplay_local_port: String,
+    netplay_peer: String,
+    netplay_status: String,
     controller_last: unko_core::InputState,
     controller_repeat: Instant,
     controller_menu_open: bool,
@@ -228,6 +234,8 @@ pub struct Args {
     pub debug: bool,
     /// Open the game properties window when a game starts.
     pub properties: bool,
+    /// Open the NetPlay window on launch.
+    pub netplay: bool,
     /// Portable data folder override (`--data-dir`).
     pub data_dir: Option<PathBuf>,
     /// Use the folder beside the executable as the data root.
@@ -321,6 +329,11 @@ impl App {
             datach_code: String::new(),
             confirm_reset: false,
             rom_manager,
+            netplay_open: args.netplay,
+            netplay_host: true,
+            netplay_local_port: "7777".into(),
+            netplay_peer: "127.0.0.1:7778".into(),
+            netplay_status: String::new(),
             controller_last: unko_core::InputState::empty(),
             controller_repeat: Instant::now(),
             controller_menu_open: false,
@@ -1341,6 +1354,13 @@ impl App {
                     }
                     if ui.button("ROM Manager…").clicked() {
                         self.rom_manager.request_focus();
+                        ui.close_menu();
+                    }
+                    if ui
+                        .add_enabled(self.player.is_some(), egui::Button::new("NetPlay…"))
+                        .clicked()
+                    {
+                        self.netplay_open = true;
                         ui.close_menu();
                     }
                     if ui
@@ -2600,6 +2620,137 @@ impl App {
         self.set_status("Reset all settings to defaults");
     }
 
+    fn netplay_apply_defaults(&mut self) {
+        if self.netplay_host {
+            self.netplay_local_port = "7777".into();
+            self.netplay_peer = "127.0.0.1:7778".into();
+        } else {
+            self.netplay_local_port = "7778".into();
+            self.netplay_peer = "127.0.0.1:7777".into();
+        }
+    }
+
+    fn start_netplay(&mut self) {
+        let Some(player) = &mut self.player else {
+            self.netplay_status = "Load a game before starting netplay.".into();
+            return;
+        };
+        let Ok(port) = self.netplay_local_port.trim().parse::<u16>() else {
+            self.netplay_status = "Local port must be a number.".into();
+            return;
+        };
+        let peer = self.netplay_peer.trim().to_string();
+        if peer.is_empty() {
+            self.netplay_status = "Peer address is empty.".into();
+            return;
+        }
+        match UdpTransport::bind(&format!("0.0.0.0:{port}")) {
+            Ok(mut transport) => match transport.connect(&peer) {
+                Ok(()) => {
+                    player.start_netplay(Box::new(transport), 8);
+                    self.netplay_status = format!(
+                        "{} on UDP {port}, peer {peer}",
+                        if self.netplay_host {
+                            "Hosting"
+                        } else {
+                            "Joined"
+                        }
+                    );
+                }
+                Err(err) => self.netplay_status = format!("Connect failed: {err}"),
+            },
+            Err(err) => self.netplay_status = format!("Bind failed: {err}"),
+        }
+    }
+
+    fn netplay_window(&mut self, ctx: &egui::Context) {
+        if !self.netplay_open {
+            return;
+        }
+        let mut open = self.netplay_open;
+        let active = self
+            .player
+            .as_ref()
+            .is_some_and(crate::player::Player::netplay_active);
+        egui::Window::new("NetPlay")
+            .open(&mut open)
+            .default_size([440.0, 300.0])
+            .show(ctx, |ui| {
+                let role_before = self.netplay_host;
+                ui.horizontal(|ui| {
+                    ui.label("Role");
+                    ui.add_enabled_ui(!active, |ui| {
+                        if ui.selectable_label(self.netplay_host, "Host").clicked() {
+                            self.netplay_host = true;
+                        }
+                        if ui.selectable_label(!self.netplay_host, "Join").clicked() {
+                            self.netplay_host = false;
+                        }
+                    });
+                });
+                if self.netplay_host != role_before {
+                    self.netplay_apply_defaults();
+                }
+                ui.horizontal(|ui| {
+                    ui.label("Local port");
+                    ui.add_enabled(
+                        !active,
+                        egui::TextEdit::singleline(&mut self.netplay_local_port)
+                            .desired_width(90.0),
+                    );
+                    ui.label("Peer");
+                    ui.add_enabled(
+                        !active,
+                        egui::TextEdit::singleline(&mut self.netplay_peer).desired_width(180.0),
+                    );
+                });
+                ui.label(
+                    RichText::new(
+                        "Both peers use complementary local ports and each other's address. \
+                         Netplay disables rewind, movies and run-ahead.",
+                    )
+                    .small()
+                    .weak(),
+                );
+                ui.separator();
+                ui.horizontal(|ui| {
+                    let can_start = !active && self.player.is_some();
+                    if ui
+                        .add_enabled(can_start, egui::Button::new("Start"))
+                        .clicked()
+                    {
+                        self.start_netplay();
+                    }
+                    if ui.add_enabled(active, egui::Button::new("Stop")).clicked() {
+                        if let Some(player) = &mut self.player {
+                            player.stop_netplay();
+                        }
+                        self.netplay_status = "Stopped".into();
+                    }
+                });
+                if !self.netplay_status.is_empty() {
+                    ui.label(&self.netplay_status);
+                }
+                if let Some((frame, sent, received, rollbacks)) = self
+                    .player
+                    .as_ref()
+                    .and_then(crate::player::Player::netplay_stats)
+                {
+                    ui.label(format!(
+                        "Frame {frame} · sent {sent} · received {received} · rollbacks {rollbacks}"
+                    ));
+                    if let Some(err) = self
+                        .player
+                        .as_ref()
+                        .and_then(crate::player::Player::netplay_error)
+                    {
+                        ui.colored_label(Color32::LIGHT_RED, err);
+                    }
+                }
+            });
+        self.netplay_open = open;
+    }
+
     fn game_props_path(&self, entry: &GameEntry) -> PathBuf {
         self.settings
             .save_dir
@@ -3075,6 +3226,7 @@ impl eframe::App for App {
         self.devices_window(ctx);
         self.cheats_window(ctx);
         self.game_properties_window(ctx);
+        self.netplay_window(ctx);
         self.rom_manager_window(ctx);
         self.controller_menu(ctx);
         self.about_window(ctx);
