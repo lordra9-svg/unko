@@ -231,7 +231,7 @@ cargo run -p unko-rom-manager -- \
 # --move deletes loose sources after a verified copy (loose output only)
 ```
 
-It scans loose files and ZIP, 7z or RAR containers, accepts UNIF images by
+It scans loose files and ZIP, 7z or RAR containers, accepts `.unif`/`.unf` images by
 converting their board/mirroring chunks to iNES/NES 2.0, can download/update a DAT
 over HTTP with `--dat-url`, can write deterministic ZIP or TorrentZip-style
 sets, and has a read-only `verify`/`audit` mode that reports per-ROM

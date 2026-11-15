@@ -141,8 +141,9 @@ Waixing, DreamTech01, CoolBoy/MindKids, Konami QTAI, KS703x, LH32/LH51/LH10,
 TF1201, Bmc289/299/301 and the rest of the `SPECIFIC` table). Mappers above 255 and boards with a
 submapper (UNROM 2, AxROM 1/2, FS005 2) emit a NES 2.0 header. Unknown `MAPR`
 names are rejected instead of guessing a mapper.
-Loose `.unif` files and members of ZIP/7z/RAR archives are discovered, shown in
-the library with mapper/size metadata when available and converted on load.
+Loose `.unif`/`.unf` files and members of ZIP/7z/RAR archives are discovered,
+shown in the library with mapper/size metadata (ZIP members are read far enough
+to parse the board chunks) and converted on load.
 Unit tests cover an NROM image with CHR-ROM and vertical mirroring, an MMC1
 board with CHR-RAM and a battery flag, the third-party board table, NES 2.0
 headers, unknown boards, truncated chunks, gapped PRG chunks and the

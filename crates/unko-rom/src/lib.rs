@@ -235,7 +235,7 @@ pub fn probe_path(path: &Path) -> Result<Vec<RomEntry>, RomError> {
     }
     let extension = extension(path);
     match extension.as_str() {
-        "nes" | "fds" | "unif" => {
+        "nes" | "fds" | "unif" | "unf" => {
             let entry = plain_entry(path.to_path_buf()).ok_or_else(|| {
                 RomError::Invalid(format!(
                     "{} is not a valid NES/FDS/UNIF image",
@@ -298,7 +298,7 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<RomEntry>) {
             }
         } else if file_type.is_file() {
             match extension(&path).as_str() {
-                "nes" | "fds" | "unif" => {
+                "nes" | "fds" | "unif" | "unf" => {
                     if let Some(entry) = plain_entry(path) {
                         out.push(entry);
                     }
@@ -372,26 +372,37 @@ fn scan_zip(path: &Path) -> Vec<RomEntry> {
         let name = name.into_owned();
         let member_ext = extension(Path::new(&name));
         if member.is_dir()
-            || !(member_ext.eq("nes") || member_ext.eq("fds") || member_ext.eq("unif"))
+            || !(member_ext.eq("nes")
+                || member_ext.eq("fds")
+                || (member_ext.eq("unif") || member_ext.eq("unf")))
         {
             continue;
         }
         let mut prefix = [0u8; 16];
-        let header = match member.read_exact(&mut prefix) {
-            Ok(()) => parse_header(&prefix),
-            Err(_) => None,
-        };
+        let prefix_ok = member.read_exact(&mut prefix).is_ok();
         let header = if member_ext.eq("fds") {
             None
-        } else if member_ext.eq("unif") {
-            // The 16-byte prefix is only the magic; the whole member is
-            // converted on load. Keep the entry even without metadata.
-            parse_header(&prefix)
-        } else {
+        } else if member_ext.eq("unif") || member_ext.eq("unf") {
+            // Read the whole member so the board/mirroring chunks are visible;
+            // the bytes are still converted on load.
+            if prefix_ok {
+                let mut bytes = prefix.to_vec();
+                if member.read_to_end(&mut bytes).is_ok() {
+                    unif::header(&bytes)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else if prefix_ok {
+            let header = parse_header(&prefix);
             let Some(header) = header else {
                 continue; // headerless ZIP images are not playable
             };
             Some(header)
+        } else {
+            continue;
         };
         let title = member_title(&name);
         let size = member.size();
@@ -429,7 +440,8 @@ fn scan_7z(path: &Path) -> Vec<RomEntry> {
         .iter()
         .filter(|file| {
             let ext = extension(Path::new(file.name()));
-            !file.is_directory() && (ext.eq("nes") || ext.eq("fds") || ext.eq("unif"))
+            !file.is_directory()
+                && (ext.eq("nes") || ext.eq("fds") || ext.eq("unif") || ext.eq("unf"))
         })
         .map(|file| {
             let inner = file.name().to_string();
@@ -464,7 +476,8 @@ fn scan_rar(path: &Path) -> Vec<RomEntry> {
         .enumerate()
         .filter(|(_, member)| {
             let ext = extension(Path::new(&member_name(member)));
-            !member.meta.is_directory && (ext.eq("nes") || ext.eq("fds") || ext.eq("unif"))
+            !member.meta.is_directory
+                && (ext.eq("nes") || ext.eq("fds") || ext.eq("unif") || ext.eq("unf"))
         })
         .map(|(index, member)| {
             let inner = member_name(&member);
@@ -690,7 +703,7 @@ mod tests {
     fn probes_and_converts_unif() {
         let dir = temp_dir("unif");
         fs::create_dir_all(&dir).expect("dir");
-        let path = dir.join("game.unif");
+        let path = dir.join("game.unf");
         fs::write(&path, synthetic_unif()).expect("write");
         let entries = probe_path(&path).expect("probe");
         assert_eq!(entries.len(), 1);
@@ -725,18 +738,30 @@ mod tests {
             .compression_method(zip::CompressionMethod::Deflated);
         zip.start_file("packed.nes", options).expect("start");
         zip.write_all(&rom).expect("write member");
+        zip.start_file("packed.unf", options).expect("start");
+        zip.write_all(&synthetic_unif()).expect("write unif member");
         zip.finish().expect("finish");
 
         let entries = scan(&dir);
-        assert_eq!(entries.len(), 2, "loose + zipped");
+        assert_eq!(entries.len(), 3, "loose + zipped + UNIF member");
         let zipped = entries
             .iter()
-            .find(|entry| entry.container == Container::Zip)
+            .find(|entry| entry.file_name == "packed.nes")
             .expect("zip entry");
         assert_eq!(zipped.title, "packed");
         assert_eq!(zipped.header.expect("header").mapper, 17);
         let bytes = load(zipped).expect("loads member");
         assert_eq!(bytes, rom);
+
+        let unif = entries
+            .iter()
+            .find(|entry| entry.file_name == "packed.unf")
+            .expect("UNIF member");
+        let header = unif.header.expect("UNIF metadata from archive");
+        assert_eq!(header.mapper, 0);
+        assert_eq!(header.prg_kib, 16);
+        let converted = load(unif).expect("converts UNIF member");
+        assert_eq!(&converted[..4], b"NES\x1a");
 
         let _ = fs::remove_dir_all(dir);
     }
