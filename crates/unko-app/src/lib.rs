@@ -34,6 +34,7 @@ mod rom_manager;
 mod rom_manager_view;
 mod settings;
 mod slots;
+mod vsconfig;
 
 pub use app::{App, Args};
 

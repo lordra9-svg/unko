@@ -90,9 +90,10 @@ The main effort is now the reference-parity accuracy core. Details in
       The **VS. System** now loads mapper 99 (banking, four-screen VRAM,
       OUT1-gated work RAM), reads coin/service/DIP input on `$4016`/`$4017`,
       models the `$4020` coin counter and uses the documented 2C03/2C04/2C05
-      RGB palettes, RGB emphasis and 2C05 register/security quirks. Remaining:
-      VS BIOS/ROMs, per-title DIP defaults, the DualSystem sub-CPU/watchdog,
-      PlayChoice-10 input and validation against real PAL/NSF content. The FDS `$4030.D1`
+      RGB palettes, RGB emphasis and 2C05 register/security quirks, with the
+      DIP/primary choices remembered per game. Remaining: VS BIOS/ROMs,
+      per-title DIP defaults, the DualSystem sub-CPU/watchdog, PlayChoice-10
+      input and validation against real PAL/NSF content. The FDS `$4030.D1`
       DRAM-refresh watchdog matches the hardware capture (`67FF`/`6E25`).
 - [ ] **A7** differential harness, hardware captures, performance pass.
       The differential harness is complete: per-frame RGBA, audio and

@@ -217,7 +217,8 @@ between machines; see `docs/platforms.md` for the resolution order and the
   devices and persists the choice. Vs. System mapper-99 carts add a
   **Vs. System** section to the Devices window: Coin 1/2 pulse the acceptor
   contact for four frames, and Service, DIP 1-8 and the primary-CPU flag map
-  directly onto `$4016`/`$4017`.
+  directly onto `$4016`/`$4017`. The DIP switches and primary-CPU flag are
+  remembered per game in `<stem>.vs`; coin and service always start released.
 - Audio: cpal output with a lock-free ring buffer, device-rate resampling,
   volume/mute and underrun statistics. The stream is opened once at startup
   and fed one mono sample per emulated frame. The Audio page selects the

@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **680 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **684 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -183,7 +183,8 @@ bit 0, a read latches open-bus bit 0 as documented, and reset clears it. The
 Devices window adds a Vs. System section with Coin 1/2, Service, the eight DIP
 switches and the primary-CPU flag; a coin press closes the acceptor contact for
 four frames (~67 ms, the hardware's 40-70 ms window) so games do not reject a
-held credit.
+held credit. DIP and primary-CPU choices are remembered per game in
+`<stem>.vs`; the momentary coin and service contacts always start released.
 
 Tests pin the PRG/CHR bank bit, the Gumshoe outer bank, the OUT1 RAM gate and
 mirroring, the undriven CHR socket, every `$4016`/`$4017` bit, the four-frame

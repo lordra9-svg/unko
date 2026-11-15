@@ -4,7 +4,6 @@
 //! (library or emulation surface), status bar, and one settings window with a
 //! category rail. See `docs/frontend.md` for the mapping and the licensing
 //! boundary (Dolphin is GPL; this is an original MIT implementation of the UX).
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -31,6 +30,7 @@ use crate::recording::RecordModes;
 use crate::rom_manager::RomManager;
 use crate::settings::{Aspect, HotkeyAction, PortInput, Settings, ShaderPreset, Theme};
 use crate::slots::{default_slot_name, size_label, SLOT_COUNT};
+use crate::vsconfig::VsConfig;
 use unko_netplay::{
     add_port_mapping, discover, endpoint, external_ip, local_address_toward, stun_public_address,
     HolePunchTransport, MappingProtocol, MappingRequest, PredictionMode, RelayTransport,
@@ -775,6 +775,7 @@ impl App {
     }
 
     fn start_entry(&mut self, entry: GameEntry) {
+        self.persist_vs_config();
         let mut settings = self.settings.clone();
         if let Some(audio) = &self.audio {
             settings.sample_rate = audio.sample_rate();
@@ -807,11 +808,22 @@ impl App {
                     self.open_props_on_start = false;
                 }
                 self.player = Some(player);
-                if let Some(player) = &self.player {
+                let vs = self
+                    .player
+                    .as_ref()
+                    .filter(|player| player.is_vs_system())
+                    .map_or_else(VsConfig::default, |player| {
+                        VsConfig::load(&VsConfig::path(&self.settings.save_dir, &player.stem))
+                    });
+                self.vs_service = false;
+                self.vs_dips = vs.dips;
+                self.vs_primary = vs.primary;
+                if let Some(player) = &mut self.player {
                     let path = self
                         .settings
                         .save_dir
                         .join(format!("{}.cheats", player.stem));
+                    player.set_vs_input(self.vs_service, self.vs_dips, self.vs_primary);
                     self.cheats = cheats::load(&path);
                 }
                 self.apply_cheats();
@@ -837,6 +849,7 @@ impl App {
 
     fn stop_game(&mut self) {
         self.flush_play_stats();
+        self.persist_vs_config();
         self.play_stem = None;
         self.paused_by_focus = false;
         if self.settings.per_game_input {
@@ -852,6 +865,21 @@ impl App {
         self.cheats.clear();
         self.cheats_open = false;
         self.cheat_error = None;
+    }
+
+    /// Writes the current Vs. DIP/primary choices for the running game.
+    fn persist_vs_config(&self) {
+        let Some(player) = &self.player else {
+            return;
+        };
+        if !player.is_vs_system() {
+            return;
+        }
+        let config = VsConfig {
+            dips: self.vs_dips,
+            primary: self.vs_primary,
+        };
+        let _ = config.save(&VsConfig::path(&self.settings.save_dir, &player.stem));
     }
 
     fn apply_cheats(&mut self) {
@@ -4265,6 +4293,7 @@ impl App {
     /// Stops the audio stream and persists settings when the shell exits.
     fn shutdown(&mut self) {
         self.flush_play_stats();
+        self.persist_vs_config();
         if let Some(player) = &mut self.player {
             player.shutdown();
         }
