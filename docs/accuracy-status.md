@@ -55,6 +55,10 @@ Implemented so far:
 - 24-bit cartridge bus mapping for ROM and SRAM, including bank mirroring
 - cycle-stepped 65C816 with emulation/native modes, 8/16-bit widths, decimal
   arithmetic, interrupts, WAI/STP and block moves
+- exact S-CPU memory timing in NTSC master clocks (six per base bus cycle)
+  using the ares `CPU::wait` table: 6 for fast ROM and the `$2000-$3FFF` /
+  `$4200-$5FFF` windows, 8 for slow ROM, WRAM and `$6000-$7FFF`, 12 for
+  `$4000-$41FF`; SRAM and the `$420D` MEMSEL latch
 - all 256 SPC700 opcodes, addressing modes, flags, bit operations, DIV/MUL,
   DAA/DAS and stack/call/return behaviour
 - APU wrapper: 64 KiB RAM, user-supplied IPL ROM, four bidirectional S-CPU
@@ -63,6 +67,11 @@ Implemented so far:
   envelopes, noise/LFSR, pitch modulation, echo and stereo sample generation
 - line-based S-PPU: registers, VRAM/CGRAM/OAM, vblank/NMI, modes 0-7, tile
   backgrounds, Mode 7 affine mapping and sprites; 256x224 RGBA8888 frames
+- subscreen rendering and the full colour-math path: per-layer priority
+  tables, `CGWSEL` fixed-colour/subscreen select, `CGADSUB` enable/halve/
+  subtract and `COLDATA` channels, with the ares 15-bit blend
+- sprite tiles addressed in the hardware 16-column object grid, per-BG 16x16
+  tile selection from `BGMODE`, and visible-line numbering (lines 1-224)
 - S-CPU DMA: eight general-purpose channels with the documented transfer modes
 - HDMA table engine: direct/indirect entries, line counters and per-line B-bus transfers
 - S-SMP timers 0-2 with targets, enable/reset bits and `$FD-$FF` output latching
@@ -71,7 +80,7 @@ Implemented so far:
 
 Validation so far:
 
-- **818 workspace tests**, 0 failed
+- **820 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -86,25 +95,39 @@ Validation so far:
 - **4 PPU tests** cover vblank/NMI timing, CGRAM/OAM access and a rendered
   mode-1 tile pixel; **2 DMA tests** verify mode-1 VRAM and CGRAM transfers;
   **1 HDMA test** verifies direct table transfers; the APU timer test exercises
-  target/output latching.
+  target/output latching
+- **2 timing tests** pin the S-CPU wait-state table (slow/fast ROM, WRAM, PPU
+  I/O and `$4000-$41FF`) and the DMA 8-clock-per-byte stall
+- the 65C816 differential suite now also asserts total master clocks:
+  `unko-snes` retires exactly six clocks per oracle bus cycle on every one of
+  the 18 suites
 - 10 retail images (LoROM, HiROM and ExHiROM): all headers detected and all
   stored checksums reproduced
 - 250-image random No-Intro sample: 237 parsed; the 13 failures are
   headerless/beta/pirate dumps, not clean retail images
 - 207 public SNES test images in `test-roms/snes/`: all 207 parsed by
   `snes-scan`
-- Super Mario World with the local 64-byte IPL ROM: the SPC700 completes the
-  IPL upload handshake, the APU timers advance and the game renders a
-  recognizable title logo plus the BG1 landscape at 600-900 frames.
-- VRAM and CGRAM now match the RustySNES oracle (CGRAM all but one entry);
-  the remaining visual differences are the missing sky/cloud HDMA bands,
-  border/colour-math effects and line timing.
+- Super Mario World with the local 64-byte IPL ROM, measured against ares
+  (`--system 'Super Famicom' --frames N --dump-frame`) and RustySNES on the
+  same ROM:
+  - **600 frames**: 99.514% of pixels bit-identical to ares, mean absolute
+    channel difference 0.754; 362 differing pixels confined to one animated
+    sprite (bbox 106-132 x 154-174)
+  - **900 frames**: 99.173% bit-identical, mean difference 1.324; 594
+    differing pixels across three animated sprites
+  - **VRAM: 0 of 32,768 words differ** from RustySNES at 600 frames;
+    **CGRAM: 0 of 256 entries differ**; **OAM: identical**
+  - title logo, sky gradient, cloud sprites, border, "© 1990, 1991 Nintendo"
+    text and the scrolling BG1 landscape all match
+- The residual sprite pixels are the line-vs-dot scheduling gap: our renderer
+  snapshots OAM once per line, while ares evaluates sprite priority per dot.
 - Star Fox remains black without the SuperFX coprocessor; Final Fantasy V was
   still in its boot sequence at the 20M-cycle sample.
 
-The PPU is line-based rather than dot-scheduled, the HDMA engine exists but
-SMW does not enable it in the sampled state, colour math/windows/hires remain
-approximations, and exact frame parity with ares is not yet achieved.
+The PPU is line-based rather than dot-scheduled; windows, hires, interlace,
+mosaic, offset-per-tile and the 32-sprite/34-tile limits are still missing.
+S-DSP output has not yet been sample-compared against ares. Exact audio parity
+and the remaining PPU scheduling work are the open accuracy items.
 
 Performance: `unko bench --synthetic 3000 --min-fps 300` measures **791.6 fps**
 (13.17x real time, 1.263 ms/frame); release save states are 417,090 bytes at

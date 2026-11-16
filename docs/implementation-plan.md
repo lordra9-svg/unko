@@ -51,9 +51,11 @@ implementation source, MesenCE is a black-box oracle, and RustySNES
    noise, pitch modulation and echo. Eight `spc700` differential tests plus
    DSP/APU unit and integration tests cover the slice.
 4. PPU dot/scanline timing, background/sprite rendering, then the first
-   frame. **Partial**: line-based modes 0-7, sprites, vblank/NMI and DMA are
-   implemented. Colour math/windows/hires/interlace and dot-level scheduling
-   remain, and the retail boot handshake still stalls before display.
+   frame. **Done for the base console**: line-based modes 0-7, sprites,
+   subscreen/colour math, vblank/NMI, DMA/HDMA and exact S-CPU wait states.
+   Super Mario World matches ares on 99.5% of pixels at 600 frames with
+   bit-identical VRAM/CGRAM/OAM. Remaining: dot-level sprite scheduling,
+   windows, hires, interlace, mosaic and offset-per-tile.
 5. `unko-snes-host` adapter once the core surface is stable.
 6. Coprocessors and enhancement chips after the base console is green.
 

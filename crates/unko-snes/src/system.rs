@@ -32,6 +32,7 @@ pub struct Snes {
     ppu_credit: i64,
     nmi_enable: bool,
     nmi_flag: bool,
+    fast_rom: bool,
     /// Number of NMI edges delivered (debug).
     pub nmi_count: u64,
 }
@@ -50,6 +51,7 @@ impl Snes {
             ppu_credit: 0,
             nmi_enable: false,
             nmi_flag: false,
+            fast_rom: false,
             nmi_count: 0,
         }
     }
@@ -83,6 +85,7 @@ impl Snes {
         self.ppu_credit = 0;
         self.nmi_enable = false;
         self.nmi_flag = false;
+        self.fast_rom = false;
         self.nmi_count = 0;
         let mut bus = SnesBus {
             wram: &mut self.wram,
@@ -92,6 +95,7 @@ impl Snes {
             dma: &mut self.dma,
             nmi_enable: &mut self.nmi_enable,
             nmi_flag: &mut self.nmi_flag,
+            fast_rom: &mut self.fast_rom,
             vblank: false,
         };
         self.cpu.reset(&mut bus)
@@ -109,6 +113,7 @@ impl Snes {
                 dma: &mut self.dma,
                 nmi_enable: &mut self.nmi_enable,
                 nmi_flag: &mut self.nmi_flag,
+                fast_rom: &mut self.fast_rom,
                 vblank,
             };
             self.cpu.step(&mut bus)
@@ -122,23 +127,24 @@ impl Snes {
                 dma: &mut self.dma,
                 nmi_enable: &mut self.nmi_enable,
                 nmi_flag: &mut self.nmi_flag,
+                fast_rom: &mut self.fast_rom,
                 vblank,
             };
             cycles += dma::run(&channels, mask, &mut bus);
         }
-        // NTSC S-CPU bus cycles are 3.579545 MHz and the SPC700 runs at
-        // 1.024 MHz. The credit is carried across instructions so long-term
-        // APU timing stays in step.
+        // NTSC master clock is 21.477272 MHz; the SPC700 runs at 1.024 MHz.
+        // The credit is carried across instructions so long-term APU timing
+        // stays in step.
         self.apu_credit += i64::from(cycles) * 1_024_000;
-        while self.apu_credit >= 3_579_545 {
+        while self.apu_credit >= 21_477_272 {
             let spent = self.apu.step();
-            self.apu_credit -= i64::from(spent) * 3_579_545;
+            self.apu_credit -= i64::from(spent) * 21_477_272;
         }
-        // The PPU dot clock is 1.5x the S-CPU bus clock on NTSC.
-        self.ppu_credit += i64::from(cycles) * 3;
-        while self.ppu_credit >= 2 {
+        // The PPU dot clock is the master clock divided by four on NTSC.
+        self.ppu_credit += i64::from(cycles);
+        while self.ppu_credit >= 4 {
             self.ppu.tick();
-            self.ppu_credit -= 2;
+            self.ppu_credit -= 4;
             if let Some(line) = self.ppu.take_line_event() {
                 if line == 0 {
                     self.dma.hdma_reset();
@@ -161,7 +167,7 @@ impl Snes {
         cycles
     }
 
-    /// Run until `max_cycles` bus cycles have elapsed, the CPU stops, or an
+    /// Run until `max_cycles` master clocks have elapsed, the CPU stops, or an
     /// instruction limit is reached.
     pub fn run_cycles(&mut self, max_cycles: u64, max_instructions: u32) -> (u64, u32) {
         let mut cycles = 0;
@@ -182,6 +188,7 @@ struct SnesBus<'a> {
     dma: &'a mut Dma,
     nmi_enable: &'a mut bool,
     nmi_flag: &'a mut bool,
+    fast_rom: &'a mut bool,
     vblank: bool,
 }
 
@@ -248,6 +255,8 @@ impl CpuBus for SnesBus<'_> {
                     self.dma.start(value);
                 } else if offset == 0x420C {
                     self.dma.set_hdma_enable(value);
+                } else if offset == 0x420D {
+                    *self.fast_rom = value & 0x01 != 0;
                 } else if (0x4300..=0x437F).contains(&offset) {
                     self.dma.write(offset as u16, value);
                 }
@@ -258,6 +267,25 @@ impl CpuBus for SnesBus<'_> {
             }
         }
         self.cart.write(address, value);
+    }
+
+    fn access_cycles(&mut self, address: u32) -> u32 {
+        // Mirrors ares CPU::wait(): six master clocks per base cycle, with
+        // wait states for slow ROM, WRAM and the internal I/O window.
+        if address & 0x40_8000 != 0 {
+            return if address & 0x80_0000 != 0 && *self.fast_rom {
+                6
+            } else {
+                8
+            };
+        }
+        if address.wrapping_add(0x6000) & 0x4000 != 0 {
+            return 8;
+        }
+        if address.wrapping_sub(0x4000) & 0x7E00 != 0 {
+            return 6;
+        }
+        12
     }
 }
 
@@ -430,6 +458,7 @@ mod tests {
             dma: &mut system.dma,
             nmi_enable: &mut system.nmi_enable,
             nmi_flag: &mut system.nmi_flag,
+            fast_rom: &mut system.fast_rom,
             vblank: false,
         };
         assert_eq!(bus.read(0x001234), 0x5A);
@@ -464,6 +493,7 @@ mod tests {
                 dma: &mut system.dma,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                fast_rom: &mut system.fast_rom,
                 vblank: false,
             };
             assert_eq!(bus.read(0x008000), 0x11);
@@ -521,6 +551,30 @@ mod tests {
     }
 
     #[test]
+    fn cpu_wait_states_match_the_hardware_table() {
+        fn bus_read_cycles(code: &[u8], bank: u8, fast: bool) -> u32 {
+            let mut system = Snes::new(cartridge(code));
+            system.reset();
+            system.fast_rom = fast;
+            system.cpu.pbr = bank;
+            system.cpu.pc = 0x8000;
+            system.step()
+        }
+
+        // Slow ROM: two eight-clock accesses (opcode + operand).
+        assert_eq!(bus_read_cycles(&[0xA9, 0x42], 0x00, false), 16);
+        // Fast ROM needs both MEMSEL and a bank $80-$FF address.
+        assert_eq!(bus_read_cycles(&[0xA9, 0x42], 0x80, true), 12);
+        assert_eq!(bus_read_cycles(&[0xA9, 0x42], 0x80, false), 16);
+        // Absolute WRAM read: three fetches plus one eight-clock data access.
+        assert_eq!(bus_read_cycles(&[0xAD, 0x10, 0x00], 0x00, false), 32);
+        // PPU register read: fetches are slow ROM, the $2100 data access is six.
+        assert_eq!(bus_read_cycles(&[0xAD, 0x00, 0x21], 0x00, false), 30);
+        // $4000-$41FF is the twelve-clock internal window.
+        assert_eq!(bus_read_cycles(&[0xAD, 0x00, 0x40], 0x00, false), 36);
+    }
+
+    #[test]
     fn dma_writes_vram() {
         let mut system = Snes::new(cartridge(&[0xDB]));
         system.reset();
@@ -537,6 +591,7 @@ mod tests {
                 dma: &mut system.dma,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                fast_rom: &mut system.fast_rom,
                 vblank: false,
             };
             bus.write(0x2115, 0x80);
@@ -561,12 +616,47 @@ mod tests {
                 dma: &mut system.dma,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                fast_rom: &mut system.fast_rom,
                 vblank: false,
             };
             dma::run(&channels, mask, &mut bus);
         }
         assert_eq!(system.ppu.vram_word(0), 0x3412);
         assert_eq!(system.ppu.vram_word(1), 0x7856);
+    }
+
+    #[test]
+    fn dma_stalls_match_the_byte_rate() {
+        struct CountBus {
+            bytes: usize,
+        }
+        impl DmaBus for CountBus {
+            fn read_a(&mut self, _address: u32) -> u8 {
+                0x5A
+            }
+            fn write_a(&mut self, _address: u32, _value: u8) {}
+            fn read_b(&mut self, _address: u8) -> u8 {
+                0
+            }
+            fn write_b(&mut self, _address: u8, _value: u8) {
+                self.bytes += 1;
+            }
+        }
+        let mut dma = Dma::new();
+        dma.write(0x4300, 0x00);
+        dma.write(0x4301, 0x04);
+        dma.write(0x4302, 0x00);
+        dma.write(0x4303, 0x01);
+        dma.write(0x4304, 0x7E);
+        dma.write(0x4305, 0x04);
+        dma.write(0x4306, 0x00);
+        dma.start(0x01);
+        let (channels, mask) = dma.take_pending().expect("DMA pending");
+        let mut bus = CountBus { bytes: 0 };
+        let cycles = dma::run(&channels, mask, &mut bus);
+        assert_eq!(bus.bytes, 4);
+        // Eight master clocks per byte plus one eight-clock setup block.
+        assert_eq!(cycles, 40);
     }
 
     #[test]
@@ -585,6 +675,7 @@ mod tests {
                 dma: &mut system.dma,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                fast_rom: &mut system.fast_rom,
                 vblank: false,
             };
             bus.write(0x2121, 0x00);
@@ -607,6 +698,7 @@ mod tests {
                 dma: &mut system.dma,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                fast_rom: &mut system.fast_rom,
                 vblank: false,
             };
             dma::run(&channels, mask, &mut bus);

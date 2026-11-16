@@ -71,6 +71,16 @@ material used to implement it. No GPL emulator source is translated or copied.
   ares formula and is embedded as a constant.
 - No external DSP crate is linked. RustySNES remains an oracle/reference only.
 
+## `src/cpu.rs` timing and `src/system.rs` wait states
+
+- SNESdev Wiki [Memory mapping](https://snes.nesdev.org/wiki/Memory_map) and
+  the [Cycles](https://snes.nesdev.org/wiki/Cycles) page.
+- ISC-licensed ares `ares/sfc/cpu/memory.cpp` (`CPU::wait`), `timing.cpp`
+  (`CPU::step`) and `io.cpp` (`$420D` MEMSEL) for the exact per-region master
+  clock counts and the fast-ROM latch.
+- `unko-snes` counts NTSC master clocks directly; the ISC ares table is
+  transcribed, not copied.
+
 ## `src/ppu.rs`
 
 - SNESdev Wiki PPU pages: [Backgrounds](https://snes.nesdev.org/wiki/Backgrounds),
@@ -84,8 +94,11 @@ material used to implement it. No GPL emulator source is translated or copied.
   map, OAM/VRAM/CGRAM layouts, tiledata bitplane order, sprite size tables,
   Mode 7 affine maths and vblank/NMI timing.
 - The renderer is line-based rather than a direct cycle-scheduler port; the
-  remaining timing/colour-math gaps are recorded in
-  `docs/snes-accuracy-divergences.md`.
+  remaining timing gaps are recorded in `docs/snes-accuracy-divergences.md`.
+- Colour math, the priority tables and the sprite object-grid addressing follow
+  `ares/sfc/ppu/dac.cpp`, `ppu.cpp` (`updateVideoMode`) and `object.cpp`.
+- The oracle comparisons use ares `--dump-frame` and RustySNES' VRAM/CGRAM/OAM
+  accessors as black-box outputs; no RustySNES code is imported.
 
 ## `src/dma.rs`
 

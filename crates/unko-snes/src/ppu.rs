@@ -80,6 +80,9 @@ pub struct Ppu {
     cgwsel: u8,
     cgadsub: u8,
     coldata: u8,
+    color_red: u8,
+    color_green: u8,
+    color_blue: u8,
     /// $2133 SETINI
     setini: u8,
     /// $2137 latch
@@ -87,6 +90,7 @@ pub struct Ppu {
     latched_v: u16,
     counter_latch: bool,
     line_event: bool,
+    layer_mask: Option<u8>,
 }
 
 impl Default for Ppu {
@@ -146,11 +150,15 @@ impl Ppu {
             cgwsel: 0,
             cgadsub: 0,
             coldata: 0,
+            color_red: 0,
+            color_green: 0,
+            color_blue: 0,
             setini: 0,
             latched_h: 0,
             latched_v: 0,
             counter_latch: false,
             line_event: false,
+            layer_mask: None,
         }
     }
 
@@ -177,6 +185,37 @@ impl Ppu {
     /// Read a word from VRAM (debug/test helper).
     pub fn vram_word(&self, address: u16) -> u16 {
         self.vram[usize::from(address & 0x7FFF)]
+    }
+
+    /// Render one scanline of the object layer into a fresh buffer.
+    /// Diagnostics only; useful for isolating sprite placement from background
+    /// composition.
+    pub fn debug_sprite_row(&self, y: usize) -> Vec<(usize, u8, u8)> {
+        let mut main = [Pixel::default(); SCREEN_WIDTH];
+        let mut sub = [Pixel::default(); SCREEN_WIDTH];
+        let (_, obj_priority) = self.priority_tables(self.bg_mode & 0x07);
+        self.render_sprites(&mut main, &mut sub, y, &obj_priority);
+        main.iter()
+            .enumerate()
+            .filter(|(_, pixel)| pixel.priority != 0)
+            .map(|(x, pixel)| (x, pixel.color, pixel.priority))
+            .collect()
+    }
+
+    /// Override the main-screen layer mask. Diagnostics only: the mask is not
+    /// part of the PPU state and is never serialized.
+    pub fn set_layer_mask(&mut self, mask: Option<u8>) {
+        self.layer_mask = mask;
+    }
+
+    /// Current OBSEL value (debug/test helper).
+    pub const fn obsel(&self) -> u8 {
+        self.obsel
+    }
+
+    /// Read the object attribute memory (debug/test helper).
+    pub fn oam(&self) -> &[u8; 0x220] {
+        &self.oam
     }
 
     /// Read a CGRAM word (debug/test helper).
@@ -281,9 +320,13 @@ impl Ppu {
     }
 
     /// Render the current visible scanline after HDMA has run.
+    ///
+    /// The PPU numbers visible NTSC lines 1-224; line 0 is part of vblank and
+    /// never produces pixels. Background and sprite fetches therefore use the
+    /// line number itself, not the framebuffer row.
     pub fn render_current_line(&mut self) {
         if (1..=SCREEN_HEIGHT as u16).contains(&self.line) {
-            self.render_line(usize::from(self.line - 1));
+            self.render_line(usize::from(self.line), usize::from(self.line - 1));
         }
     }
 
@@ -439,7 +482,18 @@ impl Ppu {
             0x212F => self.tsw = data,
             0x2130 => self.cgwsel = data,
             0x2131 => self.cgadsub = data,
-            0x2132 => self.coldata = data,
+            0x2132 => {
+                self.coldata = data;
+                if data & 0x20 != 0 {
+                    self.color_red = data & 0x1F;
+                }
+                if data & 0x40 != 0 {
+                    self.color_green = data & 0x1F;
+                }
+                if data & 0x80 != 0 {
+                    self.color_blue = data & 0x1F;
+                }
+            }
             0x2133 => self.setini = data,
             0x2137 => {
                 self.latched_h = self.dot;
@@ -489,38 +543,58 @@ impl Ppu {
         self.oam[usize::from(address & 0x3FF)] = data;
     }
 
-    fn render_line(&mut self, y: usize) {
-        let mut pixels = [Pixel::default(); SCREEN_WIDTH];
+    fn render_line(&mut self, y: usize, row: usize) {
+        let mut main = [Pixel::default(); SCREEN_WIDTH];
+        let mut sub = [Pixel::default(); SCREEN_WIDTH];
         let mode = self.bg_mode & 0x07;
-        let order: &[usize] = match mode {
-            0 => &[3, 2, 1, 0],
-            1 => &[2, 1, 0],
-            2..=4 => &[1, 0],
-            5..=7 => &[0],
-            _ => &[],
-        };
-        let main_screen = self.tm;
-        for &layer in order {
-            if main_screen & (1 << layer) != 0 {
-                if mode == 7 && layer == 0 {
-                    self.render_mode7(&mut pixels, y);
-                } else if mode <= 6 {
-                    self.render_background(&mut pixels, y, layer, mode);
-                }
+        let (bg_priority, obj_priority) = self.priority_tables(mode);
+        let main_mask = self.layer_mask.unwrap_or(self.tm);
+        for (layer, priority) in bg_priority.iter().enumerate() {
+            let enabled = main_mask & (1 << layer) != 0
+                || (self.ts & (1 << layer) != 0 && self.layer_mask.is_none());
+            if !enabled {
+                continue;
+            }
+            if mode == 7 && layer == 0 {
+                self.render_mode7(&mut main, &mut sub, y, layer);
+            } else if mode <= 6 {
+                self.render_background(&mut main, &mut sub, y, layer, mode, priority);
             }
         }
-        if main_screen & 0x10 != 0 {
-            self.render_sprites(&mut pixels, y);
+        if main_mask & 0x10 != 0 || self.ts & 0x10 != 0 {
+            self.render_sprites(&mut main, &mut sub, y, &obj_priority);
         }
-        self.present_line(y, &pixels);
+        self.present_line(row, &main, &sub);
+    }
+
+    /// Per-layer priority tables, transcribed from ares `updateVideoMode`.
+    fn priority_tables(&self, mode: u8) -> ([[u8; 2]; 4], [u8; 4]) {
+        let bg3_priority = self.bg_mode & 0x08 != 0;
+        match mode {
+            0 => ([[8, 11], [7, 10], [2, 5], [1, 4]], [3, 6, 9, 12]),
+            1 if bg3_priority => ([[5, 8], [4, 7], [1, 10], [0, 0]], [2, 3, 6, 9]),
+            1 => ([[6, 9], [5, 8], [1, 3], [0, 0]], [2, 4, 7, 10]),
+            2..=5 => ([[3, 7], [1, 5], [0, 0], [0, 0]], [2, 4, 6, 8]),
+            6 => ([[2, 5], [0, 0], [0, 0], [0, 0]], [1, 3, 4, 6]),
+            7 => {
+                if self.setini & 0x40 != 0 {
+                    ([[3, 3], [1, 5], [0, 0], [0, 0]], [2, 4, 6, 7])
+                } else {
+                    ([[2, 2], [0, 0], [0, 0], [0, 0]], [1, 3, 4, 5])
+                }
+            }
+            _ => ([[0; 2]; 4], [0; 4]),
+        }
     }
 
     fn render_background(
         &self,
-        pixels: &mut [Pixel; SCREEN_WIDTH],
+        main: &mut [Pixel; SCREEN_WIDTH],
+        sub: &mut [Pixel; SCREEN_WIDTH],
         y: usize,
         layer: usize,
         mode: u8,
+        priority: &[u8; 2],
     ) {
         let bpp_shift = match (mode, layer) {
             (0, _) => 0,
@@ -549,8 +623,10 @@ impl Ppu {
         let palette_offset = if mode == 0 { (layer as u16) << 5 } else { 0 };
         let palette_shift = 2u16 << bpp_shift;
         let tile_stride = 8u32 << bpp_shift;
+        let main_enable = self.layer_mask.unwrap_or(self.tm) & (1 << layer) != 0;
+        let sub_enable = self.ts & (1 << layer) != 0 && self.layer_mask.is_none();
 
-        for (x, pixel) in pixels.iter_mut().enumerate() {
+        for x in 0..SCREEN_WIDTH {
             let h = (x as u32 + hscroll) & (hsize - 1);
             let v = (y as u32 + vscroll) & (vsize - 1);
             let htile = h >> (3 + tile_size);
@@ -579,11 +655,7 @@ impl Ppu {
                 }
             }
             let address = char_base + u32::from(character) * tile_stride + row;
-            let bit = if hflip {
-                x as u32 & 7
-            } else {
-                7 - (x as u32 & 7)
-            };
+            let bit = if hflip { h & 7 } else { 7 - (h & 7) };
             let word0 = self.vram[(address & 0x7FFF) as usize];
             let mut color = ((word0 >> bit) & 1) | (((word0 >> (8 + bit)) & 1) << 1);
             if bpp_shift >= 1 {
@@ -603,17 +675,27 @@ impl Ppu {
             }
             let palette_group = (attributes >> 10) & 0x07;
             let palette = palette_offset + (palette_group << palette_shift) + color;
-            let priority = ((4 - layer) as u8) << 4 | (u8::from(attributes & 0x2000 != 0) << 3);
-            if priority >= pixel.priority {
-                *pixel = Pixel {
-                    color: palette,
-                    priority,
-                };
+            let pixel = Pixel {
+                color: palette as u8,
+                priority: priority[usize::from(attributes & 0x2000 != 0)],
+                layer: layer as u8,
+            };
+            if main_enable {
+                plot(main, x, pixel);
+            }
+            if sub_enable {
+                plot(sub, x, pixel);
             }
         }
     }
 
-    fn render_mode7(&self, pixels: &mut [Pixel; SCREEN_WIDTH], y: usize) {
+    fn render_mode7(
+        &self,
+        main: &mut [Pixel; SCREEN_WIDTH],
+        sub: &mut [Pixel; SCREEN_WIDTH],
+        y: usize,
+        layer: usize,
+    ) {
         let a = i32::from(self.m7a);
         let b = i32::from(self.m7b);
         let c = i32::from(self.m7c);
@@ -635,7 +717,10 @@ impl Ppu {
             + ((d * clip13(voffset - vcenter)) & !63)
             + ((d * y) & !63)
             + (vcenter << 8);
-        for (x, pixel) in pixels.iter_mut().enumerate() {
+        let main_enable = self.layer_mask.unwrap_or(self.tm) & (1 << layer) != 0;
+        let sub_enable = self.ts & (1 << layer) != 0 && self.layer_mask.is_none();
+        let extbg = self.setini & 0x40 != 0;
+        for x in 0..SCREEN_WIDTH {
             let x = if self.m7sel & 0x01 != 0 {
                 255 - x as i32
             } else {
@@ -652,26 +737,47 @@ impl Ppu {
             let tile = self.vram[((tile_y << 7 | tile_x) & 0x7FFF) as usize] as u8;
             let palette_address = ((pixel_y & 7) << 3 | (pixel_x & 7)) as usize;
             let index = usize::from((tile as u16) << 6 | palette_address as u16);
-            let palette = (self.vram[index & 0x7FFF] >> 8) as u8;
+            let mut palette = (self.vram[index & 0x7FFF] >> 8) as u8;
             if palette == 0 {
                 continue;
             }
-            let priority = 0x48
-                | (u8::from(self.cgadsub & 0x20 != 0) << 2)
-                | (u8::from(self.cgadsub & 0x40 != 0) << 1);
-            if priority >= pixel.priority {
-                *pixel = Pixel {
-                    color: u16::from(palette),
-                    priority,
-                };
+            let priority = if layer == 0 || !extbg {
+                2
+            } else {
+                let bit = palette >> 7;
+                palette &= 0x7F;
+                if bit != 0 {
+                    5
+                } else {
+                    1
+                }
+            };
+            let pixel = Pixel {
+                color: palette,
+                priority,
+                layer: layer as u8,
+            };
+            if main_enable {
+                plot(main, x as usize, pixel);
+            }
+            if sub_enable {
+                plot(sub, x as usize, pixel);
             }
         }
     }
 
-    fn render_sprites(&self, pixels: &mut [Pixel; SCREEN_WIDTH], y: usize) {
+    fn render_sprites(
+        &self,
+        main: &mut [Pixel; SCREEN_WIDTH],
+        sub: &mut [Pixel; SCREEN_WIDTH],
+        y: usize,
+        priority: &[u8; 4],
+    ) {
         let base_size = (self.obsel >> 5) & 0x07;
         let nameselect = (self.obsel >> 3) & 0x03;
         let tiledata = u32::from(self.obsel & 0x07) << 13;
+        let main_enable = self.layer_mask.unwrap_or(self.tm) & 0x10 != 0;
+        let sub_enable = self.ts & 0x10 != 0 && self.layer_mask.is_none();
         for sprite in 0..128 {
             let base = sprite * 4;
             let attr = self.oam[base + 3];
@@ -692,6 +798,7 @@ impl Ppu {
             };
             let character = self.oam[base + 2];
             let tile_width = width / 8;
+            let priority = priority[usize::from((attr >> 4) & 0x03)];
             for tx in 0..tile_width {
                 let sx = x + tx * 8;
                 for px in 0..8 {
@@ -706,9 +813,14 @@ impl Ppu {
                         } else {
                             tx
                         };
+                    // Object tiles live in a 16-column grid: the row nibble
+                    // selects a 256-word line and the column nibble a 16-word
+                    // tile, matching ares `Object::fetch`.
                     let chry = ((u16::from(character) >> 4) + row / 8) & 0x0F;
+                    let chrx = chrx & 0x0F;
                     let mut address = tiledata
-                        + ((u32::from(chry) + (u32::from(chrx) & 0x0F)) << 4)
+                        + (u32::from(chry) << 8)
+                        + (u32::from(chrx) << 4)
                         + u32::from(row & 7);
                     if attr & 0x01 != 0 {
                         address += (u32::from(nameselect) + 1) << 12;
@@ -723,34 +835,63 @@ impl Ppu {
                     if color == 0 {
                         continue;
                     }
-                    let palette = 128 + (u16::from((attr >> 1) & 0x07) << 4) + color;
-                    let priority = 0x60u8
-                        .wrapping_sub(((attr >> 4) & 0x03) << 4)
-                        .wrapping_add(4);
-                    let pixel = &mut pixels[usize::from(screen_x)];
-                    if priority >= pixel.priority {
-                        *pixel = Pixel {
-                            color: palette,
-                            priority,
-                        };
+                    let palette = 128u16 + ((u16::from(attr) >> 1) & 0x07) * 16 + color;
+                    let pixel = Pixel {
+                        color: palette as u8,
+                        priority,
+                        layer: 4,
+                    };
+                    let index = usize::from(screen_x);
+                    if main_enable {
+                        plot_sprite(main, index, pixel);
+                    }
+                    if sub_enable {
+                        plot_sprite(sub, index, pixel);
                     }
                 }
             }
         }
     }
 
-    fn present_line(&mut self, y: usize, pixels: &[Pixel; SCREEN_WIDTH]) {
+    fn present_line(
+        &mut self,
+        y: usize,
+        main: &[Pixel; SCREEN_WIDTH],
+        sub: &[Pixel; SCREEN_WIDTH],
+    ) {
         let brightness = if self.display_disable {
             0
         } else {
             u32::from(self.display_brightness) + 1
         };
-        for (x, pixel) in pixels.iter().enumerate() {
-            let color = if pixel.color == 0 {
+        let fixed = self.fixed_color();
+        for x in 0..SCREEN_WIDTH {
+            let above = main[x];
+            let below = sub[x];
+            let backdrop = above.priority == 0;
+            let layer = if backdrop { 5 } else { above.layer };
+            let mut color = if backdrop {
                 self.cgram[0]
             } else {
-                self.cgram[usize::from(pixel.color & 0xFF)]
+                self.cgram[usize::from(above.color)]
             };
+            let sub_transparent = below.priority == 0;
+            let sub_color = if sub_transparent {
+                self.cgram[0]
+            } else {
+                self.cgram[usize::from(below.color)]
+            };
+            let enable = if backdrop {
+                self.cgadsub & 0x20 != 0
+            } else {
+                self.cgadsub & (1 << layer) != 0
+            };
+            if enable {
+                let use_sub = self.cgwsel & 0x02 != 0 && !sub_transparent;
+                let operand = if use_sub { sub_color } else { fixed };
+                let halve = self.cgadsub & 0x40 != 0 && use_sub;
+                color = blend(color, operand, halve, self.cgadsub & 0x80 != 0);
+            }
             let expand = |value: u16| {
                 let value = value & 0x1F;
                 (u32::from(value) << 3) | u32::from(value >> 2)
@@ -766,12 +907,66 @@ impl Ppu {
             self.framebuffer[index + 3] = 0xFF;
         }
     }
+
+    fn fixed_color(&self) -> u16 {
+        u16::from(self.color_red)
+            | (u16::from(self.color_green) << 5)
+            | (u16::from(self.color_blue) << 10)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct Pixel {
-    color: u16,
+    color: u8,
     priority: u8,
+    layer: u8,
+}
+
+/// Plot a background pixel: higher priority wins, ties keep the earlier layer.
+fn plot(buffer: &mut [Pixel; SCREEN_WIDTH], x: usize, pixel: Pixel) {
+    if pixel.priority == 0 {
+        return;
+    }
+    if pixel.priority > buffer[x].priority {
+        buffer[x] = pixel;
+    }
+}
+
+/// Plot a sprite pixel: later sprites win ties within the object layer, but a
+/// sprite never displaces a background pixel of equal priority.
+fn plot_sprite(buffer: &mut [Pixel; SCREEN_WIDTH], x: usize, pixel: Pixel) {
+    if pixel.priority == 0 {
+        return;
+    }
+    let current = buffer[x];
+    if pixel.priority > current.priority
+        || (current.layer == 4 && pixel.priority == current.priority)
+    {
+        buffer[x] = pixel;
+    }
+}
+
+/// 15-bit add/subtract blend with optional halving, matching ares `DAC::blend`.
+fn blend(x: u16, y: u16, halve: bool, subtract: bool) -> u16 {
+    let x = u32::from(x);
+    let y = u32::from(y);
+    if !subtract {
+        if !halve {
+            let sum = x + y;
+            let carry = (sum - ((x ^ y) & 0x0421)) & 0x8420;
+            ((sum - carry) | (carry - (carry >> 5))) as u16
+        } else {
+            (((x + y) - ((x ^ y) & 0x0421)) >> 1) as u16
+        }
+    } else {
+        let diff = x.wrapping_sub(y).wrapping_add(0x8420);
+        let borrow = (diff.wrapping_sub((x ^ y) & 0x8420)) & 0x8420;
+        if !halve {
+            (diff.wrapping_sub(borrow) & borrow.wrapping_sub(borrow >> 5)) as u16
+        } else {
+            (((diff.wrapping_sub(borrow) & borrow.wrapping_sub(borrow >> 5)) & 0x7BDE) >> 1) as u16
+        }
+    }
 }
 
 fn sprite_size(base: u8, large: u8, height: bool) -> u16 {
@@ -869,7 +1064,7 @@ mod tests {
         // Tile 0 row 0 has color 1 in the left-most pixel.
         ppu.vram[0] = 0x8000;
         ppu.write(0x212C, 0x01);
-        ppu.render_line(0);
+        ppu.render_line(0, 0);
         assert_eq!(&ppu.framebuffer[0..4], &[0, 255, 0, 255]);
     }
 }

@@ -25,14 +25,17 @@ in another Rust project. A future `unko-snes-host` crate will provide the
 - S-DSP: eight BRR voices, Gaussian interpolation, ADSR/GAIN envelopes,
   noise/LFSR, pitch modulation, echo and stereo 32 kHz sample output
 - Line-based S-PPU: register map, VRAM/CGRAM/OAM, vblank/NMI, modes 0-7,
-  tile backgrounds, Mode 7 affine mapping and sprites
+  tile backgrounds, Mode 7 affine mapping, sprites, subscreen and colour math
+- Exact S-CPU memory timing in NTSC master clocks with the ares wait-state
+  table, plus DMA/HDMA stalls
 - S-CPU general-purpose DMA
 - Minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM, reset,
   `$2100-$213F` PPU registers and `$2140-$2143` APU ports
 - Oracle differential tests against the MIT `w65c816` and `spc700` crates
 
-The next work is the retail boot handshake, dot-level PPU timing/colour math
-and HDMA.
+Super Mario World is 99.5% pixel-identical to ares at 600 frames with
+bit-identical VRAM/CGRAM/OAM. The next work is dot-level PPU scheduling,
+windows/hires/interlace and S-DSP audio parity.
 
 ## Accuracy sources
 

@@ -80,6 +80,19 @@ fn main() -> ExitCode {
             if system.ppu.frame_ready() {
                 system.ppu.acknowledge_frame();
                 frames += 1;
+                if let Some(path) = std::env::var_os("SCROLL_LOG") {
+                    let mut line = format!("{frames}");
+                    for layer in 0..4 {
+                        let (h, v) = system.ppu.bg_scroll(layer);
+                        line.push_str(&format!(",{h},{v}"));
+                    }
+                    line.push('\n');
+                    let _ = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                        .and_then(|mut file| std::io::Write::write_all(&mut file, line.as_bytes()));
+                }
             }
         }
         eprintln!("frames={frames}");
@@ -114,8 +127,46 @@ fn main() -> ExitCode {
     if let Some(path) = std::env::var_os("DUMP_APU") {
         let _ = std::fs::write(path, system.apu.ram());
     }
+    if let Ok(mask) = std::env::var("ONLY_TM") {
+        if let Ok(mask) = mask.parse::<u8>() {
+            system.ppu.set_layer_mask(Some(mask));
+            system.ppu.acknowledge_frame();
+            let mut guard = 0;
+            while !system.ppu.frame_ready() && guard < 2_000_000 {
+                system.step();
+                guard += 1;
+            }
+        }
+    }
     if let Some(path) = std::env::var_os("FRAME_OUT") {
         let _ = std::fs::write(path, system.ppu.frame_buffer());
+    }
+    if std::env::var_os("OAM_DUMP").is_some() {
+        let oam = system.ppu.oam();
+        for n in 0..128 {
+            let y = oam[n * 4 + 1];
+            if y < 224 {
+                let high = oam[0x200 + n / 4];
+                let x = u16::from(oam[n * 4]) | (u16::from((high >> ((n & 3) * 2)) & 1) << 8);
+                let size = (high >> ((n & 3) * 2 + 1)) & 1;
+                let obsel = system.ppu.obsel();
+                let base = usize::from((obsel >> 5) & 7);
+                let widths = [8u16, 8, 8, 16, 16, 32, 16, 16];
+                let heights = [8u16, 8, 8, 16, 16, 32, 32, 32];
+                let large_w = [16u16, 32, 64, 32, 64, 64, 32, 32];
+                let large_h = [16u16, 32, 64, 32, 64, 64, 64, 32];
+                let (w, h) = if size != 0 {
+                    (large_w[base], large_h[base])
+                } else {
+                    (widths[base], heights[base])
+                };
+                eprintln!(
+                    "OAM {n:3} x={x:3} y={y:3} tile={:02X} attr={:02X} size={size} {w}x{h} obsel={obsel:02X}",
+                    oam[n * 4 + 2],
+                    oam[n * 4 + 3]
+                );
+            }
+        }
     }
     if let Some(path) = std::env::var_os("CGRAM_OUT") {
         let mut cgram = Vec::with_capacity(512);

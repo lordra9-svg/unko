@@ -57,7 +57,7 @@ fn step(cpu: &mut Cpu, ram: &mut Ram) -> u32 {
 #[test]
 fn lda_immediate_8() {
     let (mut cpu, mut ram) = setup(&[0xA9, 0x42, 0xDB]);
-    assert_eq!(step(&mut cpu, &mut ram), 2);
+    assert_eq!(step(&mut cpu, &mut ram), 12);
     assert_eq!(cpu.a, 0x42);
     assert!(!cpu.flags.zero);
     assert!(!cpu.flags.negative);
@@ -68,7 +68,7 @@ fn lda_immediate_8() {
 fn lda_immediate_16() {
     let (mut cpu, mut ram) = setup(&[0xA9, 0x34, 0x12, 0xDB]);
     cpu.flags = flags(false, true);
-    assert_eq!(step(&mut cpu, &mut ram), 3);
+    assert_eq!(step(&mut cpu, &mut ram), 18);
     assert_eq!(cpu.a, 0x1234);
     assert!(!cpu.flags.zero);
     assert!(!cpu.flags.negative);
@@ -87,7 +87,7 @@ fn lda_sets_zero_and_negative() {
 fn sta_direct() {
     let (mut cpu, mut ram) = setup(&[0x85, 0x10, 0xDB]);
     cpu.a = 0x5A;
-    assert_eq!(step(&mut cpu, &mut ram), 3);
+    assert_eq!(step(&mut cpu, &mut ram), 18);
     assert_eq!(ram.data[0x10], 0x5A);
     assert_eq!(cpu.pc, 0x8002);
 }
@@ -117,7 +117,7 @@ fn lda_absolute_indexed_page_cross_costs_a_cycle() {
     let (mut cpu, mut ram) = setup(&[0xBD, 0x00, 0x90, 0xDB]);
     cpu.x = 0x0100;
     ram.data[0x9100] = 0x77;
-    assert_eq!(step(&mut cpu, &mut ram), 5);
+    assert_eq!(step(&mut cpu, &mut ram), 30);
     assert_eq!(cpu.a, 0x77);
 }
 
@@ -126,7 +126,7 @@ fn lda_absolute_indexed_no_page_cross() {
     let (mut cpu, mut ram) = setup(&[0xBD, 0x00, 0x90, 0xDB]);
     cpu.x = 0x0010;
     ram.data[0x9010] = 0x77;
-    assert_eq!(step(&mut cpu, &mut ram), 4);
+    assert_eq!(step(&mut cpu, &mut ram), 24);
     assert_eq!(cpu.a, 0x77);
 }
 
@@ -268,10 +268,10 @@ fn inc_and_dec_memory() {
 fn push_and_pull_accumulator_8() {
     let (mut cpu, mut ram) = setup(&[0x48, 0x68, 0xDB]);
     cpu.a = 0x42;
-    assert_eq!(step(&mut cpu, &mut ram), 3);
+    assert_eq!(step(&mut cpu, &mut ram), 18);
     assert_eq!(cpu.s, 0x01FE);
     assert_eq!(ram.data[0x01FF], 0x42);
-    assert_eq!(step(&mut cpu, &mut ram), 4);
+    assert_eq!(step(&mut cpu, &mut ram), 24);
     assert_eq!(cpu.a, 0x42);
     assert_eq!(cpu.s, 0x01FF);
 }
@@ -281,11 +281,11 @@ fn push_and_pull_accumulator_16() {
     let (mut cpu, mut ram) = setup(&[0x48, 0x68, 0xDB]);
     cpu.flags = flags(false, true);
     cpu.a = 0x1234;
-    assert_eq!(step(&mut cpu, &mut ram), 4);
+    assert_eq!(step(&mut cpu, &mut ram), 24);
     assert_eq!(cpu.s, 0x01FD);
     assert_eq!(ram.data[0x01FF], 0x12);
     assert_eq!(ram.data[0x01FE], 0x34);
-    assert_eq!(step(&mut cpu, &mut ram), 5);
+    assert_eq!(step(&mut cpu, &mut ram), 30);
     assert_eq!(cpu.a, 0x1234);
 }
 
@@ -326,7 +326,7 @@ fn index_to_accumulator_16() {
 fn exchange_ba() {
     let (mut cpu, mut ram) = setup(&[0xEB, 0xDB]);
     cpu.a = 0x1234;
-    assert_eq!(step(&mut cpu, &mut ram), 3);
+    assert_eq!(step(&mut cpu, &mut ram), 18);
     assert_eq!(cpu.a, 0x3412);
 }
 
@@ -361,12 +361,12 @@ fn sep_and_rep() {
 fn branch_taken_and_not_taken() {
     let (mut cpu, mut ram) = setup(&[0xD0, 0x02, 0xEA, 0xEA, 0xDB]);
     cpu.flags.zero = false;
-    assert_eq!(step(&mut cpu, &mut ram), 3);
+    assert_eq!(step(&mut cpu, &mut ram), 18);
     assert_eq!(cpu.pc, 0x8004);
 
     let (mut cpu, mut ram) = setup(&[0xD0, 0x02, 0xEA, 0xEA, 0xDB]);
     cpu.flags.zero = true;
-    assert_eq!(step(&mut cpu, &mut ram), 2);
+    assert_eq!(step(&mut cpu, &mut ram), 12);
     assert_eq!(cpu.pc, 0x8002);
 }
 
@@ -378,17 +378,17 @@ fn branch_page_cross_in_emulation_costs_a_cycle() {
     cpu.flags = flags(true, true);
     cpu.flags.zero = false;
     ram.load(0x80FD, &[0xD0, 0x7F, 0xDB]);
-    assert_eq!(step(&mut cpu, &mut ram), 4);
+    assert_eq!(step(&mut cpu, &mut ram), 24);
 }
 
 #[test]
 fn jsr_and_rts() {
     let (mut cpu, mut ram) = setup(&[0x20, 0x00, 0x90, 0xDB]);
     ram.load(0x9000, &[0x60]);
-    assert_eq!(step(&mut cpu, &mut ram), 6);
+    assert_eq!(step(&mut cpu, &mut ram), 36);
     assert_eq!(cpu.pc, 0x9000);
     assert_eq!(cpu.s, 0x01FD);
-    assert_eq!(step(&mut cpu, &mut ram), 6);
+    assert_eq!(step(&mut cpu, &mut ram), 36);
     assert_eq!(cpu.pc, 0x8003);
     assert_eq!(cpu.s, 0x01FF);
 }
@@ -398,7 +398,7 @@ fn jmp_indirect() {
     let (mut cpu, mut ram) = setup(&[0x6C, 0x10, 0x00, 0xDB]);
     ram.data[0x10] = 0x00;
     ram.data[0x11] = 0x90;
-    assert_eq!(step(&mut cpu, &mut ram), 5);
+    assert_eq!(step(&mut cpu, &mut ram), 30);
     assert_eq!(cpu.pc, 0x9000);
 }
 
@@ -408,7 +408,7 @@ fn jml_indirect_long() {
     ram.data[0x10] = 0x34;
     ram.data[0x11] = 0x12;
     ram.data[0x12] = 0x02;
-    assert_eq!(step(&mut cpu, &mut ram), 6);
+    assert_eq!(step(&mut cpu, &mut ram), 36);
     assert_eq!(cpu.pc, 0x1234);
     assert_eq!(cpu.pbr, 0x02);
 }
@@ -456,7 +456,7 @@ fn brk_pushes_return_address_and_uses_irq_vector() {
     cpu.flags = flags(true, true);
     ram.data[0xFFFE] = 0x00;
     ram.data[0xFFFF] = 0x90;
-    assert_eq!(step(&mut cpu, &mut ram), 7);
+    assert_eq!(step(&mut cpu, &mut ram), 42);
     assert_eq!(cpu.pc, 0x9000);
     assert_eq!(cpu.pbr, 0);
     assert!(cpu.flags.irq_disable);
@@ -475,7 +475,7 @@ fn rti_restores_state() {
     ram.data[0x01FD] = 0x02;
     ram.data[0x01FE] = 0x80;
     ram.data[0x01FF] = 0x00;
-    assert_eq!(step(&mut cpu, &mut ram), 6);
+    assert_eq!(step(&mut cpu, &mut ram), 36);
     assert_eq!(cpu.pc, 0x8002);
     assert_eq!(cpu.s, 0x01FE);
 }
@@ -502,11 +502,11 @@ fn wai_services_unmasked_irq() {
 fn jsl_and_rtl() {
     let (mut cpu, mut ram) = setup(&[0x22, 0x00, 0x90, 0x02, 0xDB]);
     ram.load(0x02_9000, &[0x6B]);
-    assert_eq!(step(&mut cpu, &mut ram), 8);
+    assert_eq!(step(&mut cpu, &mut ram), 48);
     assert_eq!(cpu.pc, 0x9000);
     assert_eq!(cpu.pbr, 0x02);
     assert_eq!(cpu.s, 0x01FC);
-    assert_eq!(step(&mut cpu, &mut ram), 6);
+    assert_eq!(step(&mut cpu, &mut ram), 36);
     assert_eq!(cpu.pc, 0x8004);
     assert_eq!(cpu.pbr, 0x00);
     assert_eq!(cpu.s, 0x01FF);
@@ -519,8 +519,8 @@ fn jsr_absolute_indexed_indirect() {
     ram.data[0x12] = 0x00;
     ram.data[0x13] = 0x90;
     ram.load(0x9000, &[0x60]);
-    assert_eq!(step(&mut cpu, &mut ram), 8);
+    assert_eq!(step(&mut cpu, &mut ram), 48);
     assert_eq!(cpu.pc, 0x9000);
-    assert_eq!(step(&mut cpu, &mut ram), 6);
+    assert_eq!(step(&mut cpu, &mut ram), 36);
     assert_eq!(cpu.pc, 0x8003);
 }

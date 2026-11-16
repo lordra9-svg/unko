@@ -2,8 +2,8 @@
 //!
 //! The interpreter executes one instruction per [`Cpu::step`] call and performs
 //! every bus access through [`CpuBus`], so the bus sees the documented number
-//! and order of cycles. Peripheral timing can therefore advance once per access
-//! or idle cycle.
+//! and order of cycles. Time is counted in NTSC master clocks: six per base
+//! S-CPU bus cycle, plus the wait states reported by [`CpuBus::access_cycles`].
 //!
 //! Behaviour follows the public WDC 65C816 data sheet and the ISC-licensed ares
 //! `wdc65816` implementation. The MIT `w65c816` crate is used only as a
@@ -13,10 +13,17 @@ use std::fmt;
 
 /// A 24-bit system bus driven by the CPU.
 pub trait CpuBus {
-    /// Read one byte. Implementations should advance one CPU cycle.
+    /// Read one byte. The CPU accounts the clocks, not the bus.
     fn read(&mut self, address: u32) -> u8;
-    /// Write one byte. Implementations should advance one CPU cycle.
+    /// Write one byte. The CPU accounts the clocks, not the bus.
     fn write(&mut self, address: u32, value: u8);
+    /// Master clocks required by a memory access. The S-CPU runs one base bus
+    /// cycle every six master clocks; slow ROM, WRAM and internal I/O add wait
+    /// states, matching the ares `CPU::wait` table.
+    fn access_cycles(&mut self, _address: u32) -> u32 {
+        6
+    }
+
     /// Advance one idle CPU cycle.
     fn idle(&mut self) {}
 }
@@ -88,7 +95,7 @@ pub struct Cpu {
     pub irq_line: bool,
     /// Latched NMI edge.
     pub nmi_pending: bool,
-    /// Total bus cycles retired.
+    /// Total master clocks retired.
     pub cycles: u64,
     /// Number of NMI edges serviced (debug).
     pub nmi_services: u64,
@@ -190,7 +197,7 @@ impl Cpu {
 
     /// Execute one instruction or service one pending interrupt.
     ///
-    /// Returns the number of bus cycles retired.
+    /// Returns the number of NTSC master clocks retired.
     pub fn step(&mut self, bus: &mut impl CpuBus) -> u32 {
         let start = self.cycles;
 
@@ -257,17 +264,19 @@ impl Cpu {
     }
 
     fn read(&mut self, bus: &mut impl CpuBus, address: u32) -> u8 {
-        self.cycles += 1;
-        bus.read(address & 0x00FF_FFFF)
+        let address = address & 0x00FF_FFFF;
+        self.cycles += u64::from(bus.access_cycles(address));
+        bus.read(address)
     }
 
     fn write(&mut self, bus: &mut impl CpuBus, address: u32, value: u8) {
-        self.cycles += 1;
-        bus.write(address & 0x00FF_FFFF, value);
+        let address = address & 0x00FF_FFFF;
+        self.cycles += u64::from(bus.access_cycles(address));
+        bus.write(address, value);
     }
 
     fn idle(&mut self, bus: &mut impl CpuBus) {
-        self.cycles += 1;
+        self.cycles += 6;
         bus.idle();
     }
 

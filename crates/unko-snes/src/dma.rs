@@ -186,12 +186,6 @@ impl Dma {
                 }
             }
             if state.do_transfer {
-                if std::env::var_os("HDMA_TRACE").is_some() {
-                    eprintln!(
-                        "HDMA ch{index} line target={:02X} state={:?}",
-                        channel.target, state
-                    );
-                }
                 let length = match channel.control & 0x07 {
                     0 => 1,
                     1 | 2 | 6 => 2,

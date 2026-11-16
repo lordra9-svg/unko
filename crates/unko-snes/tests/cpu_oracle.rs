@@ -169,7 +169,7 @@ fn compare(label: &str, code: &[u8], state: State, patches: &[(u32, u8)]) {
 
     let mut ours_cycles = 0;
     for _ in 0..100_000 {
-        ours_cycles += ours.step(&mut ours_bus);
+        ours_cycles += u64::from(ours.step(&mut ours_bus));
         if ours.stp {
             break;
         }
@@ -227,7 +227,9 @@ fn compare(label: &str, code: &[u8], state: State, patches: &[(u32, u8)]) {
         oracle.flags().index_sel,
         "{label}: index width"
     );
-    assert_eq!(ours_cycles, oracle_cycles, "{label}: cycle count");
+    // `unko-snes` counts master clocks (six per base S-CPU bus cycle); the
+    // oracle counts base bus cycles.
+    assert_eq!(ours_cycles, oracle_cycles * 6, "{label}: cycle count");
     if let Some((address, (ours, oracle))) = ours_bus
         .data
         .iter()
