@@ -60,7 +60,8 @@ Implemented so far:
   `$4200-$5FFF` windows, 8 for slow ROM, WRAM and `$6000-$7FFF`, 12 for
   `$4000-$41FF`; SRAM and the `$420D` MEMSEL latch
 - all 256 SPC700 opcodes, addressing modes, flags, bit operations, DIV/MUL,
-  DAA/DAS and stack/call/return behaviour
+  DAA/DAS and stack/call/return behaviour, with the documented `$F0` internal/
+  external wait-state dividers (2/4/10/20 clocks per opcode cycle)
 - APU wrapper: 64 KiB RAM, user-supplied IPL ROM, four bidirectional S-CPU
   ports, IPL/control register and RAM control
 - S-DSP: register file, eight BRR voices, Gaussian interpolation, ADSR/GAIN
@@ -86,7 +87,7 @@ Implemented so far:
 
 Validation so far:
 
-- **830 workspace tests**, 0 failed
+- **831 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -108,6 +109,8 @@ Validation so far:
 - **4 I/O tests** cover the serial button order, auto-poll packing, the
   multiply/divide cycle counts and the V/H IRQ comparators; two system tests
   drive the joypad/math registers and a V-IRQ through the CPU bus
+- an APU test pins the `$F0` wait-state divider table for RAM, I/O and idle
+  cycles
 - the 65C816 differential suite now also asserts total master clocks:
   `unko-snes` retires exactly six clocks per oracle bus cycle on every one of
   the 18 suites

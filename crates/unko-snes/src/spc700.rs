@@ -16,6 +16,15 @@ pub trait SpcBus {
     fn write(&mut self, address: u16, value: u8);
     /// Advance one idle cycle.
     fn idle(&mut self) {}
+    /// S-SMP time units for an access. `None` is an internal/idle cycle.
+    ///
+    /// One unit is two APU clocks: the hardware SMP thread runs at 2.048 MHz
+    /// and an opcode cycle costs two clocks by default, so a unit is one
+    /// access at the documented 1.024 MHz rate. `$F0` bits 4-7 can raise the
+    /// internal/external wait states.
+    fn wait_cycles(&mut self, _address: Option<u16>) -> u32 {
+        1
+    }
 }
 
 /// SPC700 processor status flags.
@@ -86,7 +95,7 @@ pub struct Spc700 {
     pub wait: bool,
     /// Stopped (`STOP`).
     pub stop: bool,
-    /// Total bus cycles retired.
+    /// Total S-SMP clocks retired.
     pub cycles: u64,
 }
 
@@ -155,17 +164,17 @@ impl Spc700 {
     }
 
     fn read(&mut self, bus: &mut impl SpcBus, address: u16) -> u8 {
-        self.cycles += 1;
+        self.cycles += u64::from(bus.wait_cycles(Some(address)));
         bus.read(address)
     }
 
     fn write(&mut self, bus: &mut impl SpcBus, address: u16, value: u8) {
-        self.cycles += 1;
+        self.cycles += u64::from(bus.wait_cycles(Some(address)));
         bus.write(address, value);
     }
 
     fn idle(&mut self, bus: &mut impl SpcBus) {
-        self.cycles += 1;
+        self.cycles += u64::from(bus.wait_cycles(None));
         bus.idle();
     }
 

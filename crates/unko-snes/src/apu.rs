@@ -60,6 +60,8 @@ pub struct Apu {
     ram_disable: bool,
     timers_enable: bool,
     timers_disable: bool,
+    internal_wait: u8,
+    external_wait: u8,
     timers: [Timer; 3],
     dsp_address: u8,
     dsp: Dsp,
@@ -94,6 +96,8 @@ impl Apu {
             ram_disable: false,
             timers_enable: true,
             timers_disable: false,
+            internal_wait: 0,
+            external_wait: 0,
             timers: std::array::from_fn(|_| Timer::default()),
             dsp_address: 0,
             dsp: Dsp::new(),
@@ -154,6 +158,8 @@ impl Apu {
         self.ram_disable = false;
         self.timers_enable = true;
         self.timers_disable = false;
+        self.internal_wait = 0;
+        self.external_wait = 0;
         self.timers = std::array::from_fn(|_| Timer::default());
         self.dsp_address = 0;
         self.dsp.reset();
@@ -203,6 +209,8 @@ impl Apu {
             ram_disable: &mut self.ram_disable,
             timers_enable: &mut self.timers_enable,
             timers_disable: &mut self.timers_disable,
+            internal_wait: &mut self.internal_wait,
+            external_wait: &mut self.external_wait,
             timers: &mut self.timers,
             dsp_address: &mut self.dsp_address,
             dsp: &mut self.dsp,
@@ -263,6 +271,8 @@ struct ApuBus<'a> {
     ram_disable: &'a mut bool,
     timers_enable: &'a mut bool,
     timers_disable: &'a mut bool,
+    internal_wait: &'a mut u8,
+    external_wait: &'a mut u8,
     timers: &'a mut [Timer; 3],
     dsp_address: &'a mut u8,
     dsp: &'a mut Dsp,
@@ -274,6 +284,24 @@ struct ApuBus<'a> {
 }
 
 impl SpcBus for ApuBus<'_> {
+    fn wait_cycles(&mut self, address: Option<u16>) -> u32 {
+        // ares SMP::wait: RAM uses the external dividers, I/O and the IPL ROM
+        // use the internal dividers. The 8/16 settings are the documented
+        // hardware glitch (10/20 clocks per opcode cycle). One unit here is
+        // two APU clocks, so the table is half of ares'.
+        const CYCLE_WAIT: [u32; 4] = [1, 2, 5, 10];
+        let states = match address {
+            None => *self.internal_wait,
+            Some(address)
+                if address & 0xFFF0 == 0x00F0 || (address >= 0xFFC0 && *self.iplrom_enable) =>
+            {
+                *self.internal_wait
+            }
+            _ => *self.external_wait,
+        };
+        CYCLE_WAIT[usize::from(states & 0x03)]
+    }
+
     fn read(&mut self, address: u16) -> u8 {
         match address {
             0xF0 | 0xF1 | 0xFA | 0xFB | 0xFC => 0,
@@ -310,6 +338,8 @@ impl SpcBus for ApuBus<'_> {
                 *self.ram_writable = value & 0x02 != 0;
                 *self.ram_disable = value & 0x04 != 0;
                 *self.timers_enable = value & 0x08 != 0;
+                *self.internal_wait = (value >> 4) & 0x03;
+                *self.external_wait = (value >> 6) & 0x03;
             }
             0xF1 => {
                 for (index, timer) in self.timers.iter_mut().enumerate() {
@@ -386,6 +416,8 @@ mod tests {
             ram_disable: &mut apu.ram_disable,
             timers_enable: &mut apu.timers_enable,
             timers_disable: &mut apu.timers_disable,
+            internal_wait: &mut apu.internal_wait,
+            external_wait: &mut apu.external_wait,
             timers: &mut apu.timers,
             dsp_address: &mut apu.dsp_address,
             dsp: &mut apu.dsp,
@@ -459,6 +491,62 @@ mod dsp_integration_tests {
         }
         assert!(apu.sample_count() >= 64, "DSP did not produce samples");
         assert!(apu.drain_samples().any(|sample| sample != (0, 0)));
+    }
+}
+
+#[cfg(test)]
+mod wait_state_tests {
+    use super::*;
+
+    fn bus<'a>(apu: &'a mut Apu) -> ApuBus<'a> {
+        ApuBus {
+            ram: &mut apu.ram[..],
+            ipl: &apu.ipl,
+            ipl_loaded: apu.ipl_loaded,
+            iplrom_enable: &mut apu.iplrom_enable,
+            ram_writable: &mut apu.ram_writable,
+            ram_disable: &mut apu.ram_disable,
+            timers_enable: &mut apu.timers_enable,
+            timers_disable: &mut apu.timers_disable,
+            internal_wait: &mut apu.internal_wait,
+            external_wait: &mut apu.external_wait,
+            timers: &mut apu.timers,
+            dsp_address: &mut apu.dsp_address,
+            dsp: &mut apu.dsp,
+            apu_ports: &mut apu.apu_ports,
+            cpu_ports: &mut apu.cpu_ports,
+            aux4: &mut apu.aux4,
+            aux5: &mut apu.aux5,
+            timer_targets: &mut apu.timer_targets,
+        }
+    }
+
+    #[test]
+    fn control_register_scales_access_time() {
+        let mut apu = Apu::new();
+        apu.ram_mut()[0x0200] = 0xE8; // LDA #$42
+        apu.ram_mut()[0x0201] = 0x42;
+        apu.spc.pc = 0x0200;
+        assert_eq!(apu.step(), 2);
+
+        apu.spc.pc = 0x0200;
+        {
+            let mut bus = bus(&mut apu);
+            // External wait state 1 -> two units per RAM access.
+            bus.write(0xF0, 0x40);
+        }
+        assert_eq!(apu.step(), 4);
+
+        apu.spc.pc = 0x0200;
+        {
+            let mut bus = bus(&mut apu);
+            // Internal wait state 3 -> ten units for I/O and the IPL ROM;
+            // RAM keeps using the external divider.
+            bus.write(0xF0, 0x30);
+            assert_eq!(bus.wait_cycles(Some(0x00F4)), 10);
+            assert_eq!(bus.wait_cycles(Some(0x0200)), 1);
+            assert_eq!(bus.wait_cycles(None), 10);
+        }
     }
 }
 

@@ -171,9 +171,9 @@ impl Snes {
 
     /// Advance the APU, PPU, HDMA, IRQ and NMI by `clocks` master clocks.
     fn advance(&mut self, clocks: u32) {
-        // NTSC master clock is 21.477272 MHz; the SPC700 runs at 1.024 MHz.
-        // The credit is carried across instructions so long-term APU timing
-        // stays in step.
+        // NTSC master clock is 21.477272 MHz; the S-SMP runs at the documented
+        // 1.024 MHz access rate (one unit per opcode cycle). The credit is
+        // carried across instructions so long-term APU timing stays in step.
         self.apu_credit += i64::from(clocks) * 1_024_000;
         while self.apu_credit >= 21_477_272 {
             let spent = self.apu.step();

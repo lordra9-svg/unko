@@ -55,8 +55,11 @@ with ares. The implementation follows ares, which is the primary source.
   event rather than ares' exact hcounter window, so `$4218-$421F` can settle a
   few hundred clocks early. Games that read them at the end of NMI are
   unaffected in every measured frame.
-- The S-SMP APU timers advance once per retired SPC bus cycle. Hardware derives
-  them from the wait-state divider, so their phase can drift under heavy I/O.
+- The S-SMP APU timers advance once per access (the 1.024 MHz rate). ares
+  advances the same stage counters by two 2.048 MHz clocks per access; using
+  that rate makes our Super Mario World boot/attract timing diverge from ares,
+  so the access rate is retained until a timer-specific oracle (blargg
+  `spc_timer`) is wired up.
 - S-DSP synthesis runs one 32-clock sample pass per 32 SPC cycles. The ares
   interleaving granularity is finer; this is the main DSP timing approximation
   to remove once there is an audio oracle.
