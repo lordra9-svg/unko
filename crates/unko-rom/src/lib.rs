@@ -540,17 +540,43 @@ fn load_zip(path: &Path, inner: &str, _index: Option<usize>) -> Result<Vec<u8>, 
 fn load_7z(path: &Path, inner: &str) -> Result<Vec<u8>, RomError> {
     let mut reader = sevenz_rust2::ArchiveReader::open(path, sevenz_rust2::Password::empty())
         .map_err(|err| RomError::Archive(err.to_string()))?;
+    let mut bytes = None;
     reader
-        .read_file(inner)
-        .map_err(|err| RomError::Archive(err.to_string()))
+        .for_each_entries(|entry, stream| {
+            if entry.name != inner {
+                return Ok(true);
+            }
+            if entry.size > MAX_ROM_BYTES {
+                return Err(sevenz_rust2::Error::Other(
+                    "archive member exceeds the ROM size limit".into(),
+                ));
+            }
+            let mut output = Vec::new();
+            stream
+                .take(MAX_ROM_BYTES + 1)
+                .read_to_end(&mut output)
+                .map_err(|err| sevenz_rust2::Error::Io(err, "reading 7z member".into()))?;
+            if output.len() as u64 > MAX_ROM_BYTES {
+                return Err(sevenz_rust2::Error::Other(
+                    "archive member exceeds the ROM size limit".into(),
+                ));
+            }
+            bytes = Some(output);
+            Ok(false)
+        })
+        .map_err(|err| RomError::Archive(err.to_string()))?;
+    bytes.ok_or_else(|| RomError::NotFound(inner.to_string()))
 }
 
 fn load_rar(path: &Path, inner: &str, index: Option<usize>) -> Result<Vec<u8>, RomError> {
-    let archive =
-        rars::ArchiveReader::read_path(path).map_err(|err| RomError::Archive(err.to_string()))?;
+    let options = rars::ArchiveReadOptions::new()
+        .with_max_member_output_bytes(MAX_ROM_BYTES)
+        .with_max_total_output_bytes(MAX_ROM_BYTES);
+    let archive = rars::ArchiveReader::read_path_with_options(path, options)
+        .map_err(|err| RomError::Archive(err.to_string()))?;
     let bytes = match index {
-        Some(index) => archive.read_member_at(index, None),
-        None => archive.read_member(inner.as_bytes(), None),
+        Some(index) => archive.read_member_at_with_options(index, options),
+        None => archive.read_member_with_options(inner.as_bytes(), options),
     }
     .map_err(|err| RomError::Archive(err.to_string()))?;
     bytes.ok_or_else(|| RomError::NotFound(inner.to_string()))
