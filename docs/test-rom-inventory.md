@@ -3,7 +3,7 @@
 The public test ROMs are not committed. `test-roms/` is a local, gitignored
 drop point; the committed tests skip cleanly when it is absent.
 
-## Local drop (`test-roms/`, 72 files)
+## Local drop (`test-roms/`, 72 public test-ROM files)
 
 | Group | Files | Status |
 |---|---|---|
