@@ -59,6 +59,18 @@ material used to implement it. No GPL emulator source is translated or copied.
   (`AND1 C,/membit`) behaviour is known to differ from ares and is excluded
   from the sweep.
 
+## `src/dsp.rs`
+
+- SNESdev Wiki [S-DSP registers](https://snes.nesdev.org/wiki/S-DSP_registers),
+  [DSP envelopes](https://snes.nesdev.org/wiki/DSP_envelopes) and
+  [BRR samples](https://snes.nesdev.org/wiki/BRR_samples).
+- [Super Famicom Development Wiki — S-DSP](https://wiki.superfamicom.org/).
+- The ISC-licensed ares `ares/sfc/dsp` implementation was used to confirm the
+  voice scheduling, Gaussian table, BRR filters, envelope rates, noise LFSR
+  and echo pipeline. The Gaussian table is an integer transcription of the
+  ares formula and is embedded as a constant.
+- No external DSP crate is linked. RustySNES remains an oracle/reference only.
+
 ## `src/apu.rs`
 
 - SNESdev Wiki [S-SMP](https://snes.nesdev.org/wiki/S-SMP) and

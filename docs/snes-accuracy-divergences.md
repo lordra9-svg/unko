@@ -5,13 +5,14 @@ chosen reference (real hardware, then ares, then a public test ROM). It is the
 SNES counterpart to `docs/accuracy-divergences.md` and follows the charter in
 `docs/accuracy.md`.
 
-Current snapshot: **2026-11-16**, 65C816 + SPC700 + APU wrapper.
+Current snapshot: **2026-11-16**, 65C816 + SPC700 + APU + S-DSP.
 
 ## Open failures
 
 None known in the implemented 65C816/SPC700 instruction semantics or documented
-bus cycle order. The S-DSP, PPU and DMA are not implemented, so there is no
-frame or audio comparison yet.
+bus cycle order. The PPU and DMA are not implemented, so there is no frame or
+video comparison yet. S-DSP output is not yet bit-compared against ares; the
+pipeline is a direct port of the documented behaviour and ares ordering.
 
 ## Oracle disagreements (resolved)
 
@@ -36,10 +37,14 @@ with ares. The implementation follows ares, which is the primary source.
   Other I/O reads return `0` and writes are ignored until the PPU and DMA
   registers are implemented.
 - The S-SMP APU has RAM, the IPL ROM window, control/RAM-enable bits and the
-  four ports. Timers are register stubs, and the S-DSP is a register file with
-  no sample synthesis yet.
+  four ports. Timers are register stubs with no tick/catch-up model yet.
+- S-DSP synthesis runs one 32-clock sample pass per 32 SPC cycles. The ares
+  interleaving granularity is finer; this is the main DSP timing approximation
+  to remove once there is an audio oracle.
 - S-CPU/APU scheduling uses an exact 3,579,545:1,024,000 cycle credit. Memory
-  access wait states and timer catch-up are pending.
+  access wait states are pending.
+- Echo writes are active whenever EDL/ESA enable them, but the exact echo
+  buffer page wrap and read-only behavior need an ares sample comparison.
 - `Cpu::reset` uses the documented reset-vector fetch and a short internal
   delay sequence; exact reset pin timing is pending hardware capture.
 - `WAI`/`STP` retire two internal cycles after the opcode; the real devices

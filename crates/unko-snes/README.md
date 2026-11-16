@@ -22,11 +22,13 @@ in another Rust project. A future `unko-snes-host` crate will provide the
 - Full cycle-stepped SPC700 (S-SMP) with all 256 opcodes
 - APU wrapper: 64 KiB RAM, user-supplied IPL ROM, four bidirectional S-CPU
   ports, IPL/RAM control and the S-DSP register file
+- S-DSP: eight BRR voices, Gaussian interpolation, ADSR/GAIN envelopes,
+  noise/LFSR, pitch modulation, echo and stereo 32 kHz sample output
 - Minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM, reset and
   `$2140-$2143` APU ports
 - Oracle differential tests against the MIT `w65c816` and `spc700` crates
 
-The S-DSP sample pipeline, PPU and DMA engine are the next slices.
+The PPU and DMA engine are the next slices.
 
 ## Accuracy sources
 

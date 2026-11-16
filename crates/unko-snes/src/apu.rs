@@ -5,6 +5,9 @@
 //! not implemented yet; the DSP register file is present so games can upload
 //! their sound driver and complete the boot handshake.
 
+use std::collections::VecDeque;
+
+use crate::dsp::{Dsp, Sample};
 use crate::spc700::{Spc700, SpcBus};
 
 /// Size of APU RAM.
@@ -12,39 +15,6 @@ pub const APU_RAM_SIZE: usize = 0x1_0000;
 
 /// Size of the SPC700 IPL ROM.
 pub const IPL_SIZE: usize = 64;
-
-/// S-DSP register file. Audio synthesis is not implemented yet.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Dsp {
-    registers: [u8; 0x80],
-}
-
-impl Default for Dsp {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Dsp {
-    /// Create a DSP with zeroed registers.
-    pub const fn new() -> Self {
-        Self {
-            registers: [0; 0x80],
-        }
-    }
-
-    /// Read a DSP register. Addresses `$80-$FF` mirror `$00-$7F`.
-    pub fn read(&self, address: u8) -> u8 {
-        self.registers[usize::from(address & 0x7F)]
-    }
-
-    /// Write a DSP register. Addresses `$80-$FF` are read-only mirrors.
-    pub fn write(&mut self, address: u8, value: u8) {
-        if address < 0x80 {
-            self.registers[usize::from(address)] = value;
-        }
-    }
-}
 
 /// The S-SMP + S-DSP APU.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +37,8 @@ pub struct Apu {
     aux4: u8,
     aux5: u8,
     timer_targets: [u8; 3],
+    dsp_credit: u64,
+    samples: VecDeque<Sample>,
 }
 
 impl Default for Apu {
@@ -95,6 +67,8 @@ impl Apu {
             aux4: 0,
             aux5: 0,
             timer_targets: [0; 3],
+            dsp_credit: 0,
+            samples: VecDeque::new(),
         }
     }
 
@@ -145,6 +119,9 @@ impl Apu {
         self.ram_disable = false;
         self.timers_enable = true;
         self.dsp_address = 0;
+        self.dsp.reset();
+        self.dsp_credit = 0;
+        self.samples.clear();
         self.apu_ports = [0; 4];
         self.cpu_ports = [0; 4];
         self.aux4 = 0;
@@ -196,7 +173,27 @@ impl Apu {
             aux5: &mut self.aux5,
             timer_targets: &mut self.timer_targets,
         };
-        self.spc.step(&mut bus)
+        let cycles = self.spc.step(&mut bus);
+        self.dsp_credit += u64::from(cycles);
+        while self.dsp_credit >= 32 {
+            self.dsp_credit -= 32;
+            let sample = self.dsp.run_sample(&mut self.ram[..]);
+            self.samples.push_back(sample);
+            if self.samples.len() > 16_384 {
+                self.samples.pop_front();
+            }
+        }
+        cycles
+    }
+
+    /// Number of queued DSP samples.
+    pub fn sample_count(&self) -> usize {
+        self.samples.len()
+    }
+
+    /// Drain queued DSP samples.
+    pub fn drain_samples(&mut self) -> impl Iterator<Item = Sample> + '_ {
+        self.samples.drain(..)
     }
 
     /// Run SPC700 instructions until at least `cycles` SPC cycles have been
@@ -345,5 +342,53 @@ mod tests {
         let cycles = apu.step();
         assert!(cycles >= 2);
         assert_eq!(apu.spc.a, 0x42);
+    }
+}
+
+#[cfg(test)]
+mod dsp_integration_tests {
+    use super::*;
+
+    #[test]
+    fn apu_runs_dsp_when_spc_executes() {
+        let mut apu = Apu::new();
+        // NOP sled at $0500 so the SPC keeps retiring cycles.
+        for byte in &mut apu.ram_mut()[0x0500..0x0580] {
+            *byte = 0x00;
+        }
+        apu.spc.pc = 0x0500;
+        // Minimal looping BRR sample at $0300.
+        apu.ram_mut()[0x0200] = 0x00;
+        apu.ram_mut()[0x0201] = 0x03;
+        apu.ram_mut()[0x0202] = 0x00;
+        apu.ram_mut()[0x0203] = 0x03;
+        apu.ram_mut()[0x0300] = 0x03;
+        for (index, byte) in [0x12u8, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0]
+            .into_iter()
+            .enumerate()
+        {
+            apu.ram_mut()[0x0301 + index] = byte;
+        }
+        {
+            let dsp = apu.dsp_mut();
+            dsp.write(0x0C, 0x7F);
+            dsp.write(0x1C, 0x7F);
+            dsp.write(0x00, 0x7F);
+            dsp.write(0x01, 0x7F);
+            dsp.write(0x02, 0x00);
+            dsp.write(0x03, 0x10);
+            dsp.write(0x04, 0x00);
+            dsp.write(0x07, 0x7F);
+            dsp.write(0x5D, 0x02);
+            dsp.write(0x6C, 0x00);
+            dsp.write(0x4C, 0x01);
+        }
+        let mut steps = 0;
+        while apu.sample_count() < 64 && steps < 100_000 {
+            apu.step();
+            steps += 1;
+        }
+        assert!(apu.sample_count() >= 64, "DSP did not produce samples");
+        assert!(apu.drain_samples().any(|sample| sample != (0, 0)));
     }
 }

@@ -22,12 +22,14 @@
 
 pub mod apu;
 pub mod cpu;
+pub mod dsp;
 pub mod rom;
 pub mod spc700;
 pub mod system;
 
-pub use apu::{Apu, Dsp};
+pub use apu::Apu;
 pub use cpu::{Cpu, CpuBus, Flags};
+pub use dsp::Dsp;
 pub use rom::{
     rom_size_bytes, sram_size_bytes, BusTarget, Cartridge, Mapping, RomError, RomHeader,
 };

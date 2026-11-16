@@ -33,8 +33,8 @@ frozen as done for now (2026-11-16); VS. System and PlayChoice-10 remain paused
 by the owner pending a 2C05 title, a good DualSystem dump and PC10 images. The
 SNES track: the isolated `unko-snes` crate now has ROM parsing and checksum
 validation, LoROM/HiROM/ExLoROM/ExHiROM mapping, a cycle-stepped 65C816, the
-full SPC700, an APU wrapper with IPL/ports, WRAM/SRAM and the S-CPU memory map.
-S-DSP synthesis, the PPU and DMA are next.
+full SPC700, an APU wrapper with IPL/ports, the S-DSP voice pipeline, WRAM/SRAM
+and the S-CPU memory map. The PPU and DMA are next.
 
 Reference gates:
 
@@ -45,7 +45,7 @@ Reference gates:
 - mapper matrix (Holy Mapperel, blargg MMC3, MMC5, VRC2a, MMC1-A12):
   **65/65**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW**, 0 failed, 5 DRAW skips
-- `cargo test --workspace`: **803 passed, 0 failed**; clippy/fmt clean
+- `cargo test --workspace`: **807 passed, 0 failed**; clippy/fmt clean
 - VS. System: mapper 99, cabinet input, UniSystem/DualSystem parsing,
   2C03/2C04/2C05 palettes and 2C05 security; 13 repaired local images boot
   (including Gumshoe's outer bank)
@@ -81,8 +81,8 @@ and run-ahead. The legacy input-framing session remains for tests and
 | Metric | Value |
 |---|---:|
 | Workspace crates | 12 |
-| First-party Rust lines | ~102,600 |
-| Workspace tests | 803 pass, 0 failed |
+| First-party Rust lines | ~103,700 |
+| Workspace tests | 807 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images | 7,101 |
 
