@@ -93,7 +93,9 @@ The main effort is now the reference-parity accuracy core. Details in
       RGB palettes, RGB emphasis and 2C05 register/security quirks, with the
       DIP/primary choices remembered per game. Remaining: VS BIOS/ROMs,
       per-title DIP defaults, the DualSystem sub-CPU/watchdog, PlayChoice-10
-      input and validation against real PAL/NSF content. The FDS `$4030.D1`
+      input and validation against real PAL/NSF content. A local Vs. drop was
+      repaired and staged on 2026-11-16: 12 images (mapper 99/2C03/2C04) boot in
+      `test-roms/vs/`; Gumshoe, 2C05 and a good DualSystem dump are still missing. The FDS `$4030.D1`
       DRAM-refresh watchdog matches the hardware capture (`67FF`/`6E25`).
 - [ ] **A7** differential harness, hardware captures, performance pass.
       The differential harness is complete: per-frame RGBA, audio and

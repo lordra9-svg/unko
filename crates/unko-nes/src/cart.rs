@@ -1497,7 +1497,13 @@ impl Cartridge {
     /// Current mirroring.
     #[must_use]
     pub fn mirroring(&self) -> Mirroring {
-        self.mapper.mirroring()
+        // Every Vs. board provides 4 KiB of nametable RAM, regardless of the
+        // mapper's own register (MMC1/UNROM/MMC3/etc.).
+        if self.header.console_type == 1 {
+            Mirroring::FourScreen
+        } else {
+            self.mapper.mirroring()
+        }
     }
 
     /// Loads a Datach barcode (mapper 157); returns false when unsupported.
@@ -44597,6 +44603,15 @@ pub(crate) mod tests {
         // flags-7: mapper high nibble stays, NES 2.0 magic + Vs. console type.
         rom[7] = (rom[7] & 0xF0) | 0x08 | 0x01;
         rom[13] = (system << 4) | (ppu & 0x0F);
+    }
+
+    #[test]
+    fn vs_console_forces_four_screen_for_non_99_mappers() {
+        let mut rom = synth_banked(1, 128, 0); // MMC1, CHR-RAM
+        mark_vs_nes2(&mut rom, 0, 3);
+        let cart = Cartridge::from_ines(&rom).expect("cart");
+        assert_eq!(cart.mapper(), 1);
+        assert_eq!(cart.mirroring(), Mirroring::FourScreen);
     }
 
     #[test]

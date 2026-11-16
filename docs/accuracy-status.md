@@ -14,7 +14,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **692 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **694 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -192,6 +192,17 @@ The NES 2.0 cabinet-type nibble is now parsed into `VsSystemType`
 Gumshoe* outer-bank switch applies only to a UniSystem image, while a
 DualSystem 48 KiB image keeps the main half at `$8000` instead of switching to
 bank 4. iNES images without a NES 2.0 nibble default to UniSystem.
+
+A local Vs. drop (`refs/vspC`) was repaired and staged on 2026-11-16:
+`scripts/repair_vs_headers.py` writes NES 2.0 headers (Vs. console type,
+four-screen, cabinet and PPU nibbles) and `test-roms/vs/` now holds 12 images.
+Eleven payloads match known MAME-derived dumps; the rest are hacks. The staged
+smoke test checks mapper, PPU model, UniSystem type and four-screen mirroring
+and runs ten frames for each. This also exposed that four-screen was only
+forced for mapper 99; `Cartridge::mirroring` now forces it for every Vs.
+console type. The images cover mapper 99, 2C03 and 2C04-0001/0003/0004;
+**Vs. Gumshoe (outer bank), a 2C05 title and a known-good DualSystem dump are
+still missing**, and the raw PC10 MAME sets still need iNES conversion.
 
 Tests pin the PRG/CHR bank bit, the Gumshoe outer bank, the UniSystem/DualSystem
 distinction, the OUT1 RAM gate and mirroring, the undriven CHR socket, every
