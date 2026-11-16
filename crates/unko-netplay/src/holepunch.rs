@@ -22,6 +22,8 @@ const PONG: &[u8; 8] = b"UNKOPNG2";
 const CONTROL_LEN: usize = 16;
 /// Largest accepted datagram.
 const MAX_DATAGRAM: usize = 2048;
+/// Bound queued datagrams (UDP is already allowed to drop).
+const MAX_PENDING: usize = 256;
 /// Retry interval between punches.
 const PUNCH_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -146,7 +148,7 @@ impl HolePunchTransport {
                                 let _ = self.socket.send_to(&pong, from);
                             }
                         }
-                    } else if size > 0 {
+                    } else if size > 0 && self.pending.len() < MAX_PENDING {
                         self.pending.push_back((from, data.to_vec()));
                     }
                 }

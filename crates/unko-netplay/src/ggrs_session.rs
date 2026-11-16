@@ -415,11 +415,14 @@ impl NonBlockingSocket<GgrsAddress> for DirectSocket {
     }
 
     fn receive_all_messages(&mut self) -> Vec<(GgrsAddress, Message)> {
-        self.inner
+        let mut messages: Vec<_> = self
+            .inner
             .receive_all_messages()
             .into_iter()
             .map(|(address, message)| (GgrsAddress::Direct(address), message))
-            .collect()
+            .collect();
+        messages.truncate(MAX_POLL_MESSAGES);
+        messages
     }
 }
 
@@ -439,7 +442,10 @@ impl NonBlockingSocket<GgrsAddress> for PunchSocket {
 
     fn receive_all_messages(&mut self) -> Vec<(GgrsAddress, Message)> {
         let mut messages = Vec::new();
-        while let Ok(Some((address, bytes))) = self.transport.recv_from() {
+        while messages.len() < MAX_POLL_MESSAGES {
+            let Ok(Some((address, bytes))) = self.transport.recv_from() else {
+                break;
+            };
             if let Ok(message) = bincode::deserialize(&bytes) {
                 messages.push((GgrsAddress::Direct(address), message));
             }
@@ -464,7 +470,10 @@ impl NonBlockingSocket<GgrsAddress> for RelaySocket {
 
     fn receive_all_messages(&mut self) -> Vec<(GgrsAddress, Message)> {
         let mut messages = Vec::new();
-        while let Ok(Some((member, bytes))) = self.transport.recv_from() {
+        while messages.len() < MAX_POLL_MESSAGES {
+            let Ok(Some((member, bytes))) = self.transport.recv_from() else {
+                break;
+            };
             if let Ok(message) = bincode::deserialize(&bytes) {
                 messages.push((GgrsAddress::Relay(member), message));
             }
@@ -472,6 +481,9 @@ impl NonBlockingSocket<GgrsAddress> for RelaySocket {
         messages
     }
 }
+
+/// Maximum datagrams consumed from one socket poll.
+const MAX_POLL_MESSAGES: usize = 256;
 
 /// Stable 128-bit FNV-1a checksum for GGRS desync detection.
 fn checksum(bytes: &[u8]) -> u128 {

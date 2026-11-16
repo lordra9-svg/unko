@@ -35,6 +35,11 @@ const HEADER: usize = 9;
 const MAX_DATAGRAM: usize = 2048;
 /// Join retry interval.
 const JOIN_INTERVAL: Duration = Duration::from_millis(300);
+/// Bound per-client queued datagrams (UDP is already allowed to drop).
+const MAX_PENDING: usize = 256;
+/// Bound relay rooms and members to prevent memory exhaustion.
+const MAX_ROOMS: usize = 64;
+const MAX_MEMBERS: usize = 16;
 
 /// Stable 8-byte room token derived from a user-visible room name.
 #[must_use]
@@ -114,7 +119,14 @@ fn serve(socket: &UdpSocket, stop: &AtomicBool) {
                 let mut room = [0u8; 8];
                 room.copy_from_slice(&payload[..8]);
                 let member_id = payload[8];
-                rooms.entry(room).or_default().insert(member_id, from);
+                if !rooms.contains_key(&room) && rooms.len() >= MAX_ROOMS {
+                    continue;
+                }
+                let members = rooms.entry(room).or_default();
+                if !members.contains_key(&member_id) && members.len() >= MAX_MEMBERS {
+                    continue;
+                }
+                members.insert(member_id, from);
                 let mut ack = Vec::with_capacity(HEADER + 1);
                 ack.extend_from_slice(MAGIC);
                 ack.push(JOINED);
@@ -258,7 +270,9 @@ impl RelayTransport {
                     match kind {
                         JOINED => self.joined = true,
                         DATA if !payload.is_empty() => {
-                            self.pending.push_back((payload[0], payload[1..].to_vec()));
+                            if self.pending.len() < MAX_PENDING {
+                                self.pending.push_back((payload[0], payload[1..].to_vec()));
+                            }
                         }
                         DATA => {}
                         _ => {}

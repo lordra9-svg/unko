@@ -94,6 +94,9 @@ plaintext/unauthenticated transport remains an Internet-facing trust boundary.
 - Dependency licenses: all allowed (allowlist audit).
 - DAT download is bounded at 256 MiB, validated as Logiqx XML, written to a
   temporary file and atomically renamed.
+- Relay rooms/members, per-client relay queues, hole-punch queues and GGRS
+  socket polls are bounded, dropping excess UDP datagrams instead of growing
+  memory without limit.
 - ROM manager rebuild names are reduced to `file_name` and sanitized; it does
   not extract archive paths.
 - Save states check magic/version, ROM fingerprint and mapper state lengths;
