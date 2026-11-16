@@ -193,6 +193,18 @@ fn main() -> ExitCode {
         .iter()
         .map(|pixel| u64::from(pixel[0]) + u64::from(pixel[1]) + u64::from(pixel[2]))
         .sum();
+    if std::env::var_os("PPU_DEBUG").is_some() {
+        eprintln!(
+            "ppu regs: mode={} sc={:02X?} nba={:02X?} tm={:02X} ts={:02X} m7={:02X} scroll={:?}",
+            system.ppu.bg_mode(),
+            [0, 1, 2, 3].map(|i| system.ppu.bg_sc(i)),
+            [0, 1, 2, 3].map(|i| system.ppu.bg_nba(i)),
+            system.ppu.main_screen(),
+            system.ppu.sub_screen(),
+            system.ppu.m7sel(),
+            [0, 1, 2, 3].map(|i| system.ppu.bg_scroll(i)),
+        );
+    }
     println!(
         "ppu:         brightness={} nmi={} nmi_count={} line={} vblank={} frame_ready={} nonzero_pixels={} rgb_sum={checksum}",
         system.ppu.display_brightness(),

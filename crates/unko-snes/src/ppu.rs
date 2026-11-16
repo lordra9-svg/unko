@@ -214,6 +214,16 @@ impl Ppu {
         self.layer_mask = mask;
     }
 
+    /// Sub-screen enable mask (debug/test helper).
+    pub const fn sub_screen(&self) -> u8 {
+        self.ts
+    }
+
+    /// Mode 7 selection register (debug/test helper).
+    pub const fn m7sel(&self) -> u8 {
+        self.m7sel
+    }
+
     /// Current OBSEL value (debug/test helper).
     pub const fn obsel(&self) -> u8 {
         self.obsel

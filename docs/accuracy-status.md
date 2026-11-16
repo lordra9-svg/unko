@@ -122,6 +122,10 @@ Validation so far:
   headerless/beta/pirate dumps, not clean retail images
 - 207 public SNES test images in `test-roms/snes/`: all 207 parsed by
   `snes-scan`
+- Donkey Kong Country (USA) now produces frames (it was black before the
+  `$2180`/`$4210` fixes); its 600-frame screen is a garbled logo and does not
+  yet match ares, which is in a hires mode-5 scene at the same frame. This is
+  an open state divergence to investigate.
 - Chrono Trigger (USA) with the local IPL ROM boots to its title screen: the
   logo, clock face and pendulum render, and the 1200-frame frame is 94.8%
   pixel-identical to ares (the remainder is the pendulum animation phase,
