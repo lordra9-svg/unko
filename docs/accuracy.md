@@ -218,8 +218,14 @@ Oracle hierarchy for SNES:
    second pure-Rust oracle for differential frames/audio and feature coverage.
    It is license-compatible, but it is still oracle-only until a specific
    module has an explicit provenance review; do not copy it wholesale.
+5. **MIT `w65c816`** — CPU cross-check oracle only. The 65C816 interpreter is
+   our own; the crate is differential-tested in `tests/cpu_oracle.rs`.
+
+Public documentation: [SNESdev Wiki](https://snes.nesdev.org/wiki/SNESdev_Wiki),
+[Super Famicom Development Wiki](https://wiki.superfamicom.org/) and
+[awesome-snesdev](https://github.com/Scottcjn/awesome-snesdev).
 
 The SNES public bar starts with documented test-ROM suites for the 65816,
 SPC700 and PPU, plus deterministic frame/audio hashes against ares. No SNES
-approximation is accepted without a dated entry in the SNES divergence ledger
-(to be created with the first CPU slice).
+approximation is accepted without a dated entry in
+`docs/snes-accuracy-divergences.md`.

@@ -31,9 +31,9 @@ behind `--features vulkan`; the glow path remains the default presenter.
 Accuracy milestone **A5** is complete. **A6/A7** NES breadth and capture work is
 frozen as done for now (2026-11-16); VS. System and PlayChoice-10 remain paused
 by the owner pending a 2C05 title, a good DualSystem dump and PC10 images. The
-SNES track has started as the isolated `unko-snes` crate: copier-header,
-LoROM/HiROM/ExLoROM/ExHiROM detection, header decode, SRAM and cartridge bus
-mapping are in place with unit tests.
+SNES track: the isolated `unko-snes` crate now has ROM parsing and checksum
+validation, LoROM/HiROM/ExLoROM/ExHiROM mapping, a cycle-stepped 65C816,
+WRAM/SRAM and the minimal S-CPU memory map. SPC700/S-DSP, PPU and DMA are next.
 
 Reference gates:
 
@@ -44,7 +44,7 @@ Reference gates:
 - mapper matrix (Holy Mapperel, blargg MMC3, MMC5, VRC2a, MMC1-A12):
   **65/65**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW**, 0 failed, 5 DRAW skips
-- `cargo test --workspace`: **710 passed, 0 failed**; clippy/fmt clean
+- `cargo test --workspace`: **770 passed, 0 failed**; clippy/fmt clean
 - VS. System: mapper 99, cabinet input, UniSystem/DualSystem parsing,
   2C03/2C04/2C05 palettes and 2C05 security; 13 repaired local images boot
   (including Gumshoe's outer bank)
@@ -57,6 +57,7 @@ Licensed-library audit (7,101 images):
 
 Details: [`docs/accuracy-status.md`](docs/accuracy-status.md),
 [`docs/accuracy-divergences.md`](docs/accuracy-divergences.md),
+[`docs/snes-accuracy-divergences.md`](docs/snes-accuracy-divergences.md),
 [`docs/compatibility.md`](docs/compatibility.md),
 [`docs/mapper-audit.md`](docs/mapper-audit.md),
 [`docs/test-rom-inventory.md`](docs/test-rom-inventory.md).
@@ -79,8 +80,8 @@ and run-ahead. The legacy input-framing session remains for tests and
 | Metric | Value |
 |---|---:|
 | Workspace crates | 12 |
-| First-party Rust lines | ~96,500 |
-| Workspace tests | 710 pass, 0 failed |
+| First-party Rust lines | ~100,100 |
+| Workspace tests | 770 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images | 7,101 |
 
@@ -97,7 +98,7 @@ crates/
   unko-nes-api/      # NesCore: devices, FDS, Vs., debugger, filters
   unko-nes-host/     # Core + NesCore adapter
   unko-nes-dev/      # AccuracyCoin battery, mapper suite, harnesses
-  unko-snes/         # standalone SNES core (ROM parsing; CPU/PPU next)
+  unko-snes/         # standalone SNES core (ROM, 65C816, CPU bus; PPU next)
   unko-rom-manager/  # standalone DAT audit, 1G1R, fixdat, rebuild
   unko-netplay/      # GGRS rollback, hole-punch/relay adapters, legacy session
   unko-cli/          # info/scan/run/text/verify/trace/diff/bench/corpus

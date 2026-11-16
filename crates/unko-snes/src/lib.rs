@@ -12,15 +12,20 @@
 //!
 //! # Current scope
 //!
-//! The first slice is ROM container support: copier-header detection, LoROM /
-//! HiROM / ExLoROM / ExHiROM layout detection, internal-header decoding, SRAM
-//! sizing and cartridge bus mapping. The 65816, SPC700, PPU and DSP follow.
+//! The core supports ROM container parsing (copier-header detection, LoROM /
+//! HiROM / ExLoROM / ExHiROM layout detection, header decoding, SRAM sizing and
+//! cartridge bus mapping), a cycle-stepped 65C816 and a minimal S-CPU memory
+//! map. The SPC700, PPU and DSP follow.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod cpu;
 pub mod rom;
+pub mod system;
 
+pub use cpu::{Cpu, CpuBus, Flags};
 pub use rom::{
     rom_size_bytes, sram_size_bytes, BusTarget, Cartridge, Mapping, RomError, RomHeader,
 };
+pub use system::Snes;

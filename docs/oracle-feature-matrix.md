@@ -204,6 +204,13 @@ behavioural reference.
   coprocessor LLE cores and WebAssembly support. It joins the oracle set for
   differential runs and feature coverage. It is not copied wholesale; any
   future reuse needs a per-module provenance review.
+- **w65c816** (MIT) is a 65C816 cross-check oracle only. It drives the
+  differential CPU tests; it is not linked into `unko-snes`.
+
+Public SNES documentation used by the implementation:
+[SNESdev Wiki](https://snes.nesdev.org/wiki/SNESdev_Wiki),
+[Super Famicom Development Wiki](https://wiki.superfamicom.org/) and
+[awesome-snesdev](https://github.com/Scottcjn/awesome-snesdev).
 
 ## Licensing and provenance
 
@@ -233,3 +240,7 @@ GPL implementation unless the license permits it.
   <https://github.com/punesemu/puNES>.
 - RustyNES: local `refs/rustynes/README.md`.
 - RustySNES: <https://github.com/doublegate/RustySNES> (Apache-2.0 oracle).
+- SNESdev Wiki: <https://snes.nesdev.org/wiki/SNESdev_Wiki>.
+- Super Famicom Development Wiki: <https://wiki.superfamicom.org/>.
+- awesome-snesdev: <https://github.com/Scottcjn/awesome-snesdev>.
+- w65c816: <https://crates.io/crates/w65c816> (MIT CPU cross-check oracle).

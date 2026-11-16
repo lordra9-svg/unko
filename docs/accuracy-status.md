@@ -20,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **710 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **770 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -43,17 +43,35 @@ in `docs/mapper-audit.md`; the dated measurements are below.
 ## SNES core (in progress, 2026-11-16)
 
 `unko-snes` is a new isolated crate with no `unko-core` or shell dependency.
-The first slice is ROM container support, covered by unit tests:
+
+Implemented so far:
 
 - 512-byte copier-header detection and removal
 - LoROM, HiROM, ExLoROM and ExHiROM layout detection with header scoring
 - title, map mode, cartridge type, ROM/SRAM size, country, licensee, version,
   checksum/complement and reset-vector decoding
+- checksum validation, including the non-power-of-two mirroring rule
 - SRAM allocation and save-file loading
 - 24-bit cartridge bus mapping for ROM and SRAM, including bank mirroring
+- cycle-stepped 65C816 with emulation/native modes, 8/16-bit widths, decimal
+  arithmetic, interrupts, WAI/STP and block moves
+- minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM and reset
 
-No CPU/PPU/APU slice exists yet, so there are no SNES compatibility numbers.
-The next gates are 65816 reset/vector execution and a deterministic frame loop.
+Validation so far:
+
+- **770 workspace tests**, 0 failed
+- **16 oracle differential tests** against the MIT `w65c816` crate, including
+  all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
+  24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
+  stack, flags, block moves and emulation mode
+- 10 retail images (LoROM, HiROM and ExHiROM): all headers detected and all
+  stored checksums reproduced
+- 250-image random No-Intro sample: 237 parsed; the 13 failures are
+  headerless/beta/pirate dumps, not clean retail images
+
+There is no PPU/SPC700/DSP yet, so the core cannot produce a frame or run a
+commercial game to the title screen. The next gates are the SPC700/S-DSP
+communication ports and a dot/scanline PPU.
 
 Performance: `unko bench --synthetic 3000 --min-fps 300` measures **791.6 fps**
 (13.17x real time, 1.263 ms/frame); release save states are 417,090 bytes at

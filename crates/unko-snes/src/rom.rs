@@ -135,25 +135,25 @@ impl RomHeader {
         cartridge_type_name(self.cartridge_type)
     }
 
-    /// Compute the checksum over the ROM, with the stored checksum fields
-    /// treated as zero as on real hardware.
+    /// Compute the cartridge checksum.
+    ///
+    /// The SNES checksum is the byte sum over the ROM, including the stored
+    /// checksum and complement bytes. Non-power-of-two images are expanded by
+    /// repeatedly doubling the final `2^n` bytes, where `2^n` is the lowest set
+    /// bit of the current size. That matches the address-line mirroring used by
+    /// real boards and the header checksums in commercial ROMs.
     pub fn computed_checksum(&self, rom: &[u8]) -> u16 {
         if rom.is_empty() {
             return 0;
         }
-        let size = self.declared_rom_size.unwrap_or(rom.len());
-        let zero_start = self.header_offset + 0x1C;
-        let zero_end = zero_start + 4;
-        let mut sum = 0u32;
-        for index in 0..size {
-            let byte = if (zero_start..zero_end).contains(&index) {
-                0
-            } else {
-                rom[index % rom.len()]
-            };
-            sum = sum.wrapping_add(u32::from(byte));
+        let mut image = rom.to_vec();
+        while !image.len().is_power_of_two() {
+            let lowest = image.len() & image.len().wrapping_neg();
+            let start = image.len() - lowest;
+            let tail = image[start..].to_vec();
+            image.extend_from_slice(&tail);
         }
-        (sum & 0xFFFF) as u16
+        (image.iter().map(|&byte| u32::from(byte)).sum::<u32>() & 0xFFFF) as u16
     }
 
     /// Whether the stored checksum matches a fresh checksum calculation.
@@ -533,15 +533,26 @@ fn raw_map(mapping: Mapping, address: u32) -> Option<RawTarget> {
         }
         Mapping::ExHiRom => {
             if bank >= 0xC0 {
+                // Banks $C0-$FF see the first 4 MiB linearly.
                 Some(RawTarget::Rom((usize::from(bank - 0xC0) << 16) | offset))
+            } else if (0x80..=0xBF).contains(&bank) {
+                // Banks $80-$BF expose the upper half of the first 4 MiB.
+                if offset >= 0x8000 {
+                    Some(RawTarget::Rom((usize::from(bank & 0x3F) << 16) | offset))
+                } else if (0x6000..=0x7FFF).contains(&offset) && bank & 0x20 != 0 {
+                    Some(RawTarget::Sram(offset & 0x1FFF))
+                } else {
+                    None
+                }
             } else if (0x40..=0x7D).contains(&bank) {
+                // Banks $40-$7D see the additional 4 MiB.
                 Some(RawTarget::Rom(
                     0x40_0000 | (usize::from(bank - 0x40) << 16) | offset,
                 ))
-            } else if bank <= 0x3F || (0x80..=0xBF).contains(&bank) {
+            } else if bank <= 0x3F {
                 if offset >= 0x8000 {
                     Some(RawTarget::Rom(
-                        0x40_0000 | (usize::from(bank & 0x3F) << 16) | offset,
+                        0x40_0000 | (usize::from(bank) << 16) | offset,
                     ))
                 } else if (0x6000..=0x7FFF).contains(&offset) && bank & 0x20 != 0 {
                     Some(RawTarget::Sram(offset & 0x1FFF))
@@ -584,11 +595,12 @@ mod tests {
 
         let mut checksum_source = rom.clone();
         checksum_source[offset + 0x1C..offset + 0x20].fill(0);
-        let checksum = (checksum_source
+        let base = checksum_source
             .iter()
             .map(|&byte| u32::from(byte))
-            .sum::<u32>()
-            & 0xFFFF) as u16;
+            .sum::<u32>();
+        // The four checksum/complement bytes always sum to 0x01FE.
+        let checksum = ((base + 0x01FE) & 0xFFFF) as u16;
         rom[offset + 0x1C..offset + 0x1E].copy_from_slice(&(!checksum).to_le_bytes());
         rom[offset + 0x1E..offset + 0x20].copy_from_slice(&checksum.to_le_bytes());
         rom
@@ -709,6 +721,8 @@ mod tests {
         assert_eq!(cartridge.read(0x40_0000), Some(rom[0x40_0000]));
         assert_eq!(cartridge.read(0x00_8000), Some(rom[0x40_8000]));
         assert_eq!(cartridge.read(0x00_FFC0), Some(rom[EXHIROM_HEADER]));
+        assert_eq!(cartridge.read(0x80_8000), Some(rom[0x8000]));
+        assert_eq!(cartridge.read(0x80_FFC0), Some(rom[0xFFC0]));
     }
 
     #[test]

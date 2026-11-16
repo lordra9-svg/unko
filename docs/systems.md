@@ -30,7 +30,7 @@ beside it; the host chooses by `CoreInfo.id`.
 | Oracles | **MesenCE `Core/SNES`** (C++, GPL-3.0) — reference only · **RustySNES** (Rust, Apache-2.0) — oracle/reference only |
 | Size | ares 19.9k LOC; Mesen 35.7k LOC |
 | Coverage target | 65816, SPC700, S-DSP, dot/scanline PPU, SuperFX, SA-1, SDD1, SPC7110, CX4, DSP1-4, OBC1, ST018, MSU1, Satellaview, Sufami Turbo, BS-X |
-| Status | isolated core started 2026-11-16: crate skeleton, copier-header removal, LoROM/HiROM/ExLoROM/ExHiROM detection, header decode, SRAM sizing and cartridge bus mapping. CPU/APU/PPU slices next. |
+| Status | isolated core started 2026-11-16: ROM parsing, LoROM/HiROM/ExLoROM/ExHiROM mapping, SRAM, checksum validation, a cycle-stepped 65C816 and the minimal S-CPU memory map are implemented. SPC700/S-DSP, PPU and DMA are next. |
 
 Why an isolated Rust core: the SNES crate has no `unko-core` or shell
 dependency, exactly like `unko-nes`. ares remains the primary implementation
@@ -43,7 +43,11 @@ RustySNES (<https://github.com/doublegate/RustySNES>, Apache-2.0) joins the
 oracle set as a second pure-Rust implementation. It is useful for black-box
 differential runs and for checking feature coverage, but it is not copied,
 translated file by file, or used to generate tables without an explicit
-provenance review.
+provenance review. The MIT `w65c816` crate is a CPU cross-check oracle only.
+
+Reference documentation: [SNESdev Wiki](https://snes.nesdev.org/wiki/SNESdev_Wiki),
+[Super Famicom Development Wiki](https://wiki.superfamicom.org/) and
+[awesome-snesdev](https://github.com/Scottcjn/awesome-snesdev).
 
 Integration: implement the core in `unko-snes`, then add `unko-snes-host` with
 the generic `Core` plus a SNES extension trait. Do not port Mesen code.

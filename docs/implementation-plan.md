@@ -38,9 +38,13 @@ implementation source, MesenCE is a black-box oracle, and RustySNES
 (Apache-2.0) is a second oracle/reference. Order:
 
 1. ROM container, header detection and cartridge bus mapping. **Done**:
-   copier header, LoROM/HiROM/ExLoROM/ExHiROM, header decode, SRAM and mapping
-   tests.
-2. 65816 CPU: reset/vector execution, then cycle-level bus timing.
+   copier header, LoROM/HiROM/ExLoROM/ExHiROM, header decode, SRAM, checksum
+   mirroring and mapping tests.
+2. 65816 CPU: reset/vector execution, then cycle-level bus timing. **Done**
+   for instruction semantics and documented bus-cycle order: cycle-stepped
+   core, emulation/native modes, decimal arithmetic, interrupts, WAI/STP,
+   block moves, memory map and a 16-test `w65c816` differential oracle.
+   Remaining: hardware-capture edge validation and the S-CPU DMA/IRQ scheduler.
 3. SPC700 + S-DSP and the S-SMP communication ports.
 4. PPU dot/scanline timing, background/sprite rendering, then the first frame.
 5. `unko-snes-host` adapter once the core surface is stable.

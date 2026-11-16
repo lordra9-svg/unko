@@ -35,5 +35,12 @@ from the ares emulator (https://github.com/ares-emulator/ares), Copyright
 (c) 2004-2025 ares team, Near et al, used under the ISC license. The full
 ares license text is reproduced in `licenses/ares-LICENSE.txt`.
 
+The SNES core (`unko-snes`) uses ares `sfc/` and `wdc65816` as its primary
+implementation source under the same ISC license. Its 65C816 tests use the
+MIT-licensed `w65c816` crate (https://crates.io/crates/w65c816) as a
+cross-check oracle only; it is not linked into the shipped core. RustySNES
+(https://github.com/doublegate/RustySNES, Apache-2.0) is an oracle/reference
+only and no RustySNES code is included.
+
 No GPL-licensed emulator source (including MesenCE, RustyNES or Dolphin) is
 included in this repository.
