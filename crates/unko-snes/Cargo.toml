@@ -10,3 +10,4 @@ readme = "README.md"
 
 [dev-dependencies]
 w65c816 = "0.1.17"
+spc700 = "0.1.0"

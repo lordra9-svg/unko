@@ -8,7 +8,7 @@ save states, netplay datagrams, relay rooms and DAT downloads).
 
 ## Method
 
-- Queried OSV.dev for every crates.io package in `Cargo.lock` (469 after adding the
+- Queried OSV.dev for every crates.io package in `Cargo.lock` (470 after adding the
   SNES CPU oracle and Rust `xtask` crate).
 - Ran the repository license allowlist check (`xtask license-audit`).
 - Scanned tracked files and full git history for credentials, private keys and
@@ -104,15 +104,15 @@ plaintext/unauthenticated transport remains an Internet-facing trust boundary.
 
 ## Gate results from this pass
 
-- `cargo test --workspace`: 772 passed, 0 failed
+- `cargo test --workspace`: 803 passed, 0 failed
 - `cargo clippy --workspace --all-targets -- -D warnings`: clean
 - `cargo fmt --all -- --check`: clean
 - `nestest`: 8,980 / 8,980 lines exact
 - AccuracyCoin: 146/151, 0 failed, 5 DRAW skips, 0 unrun
 - Mapper suite: 65/65 cases, 0 failed
 - Synthetic benchmark: 780.5 fps, 12.99x realtime (CI floor 300 fps)
-- License audit: 466 dependencies, all allowed
-- OSV: 469 packages, 4 advisories (all unmaintained, baseline), 0 new
+- License audit: 467 dependencies, all allowed
+- OSV: 470 packages, 4 advisories (all unmaintained, baseline), 0 new
 - `cargo metadata --locked`: clean
 
 ## Recommended next actions

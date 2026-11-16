@@ -19,10 +19,14 @@ in another Rust project. A future `unko-snes-host` crate will provide the
 - Cycle-stepped WDC 65C816 interpreter with emulation/native modes, 8/16-bit
   accumulator and index widths, decimal arithmetic, interrupts, WAI/STP and
   block moves
-- Minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM and reset
-- Oracle differential tests against the MIT `w65c816` crate
+- Full cycle-stepped SPC700 (S-SMP) with all 256 opcodes
+- APU wrapper: 64 KiB RAM, user-supplied IPL ROM, four bidirectional S-CPU
+  ports, IPL/RAM control and the S-DSP register file
+- Minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM, reset and
+  `$2140-$2143` APU ports
+- Oracle differential tests against the MIT `w65c816` and `spc700` crates
 
-The SPC700, S-DSP, PPU and DMA engine are the next slices.
+The S-DSP sample pipeline, PPU and DMA engine are the next slices.
 
 ## Accuracy sources
 
@@ -37,6 +41,7 @@ Implementation sources, in decision order:
 4. MesenCE (GPL-3.0) — reference oracle only; no source is read or ported.
 5. RustySNES (Apache-2.0) — oracle/reference only until an explicit provenance
    review; see <https://github.com/doublegate/RustySNES>.
+6. `w65c816` and `spc700` (MIT) — CPU cross-check oracles only.
 
 See `docs/systems.md`, `docs/accuracy.md` and `PROVENANCE.md`.
 

@@ -44,6 +44,33 @@ material used to implement it. No GPL emulator source is translated or copied.
 - [awesome-snesdev](https://github.com/Scottcjn/awesome-snesdev) was used as an
   index to the public documentation above.
 
+## `src/spc700.rs`
+
+- Sony SPC700 / S-SMP public documentation, the SNESdev Wiki
+  [S-SMP](https://snes.nesdev.org/wiki/S-SMP) and
+  [SPC-700 instruction set](https://snes.nesdev.org/wiki/SPC-700_instruction_set)
+  pages.
+- [Super Famicom Development Wiki — SPC700
+  Reference](https://wiki.superfamicom.org/spc700-reference).
+- The ISC-licensed ares `ares/component/processor/spc700` implementation was
+  used to confirm per-addressing-mode bus-cycle order and instruction quirks.
+- The MIT `spc700` crate is a **cross-check oracle only** in
+  `tests/spc700_oracle.rs`; no code or tables were copied. Its `$6A`
+  (`AND1 C,/membit`) behaviour is known to differ from ares and is excluded
+  from the sweep.
+
+## `src/apu.rs`
+
+- SNESdev Wiki [S-SMP](https://snes.nesdev.org/wiki/S-SMP) and
+  [S-DSP registers](https://snes.nesdev.org/wiki/S-DSP_registers).
+- [Super Famicom Development Wiki — Memory
+  Mapping](https://wiki.superfamicom.org/memory-mapping) and the SPC700
+  reference.
+- ISC-licensed ares `ares/sfc/smp/io.cpp` and `memory.cpp` for the APU address
+  map, IPL window, control bits and port direction.
+- The 64-byte IPL ROM is **not** bundled. Users supply `ipl.rom`; local tests
+  use the ares copy only as a runtime asset.
+
 ## `src/system.rs`
 
 - [SNESdev Wiki — Memory map](https://snes.nesdev.org/wiki/Memory_map) for the

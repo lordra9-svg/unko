@@ -3302,6 +3302,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "spc700"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "089f3ff408c66b3b20765253550ca397b36b2be9e6ace55380716ee8397241a1"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "spirv"
 version = "0.3.0+sdk-1.3.268.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3844,6 +3853,7 @@ dependencies = [
 name = "unko-snes"
 version = "0.1.1"
 dependencies = [
+ "spc700",
  "w65c816",
 ]
 

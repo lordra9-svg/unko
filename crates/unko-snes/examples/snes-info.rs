@@ -7,7 +7,7 @@ use unko_snes::{Cartridge, Snes};
 
 fn main() -> ExitCode {
     let Some(path) = env::args().nth(1) else {
-        eprintln!("usage: snes-info <rom>");
+        eprintln!("usage: snes-info <rom> [ipl.rom]");
         return ExitCode::FAILURE;
     };
     let bytes = match std::fs::read(&path) {
@@ -46,10 +46,34 @@ fn main() -> ExitCode {
     println!("copier head: {}", cartridge.has_copier_header());
 
     let mut system = Snes::new(cartridge);
+    if let Some(ipl_path) = env::args().nth(2) {
+        let bytes = match std::fs::read(&ipl_path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!("{ipl_path}: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        if bytes.len() != 64 {
+            eprintln!("{ipl_path}: expected a 64-byte IPL ROM");
+            return ExitCode::FAILURE;
+        }
+        let mut ipl = [0u8; 64];
+        ipl.copy_from_slice(&bytes);
+        system.set_ipl(ipl);
+        println!("ipl:         {ipl_path}");
+    }
     system.reset();
     println!("cpu reset:   {}", system.cpu);
-    let (cycles, instructions) = system.run_cycles(200_000, 50_000);
+    println!("spc reset:   {}", system.apu.spc);
+    let (cycles, instructions) = system.run_cycles(5_000_000, 1_000_000);
     println!("cpu after:   {}", system.cpu);
+    println!("spc after:   {}", system.apu.spc);
+    println!(
+        "apu ports:   cpu<-apu {:02X?}  apu<-cpu {:02X?}",
+        [0, 1, 2, 3].map(|port| system.apu.cpu_read(port)),
+        [0, 1, 2, 3].map(|port| system.apu.apu_port(port)),
+    );
     println!("ran:         {instructions} instructions, {cycles} cycles");
     ExitCode::SUCCESS
 }

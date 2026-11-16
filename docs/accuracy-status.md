@@ -20,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **772 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **803 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -55,25 +55,36 @@ Implemented so far:
 - 24-bit cartridge bus mapping for ROM and SRAM, including bank mirroring
 - cycle-stepped 65C816 with emulation/native modes, 8/16-bit widths, decimal
   arithmetic, interrupts, WAI/STP and block moves
-- minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM and reset
+- all 256 SPC700 opcodes, addressing modes, flags, bit operations, DIV/MUL,
+  DAA/DAS and stack/call/return behaviour
+- APU wrapper: 64 KiB RAM, user-supplied IPL ROM, four bidirectional S-CPU
+  ports, IPL/control register, DSP address/data registers and RAM control
+- minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM, reset and
+  `$2140-$2143` APU port access
 
 Validation so far:
 
-- **772 workspace tests**, 0 failed
-- **18 oracle differential tests** against the MIT `w65c816` crate, including
+- **803 workspace tests**, 0 failed
+- **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
   stack, flags, block moves and emulation mode
+- **8 SPC700 differential tests** against the MIT `spc700` crate, including an
+  all-opcode sweep. The only excluded opcode is `$6A` because `spc700` 0.1.0
+  computes `AND1 C,/membit` as `!(bit & C)` instead of `C & !bit`; the ares
+  behaviour is pinned by `spc700_bit_logic`.
 - 10 retail images (LoROM, HiROM and ExHiROM): all headers detected and all
   stored checksums reproduced
 - 250-image random No-Intro sample: 237 parsed; the 13 failures are
   headerless/beta/pirate dumps, not clean retail images
+- 207 public SNES test images in `test-roms/snes/`: all 207 parsed by
+  `snes-scan`
+- Super Mario World with the local 64-byte IPL ROM: the SPC700 leaves its
+  reset vector, executes the IPL boot loop and exchanges values on the APU
+  ports. A frame is not yet produced because the PPU is not implemented.
 
-There is no PPU/SPC700/DSP yet, so the core cannot produce a frame or run a
-commercial game to the title screen. The next gates are the SPC700/S-DSP
-communication ports and a dot/scanline PPU.
-
-Performance: `unko bench --synthetic 3000 --min-fps 300` measures **791.6 fps**
+There is no PPU or S-DSP synthesis yet, so the core cannot produce a frame or
+audio. The next gates are the S-DSP voice pipeline and a dot/scanline PPU.Performance: `unko bench --synthetic 3000 --min-fps 300` measures **791.6 fps**
 (13.17x real time, 1.263 ms/frame); release save states are 417,090 bytes at
 172 us save / 237 us restore. Details in `docs/performance.md`.
 

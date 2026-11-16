@@ -5,6 +5,7 @@
 //! implementation suitable for CPU tests and for booting retail images far
 //! enough to exercise the 65C816.
 
+use crate::apu::Apu;
 use crate::cpu::{Cpu, CpuBus};
 use crate::rom::Cartridge;
 
@@ -18,7 +19,10 @@ pub struct Snes {
     pub cpu: Cpu,
     /// The inserted cartridge.
     pub cart: Cartridge,
+    /// The S-SMP/S-DSP audio unit.
+    pub apu: Apu,
     wram: Vec<u8>,
+    apu_credit: i64,
 }
 
 impl Snes {
@@ -27,7 +31,9 @@ impl Snes {
         Self {
             cpu: Cpu::new(),
             cart,
+            apu: Apu::new(),
             wram: vec![0; WRAM_SIZE],
+            apu_credit: 0,
         }
     }
 
@@ -41,22 +47,42 @@ impl Snes {
         &mut self.wram
     }
 
+    /// Install a user-supplied 64-byte SPC700 IPL ROM.
+    pub fn set_ipl(&mut self, ipl: [u8; crate::apu::IPL_SIZE]) {
+        self.apu.set_ipl(ipl);
+    }
+
     /// Reset the CPU and fetch the reset vector through the system bus.
     pub fn reset(&mut self) -> u32 {
+        self.apu.reset();
+        self.apu_credit = 0;
         let mut bus = SnesBus {
             wram: &mut self.wram,
             cart: &mut self.cart,
+            apu: &mut self.apu,
         };
         self.cpu.reset(&mut bus)
     }
 
     /// Execute one CPU instruction or interrupt.
     pub fn step(&mut self) -> u32 {
-        let mut bus = SnesBus {
-            wram: &mut self.wram,
-            cart: &mut self.cart,
+        let cycles = {
+            let mut bus = SnesBus {
+                wram: &mut self.wram,
+                cart: &mut self.cart,
+                apu: &mut self.apu,
+            };
+            self.cpu.step(&mut bus)
         };
-        self.cpu.step(&mut bus)
+        // NTSC S-CPU bus cycles are 3.579545 MHz and the SPC700 runs at
+        // 1.024 MHz. The credit is carried across instructions so long-term
+        // APU timing stays in step.
+        self.apu_credit += i64::from(cycles) * 1_024_000;
+        while self.apu_credit >= 3_579_545 {
+            let spent = self.apu.step();
+            self.apu_credit -= i64::from(spent) * 3_579_545;
+        }
+        cycles
     }
 
     /// Run until `max_cycles` bus cycles have elapsed, the CPU stops, or an
@@ -75,6 +101,7 @@ impl Snes {
 struct SnesBus<'a> {
     wram: &'a mut [u8],
     cart: &'a mut Cartridge,
+    apu: &'a mut Apu,
 }
 
 impl CpuBus for SnesBus<'_> {
@@ -89,8 +116,13 @@ impl CpuBus for SnesBus<'_> {
             if offset < 0x2000 {
                 return self.wram[offset & 0x1FFF];
             }
+            if offset < 0x6000 {
+                if (0x2140..=0x2143).contains(&offset) {
+                    return self.apu.cpu_read(offset - 0x2140);
+                }
+                return 0;
+            }
             if offset < 0x8000 {
-                // I/O and expansion ports are not modelled yet.
                 return 0;
             }
         }
@@ -110,8 +142,14 @@ impl CpuBus for SnesBus<'_> {
                 self.wram[offset & 0x1FFF] = value;
                 return;
             }
+            if offset < 0x6000 {
+                if (0x2140..=0x2143).contains(&offset) {
+                    self.apu.cpu_write(offset - 0x2140, value);
+                }
+                return;
+            }
             if offset < 0x8000 {
-                return; // I/O and expansion ports are ignored for now.
+                return;
             }
         }
         self.cart.write(address, value);
@@ -164,6 +202,7 @@ mod tests {
         let mut bus = SnesBus {
             wram: &mut system.wram,
             cart: &mut system.cart,
+            apu: &mut system.apu,
         };
         assert_eq!(bus.read(0x001234), 0x5A);
         assert_eq!(bus.read(0x801234), 0x5A);
@@ -192,6 +231,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                apu: &mut system.apu,
             };
             assert_eq!(bus.read(0x008000), 0x11);
             assert_eq!(bus.read(0x018000), 0x00);
@@ -199,6 +239,27 @@ mod tests {
             assert!(bus.cart.write(0x700000, 0x5A));
             assert_eq!(bus.read(0x700000), 0x5A);
         }
+    }
+
+    #[test]
+    fn cpu_writes_reach_the_apu_ports() {
+        // LDA #$5A; STA $2140; STP
+        let mut system = Snes::new(cartridge(&[0xA9, 0x5A, 0x8D, 0x40, 0x21, 0xDB]));
+        system.reset();
+        system.run_cycles(100, 100);
+        assert!(system.cpu.stp);
+        assert_eq!(system.apu.apu_port(0), 0x5A);
+    }
+
+    #[test]
+    fn cpu_reads_apu_output_ports() {
+        // LDA $2141; STP
+        let mut system = Snes::new(cartridge(&[0xAD, 0x41, 0x21, 0xDB]));
+        system.reset();
+        system.apu.set_cpu_port(1, 0x34);
+        system.run_cycles(100, 100);
+        assert!(system.cpu.stp);
+        assert_eq!(system.cpu.a, 0x34);
     }
 
     #[test]

@@ -37,8 +37,10 @@ ares license text is reproduced in `licenses/ares-LICENSE.txt`.
 
 The SNES core (`unko-snes`) uses ares `sfc/` and `wdc65816` as its primary
 implementation source under the same ISC license. Its 65C816 tests use the
-MIT-licensed `w65c816` crate (https://crates.io/crates/w65c816) as a
-cross-check oracle only; it is not linked into the shipped core. RustySNES
+MIT-licensed `w65c816` (https://crates.io/crates/w65c816) and `spc700`
+(https://crates.io/crates/spc700) crates as cross-check oracles only; they are
+not linked into the shipped core. The SPC700 IPL ROM is not bundled; users
+supply their own `ipl.rom`. RustySNES
 (https://github.com/doublegate/RustySNES, Apache-2.0) is an oracle/reference
 only and no RustySNES code is included.
 

@@ -45,7 +45,10 @@ implementation source, MesenCE is a black-box oracle, and RustySNES
    core, emulation/native modes, decimal arithmetic, interrupts, WAI/STP,
    block moves, memory map and a 16-test `w65c816` differential oracle.
    Remaining: hardware-capture edge validation and the S-CPU DMA/IRQ scheduler.
-3. SPC700 + S-DSP and the S-SMP communication ports.
+3. SPC700 + S-DSP and the S-SMP communication ports. **SPC700 and the APU
+   wrapper done**: all 256 opcodes, 64 KiB RAM, IPL ROM, four bidirectional
+   ports, DSP address/data registers and an 8-test `spc700` differential
+   sweep. S-DSP voice synthesis remains.
 4. PPU dot/scanline timing, background/sprite rendering, then the first frame.
 5. `unko-snes-host` adapter once the core surface is stable.
 6. Coprocessors and enhancement chips after the base console is green.

@@ -20,12 +20,16 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod apu;
 pub mod cpu;
 pub mod rom;
+pub mod spc700;
 pub mod system;
 
+pub use apu::{Apu, Dsp};
 pub use cpu::{Cpu, CpuBus, Flags};
 pub use rom::{
     rom_size_bytes, sram_size_bytes, BusTarget, Cartridge, Mapping, RomError, RomHeader,
 };
+pub use spc700::{Flags as Spc700Flags, Spc700, SpcBus};
 pub use system::Snes;

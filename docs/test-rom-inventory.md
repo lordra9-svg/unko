@@ -1,4 +1,4 @@
-# Test-ROM inventory and NESdev suite status
+# Test-ROM inventory and public-suite status
 
 The public test ROMs are not committed. `test-roms/` is a local, gitignored
 drop point; the committed tests skip cleanly when it is absent.
@@ -13,6 +13,29 @@ drop point; the committed tests skip cleanly when it is absent.
 | Battery | `AccuracyCoin.nes` + catalog | 146/146 non-DRAW (146/151 total, 5 DRAW, 0 failed) |
 
 See `docs/accuracy-status.md` for the dated evidence.
+
+## SNES drop (`test-roms/snes/`, 207 public images)
+
+Cloned from <https://github.com/akatsuki105/snes-test-roms> at commit
+`8223a0807f2b467a9923bbe455917c51d10aa26e` (2021-04-12). The local copy is
+gitignored. `cargo run -p unko-snes --example snes-scan -- test-roms/snes`
+reports **207 images, 207 parsed, 6 checksum-valid, 0 failed**. Test ROMs often
+carry zero or deliberately invalid header checksums, so the checksum count is
+not the pass criterion.
+
+| Group | Files | Purpose |
+|---|---:|---|
+| `blargg-spc-6` | 4 | SPC700/DSP timing, memory access and SMP tests |
+| `jonasquinn-test-roms` | 82 | CPU, PPU, DMA/HDMA, NMI/IRQ, multiplication/division |
+| `PeterLemon` | 61 | SPC700 and CPU instruction tests |
+| `undisbeliever-inidisp` | 29 | PPU `INIDISP`/vblank timing cases |
+| `KungFuFurby-test-ROMs` | 13 | IRQ/NMI/HDMA timing |
+| `tukuyomi-bsnes-tests` | 6 | bsnes regression cases |
+| `Motive`, `Sour`, `tepples`, `93143`, `VitorVilela7`, `ladida`, `lidnariq` | 12 | PPU, DMA and display cases |
+
+The 64-byte SPC700 IPL ROM is a user-supplied console asset and is not in the
+repository. Local runs use
+`refs/ares/ares/System/Super Famicom/ipl.rom`; no ROM data is committed.
 
 ## Local reference trees
 

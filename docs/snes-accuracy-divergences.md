@@ -5,12 +5,12 @@ chosen reference (real hardware, then ares, then a public test ROM). It is the
 SNES counterpart to `docs/accuracy-divergences.md` and follows the charter in
 `docs/accuracy.md`.
 
-Current snapshot: **2026-11-16**, first 65C816 slice.
+Current snapshot: **2026-11-16**, 65C816 + SPC700 + APU wrapper.
 
 ## Open failures
 
-None known in the implemented 65C816 instruction semantics or documented bus
-cycle order. The PPU, SPC700/S-DSP and DMA are not implemented, so there is no
+None known in the implemented 65C816/SPC700 instruction semantics or documented
+bus cycle order. The S-DSP, PPU and DMA are not implemented, so there is no
 frame or audio comparison yet.
 
 ## Oracle disagreements (resolved)
@@ -25,12 +25,21 @@ with ares. The implementation follows ares, which is the primary source.
   `$00 - $01` with carry set in decimal mode; ares and `unko-snes` return
   `$99` with borrow. The unit test `sbc_decimal_8_underflow_wraps` pins the
   ares behaviour.
+- **SPC700 `AND1 C,/membit` (`$6A`)** — `spc700` 0.1.0 computes
+  `!(bit & C)` instead of `C & !bit`. `unko-snes` follows ares and the unit
+  test `spc700_bit_logic` pins the result; the all-opcode oracle sweep skips
+  this one opcode.
 
 ## Intentional approximations
 
-- The S-CPU bus currently models WRAM, cartridge ROM and SRAM only. I/O reads
-  return `0` and I/O writes are ignored until the PPU, APU ports and DMA
+- The S-CPU bus currently models WRAM, cartridge ROM/SRAM and `$2140-$2143`.
+  Other I/O reads return `0` and writes are ignored until the PPU and DMA
   registers are implemented.
+- The S-SMP APU has RAM, the IPL ROM window, control/RAM-enable bits and the
+  four ports. Timers are register stubs, and the S-DSP is a register file with
+  no sample synthesis yet.
+- S-CPU/APU scheduling uses an exact 3,579,545:1,024,000 cycle credit. Memory
+  access wait states and timer catch-up are pending.
 - `Cpu::reset` uses the documented reset-vector fetch and a short internal
   delay sequence; exact reset pin timing is pending hardware capture.
 - `WAI`/`STP` retire two internal cycles after the opcode; the real devices
