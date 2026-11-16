@@ -277,6 +277,18 @@ impl GgrsNetplay {
         self.config
     }
 
+    /// Changes the local input delay (clamped to 0..=16).
+    pub fn set_input_delay(&mut self, delay: u32) {
+        let delay = delay.min(16);
+        if self
+            .session
+            .set_input_delay(self.local_handle, delay as usize)
+            .is_ok()
+        {
+            self.config.input_delay = delay;
+        }
+    }
+
     /// Highest frame whose inputs are fully confirmed.
     #[must_use]
     pub fn confirmed_frame(&self) -> u32 {

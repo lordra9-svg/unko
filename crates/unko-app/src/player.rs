@@ -1313,6 +1313,9 @@ impl Player {
 
     /// Changes the input delay of the active session (clamped to 0..=16).
     pub fn set_netplay_input_delay(&mut self, delay: u32) {
+        if let Some(ggrs) = &mut self.ggrs {
+            ggrs.set_input_delay(delay);
+        }
         if let Some(netplay) = &mut self.netplay {
             netplay.session.set_input_delay(delay);
         }
