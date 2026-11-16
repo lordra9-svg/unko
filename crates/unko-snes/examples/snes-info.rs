@@ -93,6 +93,9 @@ fn main() -> ExitCode {
         [0, 1, 2, 3].map(|port| system.apu.cpu_read(port)),
         [0, 1, 2, 3].map(|port| system.apu.apu_port(port)),
     );
+    if let Some(path) = std::env::var_os("DUMP_APU") {
+        let _ = std::fs::write(path, system.apu.ram());
+    }
     let frame = system.ppu.frame_buffer();
     let pixels = frame.as_chunks::<4>().0;
     let nonzero = pixels

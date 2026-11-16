@@ -5,7 +5,7 @@ chosen reference (real hardware, then ares, then a public test ROM). It is the
 SNES counterpart to `docs/accuracy-divergences.md` and follows the charter in
 `docs/accuracy.md`.
 
-Current snapshot: **2026-11-16**, 65C816 + SPC700 + APU + S-DSP.
+Current snapshot: **2026-11-16**, 65C816 + SPC700 + APU + S-DSP + line PPU + DMA.
 
 ## Open failures
 
