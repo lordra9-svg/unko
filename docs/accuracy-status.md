@@ -92,16 +92,17 @@ Validation so far:
 - 207 public SNES test images in `test-roms/snes/`: all 207 parsed by
   `snes-scan`
 - Super Mario World with the local 64-byte IPL ROM: the SPC700 completes the
-  IPL upload handshake, the APU timers advance and the game produces non-black
-  frames (about 27k-33k non-black pixels per frame at 600 frames).
-- The frames do **not** yet match ares visually: a 600-frame comparison shows
-  tilemap/VRAM garbage rather than the Super Mario World title screen. This is
-  the current blocking accuracy issue.
+  IPL upload handshake, the APU timers advance and the game renders a
+  recognizable title logo plus the BG1 landscape at 600-900 frames.
+- VRAM and CGRAM now match the RustySNES oracle (CGRAM all but one entry);
+  the remaining visual differences are the missing sky/cloud HDMA bands,
+  border/colour-math effects and line timing.
 - Star Fox remains black without the SuperFX coprocessor; Final Fantasy V was
   still in its boot sequence at the 20M-cycle sample.
 
-The PPU is line-based rather than dot-scheduled, VRAM/DMA uploads need
-reconciliation with ares, and colour math/windows/hires remain approximations.
+The PPU is line-based rather than dot-scheduled, HDMA is not implemented,
+colour math/windows/hires remain approximations, and exact frame parity with
+ares is not yet achieved.
 
 Performance: `unko bench --synthetic 3000 --min-fps 300` measures **791.6 fps**
 (13.17x real time, 1.263 ms/frame); release save states are 417,090 bytes at

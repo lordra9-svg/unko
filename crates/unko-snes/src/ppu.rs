@@ -49,7 +49,11 @@ pub struct Ppu {
     /// $210D-$2114 BGnHOFS/VOFS (already assembled 10-bit values)
     bg_h: [u16; 4],
     bg_v: [u16; 4],
-    bgofs_latch: [u8; 8],
+    latch_bgofs_ppu1: u8,
+    latch_bgofs_ppu2: u8,
+    latch_mode7: u8,
+    m7_hofs: u16,
+    m7_vofs: u16,
     /// $2115 VMAIN
     vmain: u8,
     vram_address: u16,
@@ -115,7 +119,11 @@ impl Ppu {
             bg_nba: [0; 4],
             bg_h: [0; 4],
             bg_v: [0; 4],
-            bgofs_latch: [0; 8],
+            latch_bgofs_ppu1: 0,
+            latch_bgofs_ppu2: 0,
+            latch_mode7: 0,
+            m7_hofs: 0,
+            m7_vofs: 0,
             vmain: 0,
             vram_address: 0,
             vram_read_latch: 0,
@@ -192,6 +200,11 @@ impl Ppu {
     /// Main-screen enable mask (debug).
     pub const fn main_screen(&self) -> u8 {
         self.tm
+    }
+
+    /// Current background scroll (debug).
+    pub const fn bg_scroll(&self, layer: usize) -> (u16, u16) {
+        (self.bg_h[layer], self.bg_v[layer])
     }
 
     /// Current VMAIN value (debug).
@@ -288,7 +301,7 @@ impl Ppu {
                 high
             }
             0x213B => {
-                let address = usize::from(self.cgram_address & 0x7F);
+                let address = usize::from(self.cgram_address);
                 if self.cgram_latch {
                     self.cgram_latch = false;
                     self.cgram_address = self.cgram_address.wrapping_add(1);
@@ -352,22 +365,25 @@ impl Ppu {
             }
             0x210D..=0x2114 => {
                 let index = usize::from(address - 0x210D);
-                let latch = &mut self.bgofs_latch[index];
-                if *latch == 0 {
-                    *latch = data;
+                let layer = index >> 1;
+                if index & 1 == 0 {
+                    let value = (u16::from(data) << 8)
+                        | u16::from(self.latch_bgofs_ppu1 & !7)
+                        | u16::from(self.latch_bgofs_ppu2 & 7);
+                    self.bg_h[layer] = value & 0x03FF;
+                    self.latch_bgofs_ppu1 = data;
+                    self.latch_bgofs_ppu2 = data;
+                    if index == 0 {
+                        self.m7_hofs = (u16::from(data) << 8) | u16::from(self.latch_mode7);
+                        self.latch_mode7 = data;
+                    }
                 } else {
-                    *latch = 0;
-                    let value = u16::from(data & 0x03) << 8 | u16::from(data);
-                    if index & 1 == 0 {
-                        self.bg_h[index >> 1] = value & 0x03FF;
-                        if self.bg_mode == 7 && index == 0 {
-                            self.m7x = value as i16;
-                        }
-                    } else {
-                        self.bg_v[index >> 1] = value & 0x03FF;
-                        if self.bg_mode == 7 && index == 1 {
-                            self.m7y = value as i16;
-                        }
+                    let value = (u16::from(data) << 8) | u16::from(self.latch_bgofs_ppu1);
+                    self.bg_v[layer] = value & 0x03FF;
+                    self.latch_bgofs_ppu1 = data;
+                    if index == 1 {
+                        self.m7_vofs = (u16::from(data) << 8) | u16::from(self.latch_mode7);
+                        self.latch_mode7 = data;
                     }
                 }
             }
@@ -388,7 +404,7 @@ impl Ppu {
                 self.cgram_latch = false;
             }
             0x2122 => {
-                let address = usize::from(self.cgram_address & 0x7F);
+                let address = usize::from(self.cgram_address);
                 if self.cgram_latch {
                     self.cgram_latch = false;
                     self.cgram[address] =
@@ -466,8 +482,9 @@ impl Ppu {
             5..=7 => &[0],
             _ => &[],
         };
+        let main_screen = self.tm;
         for &layer in order {
-            if self.tm & (1 << layer) != 0 {
+            if main_screen & (1 << layer) != 0 {
                 if mode == 7 && layer == 0 {
                     self.render_mode7(&mut pixels, y);
                 } else if mode <= 6 {
@@ -475,7 +492,7 @@ impl Ppu {
                 }
             }
         }
-        if self.tm & 0x10 != 0 {
+        if main_screen & 0x10 != 0 {
             self.render_sprites(&mut pixels, y);
         }
         self.present_line(y, &pixels);
@@ -503,7 +520,7 @@ impl Ppu {
             _ => return,
         };
         let sc = self.bg_sc[layer];
-        let tile_size = u32::from((sc >> 4) & 1);
+        let tile_size = u32::from((self.bg_mode >> (4 + layer)) & 1);
         let screen_h = 32u32 << ((sc as u32) & 1);
         let screen_v = 32u32 << (((sc as u32) >> 1) & 1);
         let hsize = (screen_h * 8) << tile_size;
@@ -551,18 +568,18 @@ impl Ppu {
                 7 - (x as u32 & 7)
             };
             let word0 = self.vram[(address & 0x7FFF) as usize];
-            let mut color = ((word0 >> (8 + bit)) & 1) | (((word0 >> bit) & 1) << 1);
+            let mut color = ((word0 >> bit) & 1) | (((word0 >> (8 + bit)) & 1) << 1);
             if bpp_shift >= 1 {
                 let word1 = self.vram[((address + 8) & 0x7FFF) as usize];
-                color |= (((word1 >> (8 + bit)) & 1) << 2) | (((word1 >> bit) & 1) << 3);
+                color |= (((word1 >> bit) & 1) << 2) | (((word1 >> (8 + bit)) & 1) << 3);
             }
             if bpp_shift >= 2 {
                 let word2 = self.vram[((address + 16) & 0x7FFF) as usize];
                 let word3 = self.vram[((address + 24) & 0x7FFF) as usize];
-                color |= (((word2 >> (8 + bit)) & 1) << 4)
-                    | (((word2 >> bit) & 1) << 5)
-                    | (((word3 >> (8 + bit)) & 1) << 6)
-                    | (((word3 >> bit) & 1) << 7);
+                color |= (((word2 >> bit) & 1) << 4)
+                    | (((word2 >> (8 + bit)) & 1) << 5)
+                    | (((word3 >> bit) & 1) << 6)
+                    | (((word3 >> (8 + bit)) & 1) << 7);
             }
             if color == 0 {
                 continue;
@@ -586,8 +603,8 @@ impl Ppu {
         let d = i32::from(self.m7d);
         let hcenter = sign13(self.m7x);
         let vcenter = sign13(self.m7y);
-        let hoffset = sign13(self.bg_h[0] as i16);
-        let voffset = sign13(self.bg_v[0] as i16);
+        let hoffset = sign13(self.m7_hofs as i16);
+        let voffset = sign13(self.m7_vofs as i16);
         let y = if self.m7sel & 0x02 != 0 {
             255 - y as i32
         } else {
@@ -682,10 +699,10 @@ impl Ppu {
                     let bit = if attr & 0x40 != 0 { mx } else { 7 - mx };
                     let word0 = self.vram[(address & 0x7FFF) as usize];
                     let word1 = self.vram[((address + 8) & 0x7FFF) as usize];
-                    let color = ((word0 >> (8 + bit)) & 1)
-                        | (((word0 >> bit) & 1) << 1)
-                        | (((word1 >> (8 + bit)) & 1) << 2)
-                        | (((word1 >> bit) & 1) << 3);
+                    let color = ((word0 >> bit) & 1)
+                        | (((word0 >> (8 + bit)) & 1) << 1)
+                        | (((word1 >> bit) & 1) << 2)
+                        | (((word1 >> (8 + bit)) & 1) << 3);
                     if color == 0 {
                         continue;
                     }
@@ -828,8 +845,8 @@ mod tests {
         ppu.write(0x2121, 0x00);
         ppu.write(0x2122, 0x1F); // backdrop/color 0 red
         ppu.write(0x2122, 0x00);
-        // Palette 1 color 1 = green.
-        ppu.write(0x2121, 0x01);
+        // Palette color 2 = green.
+        ppu.write(0x2121, 0x02);
         ppu.write(0x2122, 0xE0);
         ppu.write(0x2122, 0x03);
         // Tile 0 row 0 has color 1 in the left-most pixel.

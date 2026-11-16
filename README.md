@@ -35,8 +35,8 @@ SNES track: the isolated `unko-snes` crate now has ROM parsing and checksum
 validation, LoROM/HiROM/ExLoROM/ExHiROM mapping, a cycle-stepped 65C816, the
 full SPC700, an APU wrapper with IPL/ports, the S-DSP voice pipeline, a
 line-based PPU with modes 0-7 and sprites, S-CPU DMA, APU timers, WRAM/SRAM and
-the S-CPU memory map. Retail boot now produces non-black frames, but they do
-not yet match ares; PPU/DMA upload and timing work is next.
+the S-CPU memory map. Retail Super Mario World now renders a recognizable title
+logo and BG1 landscape, but sky/cloud effects and HDMA are still missing.
 
 Reference gates:
 

@@ -117,6 +117,20 @@ fn main() -> ExitCode {
     if let Some(path) = std::env::var_os("FRAME_OUT") {
         let _ = std::fs::write(path, system.ppu.frame_buffer());
     }
+    if let Some(path) = std::env::var_os("CGRAM_OUT") {
+        let mut cgram = Vec::with_capacity(512);
+        for address in 0..256u16 {
+            cgram.extend_from_slice(&system.ppu.cgram_word(address as u8).to_le_bytes());
+        }
+        let _ = std::fs::write(path, cgram);
+    }
+    if let Some(path) = std::env::var_os("VRAM_OUT") {
+        let mut vram = Vec::with_capacity(0x8000 * 2);
+        for address in 0..0x8000u16 {
+            vram.extend_from_slice(&system.ppu.vram_word(address).to_le_bytes());
+        }
+        let _ = std::fs::write(path, vram);
+    }
     let frame = system.ppu.frame_buffer();
     let pixels = frame.as_chunks::<4>().0;
     let nonzero = pixels
@@ -127,6 +141,13 @@ fn main() -> ExitCode {
         .iter()
         .map(|pixel| u64::from(pixel[0]) + u64::from(pixel[1]) + u64::from(pixel[2]))
         .sum();
+    eprintln!(
+        "scroll: {:?} {:?} {:?} {:?}",
+        system.ppu.bg_scroll(0),
+        system.ppu.bg_scroll(1),
+        system.ppu.bg_scroll(2),
+        system.ppu.bg_scroll(3),
+    );
     println!(
         "ppu:         line={} vblank={} frame_ready={} nonzero_pixels={} rgb_sum={checksum}",
         system.ppu.line(),
