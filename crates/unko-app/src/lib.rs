@@ -35,6 +35,8 @@ mod rom_manager_view;
 mod settings;
 mod slots;
 mod vsconfig;
+#[cfg(feature = "vulkan")]
+pub mod vulkan;
 
 pub use app::{App, Args};
 

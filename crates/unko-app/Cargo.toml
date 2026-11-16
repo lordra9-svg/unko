@@ -15,6 +15,11 @@ crate-type = ["rlib", "staticlib", "cdylib"]
 name = "unko-app"
 path = "src/main.rs"
 
+[features]
+default = []
+# Offscreen wgpu/Vulkan renderer scaffold; not yet wired into the egui shell.
+vulkan = ["dep:wgpu", "dep:pollster"]
+
 [dependencies]
 unko-core.workspace = true
 unko-netplay = { path = "../unko-netplay" }
@@ -30,6 +35,8 @@ hound = "3.5.1"
 png = "0.18.0"
 gif = "0.14.2"
 directories = "6.0.0"
+wgpu = { version = "24", optional = true }
+pollster = { version = "0.4", optional = true }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 eframe = { version = "0.31.1", default-features = false, features = [
