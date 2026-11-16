@@ -718,3 +718,32 @@ fn oracle_cop_and_rti() {
     let patches = [(0xFFE4, 0x00), (0xFFE5, 0x90), (0x9000, 0x40)];
     compare("COP/RTI native", &code, State::native8(), &patches);
 }
+
+#[test]
+fn oracle_16_bit_indexed_addressing() {
+    let code = [
+        0xBD, 0x00, 0x20, // LDA $2000,X (16-bit)
+        0x9D, 0x00, 0x30, // STA $3000,X (16-bit)
+        0xDB, // STP
+    ];
+    let mut state = State::native16();
+    state.d = 0x0020;
+    state.dbr = 0x01;
+    state.x = 0x0100;
+    let patches = [(0x012100, 0x34), (0x012101, 0x12)];
+    compare("16-bit indexed", &code, state, &patches);
+}
+
+#[test]
+fn oracle_decimal_16() {
+    let code = [
+        0xF8, // SED
+        0x18, // CLC
+        0xC2, 0x20, // REP #$20
+        0xA9, 0x99, 0x00, // LDA #$0099
+        0x69, 0x01, 0x00, // ADC #$0001
+        0xD8, // CLD
+        0xDB, // STP
+    ];
+    compare("decimal 16-bit", &code, State::native16(), &[]);
+}

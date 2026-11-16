@@ -39,7 +39,7 @@ with ares. The implementation follows ares, which is the primary source.
 
 ## Validation
 
-- 16 differential tests against the MIT `w65c816` crate.
+- 18 differential tests against the MIT `w65c816` crate.
 - All 15 read addressing modes across 7 ALU operations (105 opcode cases),
   24 write modes and 35 modify modes.
 - 10 retail images (LoROM, HiROM and ExHiROM): header detection and stored
