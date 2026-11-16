@@ -53,9 +53,10 @@ synthetic-tested (see `docs/accuracy-status.md`).
   out of this pass (interpreter sandbox, credentials/network, pack format,
   rollback transport).
 - Extra sprites / sprite-limit toggle and CPU/PPU overclock.
-- VS. System / PlayChoice-10: remaining VS BIOS/game ROMs, per-title DIP
-  defaults, the DualSystem sub-CPU/watchdog and PC10 input; mapper 99, cabinet
-  input, RGB PPU palettes and 2C05 security are now implemented.
+- VS. System / PlayChoice-10: **paused by the owner**. Mapper 99, cabinet
+  input, RGB PPU palettes, 2C05 security and 13 staged local images are done;
+  a 2C05 title, a known-good DualSystem dump, per-title DIP defaults, PC10
+  iNES images and the PC10 second-CPU/input layer remain.
 - `unko-core` generalisation: complete. NES methods and vocabulary live in
   `unko-nes-api`; `unko-core` is the generic contract.
 - NES 2.0 header editor, repair database and IPS/BPS soft-patching (owner

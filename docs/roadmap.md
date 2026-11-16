@@ -95,8 +95,10 @@ The main effort is now the reference-parity accuracy core. Details in
       per-title DIP defaults, the DualSystem sub-CPU/watchdog, PlayChoice-10
       input and validation against real PAL/NSF content. A local Vs. drop was
       repaired and staged on 2026-11-16: 13 images (mapper 99/2C03/2C04,
-      including Gumshoe's 40 KiB outer bank) boot in `test-roms/vs/`; a 2C05
-      title and a good DualSystem dump are still missing. The FDS `$4030.D1`
+      including Gumshoe's 40 KiB outer bank) boot in `test-roms/vs/`. VS. and
+      PlayChoice-10 work is **paused by the owner** for now: a 2C05 title, a
+      good DualSystem dump and PC10 iNES images are still missing, and PC10
+      needs the second-CPU/INST-ROM layer. The FDS `$4030.D1`
       DRAM-refresh watchdog matches the hardware capture (`67FF`/`6E25`).
 - [ ] **A7** differential harness, hardware captures, performance pass.
       The differential harness is complete: per-frame RGBA, audio and

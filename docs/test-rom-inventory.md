@@ -48,8 +48,9 @@ physical dump is required for those.
 
 ### Local Vs. System / PlayChoice-10 drop (2026-11-16)
 
-`scripts/repair_vs_headers.py` repairs the local VS images into NES 2.0
-headers: Vs. console type, four-screen mirroring, cabinet nibble and per-game
+VS./PlayChoice-10 work is paused by the owner; the staged set stays available
+for a later pass. `scripts/repair_vs_headers.py` repairs the local VS images
+into NES 2.0 headers: Vs. console type, four-screen mirroring, cabinet nibble and per-game
 PPU model. It writes only to the gitignored `test-roms/` directory.
 
 Staged under `test-roms/vs/` (13 images):
