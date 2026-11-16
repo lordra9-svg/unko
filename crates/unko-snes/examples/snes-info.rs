@@ -66,7 +66,25 @@ fn main() -> ExitCode {
     system.reset();
     println!("cpu reset:   {}", system.cpu);
     println!("spc reset:   {}", system.apu.spc);
-    let (cycles, instructions) = if std::env::var_os("TRACE").is_some() {
+    let target_frames: u32 = std::env::var("FRAMES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+    let (cycles, instructions) = if target_frames > 0 {
+        let mut cycles = 0u64;
+        let mut instructions = 0u32;
+        let mut frames = 0u32;
+        while frames < target_frames && instructions < 20_000_000 && !system.cpu.stp {
+            cycles += u64::from(system.step());
+            instructions += 1;
+            if system.ppu.frame_ready() {
+                system.ppu.acknowledge_frame();
+                frames += 1;
+            }
+        }
+        eprintln!("frames={frames}");
+        (cycles, instructions)
+    } else if std::env::var_os("TRACE").is_some() {
         let mut cycles = 0u64;
         let mut instructions = 0u32;
         while instructions < 5_000_000 && !system.cpu.stp {
@@ -95,6 +113,9 @@ fn main() -> ExitCode {
     );
     if let Some(path) = std::env::var_os("DUMP_APU") {
         let _ = std::fs::write(path, system.apu.ram());
+    }
+    if let Some(path) = std::env::var_os("FRAME_OUT") {
+        let _ = std::fs::write(path, system.ppu.frame_buffer());
     }
     let frame = system.ppu.frame_buffer();
     let pixels = frame.as_chunks::<4>().0;

@@ -16,6 +16,37 @@ pub const APU_RAM_SIZE: usize = 0x1_0000;
 /// Size of the SPC700 IPL ROM.
 pub const IPL_SIZE: usize = 64;
 
+/// One S-SMP timer.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Timer {
+    stage0: u16,
+    stage1: bool,
+    stage2: u8,
+    stage3: u8,
+    line: bool,
+    enable: bool,
+    target: u8,
+}
+
+impl Timer {
+    fn step(&mut self, clocks: u32, frequency: u16, timers_enable: bool, timers_disable: bool) {
+        self.stage0 = self.stage0.wrapping_add(clocks as u16);
+        while self.stage0 >= frequency {
+            self.stage0 -= frequency;
+            self.stage1 = !self.stage1;
+            let level = self.stage1 && timers_enable && !timers_disable;
+            if self.line && !level && self.enable {
+                self.stage2 = self.stage2.wrapping_add(1);
+                if self.stage2 == self.target {
+                    self.stage2 = 0;
+                    self.stage3 = (self.stage3 + 1) & 0x0F;
+                }
+            }
+            self.line = level;
+        }
+    }
+}
+
 /// The S-SMP + S-DSP APU.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Apu {
@@ -28,6 +59,8 @@ pub struct Apu {
     ram_writable: bool,
     ram_disable: bool,
     timers_enable: bool,
+    timers_disable: bool,
+    timers: [Timer; 3],
     dsp_address: u8,
     dsp: Dsp,
     /// Ports written by the S-CPU and read by the SPC700.
@@ -60,6 +93,8 @@ impl Apu {
             ram_writable: true,
             ram_disable: false,
             timers_enable: true,
+            timers_disable: false,
+            timers: std::array::from_fn(|_| Timer::default()),
             dsp_address: 0,
             dsp: Dsp::new(),
             apu_ports: [0; 4],
@@ -118,6 +153,8 @@ impl Apu {
         self.ram_writable = true;
         self.ram_disable = false;
         self.timers_enable = true;
+        self.timers_disable = false;
+        self.timers = std::array::from_fn(|_| Timer::default());
         self.dsp_address = 0;
         self.dsp.reset();
         self.dsp_credit = 0;
@@ -165,6 +202,8 @@ impl Apu {
             ram_writable: &mut self.ram_writable,
             ram_disable: &mut self.ram_disable,
             timers_enable: &mut self.timers_enable,
+            timers_disable: &mut self.timers_disable,
+            timers: &mut self.timers,
             dsp_address: &mut self.dsp_address,
             dsp: &mut self.dsp,
             apu_ports: &mut self.apu_ports,
@@ -174,6 +213,7 @@ impl Apu {
             timer_targets: &mut self.timer_targets,
         };
         let cycles = self.spc.step(&mut bus);
+        self.timers_step(cycles);
         self.dsp_credit += u64::from(cycles);
         while self.dsp_credit >= 32 {
             self.dsp_credit -= 32;
@@ -196,6 +236,13 @@ impl Apu {
         self.samples.drain(..)
     }
 
+    fn timers_step(&mut self, cycles: u32) {
+        for (index, timer) in self.timers.iter_mut().enumerate() {
+            let frequency = if index == 2 { 16 } else { 128 };
+            timer.step(cycles, frequency, self.timers_enable, self.timers_disable);
+        }
+    }
+
     /// Run SPC700 instructions until at least `cycles` SPC cycles have been
     /// retired.
     pub fn run_cycles(&mut self, cycles: u64) -> u64 {
@@ -215,6 +262,8 @@ struct ApuBus<'a> {
     ram_writable: &'a mut bool,
     ram_disable: &'a mut bool,
     timers_enable: &'a mut bool,
+    timers_disable: &'a mut bool,
+    timers: &'a mut [Timer; 3],
     dsp_address: &'a mut u8,
     dsp: &'a mut Dsp,
     apu_ports: &'a mut [u8; 4],
@@ -227,12 +276,18 @@ struct ApuBus<'a> {
 impl SpcBus for ApuBus<'_> {
     fn read(&mut self, address: u16) -> u8 {
         match address {
-            0xF0 | 0xF1 | 0xFA | 0xFB | 0xFC | 0xFD | 0xFE | 0xFF => 0,
+            0xF0 | 0xF1 | 0xFA | 0xFB | 0xFC => 0,
             0xF2 => *self.dsp_address,
             0xF3 => self.dsp.read(*self.dsp_address),
             0xF4..=0xF7 => self.apu_ports[usize::from(address - 0xF4)],
             0xF8 => *self.aux4,
             0xF9 => *self.aux5,
+            0xFD..=0xFF => {
+                let timer = &mut self.timers[usize::from(address - 0xFD)];
+                let value = timer.stage3;
+                timer.stage3 = 0;
+                value
+            }
             _ => {
                 if self.ipl_loaded && *self.iplrom_enable && address >= 0xFFC0 {
                     self.ipl[usize::from(address & 0x3F)]
@@ -251,11 +306,20 @@ impl SpcBus for ApuBus<'_> {
         }
         match address {
             0xF0 => {
-                *self.timers_enable = value & 0x08 != 0;
+                *self.timers_disable = value & 0x01 != 0;
                 *self.ram_writable = value & 0x02 != 0;
                 *self.ram_disable = value & 0x04 != 0;
+                *self.timers_enable = value & 0x08 != 0;
             }
             0xF1 => {
+                for (index, timer) in self.timers.iter_mut().enumerate() {
+                    let enable = value & (1 << index) != 0;
+                    if enable && !timer.enable {
+                        timer.stage2 = 0;
+                        timer.stage3 = 0;
+                    }
+                    timer.enable = enable;
+                }
                 *self.iplrom_enable = value & 0x80 != 0;
                 if value & 0x10 != 0 {
                     self.apu_ports[0] = 0;
@@ -271,7 +335,10 @@ impl SpcBus for ApuBus<'_> {
             0xF4..=0xF7 => self.cpu_ports[usize::from(address - 0xF4)] = value,
             0xF8 => *self.aux4 = value,
             0xF9 => *self.aux5 = value,
-            0xFA..=0xFC => self.timer_targets[usize::from(address - 0xFA)] = value,
+            0xFA..=0xFC => {
+                self.timer_targets[usize::from(address - 0xFA)] = value;
+                self.timers[usize::from(address - 0xFA)].target = value;
+            }
             _ => {}
         }
     }
@@ -318,6 +385,8 @@ mod tests {
             ram_writable: &mut apu.ram_writable,
             ram_disable: &mut apu.ram_disable,
             timers_enable: &mut apu.timers_enable,
+            timers_disable: &mut apu.timers_disable,
+            timers: &mut apu.timers,
             dsp_address: &mut apu.dsp_address,
             dsp: &mut apu.dsp,
             apu_ports: &mut apu.apu_ports,
@@ -390,5 +459,19 @@ mod dsp_integration_tests {
         }
         assert!(apu.sample_count() >= 64, "DSP did not produce samples");
         assert!(apu.drain_samples().any(|sample| sample != (0, 0)));
+    }
+}
+
+#[cfg(test)]
+mod timer_tests {
+    use super::*;
+
+    #[test]
+    fn timer_reaches_output() {
+        let mut apu = Apu::new();
+        apu.timers[0].target = 1;
+        apu.timers[0].enable = true;
+        apu.timers_step(1000);
+        assert!(apu.timers[0].stage3 > 0);
     }
 }

@@ -90,6 +90,8 @@ pub struct Cpu {
     pub nmi_pending: bool,
     /// Total bus cycles retired.
     pub cycles: u64,
+    /// Number of NMI edges serviced (debug).
+    pub nmi_services: u64,
 }
 
 impl Default for Cpu {
@@ -126,6 +128,7 @@ impl Cpu {
             irq_line: false,
             nmi_pending: false,
             cycles: 0,
+            nmi_services: 0,
         }
     }
 
@@ -210,8 +213,15 @@ impl Cpu {
 
         if self.nmi_pending {
             self.nmi_pending = false;
+            self.nmi_services += 1;
             let vector = if self.emulation { 0xFFFA } else { 0xFFEA };
             self.service_interrupt(bus, vector, false);
+            if std::env::var_os("NMI_TRACE").is_some() {
+                eprintln!(
+                    "NMI vector={:04X} pc={:04X} pbr={:02X}",
+                    vector, self.pc, self.pbr
+                );
+            }
             return (self.cycles - start) as u32;
         }
 

@@ -169,6 +169,41 @@ impl Ppu {
         self.vram[usize::from(address & 0x7FFF)]
     }
 
+    /// Read a CGRAM word (debug/test helper).
+    pub fn cgram_word(&self, address: u8) -> u16 {
+        self.cgram[usize::from(address)]
+    }
+
+    /// Current background mode (debug).
+    pub const fn bg_mode(&self) -> u8 {
+        self.bg_mode
+    }
+
+    /// Background screen base/mode register (debug).
+    pub const fn bg_sc(&self, layer: usize) -> u8 {
+        self.bg_sc[layer]
+    }
+
+    /// Background character base register (debug).
+    pub const fn bg_nba(&self, layer: usize) -> u8 {
+        self.bg_nba[layer]
+    }
+
+    /// Main-screen enable mask (debug).
+    pub const fn main_screen(&self) -> u8 {
+        self.tm
+    }
+
+    /// Current VMAIN value (debug).
+    pub const fn vmain(&self) -> u8 {
+        self.vmain
+    }
+
+    /// Current VRAM address (debug).
+    pub const fn vram_address(&self) -> u16 {
+        self.vram_address
+    }
+
     /// Whether the PPU is in vblank.
     pub const fn in_vblank(&self) -> bool {
         self.vblank
@@ -390,28 +425,26 @@ impl Ppu {
     }
 
     fn vram_word_address(&self) -> u16 {
+        let address = self.vram_address;
         match (self.vmain >> 2) & 0x03 {
-            0 => self.vram_address,
-            1 => self.vram_address ^ 0x8000,
-            2 => (self.vram_address & 0xFF00) | (self.vram_address << 1 & 0xFE),
-            _ => (self.vram_address & 0xFF00) | ((self.vram_address.wrapping_add(0x80)) & 0xFF),
+            0 => address,
+            1 => ((address >> 8) << 8) | ((address & 0x1F) << 3) | ((address >> 5) & 0x07),
+            2 => ((address >> 9) << 9) | ((address & 0x3F) << 3) | ((address >> 6) & 0x07),
+            _ => ((address >> 10) << 10) | ((address & 0x7F) << 3) | ((address >> 7) & 0x07),
         }
     }
 
     fn write_vram_byte(&mut self, data: u8, high: bool) {
         let address = self.vram_word_address() & 0x7FFF;
-        let low_first = self.vmain & 0x80 == 0;
-        if (high && low_first) || (!high && !low_first) {
-            let value = (self.vram_read_latch & 0x00FF) | (u16::from(data) << 8);
-            self.vram[usize::from(address)] = value;
-            self.vram_address = self.vram_address.wrapping_add(self.vram_increment());
+        let word = self.vram[usize::from(address)];
+        self.vram[usize::from(address)] = if high {
+            (word & 0x00FF) | (u16::from(data) << 8)
         } else {
-            let value = (self.vram_read_latch & 0xFF00) | u16::from(data);
-            self.vram_read_latch = value;
-            if !low_first {
-                self.vram[usize::from(address)] = value;
-                self.vram_address = self.vram_address.wrapping_add(self.vram_increment());
-            }
+            (word & 0xFF00) | u16::from(data)
+        };
+        let increment = self.vram_increment();
+        if (high && self.vmain & 0x80 != 0) || (!high && self.vmain & 0x80 == 0) {
+            self.vram_address = self.vram_address.wrapping_add(increment);
         }
     }
 

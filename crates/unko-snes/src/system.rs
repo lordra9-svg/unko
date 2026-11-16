@@ -32,6 +32,8 @@ pub struct Snes {
     ppu_credit: i64,
     nmi_enable: bool,
     nmi_flag: bool,
+    /// Number of NMI edges delivered (debug).
+    pub nmi_count: u64,
 }
 
 impl Snes {
@@ -48,6 +50,7 @@ impl Snes {
             ppu_credit: 0,
             nmi_enable: false,
             nmi_flag: false,
+            nmi_count: 0,
         }
     }
 
@@ -59,6 +62,11 @@ impl Snes {
     /// Mutable work RAM, for save states and tests.
     pub fn wram_mut(&mut self) -> &mut [u8] {
         &mut self.wram
+    }
+
+    /// Whether NMI is enabled by the last `$4200` write (debug).
+    pub const fn nmi_enabled(&self) -> bool {
+        self.nmi_enable
     }
 
     /// Install a user-supplied 64-byte SPC700 IPL ROM.
@@ -74,6 +82,7 @@ impl Snes {
         self.ppu_credit = 0;
         self.nmi_enable = false;
         self.nmi_flag = false;
+        self.nmi_count = 0;
         let mut bus = SnesBus {
             wram: &mut self.wram,
             cart: &mut self.cart,
@@ -133,6 +142,7 @@ impl Snes {
         if self.ppu.take_nmi() && self.nmi_enable {
             self.cpu.trigger_nmi();
             self.nmi_flag = true;
+            self.nmi_count += 1;
         }
         cycles
     }
@@ -436,7 +446,7 @@ mod tests {
                 nmi_flag: &mut system.nmi_flag,
                 vblank: false,
             };
-            bus.write(0x2115, 0x00);
+            bus.write(0x2115, 0x80);
             bus.write(0x2116, 0x00);
             bus.write(0x2117, 0x00);
             bus.write(0x4300, 0x01);
@@ -464,6 +474,52 @@ mod tests {
         }
         assert_eq!(system.ppu.vram_word(0), 0x3412);
         assert_eq!(system.ppu.vram_word(1), 0x7856);
+    }
+
+    #[test]
+    fn dma_writes_cgram() {
+        let mut system = Snes::new(cartridge(&[0xDB]));
+        system.reset();
+        for (index, value) in [0x1F, 0x00, 0xE0, 0x03].into_iter().enumerate() {
+            system.wram_mut()[0x0100 + index] = value;
+        }
+        {
+            let mut bus = SnesBus {
+                wram: &mut system.wram,
+                cart: &mut system.cart,
+                apu: &mut system.apu,
+                ppu: &mut system.ppu,
+                dma: &mut system.dma,
+                nmi_enable: &mut system.nmi_enable,
+                nmi_flag: &mut system.nmi_flag,
+                vblank: false,
+            };
+            bus.write(0x2121, 0x00);
+            bus.write(0x4300, 0x00);
+            bus.write(0x4301, 0x22);
+            bus.write(0x4302, 0x00);
+            bus.write(0x4303, 0x01);
+            bus.write(0x4304, 0x7E);
+            bus.write(0x4305, 0x04);
+            bus.write(0x4306, 0x00);
+            bus.write(0x420B, 0x01);
+        }
+        let (channels, mask) = system.dma.take_pending().expect("DMA pending");
+        {
+            let mut bus = SnesBus {
+                wram: &mut system.wram,
+                cart: &mut system.cart,
+                apu: &mut system.apu,
+                ppu: &mut system.ppu,
+                dma: &mut system.dma,
+                nmi_enable: &mut system.nmi_enable,
+                nmi_flag: &mut system.nmi_flag,
+                vblank: false,
+            };
+            dma::run(&channels, mask, &mut bus);
+        }
+        assert_eq!(system.ppu.cgram_word(0), 0x001F);
+        assert_eq!(system.ppu.cgram_word(1), 0x03E0);
     }
 
     #[test]
