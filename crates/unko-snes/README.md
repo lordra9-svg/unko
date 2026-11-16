@@ -24,11 +24,15 @@ in another Rust project. A future `unko-snes-host` crate will provide the
   ports, IPL/RAM control and the S-DSP register file
 - S-DSP: eight BRR voices, Gaussian interpolation, ADSR/GAIN envelopes,
   noise/LFSR, pitch modulation, echo and stereo 32 kHz sample output
-- Minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM, reset and
-  `$2140-$2143` APU ports
+- Line-based S-PPU: register map, VRAM/CGRAM/OAM, vblank/NMI, modes 0-7,
+  tile backgrounds, Mode 7 affine mapping and sprites
+- S-CPU general-purpose DMA
+- Minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM, reset,
+  `$2100-$213F` PPU registers and `$2140-$2143` APU ports
 - Oracle differential tests against the MIT `w65c816` and `spc700` crates
 
-The PPU and DMA engine are the next slices.
+The next work is the retail boot handshake, dot-level PPU timing/colour math
+and HDMA.
 
 ## Accuracy sources
 

@@ -390,7 +390,7 @@ impl Spc700 {
             0x1b => self.direct_indexed_modify(bus, 0x1B, Register::X),
             0x1c => self.implied_modify(bus, 0x1C, Register::A),
             0x1d => self.implied_modify(bus, 0x1D, Register::X),
-            0x1e => self.absolute_indexed_read(bus, 0x1E, Register::X),
+            0x1e => self.absolute_read(bus, 0x1E),
             0x1f => self.jump_indirect_x(bus),
             0x20 => self.flag_set(bus, Flag::Page, false),
             0x21 => self.call_table(bus, 2),
@@ -422,7 +422,7 @@ impl Spc700 {
             0x3b => self.direct_indexed_modify(bus, 0x3B, Register::X),
             0x3c => self.implied_modify(bus, 0x3C, Register::A),
             0x3d => self.implied_modify(bus, 0x3D, Register::X),
-            0x3e => self.direct_read_indexed(bus, 0x3E, Register::X),
+            0x3e => self.direct_read(bus, 0x3E),
             0x3f => self.call_absolute(bus),
             0x40 => self.flag_set(bus, Flag::Page, true),
             0x41 => self.call_table(bus, 4),
@@ -454,7 +454,7 @@ impl Spc700 {
             0x5b => self.direct_indexed_modify(bus, 0x5B, Register::X),
             0x5c => self.implied_modify(bus, 0x5C, Register::A),
             0x5d => self.transfer(bus, Register::A, Register::X),
-            0x5e => self.absolute_indexed_read(bus, 0x5E, Register::Y),
+            0x5e => self.absolute_read(bus, 0x5E),
             0x5f => self.jump_absolute(bus),
             0x60 => self.flag_set(bus, Flag::Carry, false),
             0x61 => self.call_table(bus, 6),
@@ -486,7 +486,7 @@ impl Spc700 {
             0x7b => self.direct_indexed_modify(bus, 0x7B, Register::X),
             0x7c => self.implied_modify(bus, 0x7C, Register::A),
             0x7d => self.transfer(bus, Register::X, Register::A),
-            0x7e => self.direct_read_indexed(bus, 0x7E, Register::Y),
+            0x7e => self.direct_read(bus, 0x7E),
             0x7f => self.return_interrupt(bus),
             0x80 => self.flag_set(bus, Flag::Carry, true),
             0x81 => self.call_table(bus, 8),
@@ -593,10 +593,10 @@ impl Spc700 {
             0xe6 => self.indirect_x_read(bus, 0xE6),
             0xe7 => self.indexed_indirect_read(bus, 0xE7),
             0xe8 => self.immediate_read(bus, 0xE8),
-            0xe9 => self.absolute_indexed_read(bus, 0xE9, Register::X),
+            0xe9 => self.absolute_read(bus, 0xE9),
             0xea => self.absolute_bit_modify(bus, 7),
-            0xeb => self.direct_read_indexed(bus, 0xEB, Register::Y),
-            0xec => self.absolute_indexed_read(bus, 0xEC, Register::Y),
+            0xeb => self.direct_read(bus, 0xEB),
+            0xec => self.absolute_read(bus, 0xEC),
             0xed => self.complement_carry(bus),
             0xee => self.pull_register(bus, Register::Y),
             0xef => self.wait_instruction(bus),
@@ -608,7 +608,7 @@ impl Spc700 {
             0xf5 => self.absolute_indexed_read(bus, 0xF5, Register::X),
             0xf6 => self.absolute_indexed_read(bus, 0xF6, Register::Y),
             0xf7 => self.indirect_indexed_read(bus, 0xF7, Register::Y),
-            0xf8 => self.direct_read_indexed(bus, 0xF8, Register::X),
+            0xf8 => self.direct_read(bus, 0xF8),
             0xf9 => self.direct_indexed_read(bus, 0xF9, Register::Y),
             0xfa => self.direct_direct_write(bus),
             0xfb => self.direct_indexed_read(bus, 0xFB, Register::X),
@@ -622,12 +622,6 @@ impl Spc700 {
     fn direct_read(&mut self, bus: &mut impl SpcBus, opcode: u8) {
         let address = self.fetch(bus);
         let value = self.load(bus, address);
-        self.apply_read(bus, opcode, value);
-    }
-
-    fn direct_read_indexed(&mut self, bus: &mut impl SpcBus, opcode: u8, register: Register) {
-        let address = self.fetch(bus);
-        let value = self.load(bus, address.wrapping_add(self.register(register)));
         self.apply_read(bus, opcode, value);
     }
 

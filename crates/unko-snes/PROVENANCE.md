@@ -71,6 +71,30 @@ material used to implement it. No GPL emulator source is translated or copied.
   ares formula and is embedded as a constant.
 - No external DSP crate is linked. RustySNES remains an oracle/reference only.
 
+## `src/ppu.rs`
+
+- SNESdev Wiki PPU pages: [Backgrounds](https://snes.nesdev.org/wiki/Backgrounds),
+  [Tiles](https://snes.nesdev.org/wiki/Tiles),
+  [Tilemaps](https://snes.nesdev.org/wiki/Tilemaps),
+  [Sprites](https://snes.nesdev.org/wiki/Sprites) and
+  [Palettes](https://snes.nesdev.org/wiki/Palettes).
+- [Super Famicom Development Wiki — PPU](https://wiki.superfamicom.org/) and
+  the SNES Development Manual drawings for the register map.
+- The ISC-licensed ares `ares/sfc/ppu` source was used to confirm the register
+  map, OAM/VRAM/CGRAM layouts, tiledata bitplane order, sprite size tables,
+  Mode 7 affine maths and vblank/NMI timing.
+- The renderer is line-based rather than a direct cycle-scheduler port; the
+  remaining timing/colour-math gaps are recorded in
+  `docs/snes-accuracy-divergences.md`.
+
+## `src/dma.rs`
+
+- SNESdev Wiki [DMA registers](https://snes.nesdev.org/wiki/DMA_registers) and
+  [DMA examples](https://snes.nesdev.org/wiki/DMA_examples).
+- ISC-licensed ares `ares/sfc/cpu/dma.cpp` for the transfer-mode address
+  stepping, A/B-bus validity rules and channel register layout.
+- HDMA table scheduling is not implemented yet.
+
 ## `src/apu.rs`
 
 - SNESdev Wiki [S-SMP](https://snes.nesdev.org/wiki/S-SMP) and

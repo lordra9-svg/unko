@@ -50,7 +50,10 @@ implementation source, MesenCE is a black-box oracle, and RustySNES
    the DSP register map, eight BRR voices, Gaussian interpolation, ADSR/GAIN,
    noise, pitch modulation and echo. Eight `spc700` differential tests plus
    DSP/APU unit and integration tests cover the slice.
-4. PPU dot/scanline timing, background/sprite rendering, then the first frame.
+4. PPU dot/scanline timing, background/sprite rendering, then the first
+   frame. **Partial**: line-based modes 0-7, sprites, vblank/NMI and DMA are
+   implemented. Colour math/windows/hires/interlace and dot-level scheduling
+   remain, and the retail boot handshake still stalls before display.
 5. `unko-snes-host` adapter once the core surface is stable.
 6. Coprocessors and enhancement chips after the base console is green.
 

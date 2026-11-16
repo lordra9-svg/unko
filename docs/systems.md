@@ -30,7 +30,7 @@ beside it; the host chooses by `CoreInfo.id`.
 | Oracles | **MesenCE `Core/SNES`** (C++, GPL-3.0) — reference only · **RustySNES** (Rust, Apache-2.0) — oracle/reference only |
 | Size | ares 19.9k LOC; Mesen 35.7k LOC |
 | Coverage target | 65816, SPC700, S-DSP, dot/scanline PPU, SuperFX, SA-1, SDD1, SPC7110, CX4, DSP1-4, OBC1, ST018, MSU1, Satellaview, Sufami Turbo, BS-X |
-| Status | isolated core started 2026-11-16: ROM parsing and checksums, mapping, SRAM, a cycle-stepped 65C816, the full SPC700, an APU wrapper with IPL/ports, the S-DSP voice/BRR/envelope/echo pipeline and the S-CPU memory map are implemented. PPU and DMA are next. |
+| Status | isolated core started 2026-11-16: ROM parsing and checksums, mapping, SRAM, 65C816, full SPC700, APU IPL/ports, S-DSP, line-based PPU modes 0-7 + sprites, S-CPU DMA and the memory map are implemented. Boot-handshake and dot-level PPU accuracy are next. |
 
 Why an isolated Rust core: the SNES crate has no `unko-core` or shell
 dependency, exactly like `unko-nes`. ares remains the primary implementation

@@ -66,7 +66,26 @@ fn main() -> ExitCode {
     system.reset();
     println!("cpu reset:   {}", system.cpu);
     println!("spc reset:   {}", system.apu.spc);
-    let (cycles, instructions) = system.run_cycles(5_000_000, 1_000_000);
+    let (cycles, instructions) = if std::env::var_os("TRACE").is_some() {
+        let mut cycles = 0u64;
+        let mut instructions = 0u32;
+        while instructions < 5_000_000 && !system.cpu.stp {
+            cycles += u64::from(system.step());
+            instructions += 1;
+            if instructions.is_multiple_of(500_000) {
+                eprintln!(
+                    "i={instructions} cyc={cycles} {} spc={} line={} ports={:02X?}",
+                    system.cpu,
+                    system.apu.spc,
+                    system.ppu.line(),
+                    [0, 1, 2, 3].map(|p| system.apu.apu_port(p))
+                );
+            }
+        }
+        (cycles, instructions)
+    } else {
+        system.run_cycles(20_000_000, 5_000_000)
+    };
     println!("cpu after:   {}", system.cpu);
     println!("spc after:   {}", system.apu.spc);
     println!(
@@ -74,6 +93,24 @@ fn main() -> ExitCode {
         [0, 1, 2, 3].map(|port| system.apu.cpu_read(port)),
         [0, 1, 2, 3].map(|port| system.apu.apu_port(port)),
     );
+    let frame = system.ppu.frame_buffer();
+    let pixels = frame.as_chunks::<4>().0;
+    let nonzero = pixels
+        .iter()
+        .filter(|pixel| pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0)
+        .count();
+    let checksum: u64 = pixels
+        .iter()
+        .map(|pixel| u64::from(pixel[0]) + u64::from(pixel[1]) + u64::from(pixel[2]))
+        .sum();
+    println!(
+        "ppu:         line={} vblank={} frame_ready={} nonzero_pixels={} rgb_sum={checksum}",
+        system.ppu.line(),
+        system.ppu.in_vblank(),
+        system.ppu.frame_ready(),
+        nonzero,
+    );
+    eprintln!("spc ram 0540: {:02X?}", &system.apu.ram()[0x540..0x560]);
     println!("ran:         {instructions} instructions, {cycles} cycles");
     ExitCode::SUCCESS
 }
