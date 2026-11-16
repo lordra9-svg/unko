@@ -41,6 +41,14 @@ install -Dm644 assets/unko-256.png \
 install -Dm644 LICENSE "$appdir/usr/share/doc/unko/LICENSE"
 install -Dm644 NOTICE "$appdir/usr/share/doc/unko/NOTICE"
 
+# The release build links SDL3 statically. If a future build produces the
+# shared library instead, bundle it and let linuxdeploy resolve it.
+sdl_lib=$(find target/release -maxdepth 1 -name 'libSDL3.so*' | head -n 1)
+if [ -n "$sdl_lib" ]; then
+  install -Dm755 "$sdl_lib" "$appdir/usr/lib/$(basename "$sdl_lib")"
+  export LD_LIBRARY_PATH="$root/target/release${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+
 # linuxdeploy populates the AppDir, bundles the dynamic libraries and writes
 # AppRun; it needs the desktop file and icon at the AppDir root as well.
 install -Dm644 assets/unko.desktop "$appdir/usr/share/applications/unko.desktop"
