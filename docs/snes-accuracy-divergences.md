@@ -71,9 +71,9 @@ with ares. The implementation follows ares, which is the primary source.
   buffer page wrap and read-only behavior need an ares sample comparison.
 - `Cpu::reset` uses the documented reset-vector fetch and a short internal
   delay sequence; exact reset pin timing is pending hardware capture.
-- Display brightness uses `(brightness + 1) / 16` scaling. ares models the DAC
-  luma as `(1 + l) / 16 * (l ? 1 : 0.25)`; the two agree at `INIDISP = $0F`
-  (all measured frames) but differ below it.
+- Display brightness follows ares' DAC luma `(1 + l) / 16 * (l ? 1 : 0.25)`
+  with integer rounding. Measured frames match ares at `INIDISP = $0F` and at
+  `$0B`; sub-1/255 rounding differences are possible at other levels.
 - PPU windows, hires output, interlace, mosaic and offset-per-tile are not
   implemented. Mode 7 `EXTBG` is partial and the 32-sprite/34-tile limits are
   not enforced.

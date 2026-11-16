@@ -913,10 +913,14 @@ impl Ppu {
         main: &[Pixel; SCREEN_WIDTH],
         sub: &[Pixel; SCREEN_WIDTH],
     ) {
-        let brightness = if self.display_disable {
-            0
+        // ares models the DAC luma as (1 + l) / 16, with l = 0 mapped to a
+        // quarter of that. Brightness 15 is unity; 0 is 1/64, not black.
+        let (num, den) = if self.display_disable {
+            (0u32, 1u32)
+        } else if self.display_brightness == 0 {
+            (1, 64)
         } else {
-            u32::from(self.display_brightness) + 1
+            (u32::from(self.display_brightness) + 1, 16)
         };
         let fixed = self.fixed_color();
         for x in 0..SCREEN_WIDTH {
@@ -946,18 +950,16 @@ impl Ppu {
                 let halve = self.cgadsub & 0x40 != 0 && use_sub;
                 color = blend(color, operand, halve, self.cgadsub & 0x80 != 0);
             }
-            let expand = |value: u16| {
-                let value = value & 0x1F;
-                (u32::from(value) << 3) | u32::from(value >> 2)
+            // 5-bit to 16-bit normalization (ares image::normalize), then the
+            // DAC luma and the high byte for the 8-bit frame buffer.
+            let scale = |value: u16| {
+                let value = u32::from(value & 0x1F) * 65_535 / 31;
+                ((value * num / den) >> 8) as u8
             };
-            let r = expand(color);
-            let g = expand(color >> 5);
-            let b = expand(color >> 10);
-            let scale = |value: u32| ((value * brightness) >> 4).min(255) as u8;
             let index = (y * SCREEN_WIDTH + x) * 4;
-            self.framebuffer[index] = scale(r);
-            self.framebuffer[index + 1] = scale(g);
-            self.framebuffer[index + 2] = scale(b);
+            self.framebuffer[index] = scale(color);
+            self.framebuffer[index + 1] = scale(color >> 5);
+            self.framebuffer[index + 2] = scale(color >> 10);
             self.framebuffer[index + 3] = 0xFF;
         }
     }

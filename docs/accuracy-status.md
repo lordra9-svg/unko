@@ -70,7 +70,8 @@ Implemented so far:
   backgrounds, Mode 7 affine mapping and sprites; 256x224 RGBA8888 frames
 - subscreen rendering and the full colour-math path: per-layer priority
   tables, `CGWSEL` fixed-colour/subscreen select, `CGADSUB` enable/halve/
-  subtract and `COLDATA` channels, with the ares 15-bit blend
+  subtract and `COLDATA` channels, with the ares 15-bit blend and DAC luma
+  ((1+l)/16, with l=0 at a quarter of that)
 - sprite tiles addressed in the hardware 16-column object grid, per-BG 16x16
   tile selection from `BGMODE`, and visible-line numbering (lines 1-224)
 - S-CPU DMA: eight general-purpose channels with the documented transfer modes,
