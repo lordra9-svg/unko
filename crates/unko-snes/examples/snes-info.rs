@@ -194,8 +194,10 @@ fn main() -> ExitCode {
         .map(|pixel| u64::from(pixel[0]) + u64::from(pixel[1]) + u64::from(pixel[2]))
         .sum();
     println!(
-        "ppu:         brightness={} line={} vblank={} frame_ready={} nonzero_pixels={} rgb_sum={checksum}",
+        "ppu:         brightness={} nmi={} nmi_count={} line={} vblank={} frame_ready={} nonzero_pixels={} rgb_sum={checksum}",
         system.ppu.display_brightness(),
+        system.nmi_enabled(),
+        system.nmi_count,
         system.ppu.line(),
         system.ppu.in_vblank(),
         system.ppu.frame_ready(),

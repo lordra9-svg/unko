@@ -84,11 +84,12 @@ Implemented so far:
   8/16-cycle counters, and H/V IRQ comparators at `$4207-$420A` with rising-edge
   latching and `$4211` acknowledgement
 - minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM, reset,
-  `$2100-$213F` PPU registers, `$2140-$2143` APU ports and `$4200-$437F` DMA/IRQ
+  `$2100-$213F` PPU registers, `$2140-$2143` APU ports, the `$2180-$2183`
+  WRAM data port and `$4200-$437F` DMA/IRQ
 
 Validation so far:
 
-- **831 workspace tests**, 0 failed
+- **833 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -121,6 +122,12 @@ Validation so far:
   headerless/beta/pirate dumps, not clean retail images
 - 207 public SNES test images in `test-roms/snes/`: all 207 parsed by
   `snes-scan`
+- Chrono Trigger (USA) with the local IPL ROM boots to its title screen: the
+  logo, clock face and pendulum render, and the 1200-frame frame is 94.8%
+  pixel-identical to ares (the remainder is the pendulum animation phase,
+  since the boot takes a different number of frames). Two blocking bugs were
+  fixed: the `$2180-$2183` WRAM data port and `$4210` bit 7 latching at
+  vblank even when NMI is disabled.
 - Super Mario World with the local 64-byte IPL ROM, measured against ares
   (`--system 'Super Famicom' --frames N --dump-frame`) and RustySNES on the
   same ROM:

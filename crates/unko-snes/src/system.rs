@@ -36,6 +36,8 @@ pub struct Snes {
     nmi_enable: bool,
     nmi_flag: bool,
     fast_rom: bool,
+    /// `$2180-$2183` WRAM data-port address (17 bits).
+    wram_port: u32,
     /// Number of NMI edges delivered (debug).
     pub nmi_count: u64,
 }
@@ -56,6 +58,7 @@ impl Snes {
             nmi_enable: false,
             nmi_flag: false,
             fast_rom: false,
+            wram_port: 0,
             nmi_count: 0,
         }
     }
@@ -103,6 +106,7 @@ impl Snes {
         self.nmi_enable = false;
         self.nmi_flag = false;
         self.fast_rom = false;
+        self.wram_port = 0;
         self.nmi_count = 0;
         let mut bus = SnesBus {
             wram: &mut self.wram,
@@ -114,6 +118,7 @@ impl Snes {
             nmi_enable: &mut self.nmi_enable,
             nmi_flag: &mut self.nmi_flag,
             fast_rom: &mut self.fast_rom,
+            wram_port: &mut self.wram_port,
             vblank: false,
             hblank: false,
         };
@@ -135,6 +140,7 @@ impl Snes {
                 nmi_enable: &mut self.nmi_enable,
                 nmi_flag: &mut self.nmi_flag,
                 fast_rom: &mut self.fast_rom,
+                wram_port: &mut self.wram_port,
                 vblank,
                 hblank,
             };
@@ -157,6 +163,7 @@ impl Snes {
                         nmi_enable: &mut self.nmi_enable,
                         nmi_flag: &mut self.nmi_flag,
                         fast_rom: &mut self.fast_rom,
+                        wram_port: &mut self.wram_port,
                         vblank,
                         hblank,
                     };
@@ -206,10 +213,14 @@ impl Snes {
         self.io.step(clocks);
         let irq = self.io.poll_irq(self.ppu.line(), self.ppu.dot());
         self.cpu.set_irq(irq);
-        if self.ppu.take_nmi() && self.nmi_enable {
-            self.cpu.trigger_nmi();
+        // The $4210 flag latches at vblank regardless of $4200 bit 7; only the
+        // CPU interrupt output is gated by NMI enable.
+        if self.ppu.take_nmi() {
             self.nmi_flag = true;
-            self.nmi_count += 1;
+            if self.nmi_enable {
+                self.cpu.trigger_nmi();
+                self.nmi_count += 1;
+            }
         }
     }
 
@@ -236,8 +247,41 @@ struct SnesBus<'a> {
     nmi_enable: &'a mut bool,
     nmi_flag: &'a mut bool,
     fast_rom: &'a mut bool,
+    wram_port: &'a mut u32,
     vblank: bool,
     hblank: bool,
+}
+
+impl SnesBus<'_> {
+    fn read_wram_port(&mut self, offset: usize) -> u8 {
+        match offset {
+            0x2180 => {
+                let address = 0x7E_0000 | *self.wram_port;
+                *self.wram_port = (*self.wram_port + 1) & 0x1_FFFF;
+                let index = ((address & 0x1_0000) | (address & 0xFFFF)) as usize & 0x1FFFF;
+                self.wram[index]
+            }
+            0x2181..=0x2183 => 0,
+            _ => 0,
+        }
+    }
+
+    fn write_wram_port(&mut self, offset: usize, value: u8) {
+        match offset {
+            0x2180 => {
+                let address = 0x7E_0000 | *self.wram_port;
+                let index = ((address & 0x1_0000) | (address & 0xFFFF)) as usize & 0x1FFFF;
+                self.wram[index] = value;
+                *self.wram_port = (*self.wram_port + 1) & 0x1_FFFF;
+            }
+            0x2181 => *self.wram_port = (*self.wram_port & 0x1_FF00) | u32::from(value),
+            0x2182 => *self.wram_port = (*self.wram_port & 0x1_00FF) | (u32::from(value) << 8),
+            0x2183 => {
+                *self.wram_port = (*self.wram_port & 0x0_FFFF) | (u32::from(value & 0x01) << 16)
+            }
+            _ => {}
+        }
+    }
 }
 
 impl CpuBus for SnesBus<'_> {
@@ -258,6 +302,9 @@ impl CpuBus for SnesBus<'_> {
                 }
                 if (0x2140..=0x2143).contains(&offset) {
                     return self.apu.cpu_read(offset - 0x2140);
+                }
+                if (0x2180..=0x2183).contains(&offset) {
+                    return self.read_wram_port(offset);
                 }
                 if offset == 0x4210 {
                     let value = if *self.nmi_flag { 0x80 } else { 0 };
@@ -307,6 +354,8 @@ impl CpuBus for SnesBus<'_> {
                     self.ppu.write(offset as u16, value);
                 } else if (0x2140..=0x2143).contains(&offset) {
                     self.apu.cpu_write(offset - 0x2140, value);
+                } else if (0x2180..=0x2183).contains(&offset) {
+                    self.write_wram_port(offset, value);
                 } else if offset == 0x4200 {
                     *self.nmi_enable = value & 0x80 != 0;
                     self.io.write(0x4200, value);
@@ -525,6 +574,7 @@ mod tests {
             nmi_enable: &mut system.nmi_enable,
             nmi_flag: &mut system.nmi_flag,
             fast_rom: &mut system.fast_rom,
+            wram_port: &mut system.wram_port,
             vblank: false,
             hblank: false,
         };
@@ -562,6 +612,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
+                wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
             };
@@ -635,6 +686,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
+                wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
             };
@@ -659,6 +711,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
+                wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
             };
@@ -666,6 +719,73 @@ mod tests {
             assert_eq!(bus.read(0x4217), 0x00);
             assert_eq!(bus.read(0x4210) & 0x0F, 0x02);
         }
+    }
+
+    #[test]
+    fn wram_port_reads_and_writes() {
+        let mut system = Snes::new(cartridge(&[0xDB]));
+        system.reset();
+        let (first, second) = {
+            let mut bus = SnesBus {
+                wram: &mut system.wram,
+                cart: &mut system.cart,
+                apu: &mut system.apu,
+                ppu: &mut system.ppu,
+                dma: &mut system.dma,
+                io: &mut system.io,
+                nmi_enable: &mut system.nmi_enable,
+                nmi_flag: &mut system.nmi_flag,
+                fast_rom: &mut system.fast_rom,
+                wram_port: &mut system.wram_port,
+                vblank: false,
+                hblank: false,
+            };
+            bus.write(0x2181, 0x34);
+            bus.write(0x2182, 0x12);
+            bus.write(0x2183, 0x00);
+            bus.write(0x2180, 0x5A);
+            bus.write(0x2180, 0xA5);
+            // Rewind and read both bytes back through the port.
+            bus.write(0x2181, 0x34);
+            bus.write(0x2182, 0x12);
+            (bus.read(0x2180), bus.read(0x2180))
+        };
+        assert_eq!(system.wram[0x1234], 0x5A);
+        assert_eq!(system.wram[0x1235], 0xA5);
+        assert_eq!((first, second), (0x5A, 0xA5));
+    }
+
+    #[test]
+    fn rdnmi_flag_sets_without_nmi_enable() {
+        let mut system = Snes::new(cartridge(&[0xDB]));
+        system.reset();
+        let mut guard = 0;
+        while !system.ppu.in_vblank() && guard < 2_000_000 {
+            system.step();
+            guard += 1;
+        }
+        let vblank = system.ppu.in_vblank();
+        let hblank = system.ppu.in_hblank();
+        let (first, second) = {
+            let mut bus = SnesBus {
+                wram: &mut system.wram,
+                cart: &mut system.cart,
+                apu: &mut system.apu,
+                ppu: &mut system.ppu,
+                dma: &mut system.dma,
+                io: &mut system.io,
+                nmi_enable: &mut system.nmi_enable,
+                nmi_flag: &mut system.nmi_flag,
+                fast_rom: &mut system.fast_rom,
+                wram_port: &mut system.wram_port,
+                vblank,
+                hblank,
+            };
+            (bus.read(0x4210), bus.read(0x4210))
+        };
+        assert!(!system.nmi_enabled());
+        assert_eq!(first & 0x80, 0x80);
+        assert_eq!(second & 0x80, 0);
     }
 
     #[test]
@@ -708,6 +828,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
+                wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
             };
@@ -744,6 +865,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
+                wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
             };
@@ -771,6 +893,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
+                wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
             };
@@ -832,6 +955,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
+                wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
             };
@@ -857,6 +981,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
+                wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
             };
