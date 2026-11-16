@@ -78,6 +78,7 @@ impl Snes {
     pub fn reset(&mut self) -> u32 {
         self.apu.reset();
         self.ppu.reset();
+        self.dma.hdma_reset();
         self.apu_credit = 0;
         self.ppu_credit = 0;
         self.nmi_enable = false;
@@ -138,6 +139,19 @@ impl Snes {
         while self.ppu_credit >= 2 {
             self.ppu.tick();
             self.ppu_credit -= 2;
+            if let Some(line) = self.ppu.take_line_event() {
+                if line == 0 {
+                    self.dma.hdma_reset();
+                }
+                let mut bus = HdmaBus {
+                    wram: &mut self.wram,
+                    cart: &mut self.cart,
+                    apu: &mut self.apu,
+                    ppu: &mut self.ppu,
+                };
+                self.dma.hdma_line(&mut bus);
+                self.ppu.render_current_line();
+            }
         }
         if self.ppu.take_nmi() && self.nmi_enable {
             self.cpu.trigger_nmi();
@@ -233,7 +247,7 @@ impl CpuBus for SnesBus<'_> {
                 } else if offset == 0x420B {
                     self.dma.start(value);
                 } else if offset == 0x420C {
-                    self.dma.hdma_enable = value;
+                    self.dma.set_hdma_enable(value);
                 } else if (0x4300..=0x437F).contains(&offset) {
                     self.dma.write(offset as u16, value);
                 }
@@ -244,6 +258,85 @@ impl CpuBus for SnesBus<'_> {
             }
         }
         self.cart.write(address, value);
+    }
+}
+
+struct HdmaBus<'a> {
+    wram: &'a mut [u8],
+    cart: &'a mut Cartridge,
+    apu: &'a mut Apu,
+    ppu: &'a mut Ppu,
+}
+
+impl HdmaBus<'_> {
+    fn read(&mut self, address: u32) -> u8 {
+        let bank = (address >> 16) as u8;
+        let offset = (address & 0xFFFF) as usize;
+        if bank == 0x7E || bank == 0x7F {
+            return self.wram[((bank as usize & 1) << 16) | offset];
+        }
+        if bank <= 0x3F || (0x80..=0xBF).contains(&bank) {
+            if offset < 0x2000 {
+                return self.wram[offset & 0x1FFF];
+            }
+            if offset < 0x6000 {
+                if (0x2100..=0x213F).contains(&offset) {
+                    return self.ppu.read(offset as u16);
+                }
+                if (0x2140..=0x2143).contains(&offset) {
+                    return self.apu.cpu_read(offset - 0x2140);
+                }
+                return 0;
+            }
+        }
+        self.cart.read(address).unwrap_or(0)
+    }
+
+    fn write(&mut self, address: u32, value: u8) {
+        let bank = (address >> 16) as u8;
+        let offset = (address & 0xFFFF) as usize;
+        if bank == 0x7E || bank == 0x7F {
+            self.wram[((bank as usize & 1) << 16) | offset] = value;
+            return;
+        }
+        if bank <= 0x3F || (0x80..=0xBF).contains(&bank) {
+            if offset < 0x2000 {
+                self.wram[offset & 0x1FFF] = value;
+                return;
+            }
+            if offset < 0x6000 {
+                if (0x2100..=0x213F).contains(&offset) {
+                    self.ppu.write(offset as u16, value);
+                } else if (0x2140..=0x2143).contains(&offset) {
+                    self.apu.cpu_write(offset - 0x2140, value);
+                }
+                return;
+            }
+        }
+        self.cart.write(address, value);
+    }
+}
+
+impl DmaBus for HdmaBus<'_> {
+    fn read_a(&mut self, address: u32) -> u8 {
+        if !valid_dma_a(address) {
+            return 0;
+        }
+        self.read(address)
+    }
+
+    fn write_a(&mut self, address: u32, value: u8) {
+        if valid_dma_a(address) {
+            self.write(address, value);
+        }
+    }
+
+    fn read_b(&mut self, address: u8) -> u8 {
+        self.read(0x2100 | u32::from(address))
+    }
+
+    fn write_b(&mut self, address: u8, value: u8) {
+        self.write(0x2100 | u32::from(address), value);
     }
 }
 

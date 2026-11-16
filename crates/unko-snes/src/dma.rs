@@ -39,6 +39,16 @@ impl Default for DmaChannel {
     }
 }
 
+/// Per-channel HDMA table cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct HdmaState {
+    address: u16,
+    indirect_address: u16,
+    line_counter: u8,
+    completed: bool,
+    do_transfer: bool,
+}
+
 /// The eight DMA channels and their enable latches.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Dma {
@@ -46,6 +56,7 @@ pub struct Dma {
     pending: u8,
     /// Channels enabled by a write to `$420C` (HDMA).
     pub hdma_enable: u8,
+    hdma: [HdmaState; 8],
 }
 
 /// Bus operations used by DMA.
@@ -123,6 +134,99 @@ impl Dma {
     pub fn start(&mut self, mask: u8) {
         self.pending = mask;
     }
+
+    /// Enable HDMA channels and reset their table cursors.
+    pub fn set_hdma_enable(&mut self, mask: u8) {
+        self.hdma_enable = mask;
+        self.hdma_reset();
+    }
+
+    /// Reset every HDMA table cursor to the channel's table address.
+    pub fn hdma_reset(&mut self) {
+        for (index, channel) in self.channels.iter().enumerate() {
+            self.hdma[index] = HdmaState {
+                address: channel.hdma_address,
+                indirect_address: 0,
+                line_counter: 0,
+                completed: false,
+                do_transfer: false,
+            };
+        }
+    }
+
+    /// Advance one scanline of HDMA transfers.
+    pub fn hdma_line(&mut self, bus: &mut impl DmaBus) {
+        for (index, channel) in self.channels.iter().copied().enumerate() {
+            if self.hdma_enable & (1 << index) == 0 {
+                continue;
+            }
+            let state = &mut self.hdma[index];
+            if state.completed {
+                continue;
+            }
+            if state.line_counter == 0 {
+                let address = (u32::from(channel.bank) << 16) | u32::from(state.address);
+                let count = bus.read_a(address);
+                state.address = state.address.wrapping_add(1);
+                if count == 0 {
+                    state.completed = true;
+                    state.do_transfer = false;
+                    continue;
+                }
+                state.line_counter = count;
+                state.do_transfer = count & 0x80 != 0;
+                if channel.control & 0x40 != 0 {
+                    let low =
+                        bus.read_a((u32::from(channel.bank) << 16) | u32::from(state.address));
+                    state.address = state.address.wrapping_add(1);
+                    let high =
+                        bus.read_a((u32::from(channel.bank) << 16) | u32::from(state.address));
+                    state.address = state.address.wrapping_add(1);
+                    state.indirect_address = u16::from_le_bytes([low, high]);
+                }
+            }
+            if state.do_transfer {
+                if std::env::var_os("HDMA_TRACE").is_some() {
+                    eprintln!(
+                        "HDMA ch{index} line target={:02X} state={:?}",
+                        channel.target, state
+                    );
+                }
+                let length = match channel.control & 0x07 {
+                    0 => 1,
+                    1 | 2 | 6 => 2,
+                    _ => 4,
+                };
+                for offset in 0..length {
+                    let target_offset = match channel.control & 0x07 {
+                        1 | 5 => (offset & 1) as u8,
+                        3 | 7 => ((offset >> 1) & 1) as u8,
+                        4 => offset as u8,
+                        _ => 0,
+                    };
+                    let target = channel.target.wrapping_add(target_offset);
+                    let indirect = channel.control & 0x40 != 0;
+                    let address = if indirect {
+                        (u32::from(channel.indirect_bank) << 16) | u32::from(state.indirect_address)
+                    } else {
+                        (u32::from(channel.bank) << 16) | u32::from(state.address)
+                    };
+                    let value = bus.read_a(address);
+                    bus.write_b(target, value);
+                    if indirect {
+                        state.indirect_address = state.indirect_address.wrapping_add(1);
+                    } else {
+                        state.address = state.address.wrapping_add(1);
+                    }
+                }
+            }
+            state.line_counter = state.line_counter.wrapping_sub(1);
+            state.do_transfer = state.line_counter & 0x80 != 0;
+            if state.line_counter & 0x7F == 0 {
+                state.line_counter = 0;
+            }
+        }
+    }
 }
 
 /// Run the general-purpose DMA channels selected by `mask`.
@@ -197,4 +301,57 @@ fn valid_a(address: u32) -> bool {
         return false;
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Bus {
+        ram: Vec<u8>,
+        writes: Vec<(u8, u8)>,
+    }
+
+    impl DmaBus for Bus {
+        fn read_a(&mut self, address: u32) -> u8 {
+            self.ram[(address & 0xFFFF) as usize]
+        }
+
+        fn write_a(&mut self, address: u32, value: u8) {
+            self.ram[(address & 0xFFFF) as usize] = value;
+        }
+
+        fn read_b(&mut self, _address: u8) -> u8 {
+            0
+        }
+
+        fn write_b(&mut self, address: u8, value: u8) {
+            self.writes.push((address, value));
+        }
+    }
+
+    #[test]
+    fn hdma_transfers_table_bytes() {
+        let mut dma = Dma::new();
+        dma.write(0x4300, 0x00); // direct, one byte
+        dma.write(0x4301, 0x00); // B-bus target
+        dma.write(0x4304, 0x7E); // table bank
+        dma.write(0x4308, 0x00);
+        dma.write(0x4309, 0x10); // table at $7E:1000
+        dma.set_hdma_enable(0x01);
+
+        let mut bus = Bus {
+            ram: vec![0; 0x10000],
+            writes: Vec::new(),
+        };
+        bus.ram[0x1000] = 0x82; // transfer on lines 1 and 2
+        bus.ram[0x1001] = 0x11;
+        bus.ram[0x1002] = 0x22;
+        bus.ram[0x1003] = 0x00; // end
+
+        dma.hdma_line(&mut bus);
+        dma.hdma_line(&mut bus);
+        dma.hdma_line(&mut bus);
+        assert_eq!(bus.writes, vec![(0x00, 0x11), (0x00, 0x22)]);
+    }
 }

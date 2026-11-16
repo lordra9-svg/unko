@@ -20,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **817 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **818 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -64,13 +64,14 @@ Implemented so far:
 - line-based S-PPU: registers, VRAM/CGRAM/OAM, vblank/NMI, modes 0-7, tile
   backgrounds, Mode 7 affine mapping and sprites; 256x224 RGBA8888 frames
 - S-CPU DMA: eight general-purpose channels with the documented transfer modes
+- HDMA table engine: direct/indirect entries, line counters and per-line B-bus transfers
 - S-SMP timers 0-2 with targets, enable/reset bits and `$FD-$FF` output latching
 - minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM, reset,
   `$2100-$213F` PPU registers, `$2140-$2143` APU ports and `$4200-$437F` DMA/IRQ
 
 Validation so far:
 
-- **817 workspace tests**, 0 failed
+- **818 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -84,7 +85,8 @@ Validation so far:
   drives sample generation.
 - **4 PPU tests** cover vblank/NMI timing, CGRAM/OAM access and a rendered
   mode-1 tile pixel; **2 DMA tests** verify mode-1 VRAM and CGRAM transfers;
-  the APU timer test exercises target/output latching.
+  **1 HDMA test** verifies direct table transfers; the APU timer test exercises
+  target/output latching.
 - 10 retail images (LoROM, HiROM and ExHiROM): all headers detected and all
   stored checksums reproduced
 - 250-image random No-Intro sample: 237 parsed; the 13 failures are
@@ -100,9 +102,9 @@ Validation so far:
 - Star Fox remains black without the SuperFX coprocessor; Final Fantasy V was
   still in its boot sequence at the 20M-cycle sample.
 
-The PPU is line-based rather than dot-scheduled, HDMA is not implemented,
-colour math/windows/hires remain approximations, and exact frame parity with
-ares is not yet achieved.
+The PPU is line-based rather than dot-scheduled, the HDMA engine exists but
+SMW does not enable it in the sampled state, colour math/windows/hires remain
+approximations, and exact frame parity with ares is not yet achieved.
 
 Performance: `unko bench --synthetic 3000 --min-fps 300` measures **791.6 fps**
 (13.17x real time, 1.263 ms/frame); release save states are 417,090 bytes at
