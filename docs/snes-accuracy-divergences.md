@@ -49,7 +49,8 @@ with ares. The implementation follows ares, which is the primary source.
 
 - The S-CPU bus models WRAM, cartridge ROM/SRAM, `$2100-$213F`, `$2140-$2143`,
   `$4016/$4017`, `$4200-$420D`, `$4210-$421F` and `$4300-$437F`. Unmapped I/O
-  reads return `0`; H/V IRQ (`$4207-$420A`) and open bus are not modelled yet.
+  reads return `0`; open bus and the joypad auto-poll's exact 128-clock
+  sequencing window are not modelled.
 - The auto-poll sequence is driven at 128-clock granularity from the line-225
   event rather than ares' exact hcounter window, so `$4218-$421F` can settle a
   few hundred clocks early. Games that read them at the end of NMI are

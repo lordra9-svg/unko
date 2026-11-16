@@ -77,14 +77,15 @@ Implemented so far:
 - S-SMP timers 0-2 with targets, enable/reset bits and `$FD-$FF` output latching
 - S-CPU I/O: serial controller ports at `$4016/$4017`, hardware auto-poll into
   `$4218-$421F`, `$4210/$4211/$4212` flags (NTSC version 2, vblank, hblank,
-  poll-busy), and the hardware multiply/divide unit at `$4202-$4206` with its
-  8/16-cycle counters
+  poll-busy), the hardware multiply/divide unit at `$4202-$4206` with its
+  8/16-cycle counters, and H/V IRQ comparators at `$4207-$420A` with rising-edge
+  latching and `$4211` acknowledgement
 - minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM, reset,
   `$2100-$213F` PPU registers, `$2140-$2143` APU ports and `$4200-$437F` DMA/IRQ
 
 Validation so far:
 
-- **825 workspace tests**, 0 failed
+- **828 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -102,8 +103,9 @@ Validation so far:
   target/output latching
 - **2 timing tests** pin the S-CPU wait-state table (slow/fast ROM, WRAM, PPU
   I/O and `$4000-$41FF`) and the DMA 8-clock-per-byte stall
-- **4 I/O tests** cover the serial button order, auto-poll packing, and the
-  multiply/divide cycle counts; a system test drives them through the CPU bus
+- **4 I/O tests** cover the serial button order, auto-poll packing, the
+  multiply/divide cycle counts and the V/H IRQ comparators; two system tests
+  drive the joypad/math registers and a V-IRQ through the CPU bus
 - the 65C816 differential suite now also asserts total master clocks:
   `unko-snes` retires exactly six clocks per oracle bus cycle on every one of
   the 18 suites

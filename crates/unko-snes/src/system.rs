@@ -169,6 +169,8 @@ impl Snes {
         while self.ppu_credit >= 4 {
             self.ppu.tick();
             self.ppu_credit -= 4;
+            let irq = self.io.poll_irq(self.ppu.line(), self.ppu.dot());
+            self.cpu.set_irq(irq);
             if let Some(line) = self.ppu.take_line_event() {
                 if line == 0 {
                     self.dma.hdma_reset();
@@ -187,6 +189,8 @@ impl Snes {
             }
         }
         self.io.step(cycles);
+        let irq = self.io.poll_irq(self.ppu.line(), self.ppu.dot());
+        self.cpu.set_irq(irq);
         if self.ppu.take_nmi() && self.nmi_enable {
             self.cpu.trigger_nmi();
             self.nmi_flag = true;
@@ -292,7 +296,8 @@ impl CpuBus for SnesBus<'_> {
                 } else if offset == 0x4200 {
                     *self.nmi_enable = value & 0x80 != 0;
                     self.io.write(0x4200, value);
-                } else if (0x4202..=0x4206).contains(&offset) {
+                } else if (0x4202..=0x4206).contains(&offset) || (0x4207..=0x420A).contains(&offset)
+                {
                     self.io.write(offset as u16, value);
                 } else if offset == 0x420B {
                     self.dma.start(value);
@@ -671,6 +676,39 @@ mod tests {
         assert_eq!(bus_read_cycles(&[0xAD, 0x00, 0x21], 0x00, false), 30);
         // $4000-$41FF is the twelve-clock internal window.
         assert_eq!(bus_read_cycles(&[0xAD, 0x00, 0x40], 0x00, false), 36);
+    }
+
+    #[test]
+    fn v_irq_reaches_the_cpu() {
+        // CLI; NOP...  with the IRQ vector pointing back at $8000.
+        let mut system = Snes::new(cartridge(&[0x58, 0xEA, 0xEA, 0xEA, 0xEA]));
+        system.reset();
+        {
+            let mut bus = SnesBus {
+                wram: &mut system.wram,
+                cart: &mut system.cart,
+                apu: &mut system.apu,
+                ppu: &mut system.ppu,
+                dma: &mut system.dma,
+                io: &mut system.io,
+                nmi_enable: &mut system.nmi_enable,
+                nmi_flag: &mut system.nmi_flag,
+                fast_rom: &mut system.fast_rom,
+                vblank: false,
+                hblank: false,
+            };
+            bus.write(0x4209, 10);
+            bus.write(0x4200, 0x20);
+        }
+        // The handler starts with `CLI`, so I must be set again by the time the
+        // IRQ at line 10 has been serviced.
+        let mut guard = 0;
+        while system.ppu.line() < 20 && guard < 2_000_000 {
+            system.step();
+            guard += 1;
+        }
+        assert!(system.cpu.flags.irq_disable, "V-IRQ was not serviced");
+        assert!(system.ppu.line() >= 20);
     }
 
     #[test]

@@ -136,6 +136,17 @@ pub struct CpuIo {
     auto_joy3: u16,
     auto_joy4: u16,
     math: MathUnit,
+    /// `$4207/$4208`: horizontal IRQ compare value in dots.
+    htime: u16,
+    /// `$4209/$420A`: vertical IRQ compare line.
+    vtime: u16,
+    /// `$4200` bits 4/5.
+    h_irq: bool,
+    v_irq: bool,
+    /// Latched IRQ condition, cleared by reading `$4211`.
+    irq_flag: bool,
+    /// Previous state of the IRQ compare condition, for edge detection.
+    irq_condition: bool,
 }
 
 impl CpuIo {
@@ -168,6 +179,12 @@ impl CpuIo {
                 quotient: 0,
                 product: 0,
             },
+            htime: 0,
+            vtime: 0,
+            h_irq: false,
+            v_irq: false,
+            irq_flag: false,
+            irq_condition: false,
         }
     }
 
@@ -260,6 +277,21 @@ impl CpuIo {
         }
     }
 
+    /// Poll the H/V IRQ comparator for the current PPU position.
+    ///
+    /// The comparator fires on the rising edge of the compare condition, then
+    /// the flag stays latched until `$4211` is read.
+    pub fn poll_irq(&mut self, line: u16, dot: u16) -> bool {
+        let v_match = !self.v_irq || line == self.vtime;
+        let h_match = !self.h_irq || dot == (self.htime + 1);
+        let condition = (self.h_irq || self.v_irq) && v_match && h_match;
+        if condition && !self.irq_condition {
+            self.irq_flag = true;
+        }
+        self.irq_condition = condition;
+        self.irq_flag
+    }
+
     /// Read a CPU I/O register in `$4016-$4017` or `$4210-$421F`.
     pub fn read(&mut self, address: u16) -> Option<u8> {
         let value = match address {
@@ -274,7 +306,11 @@ impl CpuIo {
             }
             0x4017 => u8::from(self.shift2 & 0x8000 != 0) | 0b0000_0110,
             0x4210 => 0x02,
-            0x4211 => 0,
+            0x4211 => {
+                let value = if self.irq_flag { 0x80 } else { 0 };
+                self.irq_flag = false;
+                value
+            }
             0x4212 => (u8::from(self.auto_poll_busy())) | 0x40,
             0x4213 => 0,
             0x4214..=0x4217 => self.math.read(address),
@@ -301,7 +337,19 @@ impl CpuIo {
                     self.shift2 = self.joypad2;
                 }
             }
-            0x4200 => self.auto_poll = value & 0x01 != 0,
+            0x4200 => {
+                self.auto_poll = value & 0x01 != 0;
+                self.h_irq = value & 0x10 != 0;
+                self.v_irq = value & 0x20 != 0;
+                if !self.h_irq && !self.v_irq {
+                    self.irq_flag = false;
+                    self.irq_condition = false;
+                }
+            }
+            0x4207 => self.htime = (self.htime & 0x100) | u16::from(value),
+            0x4208 => self.htime = (self.htime & 0x0FF) | (u16::from(value & 0x01) << 8),
+            0x4209 => self.vtime = (self.vtime & 0x100) | u16::from(value),
+            0x420A => self.vtime = (self.vtime & 0x0FF) | (u16::from(value & 0x01) << 8),
             0x4202..=0x4206 => self.math.write(address, value),
             _ => {}
         }
@@ -338,6 +386,31 @@ mod tests {
         }
         assert_eq!(io.auto_poll_joy1(), button::A | button::LEFT);
         assert!(!io.auto_poll_busy());
+    }
+
+    #[test]
+    fn v_irq_fires_once_per_frame() {
+        let mut io = CpuIo::new();
+        io.write(0x4209, 100);
+        io.write(0x4200, 0x20);
+        assert!(!io.poll_irq(99, 0));
+        assert!(io.poll_irq(100, 0));
+        assert!(io.read(0x4211).unwrap() & 0x80 != 0);
+        // Acknowledged; the same line no longer asserts until the next frame.
+        assert!(!io.poll_irq(100, 1));
+        assert!(!io.poll_irq(101, 0));
+    }
+
+    #[test]
+    fn h_and_v_irq_match_one_dot() {
+        let mut io = CpuIo::new();
+        io.write(0x4207, 50);
+        io.write(0x4209, 120);
+        io.write(0x4200, 0x30);
+        assert!(!io.poll_irq(120, 50));
+        assert!(io.poll_irq(120, 51));
+        assert!(io.read(0x4211).unwrap() & 0x80 != 0);
+        assert!(!io.poll_irq(120, 52));
     }
 
     #[test]
