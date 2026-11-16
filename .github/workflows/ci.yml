@@ -112,8 +112,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
       - name: Query OSV.dev
-        run: python3 scripts/osv_audit.py
+        run: cargo run --release --locked -p xtask -- osv-audit
 
   licenses:
     name: dependency license audit
@@ -122,7 +123,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
       - name: Audit licenses
-        run: python3 scripts/license_audit.py
+        run: cargo run --release --locked -p xtask -- license-audit
 
   performance:
     name: headless performance budget

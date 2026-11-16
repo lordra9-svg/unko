@@ -8,9 +8,9 @@ save states, netplay datagrams, relay rooms and DAT downloads).
 
 ## Method
 
-- Queried OSV.dev for every crates.io package in `Cargo.lock` (458 after the
-  accessibility dependency removal).
-- Ran the repository license allowlist check (`scripts/license_audit.py`).
+- Queried OSV.dev for every crates.io package in `Cargo.lock` (468 after adding the Rust
+  `xtask` automation crate).
+- Ran the repository license allowlist check (`xtask license-audit`).
 - Scanned tracked files and full git history for credentials, private keys and
   common token formats; checked sensitive file names and world-writable files.
 - Reviewed the `unsafe` surface, panic/error handling in untrusted parsers,
@@ -52,9 +52,9 @@ not applicable.
 
 - Every GitHub Action in `.github/workflows/ci.yml` and `release.yml` is now
   pinned to a commit SHA, with the version in a trailing comment.
-- A new CI job runs `scripts/osv_audit.py`; it queries OSV.dev for every
+- A new CI job runs `xtask osv-audit`; it queries OSV.dev for every
   crates.io package in `Cargo.lock` and fails when an advisory ID is not in
-  `scripts/osv-baseline.txt`.
+  `xtask/osv-baseline.txt`.
 - CI remains `contents: read`; the release workflow keeps `contents: write`
   only for publishing.
 
@@ -78,7 +78,7 @@ this pass.
 - `paste 1.0.15` — `RUSTSEC-2024-0436`.
 - `ttf-parser 0.25.1` — `RUSTSEC-2026-0192`, pulled by egui text shaping.
 
-These are accepted in `scripts/osv-baseline.txt`; a new advisory ID fails CI.
+These are accepted in `xtask/osv-baseline.txt`; a new advisory ID fails CI.
 Malformed GGRS datagrams are handled as errors rather than panics, but the
 plaintext/unauthenticated transport remains an Internet-facing trust boundary.
 
@@ -111,8 +111,8 @@ plaintext/unauthenticated transport remains an Internet-facing trust boundary.
 - AccuracyCoin: 146/151, 0 failed, 5 DRAW skips, 0 unrun
 - Mapper suite: 65/65 cases, 0 failed
 - Synthetic benchmark: 780.5 fps, 12.99x realtime (CI floor 300 fps)
-- License audit: 458 dependencies, all allowed
-- OSV: 458 packages, 4 advisories (all unmaintained, baseline), 0 new
+- License audit: 465 dependencies, all allowed
+- OSV: 468 packages, 4 advisories (all unmaintained, baseline), 0 new
 - `cargo metadata --locked`: clean
 
 ## Recommended next actions
@@ -122,6 +122,6 @@ plaintext/unauthenticated transport remains an Internet-facing trust boundary.
 2. Plan the bincode 1.x migration with the next save-state magic bump.
 3. Upgrade egui/eframe when convenient to move `ttf-parser` forward and
    restore accessibility with a fixed quick-xml.
-4. Keep `scripts/osv-baseline.txt` reviewed on every dependency upgrade.
+4. Keep `xtask/osv-baseline.txt` reviewed on every dependency upgrade.
 
 No ROMs, BIOS images or secrets are part of this repository.

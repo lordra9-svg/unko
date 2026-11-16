@@ -11,6 +11,7 @@ members = [
     "crates/unko-netplay",
     "crates/unko-cli",
     "crates/unko-app",
+    "xtask",
 ]
 
 [workspace.package]

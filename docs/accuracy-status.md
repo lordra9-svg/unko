@@ -194,7 +194,7 @@ DualSystem 48 KiB image keeps the main half at `$8000` instead of switching to
 bank 4. iNES images without a NES 2.0 nibble default to UniSystem.
 
 A local Vs. drop (`refs/vspC`) was repaired and staged on 2026-11-16:
-`scripts/repair_vs_headers.py` writes NES 2.0 headers (Vs. console type,
+`cargo run -p xtask -- repair-vs` writes NES 2.0 headers (Vs. console type,
 four-screen, cabinet and PPU nibbles) and `test-roms/vs/` now holds 13 images.
 Twelve payloads match known MAME-derived dumps; the rest are hacks. The staged
 smoke test checks mapper, PPU model, UniSystem type and four-screen mirroring

@@ -49,7 +49,7 @@ physical dump is required for those.
 ### Local Vs. System / PlayChoice-10 drop (2026-11-16)
 
 VS./PlayChoice-10 work is paused by the owner; the staged set stays available
-for a later pass. `scripts/repair_vs_headers.py` repairs the local VS images
+for a later pass. `cargo run -p xtask -- repair-vs` repairs the local VS images
 into NES 2.0 headers: Vs. console type, four-screen mirroring, cabinet nibble and per-game
 PPU model. It writes only to the gitignored `test-roms/` directory.
 
@@ -85,8 +85,8 @@ conversion and the second-CPU/INST-ROM layer are still required.
 ```sh
 unrar x "/var/home/Lordra/ai/refs/vspC/VS NES Roms.rar" /tmp/vs-roms/
 7z x "/var/home/Lordra/ai/refs/vspC/604.7z" "Gumshoe/其他版-VS/*" -o/tmp/vs-gumshoe
-scripts/repair_vs_headers.py /tmp/vs-roms -o test-roms/vs
-scripts/repair_vs_headers.py "/tmp/vs-gumshoe/Gumshoe/其他版-VS" -o test-roms/vs
+cargo run -p xtask -- repair-vs /tmp/vs-roms -o test-roms/vs
+cargo run -p xtask -- repair-vs "/tmp/vs-gumshoe/Gumshoe/其他版-VS" -o test-roms/vs
 cargo test -p unko-nes-dev --test vs_staged
 ```
 

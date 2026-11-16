@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
       - name: Audit dependency licenses
-        run: python3 scripts/license_audit.py
+        run: cargo run --release --locked -p xtask -- license-audit
 
   linux:
     name: Linux x86_64
@@ -50,10 +50,10 @@ jobs:
         run: cargo build --release --locked -p unko-cli -p unko-app
 
       - name: Package tarball
-        run: python3 scripts/package.py --platform linux --arch x86_64
+        run: cargo run --release --locked -p xtask -- package --platform linux --arch x86_64
 
       - name: Build AppImage
-        run: scripts/appimage.sh dist
+        run: cargo run --release --locked -p xtask -- appimage dist
 
       - name: Checksums
         run: |
@@ -81,7 +81,7 @@ jobs:
         run: cargo build --release --locked -p unko-cli -p unko-app
 
       - name: Package
-        run: python scripts/package.py --platform windows --arch x86_64
+        run: cargo run --release --locked -p xtask -- package --platform windows --arch x86_64
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -105,10 +105,10 @@ jobs:
         run: cargo build --release --locked -p unko-cli -p unko-app
 
       - name: Build the app icon
-        run: scripts/make_icns.sh
+        run: cargo run --release --locked -p xtask -- icns
 
       - name: Package
-        run: python3 scripts/package.py --platform macos --arch arm64
+        run: cargo run --release --locked -p xtask -- package --platform macos --arch arm64
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -139,7 +139,7 @@ jobs:
           export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
           export RUSTFLAGS="--remap-path-prefix=$PWD=/build/unko --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/build/cargo"
           cargo build --release --locked -p unko-cli -p unko-app
-          python3 scripts/package.py --platform linux --arch x86_64 --out /tmp/dist-a
+          cargo run --release --locked -p xtask -- package --platform linux --arch x86_64 --out /tmp/dist-a
 
       - name: Build in a second checkout
         run: |
@@ -149,7 +149,7 @@ jobs:
           export SOURCE_DATE_EPOCH=$(git -C "$GITHUB_WORKSPACE" log -1 --format=%ct)
           export RUSTFLAGS="--remap-path-prefix=/tmp/unko-b=/build/unko --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/build/cargo"
           cargo build --release --locked -p unko-cli -p unko-app
-          python3 scripts/package.py --platform linux --arch x86_64 --out /tmp/dist-b
+          cargo run --release --locked -p xtask -- package --platform linux --arch x86_64 --out /tmp/dist-b
           cd "$GITHUB_WORKSPACE"
           cmp target/release/unko /tmp/unko-b/target/release/unko
           cmp target/release/unko-app /tmp/unko-b/target/release/unko-app

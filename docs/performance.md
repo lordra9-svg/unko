@@ -75,7 +75,7 @@ without making CI dependent on a commercial ROM.
 
 ## PGO
 
-`scripts/pgo.sh <rom-directory>` builds an instrumented binary, trains it on a
+`cargo run --release -p xtask -- pgo <rom-directory>` builds an instrumented binary, trains it on a
 corpus slice, and produces a profile-guided build under `target/pgo`. Measured
 on 2026-11-12 it is **12-13% faster** on the MMC2 benchmark (about 458-463 fps
 versus 375-416 fps plain) and **26% faster** on the synthetic NROM (about

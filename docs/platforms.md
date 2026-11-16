@@ -82,7 +82,7 @@ a fork.
 
 ### Reproducible artifacts
 
-`scripts/package.py` builds archives with sorted entries, zeroed ownership and
+`cargo run -p xtask -- package` builds archives with sorted entries, zeroed ownership and
 `SOURCE_DATE_EPOCH` timestamps, so the same commit and toolchain produce
 byte-identical `tar.gz`/zip files. The CI `Reproducible build check` job builds
 the workspace twice in different directories with
@@ -92,7 +92,7 @@ claimed to be reproducible (appimagetool embeds timestamps).
 
 ### License audit
 
-`scripts/license_audit.py` evaluates every dependency's SPDX expression from
+`cargo run -p xtask -- license-audit` evaluates every dependency's SPDX expression from
 `cargo metadata` against the allowlist in the script (MIT, Apache-2.0,
 BSD-2/3, ISC, Zlib, Unicode-3.0, BSL-1.0, MPL-2.0, CC0, Unlicense, 0BSD,
 OFL/Ubuntu font, bzip2 and the LLVM exception). It runs in CI and fails on any
@@ -101,17 +101,18 @@ unlisted or missing license.
 ### Per-platform build steps
 
 ```sh
-scripts/package.py --platform linux --arch x86_64
-scripts/package.py --platform windows --arch x86_64
-scripts/package.py --platform macos --arch arm64   # run scripts/make_icns.sh first
-scripts/appimage.sh dist                            # Linux AppImage
+cargo run -p xtask -- package --platform linux --arch x86_64
+cargo run -p xtask -- package --platform windows --arch x86_64
+cargo run -p xtask -- icns                           # macOS icon
+cargo run -p xtask -- package --platform macos --arch arm64
+cargo run -p xtask -- appimage dist                  # Linux AppImage
 ```
 
 ## iOS
 
 ```sh
 cargo build --release --target aarch64-apple-ios --lib -p unko-app
-crates/unko-app/ios/build.sh   # xcodegen + xcodebuild
+cargo run -p xtask -- ios-build   # xcodegen + xcodebuild
 ```
 
 Requirements: macOS, Xcode, the `aarch64-apple-ios` Rust target, and
@@ -125,7 +126,7 @@ XcodeGen (`brew install xcodegen`). The Rust library is built as a `staticlib`;
 ```sh
 rustup target add aarch64-linux-android
 cargo install cargo-ndk
-crates/unko-app/android/build.sh
+cargo run -p xtask -- android-build
 ```
 
 Requirements: Android SDK, NDK, Gradle 8.9+ (or generate the wrapper once with

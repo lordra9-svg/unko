@@ -73,8 +73,8 @@ and run-ahead. The legacy input-framing session remains for tests and
 
 | Metric | Value |
 |---|---:|
-| Workspace crates | 10 |
-| First-party Rust lines | ~83,900 |
+| Workspace crates | 11 |
+| First-party Rust lines | ~92,500 |
 | Workspace tests | 697 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images | 7,101 |
@@ -96,6 +96,7 @@ crates/
   unko-netplay/      # GGRS rollback, hole-punch/relay adapters, legacy session
   unko-cli/          # info/scan/run/text/verify/trace/diff/bench/corpus
   unko-app/          # desktop shell (Dolphin-inspired UX)
+  xtask/             # Rust repository automation (former scripts)
 ```
 
 Architecture, systems, roadmap, frontend, platform and licensing notes are in
@@ -114,7 +115,7 @@ cargo run -p unko-cli -- text "roms/.../test.nes" --frames 600
 ```
 
 ROMs may be loose `.nes`/`.fds` files or inside ZIP/7z/RAR archives; `run`
-writes the last frame as a binary PPM. `scripts/pgo.sh <rom-dir>` produces a
+writes the last frame as a binary PPM. `cargo run --release -p xtask -- pgo <rom-dir>` produces a
 profile-guided build (about 10-13% faster).
 
 ## Desktop app
@@ -156,7 +157,7 @@ root. Mobile entry points and packaging are in
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-python3 scripts/license_audit.py
+cargo run -p xtask -- license-audit
 cargo run --release -p unko-cli -- bench --synthetic 3000 --min-fps 300
 ```
 
@@ -212,7 +213,7 @@ Save states, cheats and debugger helpers are default features;
 Project code is MIT. `unko-nes` includes ISC-licensed adaptations from ares;
 see [`NOTICE`](NOTICE), [`licenses/`](licenses/) and
 `crates/unko-nes/PROVENANCE.md`. Third-party crates are listed in `NOTICE`;
-`scripts/license_audit.py` checks the dependency license allowlist. Security
+`xtask license-audit` checks the dependency license allowlist. Security
 notes and the audit report are in [`docs/security.md`](docs/security.md).
 
 This repository contains **no ROMs, BIOS images or copyrighted firmware**.
