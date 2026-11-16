@@ -467,6 +467,10 @@ impl NesCore for AccuracyCore {
             .map_or_else(Vec::new, System::save_disk_image)
     }
 
+    fn frame_rate(&self) -> f64 {
+        self.system.as_ref().map_or(60.0988, System::frame_rate)
+    }
+
     fn set_video_filter(&mut self, filter: VideoFilter) {
         self.filter = filter;
     }

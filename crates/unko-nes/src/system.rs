@@ -1013,6 +1013,12 @@ impl System {
         self.stereo_enabled.then_some(self.stereo_eye)
     }
 
+    /// Frames per second for the loaded region (NTSC 60.0988, PAL/Dendy 50.007).
+    #[must_use]
+    pub fn frame_rate(&self) -> f64 {
+        self.timing.frame_rate()
+    }
+
     /// NES 2.0 Vs. System cabinet type; unmarked images are UniSystem.
     #[must_use]
     pub fn vs_system_type(&self) -> crate::VsSystemType {
@@ -4387,6 +4393,16 @@ mod tests {
         let vs99 = System::from_ines(&synthetic_vs(32)).expect("load");
         assert!(vs99.is_vs_system());
         assert_eq!(vs99.ppu.ppu_model(), PpuModel::Ppu2C03);
+    }
+
+    #[test]
+    fn frame_rate_tracks_the_configured_region() {
+        let mut system = System::from_ines(&synthetic_nrom(0)).expect("load");
+        assert!((system.frame_rate() - 60.0988).abs() < 0.01);
+        system.set_region(crate::Region::Pal);
+        assert!((system.frame_rate() - 50.007).abs() < 0.01);
+        system.set_region(crate::Region::Dendy);
+        assert!((system.frame_rate() - 50.007).abs() < 0.01);
     }
 
     #[test]

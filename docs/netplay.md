@@ -27,7 +27,7 @@ until the handshake reaches `Running`, so both peers begin at frame 0 from the
 same power-on state. GGRS handles input exchange, repeat-last prediction,
 rollback scheduling, time synchronization and checksum comparison. The window
 reports the active engine, frame, confirmed frame, rollbacks, predicted
-port-frames, deepest rollback and desync reports. GGRS cannot repair a desync:
+port-frames, deepest rollback, ping/frames-behind and desync reports. GGRS cannot repair a desync:
 the session pauses and must be restarted.
 
 Relay sessions use the player slot as a stable member id. The relay server

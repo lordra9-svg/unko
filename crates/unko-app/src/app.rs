@@ -3496,6 +3496,15 @@ impl App {
                         ui.label(format!(
                             "GGRS · frame {frame} · confirmed {received} · rollbacks {rollbacks}"
                         ));
+                        if let Some((ping, behind)) = self
+                            .player
+                            .as_ref()
+                            .and_then(crate::player::Player::netplay_network_stats)
+                        {
+                            ui.label(format!(
+                                "Ping {ping} ms · frames behind {behind}"
+                            ));
+                        }
                     } else {
                         ui.label(format!(
                             "Frame {frame} · sent {sent} · received {received} · rollbacks {rollbacks}"

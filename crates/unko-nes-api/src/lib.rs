@@ -237,6 +237,13 @@ pub trait NesCore: Core {
         None
     }
 
+    /// Frames per second of the loaded machine (NTSC/PAL/Dendy).
+    ///
+    /// Netplay uses this for GGRS time synchronization; cores may override it.
+    fn frame_rate(&self) -> f64 {
+        60.0988
+    }
+
     /// Reborrows this machine through the generic [`Core`] interface.
     ///
     /// Used when a generic helper (netplay, tracing, hashing) expects

@@ -76,7 +76,17 @@ impl GgrsNetplay {
     /// with the local player's own slot omitted. Both peers must build the
     /// same player list; the local slot comes from `config.local_player`.
     pub fn start(bind_port: u16, peers: &[String], config: SessionConfig) -> Result<Self, String> {
-        Self::start_lockstep_mode(bind_port, peers, config, false)
+        Self::start_with_fps(bind_port, peers, config, 60)
+    }
+
+    /// Starts a direct-UDP session with an explicit frame rate.
+    pub fn start_with_fps(
+        bind_port: u16,
+        peers: &[String],
+        config: SessionConfig,
+        fps: u32,
+    ) -> Result<Self, String> {
+        Self::start_lockstep_mode(bind_port, peers, config, false, fps)
     }
 
     /// Starts a lockstep session (no prediction) for deterministic validation.
@@ -85,7 +95,7 @@ impl GgrsNetplay {
         peers: &[String],
         config: SessionConfig,
     ) -> Result<Self, String> {
-        Self::start_lockstep_mode(bind_port, peers, config, true)
+        Self::start_lockstep_mode(bind_port, peers, config, true, 60)
     }
 
     /// Starts GGRS over a hole-punched transport.
@@ -94,7 +104,17 @@ impl GgrsNetplay {
         peers: &[String],
         config: SessionConfig,
     ) -> Result<Self, String> {
-        Self::start_punch_mode(transport, peers, config, false)
+        Self::start_punch_mode(transport, peers, config, false, 60)
+    }
+
+    /// Starts GGRS over a hole-punched transport with an explicit frame rate.
+    pub fn start_punch_with_fps(
+        transport: HolePunchTransport,
+        peers: &[String],
+        config: SessionConfig,
+        fps: u32,
+    ) -> Result<Self, String> {
+        Self::start_punch_mode(transport, peers, config, false, fps)
     }
 
     /// Lockstep hole-punch session for deterministic validation.
@@ -103,7 +123,7 @@ impl GgrsNetplay {
         peers: &[String],
         config: SessionConfig,
     ) -> Result<Self, String> {
-        Self::start_punch_mode(transport, peers, config, true)
+        Self::start_punch_mode(transport, peers, config, true, 60)
     }
 
     fn start_punch_mode(
@@ -111,15 +131,25 @@ impl GgrsNetplay {
         peers: &[String],
         config: SessionConfig,
         lockstep: bool,
+        fps: u32,
     ) -> Result<Self, String> {
         let addresses = parse_direct_peers(peers, config)?;
-        Self::start_with_socket(PunchSocket { transport }, addresses, config, lockstep)
+        Self::start_with_socket(PunchSocket { transport }, addresses, config, lockstep, fps)
     }
 
     /// Starts GGRS over a relay room. Member ids are the player slots; the
     /// transport must have joined with `config.local_player`.
     pub fn start_relay(transport: RelayTransport, config: SessionConfig) -> Result<Self, String> {
-        Self::start_relay_mode(transport, config, false)
+        Self::start_relay_mode(transport, config, false, 60)
+    }
+
+    /// Starts GGRS over a relay room with an explicit frame rate.
+    pub fn start_relay_with_fps(
+        transport: RelayTransport,
+        config: SessionConfig,
+        fps: u32,
+    ) -> Result<Self, String> {
+        Self::start_relay_mode(transport, config, false, fps)
     }
 
     /// Lockstep relay session for deterministic validation.
@@ -127,13 +157,14 @@ impl GgrsNetplay {
         transport: RelayTransport,
         config: SessionConfig,
     ) -> Result<Self, String> {
-        Self::start_relay_mode(transport, config, true)
+        Self::start_relay_mode(transport, config, true, 60)
     }
 
     fn start_relay_mode(
         transport: RelayTransport,
         config: SessionConfig,
         lockstep: bool,
+        fps: u32,
     ) -> Result<Self, String> {
         let config = config.normalized();
         let players = usize::from(config.players);
@@ -142,7 +173,7 @@ impl GgrsNetplay {
             .filter(|handle| *handle != local)
             .map(|handle| GgrsAddress::Relay(handle as u8))
             .collect();
-        Self::start_with_socket(RelaySocket { transport }, addresses, config, lockstep)
+        Self::start_with_socket(RelaySocket { transport }, addresses, config, lockstep, fps)
     }
 
     fn start_lockstep_mode(
@@ -150,6 +181,7 @@ impl GgrsNetplay {
         peers: &[String],
         config: SessionConfig,
         lockstep: bool,
+        fps: u32,
     ) -> Result<Self, String> {
         if bind_port == 0 {
             return Err("bind port must be non-zero".into());
@@ -157,7 +189,13 @@ impl GgrsNetplay {
         let addresses = parse_direct_peers(peers, config)?;
         let socket = UdpNonBlockingSocket::bind_to_port(bind_port)
             .map_err(|err| format!("bind UDP {bind_port}: {err}"))?;
-        Self::start_with_socket(DirectSocket { inner: socket }, addresses, config, lockstep)
+        Self::start_with_socket(
+            DirectSocket { inner: socket },
+            addresses,
+            config,
+            lockstep,
+            fps,
+        )
     }
 
     fn start_with_socket(
@@ -165,6 +203,7 @@ impl GgrsNetplay {
         addresses: Vec<GgrsAddress>,
         config: SessionConfig,
         lockstep: bool,
+        fps: u32,
     ) -> Result<Self, String> {
         let mut config = config.normalized();
         // GGRS has one compile-time predictor; the NES adapter uses
@@ -183,7 +222,7 @@ impl GgrsNetplay {
         let mut builder = SessionBuilder::<GgrsConfig>::new()
             .with_num_players(players)
             .map_err(|err| err.to_string())?
-            .with_fps(60)
+            .with_fps(fps.max(1) as usize)
             .map_err(|err| err.to_string())?
             .with_input_delay(config.input_delay as usize)
             .with_max_prediction_window(if lockstep { 0 } else { config.buffer_frames })

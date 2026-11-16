@@ -1240,7 +1240,8 @@ impl Player {
         peers: &[String],
         config: SessionConfig,
     ) -> Result<(), String> {
-        let session = GgrsNetplay::start(bind_port, peers, config)?;
+        let fps = self.frame_rate().round().clamp(1.0, 240.0) as u32;
+        let session = GgrsNetplay::start_with_fps(bind_port, peers, config, fps)?;
         self.begin_ggrs(session);
         Ok(())
     }
@@ -1252,7 +1253,8 @@ impl Player {
         peers: &[String],
         config: SessionConfig,
     ) -> Result<(), String> {
-        let session = GgrsNetplay::start_punch(transport, peers, config)?;
+        let fps = self.frame_rate().round().clamp(1.0, 240.0) as u32;
+        let session = GgrsNetplay::start_punch_with_fps(transport, peers, config, fps)?;
         self.begin_ggrs(session);
         Ok(())
     }
@@ -1263,7 +1265,8 @@ impl Player {
         transport: RelayTransport,
         config: SessionConfig,
     ) -> Result<(), String> {
-        let session = GgrsNetplay::start_relay(transport, config)?;
+        let fps = self.frame_rate().round().clamp(1.0, 240.0) as u32;
+        let session = GgrsNetplay::start_relay_with_fps(transport, config, fps)?;
         self.begin_ggrs(session);
         Ok(())
     }
@@ -1371,6 +1374,12 @@ impl Player {
     #[must_use]
     pub fn netplay_resyncing(&self) -> bool {
         self.netplay.as_ref().is_some_and(Netplay::resyncing)
+    }
+
+    /// `(ping_ms, frames_behind)` for GGRS, when available.
+    #[must_use]
+    pub fn netplay_network_stats(&self) -> Option<(u128, i32)> {
+        self.ggrs.as_ref().and_then(GgrsNetplay::network_stats)
     }
 
     /// `(checked, mismatches, last)` state-hash counters when netplay is
@@ -1776,6 +1785,11 @@ impl Player {
     /// Whether the loaded image is a Vs. System cabinet board.
     pub fn is_vs_system(&self) -> bool {
         self.core.is_vs_system()
+    }
+
+    /// Frames per second of the loaded machine, for GGRS time sync.
+    pub fn frame_rate(&self) -> f64 {
+        self.core.frame_rate()
     }
 
     /// Sets Vs. System service/DIP/primary input.
