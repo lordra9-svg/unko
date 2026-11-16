@@ -37,12 +37,15 @@ KNOWN = {
     "VS Super Mario Bros Version MAME V1.1A.nes": (5, 0, None),  # 2C04-0004
     "VS TKO Boxing Hack.nes": (4, 0, None),  # 2C04-0003
     "VS The Goonies Hack.nes": (4, 0, 75),  # 2C04-0003; VRC1 (mapper 151 in the dump)
+    # 40 KiB Gumshoe padded to 48 KiB in iNES; MAME's set uses rp2c0x.pal.
+    "VS. Gumshoe (VS) [a1].nes": (0, 0, None),
     # Headerless hack: prepend the Vs. Castlevania header (mapper 2).
     "VS Castlevania Hack.nes": (3, 0, 2),
 }
 
 # Output names stay recognisable but mark payloads that are known hacks.
 OUTPUT_NAMES = {
+    "VS. Gumshoe (VS) [a1].nes": "Vs. Gumshoe.nes",
     "VS Castlevania Hack.nes": "Vs. Castlevania (hack).nes",
     "VS Duck Hunt Hack.nes": "Vs. Duck Hunt (hack).nes",
     "VS Excitebike Hack.nes": "Vs. Excitebike (hack).nes",

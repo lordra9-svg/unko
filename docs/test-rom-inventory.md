@@ -38,9 +38,9 @@ identical traces, but *Akumajou Dracula* differs from frame 5 between
 selectable.
 
 A local Vs. System drop in `/var/home/Lordra/ai/refs/vspC/` was repaired and
-staged on 2026-11-16 (see below). **Vs. Gumshoe**, a 2C05 title and a known-good
-DualSystem dump are still absent. PlayChoice-10 game ROMs are present only as
-raw MAME sets.
+staged on 2026-11-16 (see below). **A 2C05 title and a known-good DualSystem
+dump are still absent.** PlayChoice-10 game ROMs are present only as raw MAME
+sets.
 
 The Miracle Piano's documented SysEx replies and the Datach X24C01 protocol are
 implemented from the published protocol/datasheet, so neither firmware nor a
@@ -52,7 +52,7 @@ physical dump is required for those.
 headers: Vs. console type, four-screen mirroring, cabinet nibble and per-game
 PPU model. It writes only to the gitignored `test-roms/` directory.
 
-Staged under `test-roms/vs/` (12 images):
+Staged under `test-roms/vs/` (13 images):
 
 | Image | Mapper | PPU | Payload |
 |---|---|---|---|
@@ -68,11 +68,14 @@ Staged under `test-roms/vs/` (12 images):
 | `VS Super Mario Bros Version MAME V1.1A.nes` | 1 | 2C04-0004 | known |
 | `Vs. TKO Boxing (hack).nes` | 4 | 2C04-0003 | known hack |
 | `Vs. The Goonies (hack).nes` | 75 | 2C04-0003 | known hack |
+| `Vs. Gumshoe.nes` | 99 | 2C03 | known (48 KiB padded 40 KiB image) |
 
 `crates/unko-nes-dev/tests/vs_staged.rs` loads each one, checks the mapper,
-PPU model, UniSystem type and four-screen mirroring, and runs ten frames. The
-test skips when `test-roms/vs/` is absent. `VS Castlevania.nes` renders without
-an ASCII text screen; the others also pass `unko text`/frame smoke tests.
+PPU model, UniSystem type and four-screen mirroring, and runs ten frames. A
+second test switches Gumshoe's `$4016` outer-bank bit and compares the whole
+8 KiB `$8000` window. The tests skip when `test-roms/vs/` is absent.
+`VS Castlevania.nes` renders without an ASCII text screen; the others also
+pass `unko text`/frame smoke tests.
 
 Raw PC10 MAME sets are staged in `test-roms/pc10/` (`pc_smb`, `pc_duckh`,
 `pc_ebike`, `pc_hgaly`, plus `playch10.zip`). They are not iNES PC10 images;
@@ -80,7 +83,9 @@ conversion and the second-CPU/INST-ROM layer are still required.
 
 ```sh
 unrar x "/var/home/Lordra/ai/refs/vspC/VS NES Roms.rar" /tmp/vs-roms/
+7z x "/var/home/Lordra/ai/refs/vspC/604.7z" "Gumshoe/其他版-VS/*" -o/tmp/vs-gumshoe
 scripts/repair_vs_headers.py /tmp/vs-roms -o test-roms/vs
+scripts/repair_vs_headers.py "/tmp/vs-gumshoe/Gumshoe/其他版-VS" -o test-roms/vs
 cargo test -p unko-nes-dev --test vs_staged
 ```
 
@@ -190,7 +195,7 @@ PAL APU singles in PAL mode, `dma_4016_read` and `5-branch_delays_irq`.
 | Asset | Needed for | Notes |
 |---|---|---|
 | `disksys.rom` (FDS BIOS) | `fdsirqtests`, FDS mirroring/`$4023`/audio/`$4030` tests, every `.fds` title | Present locally at `refs/bios/disksys.rom` (two revisions) and in the Myrient BIOS archive; it is **not** in `test-roms/`, and the desktop app reads it from Settings → Paths |
-| Vs. System ROMs | `characterize-vs`, VS compatibility | 12 local images staged and booting; **Vs. Gumshoe**, a 2C05 title and a known-good DualSystem dump are still missing. No VS BIOS is required for these boards. |
+| Vs. System ROMs | `characterize-vs`, VS compatibility | 13 local images staged and booting, including Gumshoe with its outer bank; **a 2C05 title and a known-good DualSystem dump are still missing**. No VS BIOS is required for these boards. |
 | PlayChoice-10 ROMs | PC10 compatibility | BIOS present; raw MAME game sets staged. iNES PC10 conversion, INST/PROM packaging and the second-CPU/input layer are still missing. |
 | Miracle Piano firmware | MIDI replies | Not required: SysEx 4/11 replies are synthesized from the documented message set |
 | Datach external X24C01 dump (Battle Rush) | external EEPROM | Not required: the 128-byte X24C01 is modelled from the Xicor datasheet |

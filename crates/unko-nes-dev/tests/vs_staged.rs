@@ -25,6 +25,7 @@ const CASES: &[(&str, u16, PpuModel)] = &[
     ),
     ("Vs. TKO Boxing (hack).nes", 4, PpuModel::Ppu2C04C),
     ("Vs. The Goonies (hack).nes", 75, PpuModel::Ppu2C04C),
+    ("Vs. Gumshoe.nes", 99, PpuModel::Ppu2C03),
 ];
 
 #[test]
@@ -63,4 +64,25 @@ fn staged_vs_images_boot_with_vs_metadata() {
         checked += 1;
     }
     assert!(checked > 0, "no staged Vs. images were found");
+}
+
+#[test]
+fn staged_gumshoe_switches_the_outer_prg_bank() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-roms/vs/Vs. Gumshoe.nes");
+    if !path.exists() {
+        eprintln!("skipping: {} is absent", path.display());
+        return;
+    }
+    let rom = std::fs::read(&path).expect("read Gumshoe");
+    let system = System::from_ines(&rom).expect("load Gumshoe");
+    assert_eq!(system.cart.mapper(), 99);
+    let bank0: Vec<u8> = (0..0x2000u16)
+        .map(|offset| system.cart.cpu_read(0x8000 + offset))
+        .collect();
+    let mut system = system;
+    system.cart.write_4016(0x04);
+    let bank4: Vec<u8> = (0..0x2000u16)
+        .map(|offset| system.cart.cpu_read(0x8000 + offset))
+        .collect();
+    assert_ne!(bank0, bank4, "Gumshoe outer-bank select at $8000");
 }
