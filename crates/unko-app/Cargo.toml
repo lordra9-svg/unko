@@ -33,7 +33,8 @@ directories = "6.0.0"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 eframe = { version = "0.31.1", default-features = false, features = [
-    "accesskit",
+    # accesskit is omitted until its zbus/quick-xml 0.30 chain is upgraded
+    # to quick-xml >= 0.41 (RUSTSEC-2026-0194/0195).
     "default_fonts",
     "glow",
     "wayland",

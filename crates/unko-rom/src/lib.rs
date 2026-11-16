@@ -26,6 +26,12 @@ use zip::ZipArchive;
 
 pub mod unif;
 
+/// Largest ROM accepted from a file or archive member (64 MiB).
+///
+/// NES images are a few MiB at most; this bounds malicious archive metadata
+/// and decompression bombs without affecting real dumps.
+pub const MAX_ROM_BYTES: u64 = 64 * 1024 * 1024;
+
 /// Archive container a ROM came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Container {
@@ -254,6 +260,11 @@ pub fn probe_path(path: &Path) -> Result<Vec<RomEntry>, RomError> {
 
 /// Reads the bytes for an entry.
 pub fn load(entry: &RomEntry) -> Result<Vec<u8>, RomError> {
+    if entry.size > MAX_ROM_BYTES {
+        return Err(RomError::Invalid(format!(
+            "ROM is larger than the {MAX_ROM_BYTES}-byte limit"
+        )));
+    }
     let bytes = match &entry.source {
         Source::File(path) => fs::read(path).map_err(RomError::Io)?,
         Source::Archive {
@@ -502,13 +513,27 @@ fn scan_rar(path: &Path) -> Vec<RomEntry> {
 fn load_zip(path: &Path, inner: &str, _index: Option<usize>) -> Result<Vec<u8>, RomError> {
     let file = fs::File::open(path).map_err(RomError::Io)?;
     let mut archive = ZipArchive::new(file).map_err(|err| RomError::Archive(err.to_string()))?;
-    let mut member = archive
+    let member = archive
         .by_name(inner)
         .map_err(|err| RomError::Archive(err.to_string()))?;
-    let mut bytes = Vec::with_capacity(member.size() as usize);
-    member
+    let declared = member.size();
+    if declared > MAX_ROM_BYTES {
+        return Err(RomError::Invalid(format!(
+            "archive member is larger than the {MAX_ROM_BYTES}-byte limit"
+        )));
+    }
+    // Do not trust the declared size for the initial allocation, and bound the
+    // actual decompressed output as well.
+    let mut bytes = Vec::with_capacity(declared.min(1024 * 1024) as usize);
+    let mut limited = member.take(MAX_ROM_BYTES + 1);
+    limited
         .read_to_end(&mut bytes)
         .map_err(|err| RomError::Archive(err.to_string()))?;
+    if bytes.len() as u64 > MAX_ROM_BYTES {
+        return Err(RomError::Invalid(format!(
+            "archive member is larger than the {MAX_ROM_BYTES}-byte limit"
+        )));
+    }
     Ok(bytes)
 }
 
@@ -651,6 +676,21 @@ impl std::error::Error for RomError {}
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn rejects_oversized_entries_before_reading() {
+        let entry = RomEntry {
+            source: Source::File(PathBuf::from("/does/not/exist.nes")),
+            container: Container::File,
+            title: "oversized".into(),
+            file_name: "oversized.nes".into(),
+            size: MAX_ROM_BYTES + 1,
+            modified: None,
+            header: None,
+            id: 0,
+        };
+        assert!(matches!(load(&entry), Err(RomError::Invalid(_))));
+    }
 
     fn synthetic_nes() -> Vec<u8> {
         let mut rom = vec![0u8; 16 + 16 * 1024 + 8 * 1024];

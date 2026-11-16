@@ -3284,6 +3284,10 @@ impl App {
             .open(&mut open)
             .default_size([560.0, 420.0])
             .show(ctx, |ui| {
+                ui.colored_label(
+                    Color32::YELLOW,
+                    "GGRS traffic is unencrypted UDP. Use trusted peers or a private relay.",
+                );
                 let role_before = self.netplay_host;
                 ui.horizontal(|ui| {
                     ui.label("Role");

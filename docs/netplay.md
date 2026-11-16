@@ -53,6 +53,13 @@ The legacy engine remains as a library fallback and for
   (`transfer_snapshot`), and the receiver reassembles it, loads it, discards
   its history (`RollbackSession::resync`) and acknowledges (`StateAck`).
 
+## Trust boundary
+
+GGRS traffic is plaintext UDP and the relay room token is not a secret. Use
+netplay with trusted peers or a private relay; the NetPlay window shows the
+same warning. Optional pre-shared-key authentication/AEAD is a future
+transport layer, not part of the current session.
+
 ## Transports
 
 | Transport | Use |

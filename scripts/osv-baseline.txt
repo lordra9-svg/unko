@@ -1,0 +1,7 @@
+# Known advisories accepted at the 2026-11-16 audit.
+# These are unmaintained-crate notices, not known exploitable vulnerabilities.
+# New advisory IDs fail the audit; remove an ID when its dependency is upgraded.
+RUSTSEC-2025-0141  # bincode 1.x, save states / GGRS wire
+RUSTSEC-2024-0384  # instant, via GGRS
+RUSTSEC-2024-0436  # paste, proc-macro dependency
+RUSTSEC-2026-0192  # ttf-parser, via egui text shaping
