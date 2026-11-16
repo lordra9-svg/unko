@@ -166,6 +166,11 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+      - name: Combined checksums
+        run: |
+          cd artifacts
+          rm -f SHA256SUMS
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS
       - name: Publish
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
         with:

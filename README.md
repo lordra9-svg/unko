@@ -12,6 +12,7 @@ NES, powered by the standalone `unko-nes` core. The base
 **Repository:** <https://github.com/lordra9-svg/unko>
 
 [![CI](https://github.com/lordra9-svg/unko/actions/workflows/ci.yml/badge.svg)](https://github.com/lordra9-svg/unko/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/lordra9-svg/unko)](https://github.com/lordra9-svg/unko/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## Status
