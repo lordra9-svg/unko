@@ -3733,7 +3733,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "unko-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cpal",
  "directories",
@@ -3758,7 +3758,7 @@ dependencies = [
 
 [[package]]
 name = "unko-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "unko-core",
  "unko-nes",
@@ -3770,11 +3770,11 @@ dependencies = [
 
 [[package]]
 name = "unko-core"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "unko-nes"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "serde",
@@ -3783,14 +3783,14 @@ dependencies = [
 
 [[package]]
 name = "unko-nes-api"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "unko-core",
 ]
 
 [[package]]
 name = "unko-nes-dev"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "unko-core",
  "unko-nes",
@@ -3801,7 +3801,7 @@ dependencies = [
 
 [[package]]
 name = "unko-nes-host"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "unko-core",
  "unko-nes",
@@ -3810,7 +3810,7 @@ dependencies = [
 
 [[package]]
 name = "unko-netplay"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "ggrs",
@@ -3819,7 +3819,7 @@ dependencies = [
 
 [[package]]
 name = "unko-rom"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "rars",
  "sevenz-rust2",
@@ -3828,7 +3828,7 @@ dependencies = [
 
 [[package]]
 name = "unko-rom-manager"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crc32fast",
  "md-5",
@@ -4716,7 +4716,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "flate2",
  "reqwest",
