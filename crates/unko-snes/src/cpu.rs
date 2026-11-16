@@ -216,12 +216,6 @@ impl Cpu {
             self.nmi_services += 1;
             let vector = if self.emulation { 0xFFFA } else { 0xFFEA };
             self.service_interrupt(bus, vector, false);
-            if std::env::var_os("NMI_TRACE").is_some() {
-                eprintln!(
-                    "NMI vector={:04X} pc={:04X} pbr={:02X}",
-                    vector, self.pc, self.pbr
-                );
-            }
             return (self.cycles - start) as u32;
         }
 

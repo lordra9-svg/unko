@@ -141,13 +141,6 @@ fn main() -> ExitCode {
         .iter()
         .map(|pixel| u64::from(pixel[0]) + u64::from(pixel[1]) + u64::from(pixel[2]))
         .sum();
-    eprintln!(
-        "scroll: {:?} {:?} {:?} {:?}",
-        system.ppu.bg_scroll(0),
-        system.ppu.bg_scroll(1),
-        system.ppu.bg_scroll(2),
-        system.ppu.bg_scroll(3),
-    );
     println!(
         "ppu:         line={} vblank={} frame_ready={} nonzero_pixels={} rgb_sum={checksum}",
         system.ppu.line(),
@@ -155,7 +148,6 @@ fn main() -> ExitCode {
         system.ppu.frame_ready(),
         nonzero,
     );
-    eprintln!("spc ram 0540: {:02X?}", &system.apu.ram()[0x540..0x560]);
     println!("ran:         {instructions} instructions, {cycles} cycles");
     ExitCode::SUCCESS
 }
