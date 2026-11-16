@@ -74,10 +74,16 @@ fn native_options(layout: Option<[f32; 4]>) -> NativeOptions {
     // A minimum window size only makes sense on a desktop.
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let viewport = viewport.with_min_inner_size([960.0, 600.0]);
-    NativeOptions {
+    let options = NativeOptions {
         viewport,
         ..Default::default()
-    }
+    };
+    #[cfg(feature = "vulkan")]
+    let options = NativeOptions {
+        renderer: eframe::Renderer::Wgpu,
+        ..options
+    };
+    options
 }
 
 /// Android entry point, called by the native activity.

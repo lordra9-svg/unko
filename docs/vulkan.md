@@ -23,6 +23,19 @@ The test verifies a full frame round-trips byte-for-byte. If no Vulkan adapter
 is available the test skips; `VulkanRenderer::new` returns an error so callers
 can fall back to the existing glow path.
 
+## Running the presenter
+
+The feature also enables eframe's `wgpu` renderer. On a desktop with a Vulkan
+adapter:
+
+```sh
+cargo run -p unko-app --release --features vulkan
+```
+
+The window then uses wgpu (Vulkan on Linux) for egui presentation. The custom
+GLSL shader presets still fall back to the CPU texture path until they are
+ported to WGSL; the offscreen renderer above is the foundation for that port.
+
 ## Why it is not the default yet
 
 The desktop shell still uses eframe's `glow` backend and the existing

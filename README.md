@@ -23,8 +23,8 @@ runs the NES core headlessly or in a window, outputs RGBA video and f32 audio,
 plays through cpal, accepts keyboard/SDL3 gamepad/touch/peripheral input,
 records WAV/PNG/GIF and verifies determinism. FDS images use a user-supplied
 `disksys.rom`. The same UI builds for Windows, macOS, Linux, iOS and Android.
-An offscreen wgpu/Vulkan renderer is available behind `--features vulkan`
-(scaffold; the glow path remains the default presenter).
+An offscreen wgpu/Vulkan renderer and opt-in wgpu presenter are available
+behind `--features vulkan`; the glow path remains the default presenter.
 
 Accuracy milestone **A5** is complete. **A6** (breadth) continues; VS. System
 and PlayChoice-10 work is paused by the owner pending a 2C05 title, a good

@@ -40,6 +40,9 @@ crates below.
 - ZIP members are checked against their declared size, allocated with a
   bounded hint and read through `take(cap + 1)`, then the actual length is
   checked again.
+- 7z members are streamed through `for_each_entries` with a bounded `take`;
+  RAR parsing/extraction uses `max_member_output_bytes` and
+  `max_total_output_bytes` set to the same cap.
 
 A unit test covers the pre-I/O rejection. ZIP/7z/RAR members are still read
 into memory only; no archive path is ever extracted to disk, so zip-slip is

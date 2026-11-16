@@ -18,7 +18,7 @@ path = "src/main.rs"
 [features]
 default = []
 # Offscreen wgpu/Vulkan renderer scaffold; not yet wired into the egui shell.
-vulkan = ["dep:wgpu", "dep:pollster"]
+vulkan = ["dep:wgpu", "dep:pollster", "eframe/wgpu"]
 
 [dependencies]
 unko-core.workspace = true
