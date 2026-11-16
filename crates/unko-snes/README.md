@@ -28,7 +28,8 @@ in another Rust project. A future `unko-snes-host` crate will provide the
   tile backgrounds, Mode 7 affine mapping, sprites, subscreen and colour math
 - Exact S-CPU memory timing in NTSC master clocks with the ares wait-state
   table, plus DMA/HDMA stalls
-- S-CPU general-purpose DMA
+- S-CPU general-purpose DMA, HDMA, controller ports/auto-poll and the
+  hardware multiply/divide unit
 - Minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM, reset,
   `$2100-$213F` PPU registers and `$2140-$2143` APU ports
 - Oracle differential tests against the MIT `w65c816` and `spc700` crates

@@ -59,6 +59,15 @@ material used to implement it. No GPL emulator source is translated or copied.
   (`AND1 C,/membit`) behaviour is known to differ from ares and is excluded
   from the sweep.
 
+## `src/io.rs`
+
+- SNESdev Wiki [Controllers](https://snes.nesdev.org/wiki/Controllers) and
+  [Memory-mapped I/O](https://snes.nesdev.org/wiki/CPU_registers).
+- ISC-licensed ares `ares/sfc/cpu/io.cpp`, `timing.cpp` (`joypadEdge`) and
+  `controller/gamepad/gamepad.cpp` for the serial button order, auto-poll
+  packing and multiply/divide counters.
+- The joypad bit layout is re-exported as `io::button` so hosts never guess it.
+
 ## `src/dsp.rs`
 
 - SNESdev Wiki [S-DSP registers](https://snes.nesdev.org/wiki/S-DSP_registers),

@@ -8,6 +8,7 @@
 use crate::apu::Apu;
 use crate::cpu::{Cpu, CpuBus};
 use crate::dma::{self, Dma, DmaBus};
+use crate::io::CpuIo;
 use crate::ppu::Ppu;
 use crate::rom::Cartridge;
 
@@ -27,6 +28,8 @@ pub struct Snes {
     pub ppu: Ppu,
     /// General-purpose DMA channels.
     pub dma: Dma,
+    /// Controller ports, auto-poll and the multiply/divide unit.
+    pub io: CpuIo,
     wram: Vec<u8>,
     apu_credit: i64,
     ppu_credit: i64,
@@ -46,6 +49,7 @@ impl Snes {
             apu: Apu::new(),
             ppu: Ppu::new(),
             dma: Dma::new(),
+            io: CpuIo::new(),
             wram: vec![0; WRAM_SIZE],
             apu_credit: 0,
             ppu_credit: 0,
@@ -66,6 +70,18 @@ impl Snes {
         &mut self.wram
     }
 
+    /// Set the buttons held on a controller port (`0` or `1`).
+    ///
+    /// Bits use [`crate::io::button`], which matches the `$4218-$421F` layout.
+    pub fn set_joypad(&mut self, port: usize, state: u16) {
+        self.io.set_joypad(port, state);
+    }
+
+    /// Buttons held on a controller port (`0` or `1`).
+    pub fn joypad(&self, port: usize) -> u16 {
+        self.io.joypad(port)
+    }
+
     /// Whether NMI is enabled by the last `$4200` write (debug).
     pub const fn nmi_enabled(&self) -> bool {
         self.nmi_enable
@@ -81,6 +97,7 @@ impl Snes {
         self.apu.reset();
         self.ppu.reset();
         self.dma.hdma_reset();
+        self.io.reset();
         self.apu_credit = 0;
         self.ppu_credit = 0;
         self.nmi_enable = false;
@@ -93,10 +110,12 @@ impl Snes {
             apu: &mut self.apu,
             ppu: &mut self.ppu,
             dma: &mut self.dma,
+            io: &mut self.io,
             nmi_enable: &mut self.nmi_enable,
             nmi_flag: &mut self.nmi_flag,
             fast_rom: &mut self.fast_rom,
             vblank: false,
+            hblank: false,
         };
         self.cpu.reset(&mut bus)
     }
@@ -104,6 +123,7 @@ impl Snes {
     /// Execute one CPU instruction or interrupt.
     pub fn step(&mut self) -> u32 {
         let vblank = self.ppu.in_vblank();
+        let hblank = self.ppu.in_hblank();
         let mut cycles = {
             let mut bus = SnesBus {
                 wram: &mut self.wram,
@@ -111,10 +131,12 @@ impl Snes {
                 apu: &mut self.apu,
                 ppu: &mut self.ppu,
                 dma: &mut self.dma,
+                io: &mut self.io,
                 nmi_enable: &mut self.nmi_enable,
                 nmi_flag: &mut self.nmi_flag,
                 fast_rom: &mut self.fast_rom,
                 vblank,
+                hblank,
             };
             self.cpu.step(&mut bus)
         };
@@ -125,10 +147,12 @@ impl Snes {
                 apu: &mut self.apu,
                 ppu: &mut self.ppu,
                 dma: &mut self.dma,
+                io: &mut self.io,
                 nmi_enable: &mut self.nmi_enable,
                 nmi_flag: &mut self.nmi_flag,
                 fast_rom: &mut self.fast_rom,
                 vblank,
+                hblank,
             };
             cycles += dma::run(&channels, mask, &mut bus);
         }
@@ -156,9 +180,13 @@ impl Snes {
                     ppu: &mut self.ppu,
                 };
                 self.dma.hdma_line(&mut bus);
+                if line == 225 {
+                    self.io.begin_auto_poll();
+                }
                 self.ppu.render_current_line();
             }
         }
+        self.io.step(cycles);
         if self.ppu.take_nmi() && self.nmi_enable {
             self.cpu.trigger_nmi();
             self.nmi_flag = true;
@@ -186,10 +214,12 @@ struct SnesBus<'a> {
     apu: &'a mut Apu,
     ppu: &'a mut Ppu,
     dma: &'a mut Dma,
+    io: &'a mut CpuIo,
     nmi_enable: &'a mut bool,
     nmi_flag: &'a mut bool,
     fast_rom: &'a mut bool,
     vblank: bool,
+    hblank: bool,
 }
 
 impl CpuBus for SnesBus<'_> {
@@ -214,10 +244,20 @@ impl CpuBus for SnesBus<'_> {
                 if offset == 0x4210 {
                     let value = if *self.nmi_flag { 0x80 } else { 0 };
                     *self.nmi_flag = false;
-                    return value;
+                    return value | 0x02;
                 }
                 if offset == 0x4212 {
-                    return u8::from(self.vblank) << 7;
+                    let busy = u8::from(self.io.auto_poll_busy());
+                    return u8::from(self.vblank) << 7 | (u8::from(self.hblank) << 6) | busy;
+                }
+                if offset == 0x4016 || offset == 0x4017 {
+                    return self.io.read(offset as u16).unwrap_or(0);
+                }
+                if (0x4211..=0x4217).contains(&offset) {
+                    return self.io.read(offset as u16).unwrap_or(0);
+                }
+                if (0x4218..=0x421F).contains(&offset) {
+                    return self.io.read(offset as u16).unwrap_or(0);
                 }
                 if (0x4300..=0x437F).contains(&offset) {
                     return self.dma.read(offset as u16);
@@ -251,6 +291,9 @@ impl CpuBus for SnesBus<'_> {
                     self.apu.cpu_write(offset - 0x2140, value);
                 } else if offset == 0x4200 {
                     *self.nmi_enable = value & 0x80 != 0;
+                    self.io.write(0x4200, value);
+                } else if (0x4202..=0x4206).contains(&offset) {
+                    self.io.write(offset as u16, value);
                 } else if offset == 0x420B {
                     self.dma.start(value);
                 } else if offset == 0x420C {
@@ -259,6 +302,9 @@ impl CpuBus for SnesBus<'_> {
                     *self.fast_rom = value & 0x01 != 0;
                 } else if (0x4300..=0x437F).contains(&offset) {
                     self.dma.write(offset as u16, value);
+                }
+                if offset == 0x4016 {
+                    self.io.write(0x4016, value);
                 }
                 return;
             }
@@ -456,10 +502,12 @@ mod tests {
             apu: &mut system.apu,
             ppu: &mut system.ppu,
             dma: &mut system.dma,
+            io: &mut system.io,
             nmi_enable: &mut system.nmi_enable,
             nmi_flag: &mut system.nmi_flag,
             fast_rom: &mut system.fast_rom,
             vblank: false,
+            hblank: false,
         };
         assert_eq!(bus.read(0x001234), 0x5A);
         assert_eq!(bus.read(0x801234), 0x5A);
@@ -491,10 +539,12 @@ mod tests {
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
+                io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 vblank: false,
+                hblank: false,
             };
             assert_eq!(bus.read(0x008000), 0x11);
             assert_eq!(bus.read(0x018000), 0x00);
@@ -551,6 +601,55 @@ mod tests {
     }
 
     #[test]
+    fn cpu_bus_exposes_joypads_and_math() {
+        let mut system = Snes::new(cartridge(&[0xDB]));
+        system.reset();
+        system.set_joypad(0, crate::io::button::B | crate::io::button::A);
+        {
+            let mut bus = SnesBus {
+                wram: &mut system.wram,
+                cart: &mut system.cart,
+                apu: &mut system.apu,
+                ppu: &mut system.ppu,
+                dma: &mut system.dma,
+                io: &mut system.io,
+                nmi_enable: &mut system.nmi_enable,
+                nmi_flag: &mut system.nmi_flag,
+                fast_rom: &mut system.fast_rom,
+                vblank: false,
+                hblank: false,
+            };
+            bus.write(0x4016, 0x01);
+            bus.write(0x4016, 0x00);
+            // B is the first bit shifted out.
+            assert_eq!(bus.read(0x4016) & 1, 1);
+            bus.write(0x4202, 0x03);
+            bus.write(0x4203, 0x05);
+        }
+        for _ in 0..8 {
+            system.io.step(6);
+        }
+        {
+            let mut bus = SnesBus {
+                wram: &mut system.wram,
+                cart: &mut system.cart,
+                apu: &mut system.apu,
+                ppu: &mut system.ppu,
+                dma: &mut system.dma,
+                io: &mut system.io,
+                nmi_enable: &mut system.nmi_enable,
+                nmi_flag: &mut system.nmi_flag,
+                fast_rom: &mut system.fast_rom,
+                vblank: false,
+                hblank: false,
+            };
+            assert_eq!(bus.read(0x4216), 0x0F);
+            assert_eq!(bus.read(0x4217), 0x00);
+            assert_eq!(bus.read(0x4210) & 0x0F, 0x02);
+        }
+    }
+
+    #[test]
     fn cpu_wait_states_match_the_hardware_table() {
         fn bus_read_cycles(code: &[u8], bank: u8, fast: bool) -> u32 {
             let mut system = Snes::new(cartridge(code));
@@ -589,10 +688,12 @@ mod tests {
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
+                io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 vblank: false,
+                hblank: false,
             };
             bus.write(0x2115, 0x80);
             bus.write(0x2116, 0x00);
@@ -614,10 +715,12 @@ mod tests {
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
+                io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 vblank: false,
+                hblank: false,
             };
             dma::run(&channels, mask, &mut bus);
         }
@@ -673,10 +776,12 @@ mod tests {
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
+                io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 vblank: false,
+                hblank: false,
             };
             bus.write(0x2121, 0x00);
             bus.write(0x4300, 0x00);
@@ -696,10 +801,12 @@ mod tests {
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
+                io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 vblank: false,
+                hblank: false,
             };
             dma::run(&channels, mask, &mut bus);
         }

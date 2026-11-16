@@ -74,7 +74,8 @@ fn main() -> ExitCode {
         let mut cycles = 0u64;
         let mut instructions = 0u32;
         let mut frames = 0u32;
-        while frames < target_frames && instructions < 20_000_000 && !system.cpu.stp {
+        let instruction_limit = target_frames.saturating_mul(20_000).max(20_000_000);
+        while frames < target_frames && instructions < instruction_limit && !system.cpu.stp {
             cycles += u64::from(system.step());
             instructions += 1;
             if system.ppu.frame_ready() {

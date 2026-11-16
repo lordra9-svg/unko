@@ -263,6 +263,14 @@ impl Ppu {
         self.vblank
     }
 
+    /// Whether the current dot is in horizontal blanking.
+    ///
+    /// ares reports `hcounter <= 2 || hcounter >= 1096` on its 1365-clock
+    /// line; a dot is four of those clocks.
+    pub const fn in_hblank(&self) -> bool {
+        self.dot == 0 || self.dot >= 271
+    }
+
     /// Take a pending NMI edge.
     pub fn take_nmi(&mut self) -> bool {
         let pending = self.nmi;
@@ -389,7 +397,7 @@ impl Ppu {
                     self.latched_v as u8
                 }
             }
-            0x213E => (self.obsel & 0x80) | 0x03,
+            0x213E => 0x01,
             0x213F => 0x03 | (u8::from(self.field) << 7),
             _ => 0,
         }

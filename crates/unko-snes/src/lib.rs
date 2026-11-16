@@ -24,6 +24,7 @@ pub mod apu;
 pub mod cpu;
 pub mod dma;
 pub mod dsp;
+pub mod io;
 pub mod ppu;
 pub mod rom;
 pub mod spc700;
@@ -33,6 +34,7 @@ pub use apu::Apu;
 pub use cpu::{Cpu, CpuBus, Flags};
 pub use dma::{Dma, DmaBus, DmaChannel};
 pub use dsp::Dsp;
+pub use io::CpuIo;
 pub use ppu::Ppu;
 pub use rom::{
     rom_size_bytes, sram_size_bytes, BusTarget, Cartridge, Mapping, RomError, RomHeader,

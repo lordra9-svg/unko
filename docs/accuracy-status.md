@@ -75,12 +75,16 @@ Implemented so far:
 - S-CPU DMA: eight general-purpose channels with the documented transfer modes
 - HDMA table engine: direct/indirect entries, line counters and per-line B-bus transfers
 - S-SMP timers 0-2 with targets, enable/reset bits and `$FD-$FF` output latching
+- S-CPU I/O: serial controller ports at `$4016/$4017`, hardware auto-poll into
+  `$4218-$421F`, `$4210/$4211/$4212` flags (NTSC version 2, vblank, hblank,
+  poll-busy), and the hardware multiply/divide unit at `$4202-$4206` with its
+  8/16-cycle counters
 - minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM, reset,
   `$2100-$213F` PPU registers, `$2140-$2143` APU ports and `$4200-$437F` DMA/IRQ
 
 Validation so far:
 
-- **820 workspace tests**, 0 failed
+- **825 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -98,6 +102,8 @@ Validation so far:
   target/output latching
 - **2 timing tests** pin the S-CPU wait-state table (slow/fast ROM, WRAM, PPU
   I/O and `$4000-$41FF`) and the DMA 8-clock-per-byte stall
+- **4 I/O tests** cover the serial button order, auto-poll packing, and the
+  multiply/divide cycle counts; a system test drives them through the CPU bus
 - the 65C816 differential suite now also asserts total master clocks:
   `unko-snes` retires exactly six clocks per oracle bus cycle on every one of
   the 18 suites
@@ -115,6 +121,9 @@ Validation so far:
     sprite (bbox 106-132 x 154-174)
   - **900 frames**: 99.173% bit-identical, mean difference 1.324; 594
     differing pixels across three animated sprites
+  - **1500 frames**: 98.669% bit-identical overall, and **100.000% identical
+    outside the sprite region** (51,107 pixels, zero difference); all 964
+    differing pixels lie in one sprite/animation box
   - **VRAM: 0 of 32,768 words differ** from RustySNES at 600 frames;
     **CGRAM: 0 of 256 entries differ**; **OAM: identical**
   - title logo, sky gradient, cloud sprites, border, "© 1990, 1991 Nintendo"

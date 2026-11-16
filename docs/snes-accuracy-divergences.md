@@ -18,7 +18,8 @@ The remaining known video divergence is **sub-frame PPU scheduling**:
 - *Super Mario World* at 600 frames is 99.514% pixel-identical to ares
   (mean absolute channel difference 0.754), with 362 differing pixels confined
   to one animated sprite. At 900 frames it is 99.173% identical (594 pixels,
-  three sprites).
+  three sprites). At 1500 frames it is 98.669% overall but **100.000% identical
+  outside the sprite region** (51,107 pixels, zero difference).
 - VRAM (32,768 words), CGRAM (256 entries) and OAM are bit-identical to the
   RustySNES oracle at 600 frames, so the divergence is in *when* the renderer
   samples OAM/priority, not in what the game wrote. ares evaluates sprites per
@@ -47,9 +48,12 @@ with ares. The implementation follows ares, which is the primary source.
 ## Intentional approximations
 
 - The S-CPU bus models WRAM, cartridge ROM/SRAM, `$2100-$213F`, `$2140-$2143`,
-  `$4200-$420D` and `$4300-$437F`. Unmapped I/O reads return `0`; joypads,
-  the multiply/divide unit, `$4210-$4212` beyond the vblank flag and open bus
-  are not modelled yet.
+  `$4016/$4017`, `$4200-$420D`, `$4210-$421F` and `$4300-$437F`. Unmapped I/O
+  reads return `0`; H/V IRQ (`$4207-$420A`) and open bus are not modelled yet.
+- The auto-poll sequence is driven at 128-clock granularity from the line-225
+  event rather than ares' exact hcounter window, so `$4218-$421F` can settle a
+  few hundred clocks early. Games that read them at the end of NMI are
+  unaffected in every measured frame.
 - The S-SMP APU timers advance once per retired SPC bus cycle. Hardware derives
   them from the wait-state divider, so their phase can drift under heavy I/O.
 - S-DSP synthesis runs one 32-clock sample pass per 32 SPC cycles. The ares
