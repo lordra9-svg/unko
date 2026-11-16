@@ -7,7 +7,7 @@
 
 use crate::apu::Apu;
 use crate::cpu::{Cpu, CpuBus};
-use crate::dma::{self, Dma, DmaBus};
+use crate::dma::{Dma, DmaBus};
 use crate::io::CpuIo;
 use crate::ppu::Ppu;
 use crate::rom::Cartridge;
@@ -122,9 +122,9 @@ impl Snes {
 
     /// Execute one CPU instruction or interrupt.
     pub fn step(&mut self) -> u32 {
-        let vblank = self.ppu.in_vblank();
-        let hblank = self.ppu.in_hblank();
-        let mut cycles = {
+        let cpu_cycles = {
+            let vblank = self.ppu.in_vblank();
+            let hblank = self.ppu.in_hblank();
             let mut bus = SnesBus {
                 wram: &mut self.wram,
                 cart: &mut self.cart,
@@ -140,32 +140,47 @@ impl Snes {
             };
             self.cpu.step(&mut bus)
         };
-        if let Some((channels, mask)) = self.dma.take_pending() {
-            let mut bus = SnesBus {
-                wram: &mut self.wram,
-                cart: &mut self.cart,
-                apu: &mut self.apu,
-                ppu: &mut self.ppu,
-                dma: &mut self.dma,
-                io: &mut self.io,
-                nmi_enable: &mut self.nmi_enable,
-                nmi_flag: &mut self.nmi_flag,
-                fast_rom: &mut self.fast_rom,
-                vblank,
-                hblank,
-            };
-            cycles += dma::run(&channels, mask, &mut bus);
+        self.advance(cpu_cycles);
+        let mut cycles = cpu_cycles;
+        while let Some(mut transfer) = self.dma.begin_transfer() {
+            while transfer.busy() {
+                let clocks = {
+                    let vblank = self.ppu.in_vblank();
+                    let hblank = self.ppu.in_hblank();
+                    let mut bus = SnesBus {
+                        wram: &mut self.wram,
+                        cart: &mut self.cart,
+                        apu: &mut self.apu,
+                        ppu: &mut self.ppu,
+                        dma: &mut self.dma,
+                        io: &mut self.io,
+                        nmi_enable: &mut self.nmi_enable,
+                        nmi_flag: &mut self.nmi_flag,
+                        fast_rom: &mut self.fast_rom,
+                        vblank,
+                        hblank,
+                    };
+                    transfer.step(&mut bus)
+                };
+                cycles += clocks;
+                self.advance(clocks);
+            }
         }
+        cycles
+    }
+
+    /// Advance the APU, PPU, HDMA, IRQ and NMI by `clocks` master clocks.
+    fn advance(&mut self, clocks: u32) {
         // NTSC master clock is 21.477272 MHz; the SPC700 runs at 1.024 MHz.
         // The credit is carried across instructions so long-term APU timing
         // stays in step.
-        self.apu_credit += i64::from(cycles) * 1_024_000;
+        self.apu_credit += i64::from(clocks) * 1_024_000;
         while self.apu_credit >= 21_477_272 {
             let spent = self.apu.step();
             self.apu_credit -= i64::from(spent) * 21_477_272;
         }
         // The PPU dot clock is the master clock divided by four on NTSC.
-        self.ppu_credit += i64::from(cycles);
+        self.ppu_credit += i64::from(clocks);
         while self.ppu_credit >= 4 {
             self.ppu.tick();
             self.ppu_credit -= 4;
@@ -188,7 +203,7 @@ impl Snes {
                 self.ppu.render_current_line();
             }
         }
-        self.io.step(cycles);
+        self.io.step(clocks);
         let irq = self.io.poll_irq(self.ppu.line(), self.ppu.dot());
         self.cpu.set_irq(irq);
         if self.ppu.take_nmi() && self.nmi_enable {
@@ -196,7 +211,6 @@ impl Snes {
             self.nmi_flag = true;
             self.nmi_count += 1;
         }
-        cycles
     }
 
     /// Run until `max_cycles` master clocks have elapsed, the CPU stops, or an
@@ -760,7 +774,7 @@ mod tests {
                 vblank: false,
                 hblank: false,
             };
-            dma::run(&channels, mask, &mut bus);
+            crate::dma::run(&channels, mask, &mut bus);
         }
         assert_eq!(system.ppu.vram_word(0), 0x3412);
         assert_eq!(system.ppu.vram_word(1), 0x7856);
@@ -794,7 +808,7 @@ mod tests {
         dma.start(0x01);
         let (channels, mask) = dma.take_pending().expect("DMA pending");
         let mut bus = CountBus { bytes: 0 };
-        let cycles = dma::run(&channels, mask, &mut bus);
+        let cycles = crate::dma::run(&channels, mask, &mut bus);
         assert_eq!(bus.bytes, 4);
         // Eight master clocks per byte plus one eight-clock setup block.
         assert_eq!(cycles, 40);
@@ -846,7 +860,7 @@ mod tests {
                 vblank: false,
                 hblank: false,
             };
-            dma::run(&channels, mask, &mut bus);
+            crate::dma::run(&channels, mask, &mut bus);
         }
         assert_eq!(system.ppu.cgram_word(0), 0x001F);
         assert_eq!(system.ppu.cgram_word(1), 0x03E0);

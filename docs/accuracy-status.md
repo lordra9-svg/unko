@@ -72,7 +72,8 @@ Implemented so far:
   subtract and `COLDATA` channels, with the ares 15-bit blend
 - sprite tiles addressed in the hardware 16-column object grid, per-BG 16x16
   tile selection from `BGMODE`, and visible-line numbering (lines 1-224)
-- S-CPU DMA: eight general-purpose channels with the documented transfer modes
+- S-CPU DMA: eight general-purpose channels with the documented transfer modes,
+  driven one byte at a time so the PPU/APU advance during the stall
 - HDMA table engine: direct/indirect entries, line counters and per-line B-bus transfers
 - S-SMP timers 0-2 with targets, enable/reset bits and `$FD-$FF` output latching
 - S-CPU I/O: serial controller ports at `$4016/$4017`, hardware auto-poll into
@@ -85,7 +86,7 @@ Implemented so far:
 
 Validation so far:
 
-- **828 workspace tests**, 0 failed
+- **830 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -97,8 +98,9 @@ Validation so far:
 - **3 DSP unit tests** cover register mirroring, KON/ENDX, non-silent BRR
   playback and global mute; the APU integration test confirms SPC execution
   drives sample generation.
-- **4 PPU tests** cover vblank/NMI timing, CGRAM/OAM access and a rendered
-  mode-1 tile pixel; **2 DMA tests** verify mode-1 VRAM and CGRAM transfers;
+- **7 PPU tests** cover vblank/NMI timing, CGRAM/OAM access (word-address
+  base, pair latch and high-table mirroring), sprite object-grid addressing
+  and a rendered mode-1 tile pixel; **2 DMA tests** verify mode-1 VRAM and CGRAM transfers;
   **1 HDMA test** verifies direct table transfers; the APU timer test exercises
   target/output latching
 - **2 timing tests** pin the S-CPU wait-state table (slow/fast ROM, WRAM, PPU

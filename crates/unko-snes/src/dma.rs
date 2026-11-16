@@ -135,6 +135,12 @@ impl Dma {
         self.pending = mask;
     }
 
+    /// Take the latched `$420B` write as an in-progress transfer.
+    pub fn begin_transfer(&mut self) -> Option<DmaTransfer> {
+        self.take_pending()
+            .map(|(channels, mask)| DmaTransfer::new(channels, mask))
+    }
+
     /// Enable HDMA channels and reset their table cursors.
     pub fn set_hdma_enable(&mut self, mask: u8) {
         self.hdma_enable = mask;
@@ -223,60 +229,119 @@ impl Dma {
     }
 }
 
-/// Run the general-purpose DMA channels selected by `mask`.
+/// A general-purpose DMA transfer in progress.
 ///
-/// Returns an approximate S-CPU stall in bus cycles.
-pub fn run(channels: &[DmaChannel; 8], mask: u8, bus: &mut impl DmaBus) -> u32 {
-    let mut cycles = 0;
-    for (index, channel) in channels.iter().enumerate() {
-        if mask & (1 << index) == 0 {
-            continue;
+/// The transfer is driven one A/B byte at a time so the system can advance the
+/// PPU, APU and IRQ comparators for each eight-clock DMA cycle. ares runs the
+/// same way, which keeps a sprite or VRAM upload aligned with the scanline it
+/// lands on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DmaTransfer {
+    channels: [DmaChannel; 8],
+    mask: u8,
+    channel: usize,
+    setup: bool,
+    transferred: u32,
+    count: u32,
+}
+
+impl DmaTransfer {
+    fn new(channels: [DmaChannel; 8], mask: u8) -> Self {
+        Self {
+            channels,
+            mask,
+            channel: 0,
+            setup: true,
+            transferred: 0,
+            count: 0,
         }
-        let mut channel = *channel;
+    }
+
+    /// Whether any channel still has bytes or setup left.
+    pub const fn busy(&self) -> bool {
+        self.mask != 0
+    }
+
+    /// Execute one DMA step and return the master clocks it consumed.
+    ///
+    /// A channel begins with an eight-clock setup step, then transfers one A/B
+    /// byte per step.
+    pub fn step(&mut self, bus: &mut impl DmaBus) -> u32 {
+        if self.mask == 0 {
+            return 0;
+        }
+        if self.setup {
+            let index = self.mask.trailing_zeros() as usize;
+            self.channel = index;
+            let channel = self.channels[index];
+            self.count = if channel.size == 0 {
+                0x1_0000
+            } else {
+                u32::from(channel.size)
+            };
+            self.transferred = 0;
+            self.setup = false;
+            if self.count == 0 {
+                self.mask &= !(1 << index);
+                self.setup = true;
+            }
+            return 8;
+        }
+
+        let channel = &mut self.channels[self.channel];
         let mode = channel.control & 0x07;
         let fixed = channel.control & 0x08 != 0;
         let reverse = channel.control & 0x10 != 0;
         let direction = channel.control & 0x80 != 0;
-        let count = if channel.size == 0 {
-            0x1_0000u32
+        let index_in_transfer = self.transferred;
+        let target = channel.target.wrapping_add(match mode {
+            1 | 5 => (index_in_transfer & 1) as u8,
+            3 | 7 => ((index_in_transfer >> 1) & 1) as u8,
+            4 => index_in_transfer as u8,
+            _ => 0,
+        });
+        let address = (u32::from(channel.bank) << 16) | u32::from(channel.source);
+        let valid_target =
+            !(target == 0x80 && ((address & 0xFE_0000) == 0x7E_0000 || (address & 0x40_E000) == 0));
+        if direction {
+            let value = if valid_target { bus.read_b(target) } else { 0 };
+            if valid_a(address) {
+                bus.write_a(address, value);
+            }
         } else {
-            u32::from(channel.size)
-        };
-        for index_in_transfer in 0..count {
-            let target = channel.target.wrapping_add(match mode {
-                1 | 5 => (index_in_transfer & 1) as u8,
-                3 | 7 => ((index_in_transfer >> 1) & 1) as u8,
-                4 => index_in_transfer as u8,
-                _ => 0,
-            });
-            let address = (u32::from(channel.bank) << 16) | u32::from(channel.source);
-            let valid_target = target != 0x80
-                || ((address & 0xFE_0000) != 0x7E_0000 && (address & 0x40_E000) != 0x0000);
-            if direction {
-                let value = if valid_target { bus.read_b(target) } else { 0 };
-                if valid_a(address) {
-                    bus.write_a(address, value);
-                }
+            let value = if valid_a(address) {
+                bus.read_a(address)
             } else {
-                let value = if valid_a(address) {
-                    bus.read_a(address)
-                } else {
-                    0
-                };
-                if valid_target {
-                    bus.write_b(target, value);
-                }
+                0
+            };
+            if valid_target {
+                bus.write_b(target, value);
             }
-            if !fixed {
-                channel.source = if reverse {
-                    channel.source.wrapping_sub(1)
-                } else {
-                    channel.source.wrapping_add(1)
-                };
-            }
-            cycles += 8;
         }
-        cycles += 8;
+        if !fixed {
+            channel.source = if reverse {
+                channel.source.wrapping_sub(1)
+            } else {
+                channel.source.wrapping_add(1)
+            };
+        }
+        self.transferred += 1;
+        if self.transferred >= self.count {
+            self.mask &= !(1 << self.channel);
+            self.setup = true;
+        }
+        8
+    }
+}
+
+/// Run the general-purpose DMA channels selected by `mask` to completion.
+///
+/// Returns the number of master clocks the CPU was stalled.
+pub fn run(channels: &[DmaChannel; 8], mask: u8, bus: &mut impl DmaBus) -> u32 {
+    let mut transfer = DmaTransfer::new(*channels, mask);
+    let mut cycles = 0;
+    while transfer.busy() {
+        cycles += transfer.step(bus);
     }
     cycles
 }

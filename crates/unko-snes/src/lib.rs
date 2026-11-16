@@ -32,7 +32,7 @@ pub mod system;
 
 pub use apu::Apu;
 pub use cpu::{Cpu, CpuBus, Flags};
-pub use dma::{Dma, DmaBus, DmaChannel};
+pub use dma::{Dma, DmaBus, DmaChannel, DmaTransfer};
 pub use dsp::Dsp;
 pub use io::CpuIo;
 pub use ppu::Ppu;

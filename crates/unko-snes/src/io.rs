@@ -147,6 +147,10 @@ pub struct CpuIo {
     irq_flag: bool,
     /// Previous state of the IRQ compare condition, for edge detection.
     irq_condition: bool,
+    /// Unspent master clocks for the once-per-six-clocks math unit.
+    math_clock_remainder: u32,
+    /// Unspent master clocks for the 128-clock auto-poll edges.
+    joy_clock_remainder: u32,
 }
 
 impl CpuIo {
@@ -185,6 +189,8 @@ impl CpuIo {
             v_irq: false,
             irq_flag: false,
             irq_condition: false,
+            math_clock_remainder: 0,
+            joy_clock_remainder: 0,
         }
     }
 
@@ -246,20 +252,22 @@ impl CpuIo {
 
     /// Advance the auto-poll and math counters by `clocks` master clocks.
     pub fn step(&mut self, clocks: u32) {
-        for _ in 0..(clocks / 6) {
+        self.math_clock_remainder += clocks;
+        let cycles = self.math_clock_remainder / 6;
+        self.math_clock_remainder %= 6;
+        for _ in 0..cycles {
             self.math.step();
         }
-        self.auto_counter_step(clocks);
-    }
-
-    fn auto_counter_step(&mut self, clocks: u32) {
         if self.auto_counter >= 33 {
+            self.joy_clock_remainder = 0;
             return;
         }
         // Hardware shifts one bit every 256 master clocks and samples it on the
         // preceding 128-clock edge; approximate that with one 128-clock tick
         // per bit pair.
-        let ticks = clocks / 128;
+        self.joy_clock_remainder += clocks;
+        let ticks = self.joy_clock_remainder / 128;
+        self.joy_clock_remainder %= 128;
         for _ in 0..ticks {
             self.auto_counter = self.auto_counter.saturating_add(1);
             if self.auto_counter >= 33 {

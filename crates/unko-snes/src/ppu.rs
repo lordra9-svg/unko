@@ -38,6 +38,8 @@ pub struct Ppu {
     /// $2102-$2104 OAM
     oam_base: u16,
     oam_address: u16,
+    oam_latch: u8,
+    oam_priority: bool,
     /// $2105 BGMODE
     bg_mode: u8,
     /// $2106 MOSAIC
@@ -118,6 +120,8 @@ impl Ppu {
             obsel: 0,
             oam_base: 0,
             oam_address: 0,
+            oam_latch: 0,
+            oam_priority: false,
             bg_mode: 0,
             mosaic: 0,
             bg_sc: [0; 4],
@@ -411,14 +415,25 @@ impl Ppu {
                 self.display_disable = data & 0x80 != 0;
             }
             0x2101 => self.obsel = data,
-            0x2102 => self.oam_base = (self.oam_base & 0x100) | u16::from(data),
+            0x2102 => {
+                self.oam_base = (self.oam_base & 0x100) | u16::from(data);
+                self.oam_address = self.oam_base << 1;
+            }
             0x2103 => {
                 self.oam_base = (self.oam_base & 0x0FF) | (u16::from(data & 0x01) << 8);
-                self.oam_address = self.oam_base;
+                self.oam_address = self.oam_base << 1;
+                self.oam_priority = data & 0x80 != 0;
             }
             0x2104 => {
-                self.write_oam(self.oam_address, data);
+                let latch_bit = self.oam_address & 1;
+                let address = self.oam_address;
                 self.oam_address = (self.oam_address + 1) & 0x3FF;
+                if latch_bit == 0 {
+                    self.oam_latch = data;
+                } else {
+                    self.write_oam(address & !1, self.oam_latch);
+                    self.write_oam((address & !1) + 1, data);
+                }
             }
             0x2105 => self.bg_mode = data,
             0x2106 => self.mosaic = data,
@@ -543,12 +558,23 @@ impl Ppu {
         }
     }
 
+    /// OAM byte address: the low table is 0-0x1FF and the high table mirrors
+    /// every 32 bytes from 0x200, matching ares `OAM::read`/`OAM::write`.
+    fn oam_index(address: u16) -> usize {
+        if address & 0x200 == 0 {
+            usize::from(address & 0x1FF)
+        } else {
+            0x200 + usize::from(address & 0x1F)
+        }
+    }
+
     fn read_oam(&self, address: u16) -> u8 {
-        self.oam[usize::from(address & 0x3FF)]
+        self.oam[Self::oam_index(address)]
     }
 
     fn write_oam(&mut self, address: u16, data: u8) {
-        self.oam[usize::from(address & 0x3FF)] = data;
+        let index = Self::oam_index(address);
+        self.oam[index] = data;
     }
 
     fn render_line(&mut self, y: usize, row: usize) {
@@ -1053,6 +1079,56 @@ mod tests {
         assert_eq!(ppu.oam[1], 0x34);
         assert_eq!(ppu.oam[2], 0x56);
         assert_eq!(ppu.oam[3], 0x78);
+    }
+
+    #[test]
+    fn sprite_rows_use_the_object_tile_grid() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2101, 0x03); // OBSEL: base size 0, tiledata $6000 words
+        ppu.write(0x212C, 0x10); // objects on the main screen
+        ppu.write(0x2102, 0x00);
+        ppu.write(0x2103, 0x00);
+        // Sprite 0: x=0, y=0, tile 0, no flips.
+        for _ in 0..4 {
+            ppu.write(0x2104, 0x00);
+        }
+        // High table: size bit set -> 16x16.
+        ppu.write(0x2103, 0x01);
+        ppu.write(0x2104, 0x02);
+        ppu.write(0x2104, 0x00);
+        // Tile 16 (the second 16x16 row) has one pixel in its first column.
+        ppu.vram[0x6100] = 0x0080;
+
+        // A 16x16 sprite's lower half reads tile 16, not tile 1.
+        assert!(ppu.debug_sprite_row(0).is_empty());
+        // Mode 0 object priority for attribute priority 0 is 3.
+        assert_eq!(ppu.debug_sprite_row(8), vec![(0, 129, 3)]);
+    }
+
+    #[test]
+    fn oam_base_is_a_word_address() {
+        let mut ppu = Ppu::new();
+        // Word address 2 -> byte address 4.
+        ppu.write(0x2102, 0x02);
+        ppu.write(0x2104, 0xAA);
+        ppu.write(0x2104, 0xBB);
+        assert_eq!(ppu.oam[4], 0xAA);
+        assert_eq!(ppu.oam[5], 0xBB);
+
+        // High table: word address 0x100 -> byte address 0x200.
+        ppu.write(0x2102, 0x00);
+        ppu.write(0x2103, 0x01);
+        ppu.write(0x2104, 0x11);
+        ppu.write(0x2104, 0x22);
+        assert_eq!(ppu.oam[0x200], 0x11);
+        assert_eq!(ppu.oam[0x201], 0x22);
+
+        // Word address 0x118 -> byte 0x230, which mirrors to 0x210.
+        ppu.write(0x2102, 0x18);
+        ppu.write(0x2104, 0x33);
+        ppu.write(0x2104, 0x44);
+        assert_eq!(ppu.oam[0x210], 0x33);
+        assert_eq!(ppu.oam[0x211], 0x44);
     }
 
     #[test]
