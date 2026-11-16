@@ -13,18 +13,18 @@ None known in the implemented 65C816/SPC700 instruction semantics or in the
 documented S-CPU wait-state table. The 65C816 differential suite asserts exact
 master-clock totals (six per oracle bus cycle) across all 18 suites.
 
-The remaining known video divergence is **sub-frame PPU scheduling**:
+The remaining known video divergence is **dot-level sprite evaluation**:
 
-- *Super Mario World* at 600 frames is 99.514% pixel-identical to ares
-  (mean absolute channel difference 0.754), with 362 differing pixels confined
-  to one animated sprite. At 900 frames it is 99.173% identical (594 pixels,
-  three sprites). At 1500 frames it is 98.669% overall but **100.000% identical
-  outside the sprite region** (51,107 pixels, zero difference).
+- *Super Mario World* at 600 frames is **99.950%** pixel-identical to ares
+  (mean absolute channel difference 0.084), with 33 differing pixels. At 900
+  frames it is 99.927% and at 1500 frames 99.912%; every differing pixel lies
+  in the overlap of two equal-priority sprites.
 - VRAM (32,768 words), CGRAM (256 entries) and OAM are bit-identical to the
-  RustySNES oracle at 600 frames, so the divergence is in *when* the renderer
-  samples OAM/priority, not in what the game wrote. ares evaluates sprites per
-  dot and rotates the 32-entry sprite list; `unko-snes` snapshots OAM once per
-  scanline and renders all 128 entries.
+  RustySNES oracle at 600 frames.
+- ares evaluates sprites with a 32-entry per-line list, the 34-tile limit and
+  the `firstSprite` rotation; `unko-snes` renders all 128 entries per line and
+  uses OAM-order tie-breaking. The backlog only shows up when sprites of equal
+  priority overlap.
 
 S-DSP output is not yet sample-compared against ares.
 
@@ -71,8 +71,9 @@ with ares. The implementation follows ares, which is the primary source.
 - Display brightness uses `(brightness + 1) / 16` scaling. ares models the DAC
   luma as `(1 + l) / 16 * (l ? 1 : 0.25)`; the two agree at `INIDISP = $0F`
   (all measured frames) but differ below it.
-- PPU windows, hires output, interlace, mosaic, offset-per-tile and the
-  32-sprite/34-tile limits are not implemented. Mode 7 `EXTBG` is partial.
+- PPU windows, hires output, interlace, mosaic and offset-per-tile are not
+  implemented. Mode 7 `EXTBG` is partial and the 32-sprite/34-tile limits are
+  not enforced.
 - `WAI`/`STP` retire two internal cycles after the opcode; the real devices
   idle indefinitely, which the system model represents by not advancing the
   CPU until an interrupt or reset.

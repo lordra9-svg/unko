@@ -100,7 +100,7 @@ Validation so far:
   drives sample generation.
 - **7 PPU tests** cover vblank/NMI timing, CGRAM/OAM access (word-address
   base, pair latch and high-table mirroring), sprite object-grid addressing
-  and a rendered mode-1 tile pixel; **2 DMA tests** verify mode-1 VRAM and CGRAM transfers;
+  an object-grid/Y-offset sprite row and a rendered mode-1 tile pixel; **2 DMA tests** verify mode-1 VRAM and CGRAM transfers;
   **1 HDMA test** verifies direct table transfers; the APU timer test exercises
   target/output latching
 - **2 timing tests** pin the S-CPU wait-state table (slow/fast ROM, WRAM, PPU
@@ -120,20 +120,20 @@ Validation so far:
 - Super Mario World with the local 64-byte IPL ROM, measured against ares
   (`--system 'Super Famicom' --frames N --dump-frame`) and RustySNES on the
   same ROM:
-  - **600 frames**: 99.514% of pixels bit-identical to ares, mean absolute
-    channel difference 0.754; 362 differing pixels confined to one animated
-    sprite (bbox 106-132 x 154-174)
-  - **900 frames**: 99.173% bit-identical, mean difference 1.324; 594
-    differing pixels across three animated sprites
-  - **1500 frames**: 98.669% bit-identical overall, and **100.000% identical
-    outside the sprite region** (51,107 pixels, zero difference); all 964
-    differing pixels lie in one sprite/animation box
+  - **600 frames**: **99.950%** of pixels bit-identical to ares, mean absolute
+    channel difference 0.084; 33 differing pixels, all inside one
+    equal-priority sprite overlap (bbox 117-121 x 162-172)
+  - **900 frames**: **99.927%** bit-identical, mean difference 0.097; 49
+    differing pixels in the equivalent overlap
+  - **1500 frames**: **99.912%** bit-identical, mean difference 0.121; 58
+    differing pixels, so the long-run state stays in lockstep
   - **VRAM: 0 of 32,768 words differ** from RustySNES at 600 frames;
     **CGRAM: 0 of 256 entries differ**; **OAM: identical**
   - title logo, sky gradient, cloud sprites, border, "© 1990, 1991 Nintendo"
     text and the scrolling BG1 landscape all match
-- The residual sprite pixels are the line-vs-dot scheduling gap: our renderer
-  snapshots OAM once per line, while ares evaluates sprite priority per dot.
+- The residual pixels are the overlap of two equal-priority sprites where
+  ares' 32-entry sprite list resolves the tie differently; dot-level sprite
+  evaluation and the 34-tile limit are the remaining PPU scheduling work.
 - Star Fox remains black without the SuperFX coprocessor; Final Fantasy V was
   still in its boot sequence at the 20M-cycle sample.
 

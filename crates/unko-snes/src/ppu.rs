@@ -40,6 +40,7 @@ pub struct Ppu {
     oam_address: u16,
     oam_latch: u8,
     oam_priority: bool,
+    first_sprite: u8,
     /// $2105 BGMODE
     bg_mode: u8,
     /// $2106 MOSAIC
@@ -122,6 +123,7 @@ impl Ppu {
             oam_address: 0,
             oam_latch: 0,
             oam_priority: false,
+            first_sprite: 0,
             bg_mode: 0,
             mosaic: 0,
             bg_sc: [0; 4],
@@ -352,6 +354,7 @@ impl Ppu {
             0x2138 => {
                 let value = self.read_oam(self.oam_address);
                 self.oam_address = (self.oam_address + 1) & 0x3FF;
+                self.set_first_sprite();
                 value
             }
             0x2139 => {
@@ -434,6 +437,7 @@ impl Ppu {
                     self.write_oam(address & !1, self.oam_latch);
                     self.write_oam((address & !1) + 1, data);
                 }
+                self.set_first_sprite();
             }
             0x2105 => self.bg_mode = data,
             0x2106 => self.mosaic = data,
@@ -556,6 +560,15 @@ impl Ppu {
         if (high && self.vmain & 0x80 != 0) || (!high && self.vmain & 0x80 == 0) {
             self.vram_address = self.vram_address.wrapping_add(increment);
         }
+    }
+
+    /// Recompute the OAM priority-rotation start sprite (`$2103` bit 7).
+    fn set_first_sprite(&mut self) {
+        self.first_sprite = if self.oam_priority {
+            (self.oam_address >> 2) as u8 & 0x7F
+        } else {
+            0
+        };
     }
 
     /// OAM byte address: the low table is 0-0x1FF and the high table mirrors
@@ -812,7 +825,10 @@ impl Ppu {
         let tiledata = u32::from(self.obsel & 0x07) << 13;
         let main_enable = self.layer_mask.unwrap_or(self.tm) & 0x10 != 0;
         let sub_enable = self.ts & 0x10 != 0 && self.layer_mask.is_none();
-        for sprite in 0..128 {
+        // Sprites are evaluated from `firstSprite` upward; the earliest one
+        // wins an equal-priority overlap.
+        for k in 0..128 {
+            let sprite = (usize::from(self.first_sprite) + k) & 0x7F;
             let base = sprite * 4;
             let attr = self.oam[base + 3];
             let high = self.oam[0x200 + sprite / 4];
@@ -822,13 +838,15 @@ impl Ppu {
             let height = sprite_size(base_size, size, true);
             let x = u16::from(self.oam[base]) | (u16::from((high >> high_bit) & 1) << 8);
             let y0 = u16::from(self.oam[base + 1]);
-            if y < usize::from(y0) || y >= usize::from(y0) + usize::from(height) {
+            // Hardware quirk: a sprite's first visible line is OAM Y + 1.
+            let first = usize::from(y0) + 1;
+            if y < first || y >= first + usize::from(height) {
                 continue;
             }
             let row = if attr & 0x80 != 0 {
-                height - 1 - (y as u16 - y0)
+                height - 1 - (y as u16 - first as u16)
             } else {
-                y as u16 - y0
+                y as u16 - first as u16
             };
             let character = self.oam[base + 2];
             let tile_width = width / 8;
@@ -840,7 +858,6 @@ impl Ppu {
                     if screen_x >= SCREEN_WIDTH as u16 {
                         continue;
                     }
-                    let mx = if attr & 0x40 != 0 { 7 - px } else { px };
                     let chrx = (u16::from(character) & 0x0F)
                         + if attr & 0x40 != 0 {
                             tile_width - 1 - tx
@@ -859,7 +876,10 @@ impl Ppu {
                     if attr & 0x01 != 0 {
                         address += (u32::from(nameselect) + 1) << 12;
                     }
-                    let bit = if attr & 0x40 != 0 { mx } else { 7 - mx };
+                    // Horizontal flip reverses the tile order and reads each
+                    // tile from bit 0 upward; it does not mirror the plane
+                    // bits a second time.
+                    let bit = if attr & 0x40 != 0 { px } else { 7 - px };
                     let word0 = self.vram[(address & 0x7FFF) as usize];
                     let word1 = self.vram[((address + 8) & 0x7FFF) as usize];
                     let color = ((word0 >> bit) & 1)
@@ -1096,13 +1116,17 @@ mod tests {
         ppu.write(0x2103, 0x01);
         ppu.write(0x2104, 0x02);
         ppu.write(0x2104, 0x00);
-        // Tile 16 (the second 16x16 row) has one pixel in its first column.
+        // Tile 0 and tile 16 (the second 16x16 row) each have one pixel in
+        // their first column.
+        ppu.vram[0x6000] = 0x0080;
         ppu.vram[0x6100] = 0x0080;
 
-        // A 16x16 sprite's lower half reads tile 16, not tile 1.
+        // A sprite starts one line below its OAM Y, and a 16x16 sprite's lower
+        // half reads tile 16, not tile 1. Mode 0 object priority for attribute
+        // priority 0 is 3.
         assert!(ppu.debug_sprite_row(0).is_empty());
-        // Mode 0 object priority for attribute priority 0 is 3.
-        assert_eq!(ppu.debug_sprite_row(8), vec![(0, 129, 3)]);
+        assert_eq!(ppu.debug_sprite_row(1), vec![(0, 129, 3)]);
+        assert_eq!(ppu.debug_sprite_row(9), vec![(0, 129, 3)]);
     }
 
     #[test]
