@@ -1,0 +1,9 @@
+[package]
+name = "unko-snes"
+description = "Standalone Super Nintendo / Super Famicom core (no emulator-shell dependencies)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"

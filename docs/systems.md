@@ -20,25 +20,33 @@ The former TetaNES compatibility core was retired after the accuracy core
 gained save states and became the default. A future NES core can be registered
 beside it; the host chooses by `CoreInfo.id`.
 
-## SNES / Super Famicom — planned
+## SNES / Super Famicom — in progress
 
 | | |
 |---|---|
-| Primary | **ares `sfc/`** (C++, ISC) — linkable via a C ABI |
-| Oracle | **MesenCE `Core/SNES`** (C++, GPL-3.0) — reference only |
+| Core | `unko-snes` (standalone Rust crate, MIT) |
+| Adapter | `crates/unko-snes-host` (`Core` + `SnesCore`) — planned |
+| Implementation source | **ares `sfc/`** (C++, ISC) — primary behavioural source |
+| Oracles | **MesenCE `Core/SNES`** (C++, GPL-3.0) — reference only · **RustySNES** (Rust, Apache-2.0) — oracle/reference only |
 | Size | ares 19.9k LOC; Mesen 35.7k LOC |
-| Coverage | 65816, SPC700, S-DSP, dot/scanline PPU, SuperFX, SA-1, SDD1, SPC7110, CX4, DSP1-4, OBC1, ST018, MSU1, Satellaview, Sufami Turbo, BS-X |
-| Status | planned after the NES slice is product-quality |
+| Coverage target | 65816, SPC700, S-DSP, dot/scanline PPU, SuperFX, SA-1, SDD1, SPC7110, CX4, DSP1-4, OBC1, ST018, MSU1, Satellaview, Sufami Turbo, BS-X |
+| Status | isolated core started 2026-11-16: crate skeleton, copier-header removal, LoROM/HiROM/ExLoROM/ExHiROM detection, header decode, SRAM sizing and cartridge bus mapping. CPU/APU/PPU slices next. |
 
-Why ares: it is the only permissively licensed implementation of the two and it
-already runs inside the multi-system ares scheduler. Mesen supplies the
-compatibility oracle, the coprocessor feature checklist, and the overclock /
-SPC-clock / strict-board ideas.
+Why an isolated Rust core: the SNES crate has no `unko-core` or shell
+dependency, exactly like `unko-nes`. ares remains the primary implementation
+source because it is ISC and closest to the silicon; MesenCE remains the
+compatibility oracle and must not be read while implementing the core. The
+adapter crate is added only after the core has a stable CPU/bus/frame surface,
+mirroring the `unko-nes` / `unko-nes-host` split.
 
-Integration: build `ares/sfc` plus its shared CPU/DSP components as a static
-C++ library behind `unko_sfc_*`; implement the generic `Core` plus a SNES
- extension trait, mirroring the NES `NesCore` split. Do not port
-Mesen code.
+RustySNES (<https://github.com/doublegate/RustySNES>, Apache-2.0) joins the
+oracle set as a second pure-Rust implementation. It is useful for black-box
+differential runs and for checking feature coverage, but it is not copied,
+translated file by file, or used to generate tables without an explicit
+provenance review.
+
+Integration: implement the core in `unko-snes`, then add `unko-snes-host` with
+the generic `Core` plus a SNES extension trait. Do not port Mesen code.
 
 ## Nintendo 64 — planned
 
@@ -81,8 +89,10 @@ implementation.
 
 ## Order
 
-1. NES — shipped, continue to product quality.
-2. SNES — ares backend behind the C ABI.
+1. NES — shipped and frozen as done on 2026-11-16; outstanding fixes are
+   deferred to a later date.
+2. SNES — isolated Rust core (`unko-snes`) with ares as the implementation
+   source and a `unko-snes-host` adapter later.
 3. N64 — ares backend + Vulkan renderer.
 4. GC/Wii — optional external Dolphin process, only if the product needs it.
 

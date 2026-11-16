@@ -1,6 +1,6 @@
-# NES oracle emulators — feature matrix
+# NES and SNES oracle emulators — feature matrix
 
-A feature-level survey of the NES emulators Unko uses as oracles or peers,
+A feature-level survey of the emulators Unko uses as oracles or peers,
 compared with Unko's current shell. It is input for prioritisation, not a
 commitment: the "gaps" section lists candidates, and the project owner picks
 what to build.
@@ -171,15 +171,49 @@ matrix above is the comparison; this list is the work queue.
 ROM management, multi-system work and distribution gaps are tracked in
 `docs/roadmap.md` and `docs/compatibility.md`.
 
+## SNES oracle matrix
+
+The SNES core is `unko-snes` (MIT Rust). Its oracle set is smaller than the
+NES set because ares is both the primary implementation source and the first
+behavioural reference.
+
+| | ares | MesenCE | RustySNES | **Unko** |
+|---|---|---|---|---|
+| Role | implementation source | black-box compatibility oracle | Apache-2.0 oracle/reference | isolated core |
+| Language / license | C++ / ISC | C++ / GPL-3.0 | Rust / Apache-2.0 | Rust / MIT |
+| Accuracy model | cycle-level, dot PPU | cycle-level, dot PPU | claims Mesen2/ares/higan bar; still early | target: cycle-level |
+| 65816 | Yes | Yes | Yes | planned |
+| SPC700 + S-DSP | Yes | Yes | Yes | planned |
+| PPU | dot/scanline, hires/interlace | dot/scanline, hires/interlace | Yes | planned |
+| Coprocessors | SuperFX, SA-1, SDD1, SPC7110, CX4, DSP1-4, OBC1, ST018 | broad | claims DSP-1/2/4, SuperFX, SA-1, CX4, S-DD1, SPC7110 | later |
+| Enhancement | MSU1, Satellaview, Sufami Turbo, BS-X | MSU1, BS-X | partial | later |
+| Save states / rewind | Yes / Yes | Yes / Yes | Yes | planned |
+| Netplay | No | Yes | — | GGRS (shell) |
+| Platforms | Win/mac/Linux | Win/mac/Linux, libretro | native + WebAssembly | Linux/Win/mac/iOS/Android |
+| Local source | `refs/ares` | `refs/mesence` | not checked out | — |
+
+### Notes
+
+- **ares** is the implementation source because it is ISC and the closest
+  silicon model. Its `sfc/` tree and board manifests can be read and adapted
+  with attribution.
+- **MesenCE** is the broad compatibility oracle. It is GPL-3.0: run it
+  black-box, do not read or translate its source.
+- **RustySNES** (<https://github.com/doublegate/RustySNES>) is a pure-Rust
+  Apache-2.0 emulator targeting the Mesen2/ares/higan accuracy bar, including
+  coprocessor LLE cores and WebAssembly support. It joins the oracle set for
+  differential runs and feature coverage. It is not copied wholesale; any
+  future reuse needs a per-module provenance review.
+
 ## Licensing and provenance
 
 ares is ISC; FCEUX, Nestopia UE, Nintendulator, puNES are GPL-2.0; MesenCE
-and RustyNES are GPL-3.0. None of their code, assets or databases may be
-ported into this MIT project. The observations above are limited to
-documented, user-visible features and behaviour. Palette tables are factual
-colour data, but any imported set will be recorded with its source and kept
-in a data file rather than copied from a GPL implementation unless the
-license permits it.
+and RustyNES are GPL-3.0; RustySNES is Apache-2.0. None of their code, assets
+or databases may be ported into this MIT project without a provenance review.
+The observations above are limited to documented, user-visible features and
+behaviour. Palette tables are factual colour data, but any imported set will
+be recorded with its source and kept in a data file rather than copied from a
+GPL implementation unless the license permits it.
 
 ## Sources
 
@@ -198,3 +232,4 @@ license permits it.
 - puNES: <https://emulation.gametechwiki.com/index.php/PuNES>,
   <https://github.com/punesemu/puNES>.
 - RustyNES: local `refs/rustynes/README.md`.
+- RustySNES: <https://github.com/doublegate/RustySNES> (Apache-2.0 oracle).

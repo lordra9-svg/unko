@@ -2,7 +2,13 @@
 
 ## Accuracy track (parallel, NES)
 
-The main effort is now the reference-parity accuracy core. Details in
+**NES is frozen as done for now (2026-11-16).** The public suites are green and
+the remaining items below are deferred to a later date: hardware captures,
+partial mapper boards, FDS display-only oracles, NSF corpus validation, real
+peripheral validation, and VS. System/PlayChoice-10. No new NES work is planned
+on this track until it is explicitly reopened.
+
+The main effort was the reference-parity accuracy core. Details in
 `docs/accuracy.md`.
 
 - [x] **A0** accuracy crate, deterministic frame/audio/state hashing, test-ROM
@@ -236,8 +242,10 @@ The main effort is now the reference-parity accuracy core. Details in
 
 - [ ] A second NES core behind the same ABI (pick by measured compatibility or
       performance gap), selected in settings.
-- [ ] A second system behind the same ABI, starting with **SNES from ares**
-      (ISC) with MesenCE as the GPL oracle, then **N64 from ares** with
+- [ ] A second system behind the same ABI. **In progress:** the isolated
+      `unko-snes` core (MIT Rust, ares as implementation source, MesenCE and
+      RustySNES as oracles) has started with ROM parsing and cartridge bus
+      mapping; the `unko-snes-host` adapter follows. Then **N64 from ares** with
       gopher64 as a GPL structural reference. See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.
 - [ ] GameCube/Wii is deferred: Dolphin is GPL-2.0+ and application-shaped, so

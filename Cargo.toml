@@ -7,6 +7,7 @@ members = [
     "crates/unko-nes-host",
     "crates/unko-nes-api",
     "crates/unko-nes-dev",
+    "crates/unko-snes",
     "crates/unko-rom-manager",
     "crates/unko-netplay",
     "crates/unko-cli",

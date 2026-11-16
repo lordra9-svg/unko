@@ -1,5 +1,11 @@
 # Accuracy status
 
+**NES frozen as done for now (2026-11-16).** The public suites below are green.
+The remaining NES items — hardware captures, partial mapper boards, FDS
+display-only oracles, NSF corpus validation, real peripheral validation and
+VS. System/PlayChoice-10 — are deferred to a later date and are not blockers
+for the SNES track.
+
 Measured on the reference-parity core (`unko-nes`, MIT with
 documented ISC adaptations from ares). These are local runs
 against public test ROMs placed in `test-roms/` (gitignored).
@@ -14,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **697 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **710 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -33,6 +39,21 @@ without Start input. The 240-frame count is lower than 120 because the exact
 sample lands on fade/transition frames. "Rendering" is a boot smoke test, not
 a completion claim. The current audit, mapper breadth and per-mapper gaps are
 in `docs/mapper-audit.md`; the dated measurements are below.
+
+## SNES core (in progress, 2026-11-16)
+
+`unko-snes` is a new isolated crate with no `unko-core` or shell dependency.
+The first slice is ROM container support, covered by unit tests:
+
+- 512-byte copier-header detection and removal
+- LoROM, HiROM, ExLoROM and ExHiROM layout detection with header scoring
+- title, map mode, cartridge type, ROM/SRAM size, country, licensee, version,
+  checksum/complement and reset-vector decoding
+- SRAM allocation and save-file loading
+- 24-bit cartridge bus mapping for ROM and SRAM, including bank mirroring
+
+No CPU/PPU/APU slice exists yet, so there are no SNES compatibility numbers.
+The next gates are 65816 reset/vector execution and a deterministic frame loop.
 
 Performance: `unko bench --synthetic 3000 --min-fps 300` measures **791.6 fps**
 (13.17x real time, 1.263 ms/frame); release save states are 417,090 bytes at

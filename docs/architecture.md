@@ -35,6 +35,11 @@ itself and has **no** dependency on `unko-core` or the shell. `unko-nes-host`
 is a thin adapter that implements `unko_core::Core` and
 `unko_nes_api::NesCore` on top of it and is the crate the app and CLI link. The former TetaNES adapter has been retired.
 
+`unko-snes` is the same shape for the SNES: a standalone MIT Rust core with no
+`unko-core` or shell dependency. It has started with ROM container parsing and
+cartridge bus mapping; a `unko-snes-host` adapter follows once the CPU/bus/frame
+surface is stable.
+
 `unko-rom` is a sibling boundary for *input*: it discovers loose ROMs and
 members of `.zip`/`.7z`/`.rar` archives, parses iNES/NES 2.0/UNIF metadata and
 converts UNIF to iNES/NES 2.0, and returns bytes to whichever core is loading. The UI never sees archive libraries.

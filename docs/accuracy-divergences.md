@@ -1,5 +1,9 @@
 # Accuracy divergences — NES
 
+**Frozen as done for now (2026-11-16).** No new NES divergences are being
+tracked until the NES track is reopened; the ledger is kept for the historical
+record and for the deferred hardware-capture work.
+
 This ledger records every known place where `unko-nes` does not
 yet match the chosen reference (real hardware, then ares, then the public test
 ROM). It is required by the accuracy charter in `docs/accuracy.md`. Add a dated

@@ -1,4 +1,4 @@
-# Accuracy charter — NES
+# Accuracy charter — NES (with the SNES extension)
 
 Decision: **reference parity, Rust, MIT with documented ISC adaptations**, no
 deadline. `unko-nes` is the only NES core; TetaNES was retired after
@@ -199,3 +199,27 @@ scheduler in published comparisons; that is accepted.
 - FDS requires a user-supplied BIOS; never bundle it.
 - The existing GPL clones under `refs/` are a provenance hazard; keep them out
   of the accuracy crate's build and review path.
+
+## 9. SNES track
+
+`unko-snes` is a separate isolated Rust crate with the same rules: MIT,
+`#![forbid(unsafe_code)]`, no shell dependency, one canonical clock and
+deterministic output. It is being built from public hardware documentation and
+the ISC-licensed ares `sfc/` source.
+
+Oracle hierarchy for SNES:
+
+1. **Real hardware capture** — authoritative.
+2. **ares `sfc/`** — primary implementation source and first behavioural
+   oracle.
+3. **MesenCE `Core/SNES`** — broad compatibility oracle, GPL-3.0. Run it
+   black-box only; do not read or translate its source.
+4. **RustySNES** (<https://github.com/doublegate/RustySNES>, Apache-2.0) — a
+   second pure-Rust oracle for differential frames/audio and feature coverage.
+   It is license-compatible, but it is still oracle-only until a specific
+   module has an explicit provenance review; do not copy it wholesale.
+
+The SNES public bar starts with documented test-ROM suites for the 65816,
+SPC700 and PPU, plus deterministic frame/audio hashes against ares. No SNES
+approximation is accepted without a dated entry in the SNES divergence ledger
+(to be created with the first CPU slice).

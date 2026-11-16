@@ -23,6 +23,32 @@ Scope decisions from this pass:
 - Tier 3 is now in scope following the latest "all three tiers" directive;
   its items are ordered after the remaining Tier 1/2 work, easiest first.
 
+## NES frozen (2026-11-16)
+
+The NES track is frozen as done for now. The unreached or partial items in the
+queue and in `docs/accuracy-status.md` — hardware captures, partial mapper
+boards (MMC5, OneBus 256, 121, 142, T230), FDS display-only oracles, NSF corpus
+validation, real peripheral validation and VS. System/PlayChoice-10 — are
+deferred to a later date. Do not start new NES work unless this is reopened.
+
+## SNES track (started 2026-11-16)
+
+`crates/unko-snes` is the isolated MIT Rust core. ares is the primary
+implementation source, MesenCE is a black-box oracle, and RustySNES
+(Apache-2.0) is a second oracle/reference. Order:
+
+1. ROM container, header detection and cartridge bus mapping. **Done**:
+   copier header, LoROM/HiROM/ExLoROM/ExHiROM, header decode, SRAM and mapping
+   tests.
+2. 65816 CPU: reset/vector execution, then cycle-level bus timing.
+3. SPC700 + S-DSP and the S-SMP communication ports.
+4. PPU dot/scanline timing, background/sprite rendering, then the first frame.
+5. `unko-snes-host` adapter once the core surface is stable.
+6. Coprocessors and enhancement chips after the base console is green.
+
+Every SNES item needs unit tests and, where possible, a black-box oracle check
+against ares or RustySNES. No GPL Mesen source is read while implementing.
+
 ## Queue
 
 | # | Item | Tier | Difficulty | Depends on | Status |
