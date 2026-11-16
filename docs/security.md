@@ -104,7 +104,7 @@ plaintext/unauthenticated transport remains an Internet-facing trust boundary.
 - `nestest`: 8,980 / 8,980 lines exact
 - AccuracyCoin: 146/151, 0 failed, 5 DRAW skips, 0 unrun
 - Mapper suite: 65/65 cases, 0 failed
-- Synthetic benchmark: 676.7 fps, 11.26x realtime (CI floor 300 fps)
+- Synthetic benchmark: 780.5 fps, 12.99x realtime (CI floor 300 fps)
 - License audit: 458 dependencies, all allowed
 - OSV: 458 packages, 4 advisories (all unmaintained, baseline), 0 new
 - `cargo metadata --locked`: clean
