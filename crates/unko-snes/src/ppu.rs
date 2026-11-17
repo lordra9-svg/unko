@@ -1252,7 +1252,16 @@ impl Ppu {
             );
             let base = y * width + x * stride;
             if self.frame_hires {
-                self.framebuffer[base * 4..base * 4 + 4].copy_from_slice(&below_px);
+                // ares' pixel pipeline is one dot deep: at the first dot of a
+                // scanline no tile has been fetched yet, so the Below screen
+                // (which owns the even column) shows the backdrop there. Both
+                // reference oracles produce a backdrop column 0.
+                let first = if x == 0 {
+                    self.dac_pixel(0, self.cgram[0], 5, true, self.cgram[0], true, luma, fixed)
+                } else {
+                    below_px
+                };
+                self.framebuffer[base * 4..base * 4 + 4].copy_from_slice(&first);
                 let odd = base + 1;
                 self.framebuffer[odd * 4..odd * 4 + 4].copy_from_slice(&above_px);
             } else {

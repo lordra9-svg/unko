@@ -289,9 +289,12 @@ with ares. The implementation follows ares, which is the primary source.
   RustySNES on `PeterLemon-PPU/HiColor/MosaicMode5.sfc` (mode 5, no HDMA colour):
   our 256-wide render matches the hires frame's odd columns at **100.000%**
   (oracle precondition), and the 512-wide output matches at **99.805%** exact
-  with mean channel difference 0.294. The residual is exactly output column 0 on
-  every row (224 pixels), i.e. the first Below column, which is the next thing
-  to chase.
+  and, after modelling ares' one-dot pixel pipeline, **100.000%** exact (mean
+  channel difference 0.000). The last 224 pixels were output column 0 on every
+  row: ares' pipeline is one dot deep, so at the first dot of a scanline no tile
+  has been fetched and the Below screen (which owns the even column) shows the
+  backdrop. Both reference oracles produce a backdrop column 0, and emitting it
+  makes the frame bit-identical.
 - Interlace is not implemented. The framebuffer geometry is
   now prepared for hires: `SCREEN_WIDTH` (256) stays the *compositing* width,
   `MAX_SCREEN_WIDTH` (512) is the DAC output width, the backing array is always

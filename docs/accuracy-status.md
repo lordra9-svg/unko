@@ -215,8 +215,8 @@ Validation so far:
 
 The PPU is line-based rather than dot-scheduled; hires and interlace are still
 missing; hires output is implemented (512-wide DAC interleave of the Above and
-Below screens, `frame_hires` latched at frame start) and measured at 99.805%
-against RustySNES on a mode-5 test ROM, while the 448-line interlace output is
+Below screens, `frame_hires` latched at frame start) and measured at 100.000%
+against RustySNES on a mode-5 test ROM (512-wide, bit-identical), while the 448-line interlace output is
 not written yet. Offset per tile is
 implemented for modes 2/4/6. Mode 7 is complete and verified against
 RustySNES on a rotation test ROM (100.000% at two frames). S-DSP output has not yet been
