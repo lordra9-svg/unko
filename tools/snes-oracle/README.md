@@ -69,3 +69,17 @@ tools/snes-oracle/baseline.py --frames 600 --out /tmp/snes-baseline.csv
 ```
 
 The manifest is intentionally not committed; compare two CSVs instead.
+
+## Current baseline (2026-11-17)
+
+- Video geometry: `spc_timer` at 600 frames vs ares at 602 — **100.000% exact**
+  (57,344 / 57,344 pixels, mean |d| 0.000).
+- Audio: `blargg_near_cd_quality.smc` at 600 frames — peak levels match
+  (0.465454 vs 0.465749), but the streams are **not yet sample-exact**
+  (first sample above 1/32768 at 16080 after alignment; RMS 8.6e-2).
+- Regression manifest: all **212** ROMs under `test-roms/snes/` run to 180
+  frames without an emulator error (`baseline.py --frames 180`).
+
+The manifest is a regression guard, not a pass/fail oracle: compare two runs of
+the same build inputs to detect changes, then use ares for the actual parity
+comparison.
