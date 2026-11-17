@@ -462,7 +462,10 @@ impl CpuBus for SnesBus<'_> {
             }
             if offset < 0x6000 {
                 if (0x2100..=0x213F).contains(&offset) {
-                    return self.ppu.read(offset as u16);
+                    if offset == 0x2137 && self.io.pio() & 0x80 != 0 {
+                        self.ppu.latch_counters();
+                    }
+                    return self.ppu.read(offset as u16, mdr);
                 }
                 if (0x2140..=0x2143).contains(&offset) {
                     return self.apu.cpu_read(offset - 0x2140);
@@ -599,7 +602,7 @@ impl HdmaBus<'_> {
             }
             if offset < 0x6000 {
                 if (0x2100..=0x213F).contains(&offset) {
-                    return self.ppu.read(offset as u16);
+                    return self.ppu.read(offset as u16, 0);
                 }
                 if (0x2140..=0x2143).contains(&offset) {
                     return self.apu.cpu_read(offset - 0x2140);

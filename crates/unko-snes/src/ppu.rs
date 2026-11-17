@@ -111,10 +111,19 @@ pub struct Ppu {
     color_blue: u8,
     /// $2133 SETINI
     setini: u8,
-    /// $2137 latch
+    /// $2137 latched dot/line
     latched_h: u16,
     latched_v: u16,
-    counter_latch: bool,
+    /// Separate byte latches for $213C and $213D (ares `latch.hcounter` /
+    /// `latch.vcounter`).
+    counter_latch_h: bool,
+    counter_latch_v: bool,
+    /// Whether a `$2137` read latched the counters since the last `$213F`.
+    counters_latched: bool,
+    /// ares `ppu1.mdr` / `ppu2.mdr`: the PPU-side data registers that back the
+    /// read-only register open bus.
+    ppu1_mdr: u8,
+    ppu2_mdr: u8,
     line_event: bool,
     layer_mask: Option<u8>,
 }
@@ -193,7 +202,11 @@ impl Ppu {
             setini: 0,
             latched_h: 0,
             latched_v: 0,
-            counter_latch: false,
+            counter_latch_h: false,
+            counter_latch_v: false,
+            counters_latched: false,
+            ppu1_mdr: 0,
+            ppu2_mdr: 0,
             line_event: false,
             layer_mask: None,
         }
@@ -444,67 +457,93 @@ impl Ppu {
     }
 
     /// Read a PPU register in `$2100-$213F`.
-    pub fn read(&mut self, address: u16) -> u8 {
+    ///
+    /// The read-only registers return a PPU-side data register (`ppu1.mdr` /
+    /// `ppu2.mdr`), and `$2137` returns the CPU's open-bus MDR. That is why
+    /// this takes `mdr` and why several arms write only their own bits.
+    pub fn read(&mut self, address: u16, mdr: u8) -> u8 {
         match address {
-            0x2134 => (self.m7a.wrapping_mul(self.m7b >> 8) as u32 & 0xFF) as u8,
-            0x2135 => ((self.m7a.wrapping_mul(self.m7b >> 8) as u32 >> 8) & 0xFF) as u8,
-            0x2136 => ((self.m7a.wrapping_mul(self.m7b >> 8) as u32 >> 16) & 0xFF) as u8,
-            0x2137 => 0,
+            0x2134..=0x2136 => {
+                // ares: `n24 result = (i16)io.m7a * (i8)(io.m7b >> 8);`
+                let a = i32::from(self.m7a);
+                let b = i32::from((self.m7b >> 8) as i8);
+                let result = (a * b) as u32;
+                let byte = (result >> (8 * (address - 0x2134))) & 0xFF;
+                self.ppu1_mdr = byte as u8;
+                self.ppu1_mdr
+            }
+            0x2137 => mdr,
             0x2138 => {
-                let value = self.read_oam(self.oam_address);
+                self.ppu1_mdr = self.read_oam(self.oam_address);
                 self.oam_address = (self.oam_address + 1) & 0x3FF;
                 self.set_first_sprite();
-                value
+                self.ppu1_mdr
             }
             0x2139 => {
-                let low = self.vram_read_latch as u8;
+                self.ppu1_mdr = self.vram_read_latch as u8;
                 if self.vmain & 0x80 == 0 {
                     self.vram_read_latch =
                         self.vram[usize::from(self.vram_word_address() & 0x7FFF)];
                     self.vram_address = self.vram_address.wrapping_add(self.vram_increment());
                 }
-                low
+                self.ppu1_mdr
             }
             0x213A => {
-                let high = (self.vram_read_latch >> 8) as u8;
+                self.ppu1_mdr = (self.vram_read_latch >> 8) as u8;
                 if self.vmain & 0x80 != 0 {
                     self.vram_read_latch =
                         self.vram[usize::from(self.vram_word_address() & 0x7FFF)];
                     self.vram_address = self.vram_address.wrapping_add(self.vram_increment());
                 }
-                high
+                self.ppu1_mdr
             }
             0x213B => {
                 let address = usize::from(self.cgram_address);
                 if self.cgram_latch {
                     self.cgram_latch = false;
+                    self.ppu2_mdr =
+                        (self.ppu2_mdr & 0x80) | ((self.cgram[address] >> 8) as u8 & 0x7F);
                     self.cgram_address = self.cgram_address.wrapping_add(1);
-                    (self.cgram[address] >> 8) as u8
                 } else {
                     self.cgram_latch = true;
-                    self.cgram[address] as u8
+                    self.ppu2_mdr = self.cgram[address] as u8;
                 }
+                self.ppu2_mdr
             }
             0x213C => {
-                if self.counter_latch {
-                    self.counter_latch = false;
-                    (self.latched_h >> 8) as u8
+                if self.counter_latch_h {
+                    self.ppu2_mdr = (self.ppu2_mdr & !0x01) | ((self.latched_h >> 8) as u8 & 0x01);
                 } else {
-                    self.counter_latch = true;
-                    self.latched_h as u8
+                    self.ppu2_mdr = self.latched_h as u8;
                 }
+                self.counter_latch_h = !self.counter_latch_h;
+                self.ppu2_mdr
             }
             0x213D => {
-                if self.counter_latch {
-                    self.counter_latch = false;
-                    (self.latched_v >> 8) as u8
+                if self.counter_latch_v {
+                    self.ppu2_mdr = (self.ppu2_mdr & !0x01) | ((self.latched_v >> 8) as u8 & 0x01);
                 } else {
-                    self.counter_latch = true;
-                    self.latched_v as u8
+                    self.ppu2_mdr = self.latched_v as u8;
                 }
+                self.counter_latch_v = !self.counter_latch_v;
+                self.ppu2_mdr
             }
-            0x213E => 0x01,
-            0x213F => 0x03 | (u8::from(self.field) << 7),
+            0x213E => {
+                // ares sets bits 0-3 (PPU1 version 1); bits 6/7 are the sprite
+                // range/time overflow flags, which we do not model yet.
+                self.ppu1_mdr = (self.ppu1_mdr & 0x10) | 0x01;
+                self.ppu1_mdr
+            }
+            0x213F => {
+                // ares `latch.hcounter`/`latch.vcounter` reset; the latch-status
+                // bit (6) reports whether $2137 latched the counters.
+                self.counter_latch_h = false;
+                self.counter_latch_v = false;
+                self.ppu2_mdr =
+                    (self.ppu2_mdr & 0x80) | 0x03 | (u8::from(self.counters_latched) << 6);
+                self.counters_latched = false;
+                self.ppu2_mdr | (u8::from(self.field) << 7)
+            }
             _ => 0,
         }
     }
@@ -649,12 +688,16 @@ impl Ppu {
                 }
             }
             0x2133 => self.setini = data,
-            0x2137 => {
-                self.latched_h = self.dot;
-                self.latched_v = self.line;
-            }
+            0x2137 => {}
             _ => {}
         }
+    }
+
+    /// Latch the H/V counters for `$213C`/`$213D` (ares `latchCounters`).
+    pub fn latch_counters(&mut self) {
+        self.latched_h = self.dot;
+        self.latched_v = self.line;
+        self.counters_latched = true;
     }
 
     fn vram_increment(&self) -> u16 {
@@ -2119,5 +2162,28 @@ mod tests {
         ppu.write(0x212C, 0x01);
         ppu.render_line(0, 0);
         assert_eq!(&ppu.framebuffer[0..4], &[0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn ophct_opvct_return_the_latched_counters() {
+        let mut ppu = Ppu::new();
+        for _ in 0..75 {
+            ppu.tick();
+        }
+        let dot = ppu.dot();
+        let line = ppu.line();
+        ppu.latch_counters();
+        let h_low = ppu.read(0x213C, 0);
+        let h_high = ppu.read(0x213C, 0);
+        let v_low = ppu.read(0x213D, 0);
+        let v_high = ppu.read(0x213D, 0);
+        assert_eq!(u16::from(h_low) | (u16::from(h_high & 1) << 8), dot);
+        assert_eq!(u16::from(v_low) | (u16::from(v_high & 1) << 8), line);
+        // $213F resets the byte latches and reports the counter-latch status.
+        let stat = ppu.read(0x213F, 0);
+        assert_eq!(stat & 0x0F, 0x03);
+        assert_ne!(stat & 0x40, 0);
+        let stat = ppu.read(0x213F, 0);
+        assert_eq!(stat & 0x40, 0);
     }
 }

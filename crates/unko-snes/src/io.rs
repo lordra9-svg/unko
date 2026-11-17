@@ -140,6 +140,8 @@ pub struct CpuIo {
     htime: u16,
     /// `$4209/$420A`: vertical IRQ compare line.
     vtime: u16,
+    /// `$4201` WRIO: bit 7 enables `$2137` counter latching.
+    pio: u8,
     /// `$4200` bits 4/5.
     h_irq: bool,
     v_irq: bool,
@@ -172,6 +174,7 @@ impl CpuIo {
             auto_joy2: 0,
             auto_joy3: 0,
             auto_joy4: 0,
+            pio: 0,
             math: MathUnit {
                 multiplicand: 0,
                 multiplier: 0,
@@ -210,6 +213,11 @@ impl CpuIo {
         } else {
             self.joypad2
         }
+    }
+
+    /// `$4201` WRIO (bit 7 gates `$2137` counter latching).
+    pub const fn pio(&self) -> u8 {
+        self.pio
     }
 
     /// Whether auto-polling is running (`$4212` bit 0).
@@ -354,6 +362,7 @@ impl CpuIo {
                     self.irq_condition = false;
                 }
             }
+            0x4201 => self.pio = value,
             0x4207 => self.htime = (self.htime & 0x100) | u16::from(value),
             0x4208 => self.htime = (self.htime & 0x0FF) | (u16::from(value & 0x01) << 8),
             0x4209 => self.vtime = (self.vtime & 0x100) | u16::from(value),
