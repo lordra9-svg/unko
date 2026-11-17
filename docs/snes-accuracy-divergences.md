@@ -83,6 +83,42 @@ S-DSP output is now instrumented but not sample-identical:
     (`0x00`) - exactly what test 9 checks. Reading the latch directly fixed
     it; `smp_port_reads_see_only_the_cpu_latches` pins both directions.
 - blargg `spc_dsp6` reports `Failed 02` (Echo/esa_changes). It is **parked**:
+  - **The first divergence is now located exactly, from an ARAM store log.**
+    Logging `(spc pc, address, value)` for every S-SMP store and diffing against
+    RustySNES gives a 400,000-entry stream whose first difference is at **entry
+    8729**: the echo-page stores are byte-identical throughout (2,051/2,051),
+    and the divergence is a **single extra iteration** of the `V0ENVX`
+    sample-boundary spin at `$04F3`-`$050A`:
+    ```
+    $04F4: str $F2=#$08      ; DSPADDR = V0ENVX (read-only; write stores the
+    $04F7: lda #$88          ;   value in the register file)
+    $04F9: sta $F3           ; DSPDATA = $88
+    $04FB: cmp $F3 / beq     ; wait until a DSP sample boundary replaces it
+    $0502: jsr $0461         ; per-iteration delay
+    $0505: sta $F3           ; re-write $88
+    $0508: cmp $F3 / beq $0502
+    ```
+    The loop only exits when the DSP's per-sample `registers[$08] =
+    latch.envx` lands inside the write-to-read window, so it is a sub-access
+    synchronisation race, not a value error. After the blip the two logs resync
+    (offset 6, 116,616 identical entries) and diverge again at 125,351 in the
+    same way, so the effect recurs as occasional one-iteration slips.
+  - Ruled out by measurement: the coarse DSP phase (sweeping the DSP step
+    counter over 32 offsets moves the first divergence only between entries
+    8717 and 8729, never further), and the DSP tick ordering (advancing the
+    step before the plan step, as ares `SMP::wait` does, instead of after,
+    changes nothing). Access costs themselves match ares' tables
+    (`cycleWaitStates` 2/4/10/20, `timerWaitStates` 2/4/8/16).
+  - The residual mechanism is the **instruction-granular S-SMP read**: our
+    `$F3` read is sampled when the instruction is executed (at plan-record
+    time) rather than at the access's own clock, which shifts it by up to one
+    instruction relative to the DSP boundary. This also **corrects an earlier
+    conclusion**: the `spc-resume` deferral experiment was called falsified
+    because its framebuffer was byte-identical, but the framebuffer only
+    encodes pass/fail (`Failed 02` either way), so it was never a valid test of
+    the readings. The store-log divergence index is the right acceptance
+    metric for that work (baseline: 8729).
+- blargg `spc_dsp6` reports `Failed 02` (Echo/esa_changes). It is **parked**:
   five turns of instrumentation excluded every DSP-side cause (see above) and
   showed the `$F0` ramp is written by the test itself, so closing it needs a
   TAS-style trace of the test's own SPC stores rather than more DSP work. It
