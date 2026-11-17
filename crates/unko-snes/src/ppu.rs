@@ -124,6 +124,10 @@ pub struct Ppu {
     /// read-only register open bus.
     ppu1_mdr: u8,
     ppu2_mdr: u8,
+    /// ares `Object::io.rangeOver`: more than 32 sprites on the line.
+    range_over: bool,
+    /// ares `Object::io.timeOver`: more than 34 object tiles on the line.
+    time_over: bool,
     line_event: bool,
     layer_mask: Option<u8>,
 }
@@ -207,6 +211,8 @@ impl Ppu {
             counters_latched: false,
             ppu1_mdr: 0,
             ppu2_mdr: 0,
+            range_over: false,
+            time_over: false,
             line_event: false,
             layer_mask: None,
         }
@@ -244,7 +250,7 @@ impl Ppu {
         let mut main = [Pixel::default(); SCREEN_WIDTH];
         let mut sub = [Pixel::default(); SCREEN_WIDTH];
         let (_, obj_priority) = self.priority_tables(self.bg_mode & 0x07);
-        self.render_sprites(&mut main, &mut sub, y, &obj_priority);
+        let _ = self.render_sprites(&mut main, &mut sub, y, &obj_priority);
         main.iter()
             .enumerate()
             .filter(|(_, pixel)| pixel.priority != 0)
@@ -416,7 +422,13 @@ impl Ppu {
             };
         }
         match self.line {
-            0 => self.vblank = false,
+            0 => {
+                self.vblank = false;
+                // ares `Object::frame`: the overflow flags are cleared once per
+                // frame and latched by any line that overflows.
+                self.range_over = false;
+                self.time_over = false;
+            }
             VBLANK_LINE => {
                 self.vblank = true;
                 self.nmi = true;
@@ -530,8 +542,11 @@ impl Ppu {
             }
             0x213E => {
                 // ares sets bits 0-3 (PPU1 version 1); bits 6/7 are the sprite
-                // range/time overflow flags, which we do not model yet.
-                self.ppu1_mdr = (self.ppu1_mdr & 0x10) | 0x01;
+                // range/time overflow flags latched for this frame.
+                self.ppu1_mdr = (self.ppu1_mdr & 0x10)
+                    | 0x01
+                    | (u8::from(self.range_over) << 6)
+                    | (u8::from(self.time_over) << 7);
                 self.ppu1_mdr
             }
             0x213F => {
@@ -852,7 +867,10 @@ impl Ppu {
             }
         }
         if main_mask & 0x10 != 0 || self.ts & 0x10 != 0 {
-            self.render_sprites(&mut main, &mut sub, y, &obj_priority);
+            let (range_over, time_over) =
+                self.render_sprites(&mut main, &mut sub, y, &obj_priority);
+            self.range_over |= range_over;
+            self.time_over |= time_over;
         }
         self.present_line(row, &main, &sub);
     }
@@ -1225,14 +1243,20 @@ impl Ppu {
         }
     }
 
+    /// Render the object layer for one line.
+    ///
+    /// Returns the line's `(rangeOver, timeOver)` sprite flags; the caller
+    /// latches them for the frame (ares `Object::evaluate`/`fetch`).
     fn render_sprites(
         &self,
         main: &mut [Pixel; SCREEN_WIDTH],
         sub: &mut [Pixel; SCREEN_WIDTH],
         y: usize,
         priority: &[u8; 4],
-    ) {
+    ) -> (bool, bool) {
         let base_size = (self.obsel >> 5) & 0x07;
+        let mut range_over = false;
+        let mut time_over = false;
         let nameselect = (self.obsel >> 3) & 0x03;
         let tiledata = u32::from(self.obsel & 0x07) << 13;
         let main_enable = self.layer_mask.unwrap_or(self.tm) & 0x10 != 0;
@@ -1268,11 +1292,14 @@ impl Ppu {
             if y < first || y >= first + usize::from(height) {
                 continue;
             }
-            items[item_count] = sprite;
-            item_count += 1;
             if item_count == 32 {
+                // ares `Object::evaluate` stops once more than 32 sprites are
+                // on-line and latches `rangeOver` for the frame.
+                range_over = true;
                 break;
             }
+            items[item_count] = sprite;
+            item_count += 1;
         }
 
         // ares `Object::run`: walk the list backwards and overwrite opaque
@@ -1318,10 +1345,13 @@ impl Ppu {
                 if sx >= SCREEN_WIDTH as u16 {
                     continue;
                 }
-                if tile_count >= 34 {
+                // ares `Object::fetch`: `if(t.tileCount++ >= 34) break;`, so
+                // the 35th attempted tile latches `timeOver` and is dropped.
+                tile_count += 1;
+                if tile_count > 34 {
+                    time_over = true;
                     break;
                 }
-                tile_count += 1;
                 let chrx = (u16::from(character) & 0x0F)
                     + if attr & 0x40 != 0 {
                         tile_width - 1 - tx
@@ -1371,6 +1401,7 @@ impl Ppu {
                 }
             }
         }
+        (range_over, time_over)
     }
 
     fn present_line(
@@ -2162,6 +2193,49 @@ mod tests {
         ppu.write(0x212C, 0x01);
         ppu.render_line(0, 0);
         assert_eq!(&ppu.framebuffer[0..4], &[0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn sprite_overflow_flags_latch_for_the_frame() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2100, 0x0F);
+        ppu.write(0x2101, 0x20); // OBSEL base size 1: 16x16 / 32x32 sprites
+        ppu.write(0x212C, 0x10); // OBJ on the main screen
+                                 // 33 sprites on line 100 (a sprite's first visible line is OAM Y + 1).
+                                 // OAM addresses are word addresses; a sprite entry is four bytes, so
+                                 // sprite n starts at word address n * 2.
+        for n in 0..33u16 {
+            let word = n * 2;
+            ppu.write(0x2102, word as u8);
+            ppu.write(0x2103, ((word >> 8) & 1) as u8);
+            ppu.write(0x2104, 0);
+            ppu.write(0x2104, 99);
+            ppu.write(0x2104, 0);
+            ppu.write(0x2104, 0);
+        }
+        // High OAM table: select the large size for every sprite, so 32 stored
+        // sprites fetch far more than 34 tiles. The table is written as words
+        // (four sprites per byte, two bytes per $2104 pair).
+        for byte_index in 0..9u16 {
+            let mut value = 0u8;
+            for k in 0..4u16 {
+                let n = byte_index * 4 + k;
+                if n < 33 {
+                    value |= 0x02 << ((n & 3) * 2);
+                }
+            }
+            if byte_index % 2 == 0 {
+                let word = (0x200 + byte_index) / 2;
+                ppu.write(0x2102, word as u8);
+                ppu.write(0x2103, ((word >> 8) & 1) as u8);
+            }
+            ppu.write(0x2104, value);
+        }
+        ppu.render_line(100, 0);
+        let stat = ppu.read(0x213E, 0);
+        assert_ne!(stat & 0x40, 0, "rangeOver should be latched");
+        // 32 stored 16x16 sprites are 64 tiles, well over the 34-tile limit.
+        assert_ne!(stat & 0x80, 0, "timeOver should be latched");
     }
 
     #[test]
