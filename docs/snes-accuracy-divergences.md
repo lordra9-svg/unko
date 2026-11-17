@@ -301,6 +301,18 @@ with ares. The implementation follows ares, which is the primary source.
   `test-roms/snes/PeterLemon-PPU/README.md`, and the RustySNES harness now
   reports `FBGEOM <frame_hires> <visible_width>` (`true 512` for this ROM) so a
   hi-res dump can be strided on the next attempt.
+  A follow-up measurement shows *why* the DAC-only model failed and what the
+  oracle actually contains: our **current 256-wide non-hires** render of the
+  same ROM matches RustySNES' hires frame at only **5.882%** (even columns) and
+  **6.570%** (odd columns), i.e. the demo stores genuine 512-wide detail, so a
+  256-wide render of it is aliased no matter how the output stage is written.
+  The visual comparison confirms it: the image is present in both but ours is
+  decimated. This makes the ROM a valid hires oracle but *only* at 512 wide, and
+  it shows that the earlier 5.767% was the aliasing, not the DAC interleave.
+  The next attempt must therefore render the Above and Below screens as the two
+  interleaved halves (Above at even output columns, Below at odd) **and** verify
+  that `sub` (Below) actually carries the alternate detail for a pseudo-hires
+  ROM, i.e. check `TS`/sub-layer rendering at 256 wide first.
 - Offset per tile **is** implemented for modes 2, 4 and 6, transcribed from
   ares `Background::fetchNameTable`/`fetchOffset`: the per-column horizontal and
   vertical words are read from BG3's tilemap (horizontal at `voffset + 0`,
