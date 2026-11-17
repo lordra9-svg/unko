@@ -109,6 +109,20 @@ S-DSP output is now instrumented but not sample-identical:
     step before the plan step, as ares `SMP::wait` does, instead of after,
     changes nothing). Access costs themselves match ares' tables
     (`cycleWaitStates` 2/4/10/20, `timerWaitStates` 2/4/8/16).
+  - **Read-time DSP advance tested and ruled out.** ares `SMP::wait` steps the
+    SMP (and synchronizes the DSP) *before* the access returns its data, so an
+    access-exact implementation should advance the DSP for the access's own
+    clocks at read time. Implementing exactly that for `$F3`/`$F4-$F7` reads
+    (ticking `clocks / 2` micro-steps before the register is sampled and
+    suppressing the drain-time tick for that access) leaves the first
+    divergence at **entry 8729**, unchanged. Combined with the null results for
+    the coarse phase sweep and the tick ordering, the slip is not explained by
+    any of the three plausible DSP/SPC phase adjustments.
+  - Consequence for the next attempt: the slip is a *discrete* difference in
+    when the sample boundary is deemed to fall inside the write->read window,
+    not a phase offset. The instrument that will settle it is a log of the DSP
+    step index (0-31) at each `$F3` read of `V0ENVX`, in both emulators, taken
+    across the two known slip points (store entries 8729 and 125351).
   - The residual mechanism is the **instruction-granular S-SMP read**: our
     `$F3` read is sampled when the instruction is executed (at plan-record
     time) rather than at the access's own clock, which shifts it by up to one
