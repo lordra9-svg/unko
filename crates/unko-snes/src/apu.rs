@@ -15,6 +15,8 @@ use crate::spc700::{Spc700, SpcBus};
 pub enum PortEventKind {
     /// S-CPU write to `$2140-$2143`.
     CpuWrite,
+    /// S-CPU read of `$2140-$2143`.
+    CpuRead,
     /// S-SMP read of `$F4-$F7`.
     SmpRead,
     /// S-SMP write to `$F4-$F7` (the echo the S-CPU polls).
@@ -48,8 +50,8 @@ pub struct PortDebug {
     /// S-SMP instruction currently being recorded.
     spc_instruction: u64,
     events: Vec<PortEvent>,
-    /// `(retired units, pc)` per recorded instruction.
-    trace: Vec<(u64, u16)>,
+    /// `(master clock at instruction start, pc, S-SMP clocks)` per instruction.
+    trace: Vec<(u64, u16, u32)>,
 }
 
 impl PortDebug {
@@ -66,8 +68,8 @@ impl PortDebug {
         &self.events
     }
 
-    /// Captured `(retired units, pc)` instruction trace.
-    pub fn trace(&self) -> &[(u64, u16)] {
+    /// Captured `(master clock, pc, clocks)` instruction trace.
+    pub fn trace(&self) -> &[(u64, u16, u32)] {
         &self.trace
     }
 
@@ -76,7 +78,19 @@ impl PortDebug {
         self.clock = clock;
     }
 
-    /// Record an S-CPU write to `$2140-$2143`.
+    /// Record an S-CPU read of `$2140-$2143` (debug).
+    pub(crate) fn record_cpu_read(&mut self, clock: u64, port: usize, value: u8) {
+        let spc_instruction = self.spc_instruction;
+        self.record(PortEvent {
+            clock,
+            kind: PortEventKind::CpuRead,
+            port: u8::try_from(port).unwrap_or(0),
+            value,
+            spc_pc: 0,
+            spc_instruction,
+        });
+    }
+
     pub(crate) fn record_cpu_write(&mut self, clock: u64, port: usize, value: u8) {
         let spc_instruction = self.spc_instruction;
         self.record(PortEvent {
@@ -170,7 +184,7 @@ impl Timer {
 /// the S-CPU is in the middle of its own instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PlanStep {
-    /// S-SMP clocks (2.048 MHz) this access consumes.
+    /// S-SMP clocks (2.050560 MHz) this access consumes.
     clocks: u8,
     /// Latched `$F4-$F7` write, committed when the access finishes.
     port_write: Option<(u8, u8)>,
@@ -203,12 +217,16 @@ pub struct Apu {
     timer_targets: [u8; 3],
     /// Number of SPC700 instructions executed (debug).
     pub instructions: u64,
-    /// Number of S-SMP clock units (two clocks each) retired (debug).
+    /// Number of S-SMP clocks retired (debug).
     pub units: u64,
     /// Micro-op timeline of the instruction being drained.
     plan: Vec<PlanStep>,
     plan_pos: usize,
     plan_sub: u32,
+    /// S-SMP clocks not yet converted into S-DSP micro-steps. The DSP runs one
+    /// micro-step per two S-SMP clocks; split `$F4-$F7` reads advance it by one
+    /// clock on each side of the access, so the remainder persists.
+    dsp_clock_credit: u32,
     samples: VecDeque<Sample>,
     /// Debug: S-CPU/S-SMP port handshake trace.
     pub debug: PortDebug,
@@ -249,6 +267,7 @@ impl Apu {
             plan: Vec::new(),
             plan_pos: 0,
             plan_sub: 0,
+            dsp_clock_credit: 0,
             samples: VecDeque::new(),
             debug: PortDebug::default(),
         }
@@ -309,6 +328,7 @@ impl Apu {
         self.plan.clear();
         self.plan_pos = 0;
         self.plan_sub = 0;
+        self.dsp_clock_credit = 0;
         self.samples.clear();
         self.apu_ports = [0; 4];
         self.cpu_ports = [0; 4];
@@ -365,7 +385,7 @@ impl Apu {
         total
     }
 
-    /// Advance the S-SMP by one base-clock unit (two 2.048 MHz clocks).
+    /// Advance the S-SMP by one clock (2.050560 MHz).
     ///
     /// The system calls this from inside an S-CPU access, so an S-SMP port write
     /// commits at the exact master clock of the S-SMP access that produced it.
@@ -379,10 +399,7 @@ impl Apu {
         self.plan_pos = 0;
         self.plan_sub = 0;
         self.debug.spc_instruction = self.instructions;
-        if self.debug.enabled {
-            let entry = (self.units, self.spc.pc);
-            self.debug.trace.push(entry);
-        }
+        let entry_pc = self.spc.pc;
         let page_flag = self.spc.flags.page;
         // The S-SMP's logical time is exactly its retired access units.
         let mut plan = std::mem::take(&mut self.plan);
@@ -401,6 +418,8 @@ impl Apu {
                 timers: &mut self.timers,
                 dsp_address: &mut self.dsp_address,
                 dsp: &mut self.dsp,
+                dsp_clock_credit: &mut self.dsp_clock_credit,
+                samples: &mut self.samples,
                 apu_ports: &mut self.apu_ports,
                 cpu_ports: &mut self.cpu_ports,
                 aux4: &mut self.aux4,
@@ -423,18 +442,28 @@ impl Apu {
                 port_write: None,
             });
         }
+        if self.debug.enabled && self.debug.trace.len() < 6_000_000 {
+            let clocks: u32 = plan.iter().map(|step| u32::from(step.clocks)).sum();
+            self.debug.trace.push((self.debug.clock, entry_pc, clocks));
+        }
         self.plan = plan;
         self.instructions += 1;
     }
 
-    /// Drain one base-clock unit (two clocks) from the recorded timeline.
+    /// Drain one SMP clock from the recorded timeline.
+    ///
+    /// ares runs the S-SMP as a cooperative thread synchronized on every S-CPU
+    /// step, so an S-CPU port poll observes exactly the SMP writes committed up
+    /// to that master instant. Advancing one clock at a time (instead of one
+    /// two-clock access unit) keeps a port write's visibility window to a single
+    /// SMP clock.
     fn drain_unit(&mut self) -> u32 {
         if self.plan_pos >= self.plan.len() {
             self.record_instruction();
         }
         self.units += 1;
         let step = self.plan[self.plan_pos];
-        self.plan_sub += 2;
+        self.plan_sub += 1;
         if self.plan_sub >= u32::from(step.clocks) {
             if let Some((port, value)) = step.port_write {
                 // S-SMP -> S-CPU latch ($2140-$2143), committed at the end of
@@ -446,18 +475,7 @@ impl Apu {
             self.plan_pos += 1;
             self.plan_sub = 0;
         }
-        // ares synchronizes the DSP thread on every S-SMP access and its tick
-        // is exactly one access unit, so the DSP advances one micro-step here
-        // and finishes a sample every 32 accesses. Advancing the whole sample
-        // at once would hide the echo buffer's partial state from an S-SMP
-        // read that lands mid-sample.
-        if let Some(sample) = self.dsp.tick(&mut self.ram[..]) {
-            self.samples.push_back(sample);
-            if self.samples.len() > 16_384 {
-                self.samples.pop_front();
-            }
-        }
-        2
+        1
     }
 
     /// Number of queued DSP samples.
@@ -494,7 +512,7 @@ impl Apu {
         &self.samples
     }
 
-    /// Run the S-SMP until at least `cycles` 2.048 MHz clocks have elapsed.
+    /// Run the S-SMP until at least `cycles` 2.050560 MHz clocks have elapsed.
     pub fn run_cycles(&mut self, cycles: u64) -> u64 {
         let mut total = 0;
         while total < cycles {
@@ -518,6 +536,8 @@ struct ApuBus<'a> {
     timers: &'a mut [Timer; 3],
     dsp_address: &'a mut u8,
     dsp: &'a mut Dsp,
+    dsp_clock_credit: &'a mut u32,
+    samples: &'a mut VecDeque<Sample>,
     apu_ports: &'a mut [u8; 4],
     cpu_ports: &'a mut [u8; 4],
     aux4: &'a mut u8,
@@ -531,6 +551,22 @@ struct ApuBus<'a> {
 }
 
 impl ApuBus<'_> {
+    /// Advance the S-DSP by `clocks` S-SMP clocks (ares `Thread::step` +
+    /// `synchronize(dsp)` inside `SMP::wait`). The DSP executes one micro-step
+    /// per two S-SMP clocks and finishes a 32-step sample every 64.
+    fn step_dsp_clock(&mut self, clocks: u32) {
+        *self.dsp_clock_credit += clocks;
+        while *self.dsp_clock_credit >= 2 {
+            *self.dsp_clock_credit -= 2;
+            if let Some(sample) = self.dsp.tick(self.ram) {
+                self.samples.push_back(sample);
+                if self.samples.len() > 16_384 {
+                    self.samples.pop_front();
+                }
+            }
+        }
+    }
+
     /// Write the underlying APU RAM (ares `writeRAM`).
     fn write_ram(&mut self, address: u16, value: u8) {
         if *self.ram_writable && !*self.ram_disable {
@@ -561,6 +597,10 @@ impl SpcBus for ApuBus<'_> {
             let frequency = if index == 2 { 16 } else { 128 };
             timer.step(clocks, frequency, *self.timers_enable, *self.timers_disable);
         }
+    }
+
+    fn step_clock(&mut self, clocks: u32) {
+        self.step_dsp_clock(clocks);
     }
 
     fn wait_cycles(&mut self, address: Option<u16>) -> u32 {
@@ -717,20 +757,27 @@ impl SpcBus for RecordBus<'_, '_> {
         self.inner.advance(clocks);
     }
 
+    fn step_clock(&mut self, clocks: u32) {
+        // The DSP advances while the instruction is recorded (ares runs it as a
+        // cooperative thread inside `SMP::wait`), which keeps every DSP register
+        // access ordered exactly one micro-step after its wait, as on hardware.
+        self.inner.step_clock(clocks);
+    }
+
     fn read(&mut self, address: u16) -> u8 {
-        let clocks = self.inner.timer_cycles(Some(address)) as u8;
+        let clocks = (self.inner.wait_cycles(Some(address)) * 2) as u8;
         let value = self.inner.read(address);
         self.plan.push(PlanStep {
             clocks,
             port_write: None,
         });
-        self.units += u64::from(clocks) / 2;
+        self.units += u64::from(clocks);
         value
     }
 
     fn write(&mut self, address: u16, value: u8) {
-        let clocks = self.inner.timer_cycles(Some(address)) as u8;
-        self.units += u64::from(clocks) / 2;
+        let clocks = (self.inner.wait_cycles(Some(address)) * 2) as u8;
+        self.units += u64::from(clocks);
         if (0xF4..=0xF7).contains(&address) {
             // ares writes the RAM mirror immediately and latches the port; the
             // latch itself is only visible to the S-CPU at the access's end.
@@ -749,12 +796,12 @@ impl SpcBus for RecordBus<'_, '_> {
     }
 
     fn idle(&mut self) {
-        let clocks = self.inner.timer_cycles(None) as u8;
+        let clocks = (self.inner.wait_cycles(None) * 2) as u8;
         self.plan.push(PlanStep {
             clocks,
             port_write: None,
         });
-        self.units += u64::from(clocks) / 2;
+        self.units += u64::from(clocks);
     }
 }
 
@@ -810,6 +857,8 @@ mod tests {
                 timers: &mut apu.timers,
                 dsp_address: &mut apu.dsp_address,
                 dsp: &mut apu.dsp,
+                dsp_clock_credit: &mut apu.dsp_clock_credit,
+                samples: &mut apu.samples,
                 apu_ports: &mut apu.apu_ports,
                 cpu_ports: &mut apu.cpu_ports,
                 aux4: &mut apu.aux4,
@@ -856,6 +905,8 @@ mod tests {
                 timers: &mut apu.timers,
                 dsp_address: &mut apu.dsp_address,
                 dsp: &mut apu.dsp,
+                dsp_clock_credit: &mut apu.dsp_clock_credit,
+                samples: &mut apu.samples,
                 apu_ports: &mut apu.apu_ports,
                 cpu_ports: &mut apu.cpu_ports,
                 aux4: &mut apu.aux4,
@@ -883,6 +934,8 @@ mod tests {
                 timers: &mut apu.timers,
                 dsp_address: &mut apu.dsp_address,
                 dsp: &mut apu.dsp,
+                dsp_clock_credit: &mut apu.dsp_clock_credit,
+                samples: &mut apu.samples,
                 apu_ports: &mut apu.apu_ports,
                 cpu_ports: &mut apu.cpu_ports,
                 aux4: &mut apu.aux4,
@@ -920,6 +973,8 @@ mod tests {
             timers: &mut apu.timers,
             dsp_address: &mut apu.dsp_address,
             dsp: &mut apu.dsp,
+            dsp_clock_credit: &mut apu.dsp_clock_credit,
+            samples: &mut apu.samples,
             apu_ports: &mut apu.apu_ports,
             cpu_ports: &mut apu.cpu_ports,
             aux4: &mut apu.aux4,
@@ -955,6 +1010,8 @@ mod tests {
             timers: &mut apu.timers,
             dsp_address: &mut apu.dsp_address,
             dsp: &mut apu.dsp,
+            dsp_clock_credit: &mut apu.dsp_clock_credit,
+            samples: &mut apu.samples,
             apu_ports: &mut apu.apu_ports,
             cpu_ports: &mut apu.cpu_ports,
             aux4: &mut apu.aux4,
@@ -1050,6 +1107,8 @@ mod wait_state_tests {
             timers: &mut apu.timers,
             dsp_address: &mut apu.dsp_address,
             dsp: &mut apu.dsp,
+            dsp_clock_credit: &mut apu.dsp_clock_credit,
+            samples: &mut apu.samples,
             apu_ports: &mut apu.apu_ports,
             cpu_ports: &mut apu.cpu_ports,
             aux4: &mut apu.aux4,

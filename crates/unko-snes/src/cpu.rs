@@ -30,11 +30,18 @@ pub trait CpuBus {
     /// Advance peripherals (S-SMP, S-PPU, DMA/HDMA, IRQ comparators) by
     /// `clocks` master clocks while the CPU is mid-instruction.
     ///
+    /// Returns any extra clocks the CPU must account for beyond `clocks`. ares
+    /// runs the scanline's DRAM refresh at the end of the `CPU::step` call that
+    /// reaches the refresh position, so the 40 refresh clocks land inside that
+    /// access and are charged to it here.
+    ///
     /// The S-CPU and the other chips run as cooperative threads in ares: every
     /// access steps the CPU and its peripherals by the wait-state count and
     /// samples the bus at a precise point inside that window. Implementations
     /// that do not care about sub-instruction timing can leave this empty.
-    fn advance(&mut self, _clocks: u32) {}
+    fn advance(&mut self, _clocks: u32) -> u32 {
+        0
+    }
 }
 
 /// Processor status flags.
@@ -182,6 +189,10 @@ impl Cpu {
     }
 
     /// Reset the CPU and fetch the reset vector.
+    ///
+    /// ares services the power-on reset as a pending interrupt: `CPU::main`
+    /// steps 132 master clocks before it vectors. The S-SMP is already running
+    /// by then, so the delay shifts the whole boot phase and must be modelled.
     pub fn reset(&mut self, bus: &mut impl CpuBus) -> u32 {
         self.a = 0;
         self.x = 0;
@@ -198,12 +209,11 @@ impl Cpu {
         self.irq_line = false;
         self.nmi_pending = false;
         let start = self.cycles;
-        for _ in 0..7 {
-            self.idle(bus);
-        }
-        let low = self.read(bus, 0x00FFFC);
-        let high = self.read(bus, 0x00FFFD);
-        self.pc = u16::from_le_bytes([low, high]);
+        // ares `CPU::main`: `status.resetPending` → `step(132)`.
+        self.cycles += 132;
+        self.cycles += u64::from(bus.advance(132));
+        // ... then the emulation-mode interrupt sequence (`WDC65816::interrupt`).
+        self.service_interrupt(bus, 0xFFFC, false);
         (self.cycles - start) as u32
     }
 
@@ -283,9 +293,9 @@ impl Cpu {
         // ares `CPU::read`: the CPU and its peripherals step `wait - 4` clocks
         // before the data is sampled, then four more clocks after it, so a port
         // read observes the S-SMP exactly `wait - 4` clocks into the access.
-        bus.advance(clocks.saturating_sub(4));
+        self.cycles += u64::from(bus.advance(clocks.saturating_sub(4)));
         let value = bus.read(address);
-        bus.advance(4);
+        self.cycles += u64::from(bus.advance(4));
         value
     }
 
@@ -295,13 +305,13 @@ impl Cpu {
         self.cycles += u64::from(clocks);
         // ares `CPU::write`: the peripherals advance for the whole access
         // before the write commits.
-        bus.advance(clocks);
+        self.cycles += u64::from(bus.advance(clocks));
         bus.write(address, value);
     }
 
     fn idle(&mut self, bus: &mut impl CpuBus) {
         self.cycles += 6;
-        bus.advance(6);
+        self.cycles += u64::from(bus.advance(6));
         bus.idle();
     }
 

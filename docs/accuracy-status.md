@@ -164,9 +164,13 @@ Validation so far:
   since the boot takes a different number of frames). Two blocking bugs were
   fixed: the `$2180-$2183` WRAM data port and `$4210` bit 7 latching at
   vblank even when NMI is disabled.
-- blargg **`spc_timer` and `spc_smp` both report `PASSED TESTS`**;
-  `spc_dsp6` reports `Failed 02` (Echo/esa_changes), recorded in the
-  divergence ledger. `spc_smp` needed two real fixes found by diffing the
+- blargg **`spc_timer`, `spc_smp`, `spc_mem_access_times` and `spc_dsp6` all
+  report `PASSED TESTS`**. `spc_dsp6` was the last hold-out (111 sub-tests);
+  it needed the DSP fixes recorded in the divergence ledger: the GAIN mode-7
+  unsigned latch compare, the `echo_output` 16-bit product truncation, the
+  `clock.sample = 1` power-on phase (the KON poll), and running the S-DSP one
+  micro-step per two S-SMP clocks inside the S-SMP access path. `spc_smp`
+  needed two real fixes found by diffing the
   framework's CRC-input stream against RustySNES character by character:
   `INCW`/`DECW` now load, store, then load and store the other byte (ares'
   bus order), and an S-SMP read of `$F4-$F7` returns the CPU-to-SMP latch

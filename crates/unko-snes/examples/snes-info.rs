@@ -1,6 +1,7 @@
 //! Print the decoded SNES header and run the S-CPU for a short warm-up.
 
 use std::env;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use unko_snes::{Cartridge, Snes};
@@ -63,12 +64,21 @@ fn main() -> ExitCode {
         system.set_ipl(ipl);
         println!("ipl:         {ipl_path}");
     }
-    system.reset();
-    if std::env::var_os("PORT_OUT").is_some() {
+    if std::env::var_os("PORT_OUT").is_some() || std::env::var_os("SPC_TRACE").is_some() {
         system.apu.set_port_logging(true);
+    }
+    system.reset();
+    if std::env::var_os("DSP_TRACE_OUT").is_some() {
+        system.apu.dsp_mut().enable_trace();
     }
     println!("cpu reset:   {}", system.cpu);
     println!("spc reset:   {}", system.apu.spc);
+    // Optional `PC_WATCH=8000,8195` breakpoint log (debug).
+    let watched_pcs: Vec<u16> = std::env::var("PC_WATCH")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|v| u16::from_str_radix(v.trim().trim_start_matches("0x"), 16).ok())
+        .collect();
     let target_frames: u32 = std::env::var("FRAMES")
         .ok()
         .and_then(|value| value.parse().ok())
@@ -79,6 +89,22 @@ fn main() -> ExitCode {
         let mut frames = 0u32;
         let instruction_limit = target_frames.saturating_mul(20_000).max(20_000_000);
         while frames < target_frames && instructions < instruction_limit && !system.cpu.stp {
+            if watched_pcs.contains(&system.cpu.pc) {
+                eprintln!(
+                        "WATCH {:02X}:{:04X} clock={} frame={frames} A={:04X} X={:04X} Y={:04X} D={:04X} db={:02X} dp12={:02X}{:02X}{:02X}",
+                        system.cpu.pbr,
+                        system.cpu.pc,
+                        system.clock,
+                        system.cpu.a,
+                        system.cpu.x,
+                        system.cpu.y,
+                        system.cpu.d,
+                        system.cpu.dbr,
+                        system.wram()[0x14],
+                        system.wram()[0x13],
+                    system.wram()[0x12]
+                );
+            }
             if let Some(path) = std::env::var_os("PC_TRACE") {
                 let from: u64 = std::env::var("PC_TRACE_FROM")
                     .ok()
@@ -102,6 +128,15 @@ fn main() -> ExitCode {
             }
             cycles += u64::from(system.step());
             instructions += 1;
+            if system.cpu.stp && std::env::var_os("STP_LOG").is_some() {
+                eprintln!(
+                    "STP at {:02X}:{:04X} frame={frames} master={} line={}",
+                    system.cpu.pbr,
+                    system.cpu.pc,
+                    system.clock,
+                    system.ppu.line()
+                );
+            }
             if system.ppu.frame_ready() {
                 system.ppu.acknowledge_frame();
                 frames += 1;
@@ -157,6 +192,7 @@ fn main() -> ExitCode {
                 event.clock,
                 match event.kind {
                     unko_snes::PortEventKind::CpuWrite => "W",
+                    unko_snes::PortEventKind::CpuRead => "CR",
                     unko_snes::PortEventKind::SmpRead => "R",
                     unko_snes::PortEventKind::SmpWrite => "S",
                 },
@@ -170,10 +206,29 @@ fn main() -> ExitCode {
     }
     if let Some(path) = std::env::var_os("SPC_TRACE") {
         let mut out = String::new();
-        for (index, (units, pc)) in system.apu.debug.trace().iter().enumerate() {
-            out.push_str(&format!("{index} {units} {pc:04X}\n"));
+        for (index, (clock, pc, clocks)) in system.apu.debug.trace().iter().enumerate() {
+            out.push_str(&format!("{index} {clock} {pc:04X} {clocks}\n"));
         }
         let _ = std::fs::write(path, out);
+    }
+    if let Some(path) = std::env::var_os("DSP_TRACE_OUT") {
+        let base = PathBuf::from(&path);
+        if let Some(trace) = system.apu.dsp().trace.as_ref() {
+            let mut out = String::new();
+            for row in &trace.rows {
+                out.push_str(&row.map(|v| v.to_string()).join(" "));
+                out.push('\n');
+            }
+            let _ = std::fs::write(path, out);
+            let mut wout = String::new();
+            for (sample, address, value) in &trace.writes {
+                wout.push_str(&format!("{sample} {address:02X} {value:02X}\n"));
+            }
+            let wpath = std::env::var_os("DSP_WRITES_OUT")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(format!("{}.writes", base.to_string_lossy())));
+            let _ = std::fs::write(wpath, wout);
+        }
     }
     if let Some(path) = std::env::var_os("DUMP_APU") {
         let _ = std::fs::write(path, system.apu.ram());
@@ -315,9 +370,10 @@ fn main() -> ExitCode {
         );
     }
     println!(
-        "spc inst:    {}  spc units: {}  nmi_vec: {}\nppu:         brightness={} nmi={} nmi_count={} irq={} line={} vblank={} frame_ready={} nonzero_pixels={} rgb_sum={checksum}",
+        "spc inst:    {}  spc units: {}  master clock: {}  nmi_vec: {}\nppu:         brightness={} nmi={} nmi_count={} irq={} line={} vblank={} frame_ready={} nonzero_pixels={} rgb_sum={checksum}",
         system.apu.instructions,
         system.apu.units,
+        system.clock,
         system.cpu.nmi_services,
         system.ppu.display_brightness(),
         system.nmi_enabled(),

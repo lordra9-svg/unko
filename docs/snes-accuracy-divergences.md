@@ -5,7 +5,64 @@ chosen reference (real hardware, then ares, then a public test ROM). It is the
 SNES counterpart to `docs/accuracy-divergences.md` and follows the charter in
 `docs/accuracy.md`.
 
-Current snapshot: **2026-11-16**, 65C816 + SPC700 + APU + S-DSP + PPU + DMA + HDMA.
+Current snapshot: **2026-11-17**, 65C816 + SPC700 + APU + S-DSP + PPU + DMA + HDMA.
+
+## Resolved 2026-11-17 — blargg `spc_dsp6` reports `PASSED TESTS`
+
+All 111 sub-tests of `blargg-spc-6/spc_dsp6.sfc` now pass (verified at 9,000
+frames against `test-roms/snes/blargg-spc-6/`). `spc_timer`, `spc_smp` and
+`spc_mem_access_times` still report `PASSED TESTS`; the whole workspace test
+suite passes; `cargo clippy --workspace --all-targets -- -D warnings` and
+`cargo fmt --check` are clean.
+
+`Failed 02` was **never a test index**. blargg's harness runs each of the 111
+named tests in order, prints the name, then `Passed`/`Failed <code>`; `02` is
+the failing test's own failure code. The old notes below interpreted it as
+"`Echo/esa_changes`, test 2", which sent several turns of work after the wrong
+test. The failing test is identified instead from the harness's test-table
+pointer in WRAM `$12-$14` (each entry is one 4 KiB ROM slot) and from the
+diagnostic table the failing test prints on its re-run.
+
+The four real defects, each confirmed against ares source and RustySNES:
+
+- **Envelope GAIN mode 7 compared the internal latch signed.** ares
+  `envelope.cpp` tests `(u32)v._envelope >= 0x600`; a mode 4/5 decrease can
+  leave `_envelope` negative, which the unsigned compare still treats as past
+  the threshold. Ours was signed and over-incremented. Fixed; this cleared the
+  whole `Envelope/` group (`Envelope/gain $E0 threshold` onward).
+- **`echo_output` added two un-truncated products.** ares declares both shifted
+  products as `i16` locals, so each truncates to 16 bits before the sum
+  (RustySNES mirrors it). Ours summed in `i32`. Fixed.
+- **`clock.sample` started `false`.** ares `Clock { n1 sample = 1; }`; this is
+  the 16 kHz KON/KOFF poll phase. Starting inverted shifted every key-on poll by
+  one output sample. This was the last failure: with it fixed the suite goes
+  from failing at test 35 (`Misc/brr addr wrap-around`) to `PASSED TESTS`.
+  `misc29`/`misc30` themselves already matched ares.
+- **S-DSP side effects were ordered against the wrong S-SMP edge.** The DSP now
+  runs one micro-step per two S-SMP clocks *inside* the S-SMP access path
+  (`SpcBus::step_clock`, called where ares `SMP::wait` does `step()` then
+  `synchronize(dsp)`), so a `$F3` read observes the post-wait DSP state and a
+  `$F3` write lands after that access's micro-step. Previously the whole
+  instruction was recorded, and its DSP effects applied, before any of its
+  clocks were drained.
+
+Two supporting timing corrections came out of the same investigation and are
+kept because they are ares-faithful and were needed to make the S-SMP stream
+lockstep with RustySNES for longer stretches:
+
+- The S-SMP is drained **one SMP clock at a time** (2,050,560 Hz), not one
+  two-clock access unit, so an S-CPU `$2140-$2143` poll observes exactly the
+  SMP writes committed up to that master instant.
+- The scanline DRAM refresh is now charged **inside the CPU step that crosses
+  the refresh position** (`CpuBus::advance` returns the 40 extra clocks) rather
+  than as a debt paid by the next bus access, matching ares `CPU::step`.
+
+The S-SMP instruction stream still shows occasional one-iteration slips in the
+IPL `$FFDA`/`$FFDC` echo poll - the residual sub-clock ordering race documented
+below. It no longer affects any DSP test result: the tests synchronise on their
+own DSP sample boundaries, and the DSP counter phase is derived from master
+time, not from the upload's poll count.
+
 
 ## Open failures
 
@@ -82,7 +139,10 @@ S-DSP output is now instrumented but not sample-identical:
     `$F6` return a stale CPU-side value (`0x30`) instead of the real latch
     (`0x00`) - exactly what test 9 checks. Reading the latch directly fixed
     it; `smp_port_reads_see_only_the_cpu_latches` pins both directions.
-- blargg `spc_dsp6` reports `Failed 02` (Echo/esa_changes). It is **parked**:
+- *(Superseded 2026-11-17: `spc_dsp6` now passes; the failure below was the
+  signed GAIN-mode-7 compare, the `echo_output` i16 truncation and the
+  `clock.sample` phase, not `Echo/esa_changes`. Kept for the instrumentation
+  record.)* blargg `spc_dsp6` reported `Failed 02`. It was **parked**:
   - **The first divergence is now located exactly, from an ARAM store log.**
     Logging `(spc pc, address, value)` for every S-SMP store and diffing against
     RustySNES gives a 400,000-entry stream whose first difference is at **entry
@@ -229,8 +289,8 @@ S-DSP output is now instrumented but not sample-identical:
     encodes pass/fail (`Failed 02` either way), so it was never a valid test of
     the readings. The store-log divergence index is the right acceptance
     metric for that work (baseline: 8729).
-- blargg `spc_dsp6` reports `Failed 02` (Echo/esa_changes). It is **parked**:
-  five turns of instrumentation excluded every DSP-side cause (see above) and
+- *(Superseded 2026-11-17, see above.)* blargg `spc_dsp6` reported `Failed 02`.
+  It was **parked**: five turns of instrumentation excluded every DSP-side cause (see above) and
   showed the `$F0` ramp is written by the test itself, so closing it needs a
   TAS-style trace of the test's own SPC stores rather than more DSP work. It
   used to panic in

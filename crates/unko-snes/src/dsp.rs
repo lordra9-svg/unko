@@ -227,6 +227,23 @@ pub struct Dsp {
     /// Index of the next micro-step in the 32-step sample sequence.
     step: u8,
     sample_out: Sample,
+    /// Number of finished output samples since reset (debug).
+    samples_run: u64,
+    /// Optional bounded debug trace (see [`DspTrace`]).
+    pub trace: Option<DspTrace>,
+}
+
+/// Bounded S-DSP debug trace used to diff the voice pipeline against another
+/// emulator. Rows are one entry per finished output sample, writes one entry
+/// per S-SMP DSP register write.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DspTrace {
+    /// One row per finished output sample: `[sample, keyon_delay, envelope, envx,
+    /// brr_address, brr_offset, gaussian_offset, latch_pitch, header, byte,
+    /// latch_output, voice_pitch]` for voice 0.
+    pub rows: std::collections::VecDeque<[i32; 12]>,
+    /// `(sample, register, value)` for every S-SMP S-DSP register write.
+    pub writes: std::collections::VecDeque<(u64, u8, u8)>,
 }
 
 impl Default for Dsp {
@@ -246,7 +263,9 @@ impl Dsp {
             registers: [0; DSP_REGISTERS],
             clock: Clock {
                 counter: 0,
-                sample: false,
+                // ares `Clock { n1 sample = 1; }`: the key-on poll is sampled on
+                // the *second* output sample, so this must start true.
+                sample: true,
             },
             mainvol: MainVol::default(),
             echo: Echo::default(),
@@ -259,6 +278,15 @@ impl Dsp {
             voice,
             step: 0,
             sample_out: (0, 0),
+            samples_run: 0,
+            trace: None,
+        }
+    }
+
+    /// Start recording the bounded debug trace.
+    pub fn enable_trace(&mut self) {
+        if self.trace.is_none() {
+            self.trace = Some(DspTrace::default());
         }
     }
 
@@ -281,6 +309,12 @@ impl Dsp {
             return;
         }
         self.registers[usize::from(address)] = data;
+        if let Some(trace) = &mut self.trace {
+            trace.writes.push_back((self.samples_run, address, data));
+            if trace.writes.len() > 2_000_000 {
+                trace.writes.pop_front();
+            }
+        }
 
         match address {
             0x0C => self.mainvol.volume[0] = data as i8,
@@ -364,6 +398,28 @@ impl Dsp {
         self.step_once(ram);
         self.step = (self.step + 1) & 0x1F;
         if self.step == 0 {
+            self.samples_run += 1;
+            if let Some(trace) = &mut self.trace {
+                let voice = &self.voice[0];
+                let row = [
+                    self.samples_run as i32,
+                    i32::from(voice.keyon_delay),
+                    i32::from(voice.envelope),
+                    i32::from(voice.envx),
+                    i32::from(voice.brr_address),
+                    voice.brr_offset as i32,
+                    i32::from(voice.gaussian_offset),
+                    i32::from(self.latch.pitch),
+                    i32::from(self.brr._header),
+                    i32::from(self.brr._byte),
+                    self.latch.output,
+                    i32::from(voice.pitch),
+                ];
+                trace.rows.push_back(row);
+                if trace.rows.len() > 400_000 {
+                    trace.rows.pop_front();
+                }
+            }
             Some(self.sample_out)
         } else {
             None
@@ -736,7 +792,14 @@ impl Dsp {
                     envelope -= envelope >> 8;
                 } else {
                     envelope += 0x20;
-                    if mode > 6 && self.voice[index]._envelope >= 0x600 {
+                    // GAIN mode 7 (two-slope linear increase): the slope halves once
+                    // the internal envelope latch reaches 0x600. ares compares the
+                    // latch as `(u32)v._envelope`, so a negative latch (left by a
+                    // mode 4/5 decrease that underflowed) still satisfies the
+                    // threshold. A signed compare misses that case and
+                    // over-increments (blargg `spc_dsp6` `Envelope/gain $E0
+                    // threshold`).
+                    if mode > 6 && (self.voice[index]._envelope as u32) >= 0x600 {
                         envelope += 0x08 - 0x20;
                     }
                 }
@@ -884,9 +947,12 @@ impl Dsp {
     }
 
     fn echo_output(&self, channel: usize) -> i16 {
-        let main = (self.mainvol.output[channel] * i32::from(self.mainvol.volume[channel])) >> 7;
-        let echo = (self.echo.input[channel] * i32::from(self.echo.volume[channel])) >> 7;
-        clamp16(main + echo) as i16
+        // ares declares both shifted products as `i16` locals, so each is
+        // truncated to 16 bits before the sum (RustySNES mirrors this).
+        let main =
+            ((self.mainvol.output[channel] * i32::from(self.mainvol.volume[channel])) >> 7) as i16;
+        let echo = ((self.echo.input[channel] * i32::from(self.echo.volume[channel])) >> 7) as i16;
+        clamp16(i32::from(main) + i32::from(echo)) as i16
     }
 
     fn echo_read(&mut self, ram: &mut [u8], channel: usize) {

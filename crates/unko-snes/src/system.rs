@@ -49,6 +49,9 @@ pub struct Snes {
     cpu_stall: u32,
     /// Whether the current scanline's DRAM refresh has been applied.
     refresh_done: bool,
+    /// Set when this peripheral advance crossed the refresh position; the
+    /// wrapper then runs the 40 refresh clocks and reports them to the CPU.
+    refresh_pending: bool,
     /// IRQ line state latched by the H/V comparator, applied at the next
     /// instruction boundary.
     irq_line: bool,
@@ -80,6 +83,7 @@ impl Snes {
             wram_port: 0,
             cpu_stall: 0,
             refresh_done: false,
+            refresh_pending: false,
             irq_line: false,
             nmi_line: false,
             nmi_count: 0,
@@ -149,7 +153,6 @@ impl Snes {
             wram_port: &mut self.wram_port,
             vblank: false,
             hblank: false,
-            clock: 0,
         };
         self.cpu.reset(&mut bus)
     }
@@ -186,16 +189,15 @@ impl Snes {
                         wram_port: &mut self.wram_port,
                         vblank,
                         hblank,
-                        clock: self.clock,
                     };
                     transfer.step(&mut bus)
                 };
-                cycles += clocks;
-                self.advance_peripherals(clocks);
+                let extra = self.advance_peripherals(clocks);
+                cycles += clocks + extra;
                 // DMA time is master time: keep the CPU's cumulative clock
                 // equal to the system clock, otherwise any timing analysis
                 // based on `cpu.cycles` is short by the DMA/stall time.
-                dma_clocks += clocks;
+                dma_clocks += clocks + extra;
             }
         }
         self.cpu.cycles += u64::from(dma_clocks);
@@ -214,17 +216,32 @@ impl Snes {
 
     /// Advance the APU, PPU, HDMA and IRQ comparators by `clocks` master
     /// clocks. NMI/IRQ edges are latched for the next instruction boundary.
-    fn advance_peripherals(&mut self, clocks: u32) {
-        // NTSC master clock is 21.477272 MHz; the S-SMP runs at the documented
-        // 1.024 MHz access rate (one unit per opcode cycle). The credit is
-        // carried across instructions so long-term APU timing stays in step.
-        // ares: `apuFrequency = 32040 * 768 = 24,606,720 Hz`, so the S-SMP runs
-        // at 2,050,560 Hz and retires one access unit (two clocks) every
-        // 21,477,272 / 1,025,280 master clocks. Draining one unit at a time
-        // lets the S-SMP commit a port write at its exact master cycle, and the
-        // timestamped S-CPU port history lets an S-SMP read observe the latch
-        // as of its own access.
-        const APU_UNIT_NUM: i64 = 1_025_280;
+    ///
+    /// Returns the extra master clocks the CPU must account for, which is
+    /// `DRAM_REFRESH_CLOCKS` whenever this step crossed the scanline's refresh
+    /// point (ares `CPU::step` runs the five 6+2-clock stalls at the end of the
+    /// step call that reaches `dramRefreshPosition`).
+    fn advance_peripherals(&mut self, clocks: u32) -> u32 {
+        self.advance_peripherals_inner(clocks);
+        if self.refresh_pending {
+            self.refresh_pending = false;
+            self.advance_peripherals_inner(DRAM_REFRESH_CLOCKS);
+            DRAM_REFRESH_CLOCKS
+        } else {
+            0
+        }
+    }
+
+    fn advance_peripherals_inner(&mut self, clocks: u32) {
+        // NTSC master clock is 21.477272 MHz; the S-SMP runs at 2,050,560 Hz,
+        // so one SMP clock is 21,477,272 / 2,050,560 master clocks. The credit
+        // is carried across instructions so long-term APU timing stays in step.
+        // Draining *one SMP clock* at a time (rather than one two-clock access
+        // unit) is what makes an S-SMP port write become visible at the exact
+        // master clock it lands on: ares/bsnes synchronize the S-SMP on every
+        // S-CPU step, so an S-CPU poll must observe every SMP write up to that
+        // instant and no further.
+        const APU_UNIT_NUM: i64 = 2_050_560;
         const APU_UNIT_DEN: i64 = 21_477_272;
         if self.apu.port_logging_enabled() {
             // Resolve every access unit to the master clock it starts on, so the
@@ -265,12 +282,11 @@ impl Snes {
             // 6+2 master-clock stalls at hcounter 536 (dot 134). The CPU loses
             // those 40 clocks; the rest of the machine keeps running.
             if pre_dot == DRAM_REFRESH_DOT - 1 && !self.refresh_done {
-                // The CPU loses these clocks; they are charged to its next access,
-                // which then advances the peripherals by the same amount, so no
-                // extra `advance_peripherals` call belongs here (that would count
-                // the 40 clocks twice).
+                // ares `CPU::step` applies the five 6+2-clock refresh stalls at
+                // the end of the step that reaches the refresh position, so the
+                // caller adds them to the current access.
                 self.refresh_done = true;
-                self.cpu_stall += DRAM_REFRESH_CLOCKS;
+                self.refresh_pending = true;
             }
             self.irq_line = self.io.poll_irq(self.ppu.line(), self.ppu.dot());
             if let Some(line) = self.ppu.take_line_event() {
@@ -337,18 +353,26 @@ impl Snes {
             wram_port: &mut self.wram_port,
             vblank,
             hblank,
-            clock: self.clock,
         }
     }
 }
 
 impl CpuBus for Snes {
     fn read(&mut self, address: u32) -> u8 {
-        self.bus().read(address)
+        let value = self.bus().read(address);
+        if address & 0x40_FF00 == 0x2100 && (0x2140..=0x2143).contains(&(address & 0xFFFF)) {
+            let port = ((address & 0xFFFF) - 0x2140) as usize;
+            self.apu.debug.record_cpu_read(self.clock, port, value);
+        }
+        value
     }
 
     fn write(&mut self, address: u32, value: u8) {
         self.bus().write(address, value);
+        if address & 0x40_FF00 == 0x2100 && (0x2140..=0x2143).contains(&(address & 0xFFFF)) {
+            let port = ((address & 0xFFFF) - 0x2140) as usize;
+            self.apu.debug.record_cpu_write(self.clock, port, value);
+        }
     }
 
     fn access_cycles(&mut self, address: u32) -> u32 {
@@ -363,8 +387,8 @@ impl CpuBus for Snes {
         self.bus().idle();
     }
 
-    fn advance(&mut self, clocks: u32) {
-        self.advance_peripherals(clocks);
+    fn advance(&mut self, clocks: u32) -> u32 {
+        self.advance_peripherals(clocks)
     }
 }
 
@@ -381,18 +405,9 @@ struct SnesBus<'a> {
     wram_port: &'a mut u32,
     vblank: bool,
     hblank: bool,
-    /// Master clock at this access (debug).
-    clock: u64,
 }
 
 impl SnesBus<'_> {
-    /// Write one of the S-CPU's four APU ports and timestamp it for the
-    /// handshake log.
-    fn write_apu_port(&mut self, port: usize, value: u8) {
-        self.apu.cpu_write(port, value);
-        self.apu.debug.record_cpu_write(self.clock, port, value);
-    }
-
     fn read_wram_port(&mut self, offset: usize) -> u8 {
         match offset {
             0x2180 => {
@@ -493,7 +508,7 @@ impl CpuBus for SnesBus<'_> {
                 if (0x2100..=0x213F).contains(&offset) {
                     self.ppu.write(offset as u16, value);
                 } else if (0x2140..=0x2143).contains(&offset) {
-                    self.write_apu_port(offset - 0x2140, value);
+                    self.apu.cpu_write(offset - 0x2140, value);
                 } else if (0x2180..=0x2183).contains(&offset) {
                     self.write_wram_port(offset, value);
                 } else if offset == 0x4200 {
@@ -717,7 +732,6 @@ mod tests {
             wram_port: &mut system.wram_port,
             vblank: false,
             hblank: false,
-            clock: 0,
         };
         assert_eq!(bus.read(0x001234), 0x5A);
         assert_eq!(bus.read(0x801234), 0x5A);
@@ -756,7 +770,6 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
-                clock: 0,
             };
             assert_eq!(bus.read(0x008000), 0x11);
             assert_eq!(bus.read(0x018000), 0x00);
@@ -831,7 +844,6 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
-                clock: 0,
             };
             bus.write(0x4016, 0x01);
             bus.write(0x4016, 0x00);
@@ -857,7 +869,6 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
-                clock: 0,
             };
             assert_eq!(bus.read(0x4216), 0x0F);
             assert_eq!(bus.read(0x4217), 0x00);
@@ -883,7 +894,6 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
-                clock: 0,
             };
             bus.write(0x2181, 0x34);
             bus.write(0x2182, 0x12);
@@ -925,7 +935,6 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank,
                 hblank,
-                clock: 0,
             };
             (bus.read(0x4210), bus.read(0x4210))
         };
@@ -977,7 +986,6 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
-                clock: 0,
             };
             bus.write(0x4209, 10);
             bus.write(0x4200, 0x20);
@@ -1015,7 +1023,6 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
-                clock: 0,
             };
             bus.write(0x2115, 0x80);
             bus.write(0x2116, 0x00);
@@ -1044,7 +1051,6 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
-                clock: 0,
             };
             crate::dma::run(&channels, mask, &mut bus);
         }
@@ -1054,19 +1060,17 @@ mod tests {
 
     #[test]
     fn dram_refresh_stalls_the_cpu_once_per_scanline() {
-        // ares `CPU::step` refreshes WRAM once per scanline at hcounter 536 (dot
-        // 134) as five 6+2 master-clock stalls, so the CPU loses 40 clocks per
-        // line while the rest of the machine keeps running. Without it the CPU
-        // executes ~2.9% more work per frame than the reference and the game
+        // ares `CPU::step` refreshes WRAM once per scanline at the refresh
+        // position as five 6+2 master-clock stalls, so the CPU loses 40 clocks
+        // per line while the rest of the machine keeps running. Without it the
+        // CPU executes ~2.9% more work per frame than the reference and the game
         // loop drifts (Super Mario World's title screen ran two frames ahead).
         let mut system = Snes::new(cartridge(&[0xDB]));
         // 341 dots x 4 master clocks = one NTSC scanline.
-        system.advance_peripherals(1364);
-        assert_eq!(system.cpu_stall, DRAM_REFRESH_CLOCKS);
-        system.advance_peripherals(1364);
-        assert_eq!(system.cpu_stall, 2 * DRAM_REFRESH_CLOCKS);
-        system.advance_peripherals(1364);
-        assert_eq!(system.cpu_stall, 3 * DRAM_REFRESH_CLOCKS);
+        assert_eq!(system.advance_peripherals(1364), DRAM_REFRESH_CLOCKS);
+        assert_eq!(system.advance_peripherals(1364), DRAM_REFRESH_CLOCKS);
+        assert_eq!(system.advance_peripherals(1364), DRAM_REFRESH_CLOCKS);
+        assert_eq!(system.cpu_stall, 0);
     }
 
     #[test]
@@ -1125,7 +1129,6 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
-                clock: 0,
             };
             bus.write(0x2121, 0x00);
             bus.write(0x4300, 0x00);
@@ -1152,7 +1155,6 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
-                clock: 0,
             };
             crate::dma::run(&channels, mask, &mut bus);
         }

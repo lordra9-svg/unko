@@ -16,12 +16,16 @@ pub trait SpcBus {
     fn write(&mut self, address: u16, value: u8);
     /// Advance one idle cycle.
     fn idle(&mut self) {}
-    /// Advance the S-SMP timers by `clocks` 2.048 MHz clocks.
+    /// Advance the S-SMP timers by `clocks` 2.050560 MHz clocks.
     fn advance(&mut self, _clocks: u32) {}
+    /// Advance the cooperative peripherals (the S-DSP) by `clocks` 2.050560 MHz
+    /// clocks. ares `SMP::wait` steps the thread and then synchronizes the DSP,
+    /// so this runs *before* the access it belongs to.
+    fn step_clock(&mut self, _clocks: u32) {}
 
     /// Access cost in S-SMP time units (ares `cycleWaitStates` / 2).
     ///
-    /// One unit is two APU clocks: the hardware SMP thread runs at 2.048 MHz
+    /// One unit is two APU clocks: the hardware SMP thread runs at 2.050560 MHz
     /// and an opcode cycle costs two clocks by default. `$F0` bits 4-7 select
     /// the internal/external wait states, including the glitchy 10/20 values.
     fn wait_cycles(&mut self, _address: Option<u16>) -> u32 {
@@ -182,17 +186,22 @@ impl Spc700 {
     fn read(&mut self, bus: &mut impl SpcBus, address: u16) -> u8 {
         let wait = bus.wait_cycles(Some(address));
         self.cycles += u64::from(wait);
+        let clocks = wait * 2;
         if bus.split_port_read(address) {
             // ares `SMP::read`: $F4-$F7 split the wait into two halves around
             // the data fetch, halving both the CPU cost and the timer step.
             let half = bus.timer_cycles(Some(address)) / 2;
+            bus.step_clock(clocks / 2);
             bus.advance(half);
             let value = bus.read(address);
+            bus.step_clock(clocks / 2);
             bus.advance(half);
             return value;
         }
-        // ares steps the timers during the wait, before the access.
+        // ares steps the thread and the timers during the wait, before the
+        // access, so a DSP register read observes the post-step state.
         let timer = bus.timer_cycles(Some(address));
+        bus.step_clock(clocks);
         bus.advance(timer);
         bus.read(address)
     }
@@ -201,6 +210,7 @@ impl Spc700 {
         let wait = bus.wait_cycles(Some(address));
         self.cycles += u64::from(wait);
         let timer = bus.timer_cycles(Some(address));
+        bus.step_clock(wait * 2);
         bus.advance(timer);
         bus.write(address, value);
     }
@@ -209,6 +219,7 @@ impl Spc700 {
         let wait = bus.wait_cycles(None);
         self.cycles += u64::from(wait);
         let timer = bus.timer_cycles(None);
+        bus.step_clock(wait * 2);
         bus.advance(timer);
         bus.idle();
     }
