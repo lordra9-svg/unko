@@ -279,7 +279,7 @@ fn main() -> ExitCode {
     if std::env::var_os("SA1_STATE").is_some() {
         if let Some(sa1) = &system.sa1 {
             eprintln!(
-                "SA1 pc={:02X}:{:04X} s={:04X} p={:02X} e={} ticks={} resb={} rdyb={} pending={} hc={} vc={} mr={:010X}",
+                "SA1 pc={:02X}:{:04X} s={:04X} p={:02X} e={} ticks={} resb={} rdyb={} pending={} hc={} vc={} mr={:010X} sbm={:02X} cbm={:02X} sw46={} swen={} cwen={} bwp={:X} bbf={}",
                 sa1.cpu.pbr,
                 sa1.cpu.pc,
                 sa1.cpu.s,
@@ -291,7 +291,21 @@ fn main() -> ExitCode {
                 sa1.interrupt_pending,
                 sa1.hcounter,
                 sa1.vcounter,
-                sa1.io.mr
+                sa1.io.mr,
+                sa1.io.sbm,
+                sa1.io.cbm,
+                sa1.io.sw46,
+                sa1.io.swen,
+                sa1.io.cwen,
+                sa1.io.bwp,
+                sa1.io.bbf
+            );
+            eprintln!(
+                "SA1 iram[6DE..6E2]={:02X?} dma_count={} dtc={:04X} dmaen={}",
+                &sa1.iram[0x6DE..0x6E2],
+                sa1.dma_count,
+                sa1.io.dtc,
+                sa1.io.dmaen
             );
         } else {
             eprintln!("SA1 not attached");

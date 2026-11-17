@@ -883,10 +883,17 @@ frames of gameplay HUD rendering.
   machines show the same scene but with a different palette/scroll, so a later
   SA-1 data path (probably the character-conversion DMA or a BWRAM protection
   case) is still wrong.
-- Kirby's Dream Land 3 never finishes booting: the SA-1 spins at `$00:A96D`
-  waiting for a BWRAM handshake flag the S-CPU never sets, and the S-CPU leaves
-  the main screen blank. KDL3 is the heaviest user of the bit-map/character
-  conversion path, which is where the remaining bug is presumed to be.
+- Kirby's Dream Land 3 never finishes booting. Instrumented run (PC trace plus
+  BWRAM/I-RAM write logs): the S-CPU boots normally through frame ~100, then at
+  `$00:82F3` executes `JMP [$72AC]` (BWRAM pointer -> `$00:EF31`), and
+  `$00:EF34`'s `JMP [$36DE]` reads I-RAM `$36DE`, which holds **0**, so it jumps
+  to `$00:0000` (empty WRAM), executes zero bytes and derails at `$00:5FFF`
+  with a corrupted stack. Neither CPU writes a non-zero value to `$36DE`
+  (the S-CPU clears `$7E:36DE`, the SA-1 writes 0 into I-RAM) and **no SA-1 DMA
+  runs at all** (`$2230` stays 0), so the dispatch pointer is never produced.
+  The next step is to find which routine is supposed to fill the `$36xx`
+  dispatch table (the trace's `$00:A940-$A951` routine shares the ROM with the
+  SA-1's `$72A4` handshake).
 - The SA-1's `$40-$4F` BWRAM window is the only extra S-CPU mapping modelled;
   the boot ROM / BS-X slot and the `$50-$6F` open-bus windows are not.
 

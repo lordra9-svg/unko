@@ -332,6 +332,8 @@ pub struct Sa1 {
     pub snes_refresh: bool,
     /// Instructions retired (debug).
     pub ticks: u64,
+    /// Normal DMA transfers executed (debug).
+    pub dma_count: u64,
 }
 
 impl Sa1 {
@@ -352,6 +354,7 @@ impl Sa1 {
             snes_mar: 0,
             snes_refresh: false,
             ticks: 0,
+            dma_count: 0,
         };
         sa1.power(region);
         sa1
@@ -816,6 +819,7 @@ impl Sa1 {
 
     /// ares `SA1::dmaNormal`.
     fn dma_normal(&mut self, rom: &[u8], bwram: &mut [u8]) {
+        self.dma_count = self.dma_count.wrapping_add(1);
         let rom_conflict =
             (self.snes_mar & 0x408000) == 0x008000 || (self.snes_mar & 0xC00000) == 0xC00000;
         let bwram_conflict =
