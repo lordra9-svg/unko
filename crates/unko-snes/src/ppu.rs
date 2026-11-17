@@ -70,6 +70,8 @@ pub struct Ppu {
     vblank: bool,
     nmi: bool,
     frame_ready: bool,
+    /// Completed frames since power-on (debug).
+    pub debug_frame: u64,
     /// $2100 INIDISP
     display_brightness: u8,
     display_disable: bool,
@@ -187,6 +189,7 @@ impl Ppu {
             vblank: false,
             nmi: false,
             frame_ready: false,
+            debug_frame: 0,
             display_brightness: 0,
             // ares `PPU::power`: the PPU powers up force-blanked.
             display_disable: true,
@@ -569,6 +572,7 @@ impl Ppu {
         // ares `PPU::main` presents the frame at vcounter 240 in both modes.
         if self.line == 240 {
             self.frame_ready = true;
+            self.debug_frame = self.debug_frame.wrapping_add(1);
         }
     }
 
@@ -709,6 +713,22 @@ impl Ppu {
 
     /// Write a PPU register in `$2100-$213F`.
     pub fn write(&mut self, address: u16, data: u8) {
+        static PPU_LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let enabled = *PPU_LOG.get_or_init(|| std::env::var_os("PPU_LOG").is_some());
+        if enabled && matches!(address, 0x2100 | 0x2121 | 0x2122 | 0x2130 | 0x2131 | 0x2132) {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/opencode/ppu.log")
+            {
+                let _ = writeln!(
+                    f,
+                    "{} {} {} {:04X} {:02X}",
+                    self.debug_frame, self.line, self.dot, address, data
+                );
+            }
+        }
         match address {
             0x2100 => {
                 // ares: forcing blank at the start of vblank resets the OAM

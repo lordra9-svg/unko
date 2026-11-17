@@ -980,10 +980,29 @@ frames of gameplay HUD rendering.
   where ares is fully lit. So the scene, the tilemap and the register setup
   all agree; only the brightness/palette ramp into it is late in ours.
 
-  Note that at 492 our `INIDISP` brightness is already 15 while the screen is
-  black, so the fade is being done through CGRAM (palette toward black) as well
-  as `INIDISP`; the next step is to compare the CGRAM/`INIDISP` write sequence
-  between frames 488 and 500 in both emulators.
+  **Root cause: a constant timeline lag, not the palette.** Logging every
+  `$2100` (INIDISP) write with a frame stamp in both cores (`PPU_LOG` /
+  `ARES_PPU_LOG`) gives:
+
+  | event | ares | ours | lag |
+  |---|---|---|---|
+  | first fade-in step (`$01`) | frame 30.81 | frame 36 | 5.2 |
+  | fade-out starts (`$0D`) | frame 374.24 | frame 381 | 5.8 |
+  | force blank on (`$8F`) | frame 382.23 | frame 388 | 5.8 |
+  | second fade-in starts (`$02`) | frame 491.07 | frame 497.06 | 5.9 |
+
+  So the brightness/palette logic is *correct* - both cores run the same
+  sequence of `$2100` values, one step per frame - but ours is a constant ~5-6
+  frames (about 1.8-2.1 M master clocks) behind from the very first fade at
+  frame 30, and the lag creeps up by ~0.7 frames over the next 460. Because
+  both cores are force-blanked (pure black) for most of frames 388-492, that
+  offset is invisible in the frame diffs until a fade is in progress, which is
+  exactly why the first mismatch appears at frame 493.
+
+  The remaining work is therefore not PPU-side: something in the first 30
+  frames costs us ~5 frames of game time. The next step is to find the clock of
+  the first `$2100 = $01` in both cores and work backwards, or trace-diff
+  SMRPG's S-CPU; the palette and `INIDISP` handling can be ruled out.
 - Kirby's Dream Land 3 no longer derails. The null `$36DE` pointer turned out
   to be a symptom of two unrelated CPU bugs (both fixed, see "Resolved
   2026-11-17 - joypad serial ports and the NMI-enable edge" below): the game
