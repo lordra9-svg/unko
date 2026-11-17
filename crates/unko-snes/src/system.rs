@@ -369,11 +369,6 @@ impl CpuBus for SnesBus<'_> {
                 } else if offset == 0x420D {
                     *self.fast_rom = value & 0x01 != 0;
                 } else if (0x4300..=0x437F).contains(&offset) {
-                    if std::env::var_os("DMA_WRITE_TRACE").is_some()
-                        && (0x4370..=0x437A).contains(&offset)
-                    {
-                        eprintln!("dma write {offset:04X} = {value:02X}");
-                    }
                     self.dma.write(offset as u16, value);
                 }
                 if offset == 0x4016 {

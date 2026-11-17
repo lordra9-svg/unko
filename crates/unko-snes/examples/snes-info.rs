@@ -195,8 +195,9 @@ fn main() -> ExitCode {
         .sum();
     if std::env::var_os("PPU_DEBUG").is_some() {
         eprintln!(
-            "ppu regs: mode={} sc={:02X?} nba={:02X?} tm={:02X} ts={:02X} m7={:02X} scroll={:?}",
+            "ppu regs: mode={} mosaic={:02X} sc={:02X?} nba={:02X?} tm={:02X} ts={:02X} m7={:02X} scroll={:?}",
             system.ppu.bg_mode(),
+            system.ppu.mosaic(),
             [0, 1, 2, 3].map(|i| system.ppu.bg_sc(i)),
             [0, 1, 2, 3].map(|i| system.ppu.bg_nba(i)),
             system.ppu.main_screen(),

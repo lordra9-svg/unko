@@ -82,6 +82,8 @@ Implemented so far:
 - PPU windows: W12SEL/W34SEL/WOBJSEL decode (invert on the even bits, enable on
   the odd bits), inclusive window edges, WBGLOG/WOBJLOG combine modes, TMW/TSW
   per-layer masking and the CGWSEL colour-window gate
+- PPU mosaic: per-BG `$2106` enable, 1-16 pixel size, horizontal pixel repeats
+  and vertical row reuse aligned like ares
 - S-SMP timers 0-2 with targets, enable/reset bits and `$FD-$FF` output latching
 - S-CPU I/O: serial controller ports at `$4016/$4017`, hardware auto-poll into
   `$4218-$421F`, `$4210/$4211/$4212` flags (NTSC version 2, vblank, hblank,
@@ -94,7 +96,7 @@ Implemented so far:
 
 Validation so far:
 
-- **835 workspace tests**, 0 failed
+- **836 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,

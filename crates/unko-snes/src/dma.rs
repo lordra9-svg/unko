@@ -126,41 +126,12 @@ impl Dma {
 
     /// Take the latched `$420B` write as an in-progress transfer.
     pub fn begin_transfer(&mut self) -> Option<DmaTransfer> {
-        let transfer = self
-            .take_pending()
-            .map(|(channels, mask)| DmaTransfer::new(channels, mask));
-        if std::env::var_os("DMA_TRACE").is_some() {
-            if let Some(transfer) = &transfer {
-                for (index, channel) in transfer.channels.iter().enumerate() {
-                    if transfer.mask & (1 << index) != 0 {
-                        eprintln!(
-                            "DMA{index} ctrl={:02X} target={:02X} src={:02X}:{:04X} size={}",
-                            channel.control,
-                            channel.target,
-                            channel.bank,
-                            channel.source,
-                            channel.size
-                        );
-                    }
-                }
-            }
-        }
-        transfer
+        self.take_pending()
+            .map(|(channels, mask)| DmaTransfer::new(channels, mask))
     }
 
     /// Enable HDMA channels and reset their table cursors.
     pub fn set_hdma_enable(&mut self, mask: u8) {
-        if std::env::var_os("HDMA_TRACE").is_some() {
-            eprintln!("HDMAEN <- {mask:02X}");
-            for (index, channel) in self.channels.iter().enumerate() {
-                if mask & (1 << index) != 0 {
-                    eprintln!(
-                        "  ch{index} ctrl={:02X} target={:02X} bank={:02X} table={:04X}",
-                        channel.control, channel.target, channel.bank, channel.hdma_address
-                    );
-                }
-            }
-        }
         self.hdma_enable = mask;
         self.hdma_reset();
     }

@@ -74,7 +74,7 @@ with ares. The implementation follows ares, which is the primary source.
 - Display brightness follows ares' DAC luma `(1 + l) / 16 * (l ? 1 : 0.25)`
   with integer rounding. Measured frames match ares at `INIDISP = $0F` and at
   `$0B`; sub-1/255 rounding differences are possible at other levels.
-- Hires output, interlace, mosaic and offset-per-tile are not implemented.
+- Hires output, interlace and offset-per-tile are not implemented.
 - The 32-sprite/34-tile limits and the 32-entry per-line sprite list are not
   enforced, so equal-priority sprite overlaps can resolve differently.
 - Mode 7 `EXTBG` is partial and the 32-sprite/34-tile limits are not enforced.

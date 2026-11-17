@@ -224,6 +224,11 @@ impl Ppu {
         self.layer_mask = mask;
     }
 
+    /// Current mosaic register (debug/test helper).
+    pub const fn mosaic(&self) -> u8 {
+        self.mosaic
+    }
+
     /// Sub-screen enable mask (debug/test helper).
     pub const fn sub_screen(&self) -> u8 {
         self.ts
@@ -587,6 +592,16 @@ impl Ppu {
         }
     }
 
+    /// Mosaic pixel size (`$2106` bits 4-7 plus one).
+    fn mosaic_size(&self) -> usize {
+        usize::from((self.mosaic >> 4) & 0x0F) + 1
+    }
+
+    /// Whether mosaic is enabled for a BG layer.
+    fn layer_mosaic(&self, layer: usize) -> bool {
+        self.mosaic & (1 << layer) != 0
+    }
+
     /// Window configuration for a layer: BG1-4 = 0-3, OBJ = 4, colour = 5.
     fn window_config(&self, layer: usize) -> (bool, bool, bool, bool, u8) {
         let (selector, mask) = match layer {
@@ -761,9 +776,25 @@ impl Ppu {
         let main_enable = self.layer_mask.unwrap_or(self.tm) & (1 << layer) != 0;
         let sub_enable = self.ts & (1 << layer) != 0 && self.layer_mask.is_none();
 
+        let mosaic = self.layer_mosaic(layer);
+        let mosaic_size = self.mosaic_size() as u32;
+        // ares' mosaic repeats the fetched pixel for `size` pixels and reuses
+        // the tile row for `size` lines, aligned so line 1 and pixel 0 start a
+        // new block.
+        let mosaic_y = if mosaic {
+            let offset = (y as u32).saturating_sub(1) % mosaic_size;
+            (y as u32) - offset
+        } else {
+            y as u32
+        };
         for x in 0..SCREEN_WIDTH {
-            let h = (x as u32 + hscroll) & (hsize - 1);
-            let v = (y as u32 + vscroll) & (vsize - 1);
+            let mosaic_x = if mosaic {
+                (x as u32) - (x as u32 % mosaic_size)
+            } else {
+                x as u32
+            };
+            let h = (mosaic_x + hscroll) & (hsize - 1);
+            let v = (mosaic_y + vscroll) & (vsize - 1);
             let htile = h >> (3 + tile_size);
             let vtile = v >> (3 + tile_size);
             let mut offset = (htile & 0x1F) | ((vtile & 0x1F) << 5);
@@ -1179,6 +1210,44 @@ mod tests {
         ppu.write(0x2122, 0x1F);
         ppu.write(0x2122, 0x00);
         assert_eq!(ppu.cgram[2], 0x001F);
+    }
+
+    #[test]
+    fn mosaic_repeats_background_pixels() {
+        fn setup() -> Ppu {
+            let mut ppu = Ppu::new();
+            ppu.write(0x2100, 0x0F); // full brightness
+            ppu.write(0x2105, 0x01); // mode 1
+            ppu.write(0x2107, 0x04); // BG1 map at $0400
+            ppu.write(0x210B, 0x00); // BG1 characters at $0000
+            ppu.write(0x2121, 0x01);
+            ppu.write(0x2122, 0x1F); // palette colour 1 = red
+            ppu.write(0x2122, 0x00);
+            ppu.write(0x212C, 0x01); // BG1 on the main screen
+                                     // 4bpp tile 0 row 1 (visible line 1): colour 1 at pixels 0 and 4.
+            ppu.vram[1] = 0x0088;
+            ppu
+        }
+
+        let mut ppu = setup();
+        ppu.render_line(1, 0);
+        let plain: Vec<u8> = ppu.framebuffer[0..8 * 4]
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| pixel[0])
+            .collect();
+        assert_eq!(plain, vec![255, 0, 0, 0, 255, 0, 0, 0]);
+
+        ppu.write(0x2106, 0x11); // size 2, BG1 mosaic enabled
+        ppu.render_line(1, 0);
+        let mosaic: Vec<u8> = ppu.framebuffer[0..8 * 4]
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| pixel[0])
+            .collect();
+        assert_eq!(mosaic, vec![255, 255, 0, 0, 255, 255, 0, 0]);
     }
 
     #[test]
