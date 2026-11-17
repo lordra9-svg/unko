@@ -55,6 +55,8 @@ pub struct Snes {
     refresh_pending: bool,
     /// Whether this frame's joypad auto-poll has started.
     auto_poll_started: bool,
+    /// Whether this line's HDMA run (ares `hdmaPosition`, dot 276) has happened.
+    hdma_run_done: bool,
     /// IRQ line state latched by the H/V comparator, applied at the next
     /// instruction boundary.
     irq_line: bool,
@@ -88,6 +90,7 @@ impl Snes {
             refresh_done: false,
             refresh_pending: false,
             auto_poll_started: false,
+            hdma_run_done: false,
             irq_line: false,
             nmi_line: false,
             nmi_count: 0,
@@ -143,6 +146,7 @@ impl Snes {
         self.nmi_line = false;
         self.nmi_count = 0;
         self.auto_poll_started = false;
+        self.hdma_run_done = false;
         self.clock = 0;
         self.apu.debug.set_clock(0);
         let mut bus = SnesBus {
@@ -300,12 +304,15 @@ impl Snes {
                 self.auto_poll_started = true;
                 self.io.begin_auto_poll();
             }
-            if let Some(line) = self.ppu.take_line_event() {
-                self.refresh_done = false;
-                if line == 0 {
-                    self.dma.hdma_reset();
-                    self.auto_poll_started = false;
-                }
+            // ares `CPU::step`: HDMA triggers at hcounter 1104 (dot 276) of
+            // every visible line, so its register writes land before the next
+            // line is rendered but after the current line's CPU work.
+            if pre_dot == 275
+                && self.ppu.line() >= 1
+                && !self.ppu.in_vblank()
+                && !self.hdma_run_done
+            {
+                self.hdma_run_done = true;
                 let mut bus = HdmaBus {
                     wram: &mut self.wram,
                     cart: &mut self.cart,
@@ -315,6 +322,25 @@ impl Snes {
                 let bytes = self.dma.hdma_line(&mut bus);
                 // ares: an HDMA byte costs the CPU eight master clocks.
                 self.cpu_stall += bytes * 8;
+            }
+            if let Some(line) = self.ppu.take_line_event() {
+                self.refresh_done = false;
+                self.hdma_run_done = false;
+                if line == 0 {
+                    self.dma.hdma_reset();
+                    self.auto_poll_started = false;
+                    // ares `hdmaSetup` runs at V=0 (hcounter ~12); our
+                    // line-granular renderer runs it with the line-0 event so
+                    // line 0 sees it.
+                    let mut bus = HdmaBus {
+                        wram: &mut self.wram,
+                        cart: &mut self.cart,
+                        apu: &mut self.apu,
+                        ppu: &mut self.ppu,
+                    };
+                    let bytes = self.dma.hdma_line(&mut bus);
+                    self.cpu_stall += bytes * 8;
+                }
                 self.ppu.render_current_line();
             }
         }
