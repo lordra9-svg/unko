@@ -136,14 +136,22 @@ S-DSP output is now instrumented but not sample-identical:
     access (as ares does inside `SMP::step`) rather than at the plan drain makes
     the first divergence *earlier* (read 7 instead of 34), so the drain-time
     model is the closer one and was kept.
-  - **Root cause.** A `$F3` read inside an instruction must observe the DSP as of
-    that access, but our SPC executes a whole instruction when its plan is
-    formed, so every read inside it observes the DSP as of the instruction
-    start - up to ~12 S-Clock early. Boundary detection is exactly the
-    operation for which that skew changes the answer, which is why only this
-    test fails. Fixing it needs the DSP (and therefore the S-SMP) to be
-    advanced per access by the scheduler, i.e. the resumable-SPC design, not
-    another arithmetic fix.
+  - **Tested and falsified.** The access-granularity hypothesis was implemented
+    on branch `spc-resume` (commits `c66eeec`, `4f6e2ae`): the micro-op plan was
+    replaced by tick-paced stepping, `Spc700::Pending::DirectRead` defers any
+    read of `$00F0-$00FF` to the start of its own access, and the S-SMP is paced
+    by a per-instruction access-unit budget so wall time still equals
+    instruction cost. The build passes 843 workspace tests, the 8x256 cycle
+    oracle, `spc_timer` and `spc_smp` - and the `spc_dsp6` framebuffer is
+    **byte-identical to `main`**, as is `spc_smp`'s. So access-exact S-SMP I/O
+    reads change nothing for this ROM: the `Echo/esa_changes` failure is on the
+    DSP side, not the S-SMP read granularity.
+  - Two intermediate variants (over-counting one access unit per deferred read,
+    so the S-SMP ran slower than real time) *did* move the Super Mario World
+    content offset from two frames to one (`ours 599 == RS 600` at 100.000%).
+    With the delay arithmetic corrected the offset returns to two, so the
+    remaining title-screen phase is likewise **not** caused by I/O read
+    sampling granularity - the drift was compensating something else.
 - At 600 frames, 36 of the 128 DSP registers differ from the RustySNES oracle;
   voices 6 and 7 match exactly and voices 0-4 are at different song positions.
 - The queued audio is non-silent (RMS about 0.012 vs ares 0.023) and the best
