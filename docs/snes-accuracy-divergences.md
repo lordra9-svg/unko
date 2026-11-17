@@ -130,6 +130,33 @@ S-DSP output is now instrumented but not sample-identical:
     of step by one access. The bus path itself is correct and now pinned by
     `dspdata_write_reads_back_immediately` (write `$F3` = `$88` to `V0ENVX`,
     read back `$88`, register file retains it until the sample latch).
+  - **Combined write+read log with PCs (both emulators).** Logging `$F3`
+    accesses as `W/R address value pc dsp-step` gives, at the first slip:
+    ```
+    ours                          RustySNES
+    R 08 00 04F6 step 1           R 08 00 04F6 phase 21
+    W 08 88 04F6 step 1           W 08 88 04F6 phase 22
+    R 08 00 04F8 step 5   <- 00   R 08 88 04F8 phase 25
+                                  R 08 88 04F8 phase 0
+                                  R 08 00 04F8 phase 7
+    ```
+    Both refresh `registers[$x8]` at micro-step 4 of the 32-step sequence
+    (`voice9(0)`, identical schedules in both emulators), so the *schedule* is
+    not the difference: ours writes at step 1, i.e. just before the step-4
+    refresh, and is clobbered three ticks later; RustySNES writes at phase 22,
+    after that refresh, so the value survives until the next sample. In other
+    words the two emulators' **DSP position at the same SPC instruction differs
+    by about 21 ticks (42 master clocks)**.
+  - A phase sweep judged with this combined-log prefix (ignoring the step
+    column) peaks at phase 20 (prefix 20) against phase 0 (prefix 2), i.e. the
+    ordering *does* improve towards that offset, but no phase removes the slip;
+    the residual is therefore not a pure phase shift either.
+  - Also measured: at 600 frames our log holds 25,012 `$F3` accesses against
+    RustySNES' 1,348, while the `VxENVX` read counts are comparable (207 vs
+    190). The extra traffic is all writes, so after the first slip the test
+    follows a much longer DSP-access path in ours. This needs one confirmation
+    run (the two logging paths differ), but it is the first *macroscopic*
+    difference found in this test.
   - Consequence for the next attempt: the remaining question is the
     *instruction-level* ordering of the write and the following read inside
     `$04F3`-`$050A` (which instruction's access the value is sampled on), not
