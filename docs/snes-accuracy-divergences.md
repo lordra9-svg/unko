@@ -180,6 +180,18 @@ S-DSP output is now instrumented but not sample-identical:
     echo writes - not in the envelope cadence, `misc29`/`misc30` order,
     `clock.counter`, or the shared `latch.adsr0`/`latch.envx` (all of which the
     log shows to be irrelevant here).
+  - **The echo feedback path is inactive where the ramp is compared.** Logging
+    `(_history_offset, echo.input[0], echo.feedback, echo.history[0][*])` at
+    `echo22`, at `echo25` and at every `echoWrite` of channel 0 shows
+    `in=0000 fb=00 history=[0;8]` in **every** captured window: the two `$6D`
+    (ESA) writes of the whole run (samples 4017 and 12028), the V4GAIN windows,
+    and - decisively - all 2000 sampled `echoWrite` calls never observe
+    `echo.output[0] != 0`. So the `0800, 0800, 07F8, ...` ramp in the `$F0`
+    page is not produced by the echo feedback/FIR arithmetic at all; it is
+    written by the test's own SPC stores (or is untouched echo-page data).
+    The remaining divergence is therefore in the **test's ARAM write sequence
+    or the pages it compares**, not in any DSP arithmetic - every DSP formula
+    and cadence has now been excluded by measurement.
   - **`clock.counter` phase is ruled out structurally.** `Dsp::reset` is called
     exactly once (`Apu::reset` from `Snes::reset`), so `clock.counter` starts at
     zero exactly as in the reference (ares does not reset `clock` at all, and it
