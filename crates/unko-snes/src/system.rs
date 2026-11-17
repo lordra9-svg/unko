@@ -38,6 +38,8 @@ pub struct Snes {
     fast_rom: bool,
     /// `$2180-$2183` WRAM data-port address (17 bits).
     wram_port: u32,
+    /// Master clocks the CPU still owes for HDMA bytes already transferred.
+    hdma_stall: u32,
     /// IRQ line state latched by the H/V comparator, applied at the next
     /// instruction boundary.
     irq_line: bool,
@@ -65,6 +67,7 @@ impl Snes {
             nmi_flag: false,
             fast_rom: false,
             wram_port: 0,
+            hdma_stall: 0,
             irq_line: false,
             nmi_line: false,
             nmi_count: 0,
@@ -219,7 +222,9 @@ impl Snes {
                     apu: &mut self.apu,
                     ppu: &mut self.ppu,
                 };
-                self.dma.hdma_line(&mut bus);
+                let bytes = self.dma.hdma_line(&mut bus);
+                // ares: an HDMA byte costs the CPU eight master clocks.
+                self.hdma_stall += bytes * 8;
                 if line == 225 {
                     self.io.begin_auto_poll();
                 }
@@ -284,7 +289,10 @@ impl CpuBus for Snes {
     }
 
     fn access_cycles(&mut self, address: u32) -> u32 {
-        self.bus().access_cycles(address)
+        let base = self.bus().access_cycles(address);
+        // HDMA transfers inside hblank steal eight master clocks per byte from
+        // the CPU (ares); the debt is paid on the next access.
+        base + std::mem::take(&mut self.hdma_stall)
     }
 
     fn idle(&mut self) {

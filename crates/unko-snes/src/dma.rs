@@ -153,7 +153,12 @@ impl Dma {
     }
 
     /// Advance one scanline of HDMA transfers.
-    pub fn hdma_line(&mut self, bus: &mut impl DmaBus) {
+    ///
+    /// Returns the number of bytes transferred, so the caller can stall the CPU
+    /// by ares' eight master clocks per byte (an HDMA transfer inside hblank
+    /// steals cycles from the CPU; without it the CPU runs ahead).
+    pub fn hdma_line(&mut self, bus: &mut impl DmaBus) -> u32 {
+        let mut transferred = 0u32;
         for (index, channel) in self.channels.iter().copied().enumerate() {
             if self.hdma_enable & (1 << index) == 0 {
                 continue;
@@ -205,6 +210,7 @@ impl Dma {
                     };
                     let value = bus.read_a(address);
                     bus.write_b(target, value);
+                    transferred += 1;
                     if indirect {
                         state.indirect_address = state.indirect_address.wrapping_add(1);
                     } else {
@@ -218,6 +224,7 @@ impl Dma {
                 state.line_counter = 0;
             }
         }
+        transferred
     }
 }
 

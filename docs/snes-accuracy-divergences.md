@@ -79,6 +79,20 @@ rendering difference:
     point the main loop starts spinning (or our HDMA stalls shorten the loop
     period). Measuring RustySNES' loop period over the same interval separates
     the two.
+  - **Loop period measured on both sides: identical.** Logging
+    `(master_clock, DP $10)` at every `$806B` on the RustySNES side as well gives
+    a **46.00 master clock** iteration period in *both* emulators, so a
+    per-iteration cost difference is ruled out. (The earlier reading of "312
+    iterations at 86 clocks" on the reference side was an artefact of comparing
+    unmatched windows: RustySNES' 9,000 samples cover 1.3 frames because they are
+    one long spin, while ours span 44 frames.)
+  - **HDMA CPU stalls implemented.** While measuring this, the loop's measured
+    46-clock period against `lda`+`beq` = 11 clocks showed that stalls dominate
+    the loop. HDMA now charges the CPU ares' eight master clocks per transferred
+    byte (`Snes.hdma_stall`, paid on the next access), which is a real fidelity
+    fix - but it does **not** touch the frame-191 window: SMW transfers **0 HDMA
+    bytes** at frames 100 and 191 (only 146,288 by frame 600), so HDMA is not the
+    stall source there.
   - Also note the cumulative totals: our `$806B` sits at 472,528 by frame 190
     against the reference's 454,144 (+4%), and `$809A` at 266,693 against
     253,713 (+5%), so the CPU spends slightly more iterations spinning in both
