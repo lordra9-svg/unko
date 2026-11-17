@@ -288,6 +288,19 @@ with ares. The implementation follows ares, which is the primary source.
   (`frame_buffer()` returns a resolution-sized slice). Hi-res *fetching*
   (`Background::fetchCharacter(index, half)`, two output columns per pixel
   clock) and the 448-line interlace field output are still to be written.
+  A first attempt implemented only the **DAC doubling** (output column 2x =
+  Above screen, 2x+1 = Below screen, each with its own colour math) and latched
+  `frame_hires` from `SETINI` bit 3 / modes 5/6. Measured against RustySNES on
+  `PeterLemon-PPU/HiColor/PseudoHiRes.sfc` at 512 wide it matched **5.767%** of
+  pixels (mean channel difference 51.98), i.e. wrong, and was reverted. The
+  conclusion is that the DAC-only model is insufficient: hi-res needs ares'
+  `Background::fetchCharacter(index, half)` fetch path (two output columns per
+  pixel clock, `half` selecting between the two halves of the fetched bitplane
+  pair, `pixelCounter` running at 512 per line) before the output stage can be
+  validated. The ROM and its SHA-256 are recorded in
+  `test-roms/snes/PeterLemon-PPU/README.md`, and the RustySNES harness now
+  reports `FBGEOM <frame_hires> <visible_width>` (`true 512` for this ROM) so a
+  hi-res dump can be strided on the next attempt.
 - Offset per tile **is** implemented for modes 2, 4 and 6, transcribed from
   ares `Background::fetchNameTable`/`fetchOffset`: the per-column horizontal and
   vertical words are read from BG3's tilemap (horizontal at `voffset + 0`,
