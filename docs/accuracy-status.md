@@ -232,6 +232,15 @@ Validation so far:
   verified against ares below. A release SuperFX image (e.g. Star Fox) is not
   present locally, so the end-to-end game path is not yet measured; Final
   Fantasy V was still in its boot sequence at the 20M-cycle sample.
+- The S-DD1 decompression coprocessor is implemented (`sdd1.rs`): the
+  `$4800-$480F` registers, the LoROM/MMC MCU windows, both save-RAM windows,
+  the `$4300-$437F` DMA snoop and the full Golomb-Rice/context-model entropy
+  decoder from ares. Cartridges are detected from map modes `$22`/`$32`, so no
+  firmware or database entry is required. Verified **100.000%**
+  pixel-identical against ares for Street Fighter Alpha 2 (USA) at frames 120,
+  300 and 600 and Star Ocean (Japan) at 120 and 600; the decoder was also
+  checked stream-by-stream against an independent transcription of the ares
+  algorithm.
 - The Capcom CX4 (Hitachi HG51B S169) is implemented (`cx4.rs`): the full
   16-bit opcode decode with every ALU/branch/load class, the two-page 256-word
   instruction cache, the 3 KiB data RAM and 1 KiB `cx4.rom` data ROM, the

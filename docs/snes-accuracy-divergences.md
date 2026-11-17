@@ -790,6 +790,51 @@ Known limitations:
   in-game (post-title) path is not diffed frame-by-frame; the boot, logo and
   title screens are.
 
+## S-DD1 decompression
+
+`crates/unko-snes/src/sdd1.rs` ports the ares `SDD1` component and its
+`Decompressor`:
+
+- the `$4800-$480F` register window (`$4800` hard enable, `$4801` soft enable,
+  `$4804-$4807` MMC banks masked to `0x8F`); `$4802/$4803` and `$4808-$480F`
+  read the raw ROM at that offset, like ares;
+- the MCU windows `$00-$3F,$80-$BF:$8000-$FFFF` (LoROM fold with the
+  `r4805`/`r4807` bit-7 A21 remaps) and `$C0-$FF:$0000-$FFFF` (MMC bank
+  registers, or a live decompression stream);
+- the board's save RAM at `$00-$3F,$80-$BF:$6000-$7FFF` and
+  `$70-$73:$0000-$FFFF`;
+- the DMA snoop: every `$4300-$437F` write is mirrored so the chip knows each
+  channel's source address and size. Decompression streams only while a
+  matching read hits an armed channel, and the channel disables itself when
+  the byte count reaches zero;
+- the entropy decoder: input manager, eight Golomb-Rice bits generators, the
+  32-context probability-estimation module, the context model and the output
+  logic, with the ares `runCount`/`evolutionTable` tables copied verbatim.
+
+**One bug was worth recording.** The probability-estimation evolution table has
+**33** states (0..=32): state 31's `nextIfMps` is 32. Masking the stored status
+to 5 bits (`& 31`) folded state 32 back to 0 and desynchronised the stream. For
+Star Ocean's third stream (6,144 bytes) the first 51 bytes were right and the
+remaining 5,334 were wrong; correcting it made all four streams byte-exact.
+The decoder was checked against an independent Python transcription of the ares
+algorithm, stream by stream.
+
+Verification (same-frame comparisons against ares):
+
+| ROM | Frames | Result |
+|---|---|---|
+| Street Fighter Alpha 2 (USA) | 120, 300, 600 | **100.000%** exact (57,344/57,344 each) |
+| Star Ocean (Japan) | 120, 600 | **100.000%** exact |
+
+Star Ocean at frame 90 differs (94.046%): ares is still black while our ENIX
+logo is already fading in, i.e. a boot-phase timing offset of a few frames that
+converges by frame 120. The decompressed logo itself is byte-identical.
+
+Cartridges are detected as S-DD1 from map modes `$22`/`$32` (the ares/mia
+`SDD1-` rule), so no firmware or database entry is needed. Only the `SDD1`
+board layouts (no extra coprocessor RAM) are modelled; save-state coverage
+includes the register file, DMA shadows and decompressor state.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

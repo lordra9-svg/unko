@@ -30,6 +30,7 @@ pub mod io;
 pub mod necdsp;
 pub mod ppu;
 pub mod rom;
+pub mod sdd1;
 pub mod spc700;
 pub mod system;
 
@@ -46,5 +47,6 @@ pub use rom::{
     region_for_country, rom_size_bytes, sram_size_bytes, BusTarget, Cartridge, Mapping, Region,
     RomError, RomHeader,
 };
+pub use sdd1::{Sdd1, Sdd1Banks, Sdd1Dma};
 pub use spc700::{Flags as Spc700Flags, Spc700, SpcBus};
 pub use system::{Snes, SnesState, StateError, SAVE_STATE_MAGIC, SAVE_STATE_VERSION};

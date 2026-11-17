@@ -276,6 +276,25 @@ fn main() -> ExitCode {
             eprintln!("CX4 not attached");
         }
     }
+    if std::env::var_os("SDD1_STATE").is_some() {
+        if let Some(sdd1) = &system.sdd1 {
+            eprintln!(
+                "SDD1 r4800={:02X} r4801={:02X} banks={:02X},{:02X},{:02X},{:02X} dma_ready={} streams={} bytes={} dma={:02X?}",
+                sdd1.r4800,
+                sdd1.r4801,
+                sdd1.banks.bank0,
+                sdd1.banks.bank1,
+                sdd1.banks.bank2,
+                sdd1.banks.bank3,
+                sdd1.dma_ready,
+                sdd1.streams,
+                sdd1.bytes,
+                sdd1.dma
+            );
+        } else {
+            eprintln!("SDD1 not attached");
+        }
+    }
     if std::env::var_os("DSP_STATE").is_some() {
         if let Some(dsp) = &system.dsp1 {
             eprintln!(

@@ -155,6 +155,22 @@ Man X3 (USA) at 300/600. Attach the firmware only to cartridges that declare a
 CX4 (type `$F3`, LoROM); otherwise it would map over that cart's `$6000-$7FFF`
 space.
 
+## S-DD1 titles
+
+The S-DD1 needs no firmware: it is detected from map mode `$22`/`$32` and the
+decompressor runs against the cartridge's own compressed data.
+
+```sh
+tools/snes-oracle/ours-capture.sh "Star Ocean (Japan).sfc" 600 /tmp/so
+ARES_REGION=NTSC tools/snes-oracle/ares-capture.sh \
+  "Star Ocean (Japan).sfc" 600 /tmp/so-ares
+tools/snes-oracle/diff-frame.py /tmp/so/frame.raw /tmp/so-ares/frame.raw
+```
+
+Street Fighter Alpha 2 (USA) is **100.000%** exact at frames 120/300/600 and
+Star Ocean (Japan) at 120/600. Star Ocean's ENIX logo fade starts a few frames
+earlier than ares (frame 90 is 94.046%) but converges by frame 120.
+
 ## Regression baseline
 
 `baseline.py` runs every ROM under `test-roms/snes/` for a fixed frame count and

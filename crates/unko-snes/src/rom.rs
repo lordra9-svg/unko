@@ -135,6 +135,14 @@ impl RomHeader {
         region_for_country(self.country_code)
     }
 
+    /// Whether the cartridge declares an S-DD1 decompression coprocessor.
+    ///
+    /// ares/mia select the `SDD1-` board from map modes `$22`/`$32`, the
+    /// extended-LoROM layouts used by the three S-DD1 titles.
+    pub const fn has_sdd1(&self) -> bool {
+        matches!(self.map_mode, 0x22 | 0x32)
+    }
+
     /// Whether the cartridge type declares a CX4 (Hitachi HG51B) coprocessor.
     ///
     /// CX4 carts use LoROM map modes with cartridge type `$F3`.
