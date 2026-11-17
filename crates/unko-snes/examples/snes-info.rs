@@ -169,6 +169,15 @@ fn main() -> ExitCode {
             );
         }
     }
+    if std::env::var_os("AUDIO_DEBUG").is_some() {
+        eprintln!(
+            "timers: latches={:?} t0={:?} t1={:?} t2={:?}",
+            system.apu.timer_latches(),
+            system.apu.timer_state(0),
+            system.apu.timer_state(1),
+            system.apu.timer_state(2)
+        );
+    }
     if let Some(path) = std::env::var_os("DSP_OUT") {
         let dsp = system.apu.dsp();
         let mut bytes = Vec::with_capacity(0x80);

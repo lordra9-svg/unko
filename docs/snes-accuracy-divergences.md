@@ -33,11 +33,16 @@ S-DSP output is now instrumented but not sample-identical:
 - The queued audio is non-silent (RMS about 0.012 vs ares 0.023) and the best
   cross-correlation against ares's dumped 395-sample window is about 0.43 at a
   232-sample lag; the remaining difference is a different point in the song.
-- Our S-SMP timer stage counters advance once per opcode cycle. ares steps them
-  by two 2.048 MHz clocks per access on paper; doubling our rate advances the
-  Super Mario World boot/attract by two frames and loses the video parity, so
-  the current rate is retained. The blargg `spc_timer` ROM is the right oracle
-  to settle this and is already in `test-roms/snes/blargg-spc-6`.
+- **Blargg `spc_timer` fails test 02 ("timer read vs write").** Our screen
+  shows `Failed 02` with status `006278F6`; RustySNES on the same ROM at the
+  same frame shows `PASSED TESTS`. The test waits at ARAM `$04C5` for `$FD` to
+  become non-zero after `target = 1`, and our recorded result differs even
+  though APU RAM is otherwise identical to RustySNES (5 bytes differ at frame
+  300). Our timer state at frame 300 is `t0 stage3=9` vs RustySNES `14`,
+  `t1 2 vs 6`, `t2 4 vs 3`. This is the next concrete audio task.
+- Doubling the timer stage rate (2.048 MHz clocks per access) makes the test
+  still fail and advances the Super Mario World boot/attract by two frames, so
+  the current rate is retained until the ROM passes.
 - ares' DRAM refresh (5 x 6+2 clocks per scanline) is not modelled. Adding it
   shifts the SWM boot by three frames; the exact interaction with the SPC
   handshake still needs a timer/refresh-specific test.

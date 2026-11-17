@@ -29,6 +29,20 @@ pub struct Timer {
 }
 
 impl Timer {
+    /// Re-evaluate the timer line level without advancing stage 0 (ares
+    /// `synchronizeStage1`), used when `$F0` changes the enable bits.
+    fn synchronize(&mut self, timers_enable: bool, timers_disable: bool) {
+        let level = self.stage1 && timers_enable && !timers_disable;
+        if self.line && !level && self.enable {
+            self.stage2 = self.stage2.wrapping_add(1);
+            if self.stage2 == self.target {
+                self.stage2 = 0;
+                self.stage3 = (self.stage3 + 1) & 0x0F;
+            }
+        }
+        self.line = level;
+    }
+
     fn step(&mut self, clocks: u32, frequency: u16, timers_enable: bool, timers_disable: bool) {
         self.stage0 = self.stage0.wrapping_add(clocks as u16);
         while self.stage0 >= frequency {
@@ -221,7 +235,6 @@ impl Apu {
             timer_targets: &mut self.timer_targets,
         };
         let cycles = self.spc.step(&mut bus);
-        self.timers_step(cycles);
         self.dsp_credit += u64::from(cycles);
         while self.dsp_credit >= 32 {
             self.dsp_credit -= 32;
@@ -244,16 +257,20 @@ impl Apu {
         self.samples.drain(..)
     }
 
+    /// Timer internals for diagnostics: `(stage3, stage2, target, enable)`.
+    pub fn timer_state(&self, index: usize) -> (u8, u8, u8, bool) {
+        let timer = &self.timers[index];
+        (timer.stage3, timer.stage2, timer.target, timer.enable)
+    }
+
+    /// Global timer enable/disable latches for diagnostics.
+    pub const fn timer_latches(&self) -> (bool, bool) {
+        (self.timers_enable, self.timers_disable)
+    }
+
     /// Queued DSP samples without draining them.
     pub fn samples(&self) -> &VecDeque<Sample> {
         &self.samples
-    }
-
-    fn timers_step(&mut self, cycles: u32) {
-        for (index, timer) in self.timers.iter_mut().enumerate() {
-            let frequency = if index == 2 { 16 } else { 128 };
-            timer.step(cycles, frequency, self.timers_enable, self.timers_disable);
-        }
     }
 
     /// Run SPC700 instructions until at least `cycles` SPC cycles have been
@@ -289,6 +306,16 @@ struct ApuBus<'a> {
 }
 
 impl SpcBus for ApuBus<'_> {
+    // (logging lives in the APU bus read/write below)
+    fn advance(&mut self, cycles: u32) {
+        // One unit is two 2.048 MHz clocks; ares advances the stage counters
+        // by two clocks per opcode cycle (timer divisors 128 and 16).
+        for (index, timer) in self.timers.iter_mut().enumerate() {
+            let frequency = if index == 2 { 16 } else { 128 };
+            timer.step(cycles, frequency, *self.timers_enable, *self.timers_disable);
+        }
+    }
+
     fn wait_cycles(&mut self, address: Option<u16>) -> u32 {
         // ares SMP::wait: RAM uses the external dividers, I/O and the IPL ROM
         // use the internal dividers. The 8/16 settings are the documented
@@ -343,17 +370,22 @@ impl SpcBus for ApuBus<'_> {
                 *self.ram_writable = value & 0x02 != 0;
                 *self.ram_disable = value & 0x04 != 0;
                 *self.timers_enable = value & 0x08 != 0;
-                *self.internal_wait = (value >> 4) & 0x03;
-                *self.external_wait = (value >> 6) & 0x03;
+                // ares: external wait = bits 4-5, internal wait = bits 6-7.
+                *self.external_wait = (value >> 4) & 0x03;
+                *self.internal_wait = (value >> 6) & 0x03;
+                for timer in self.timers.iter_mut() {
+                    timer.synchronize(*self.timers_enable, *self.timers_disable);
+                }
             }
             0xF1 => {
                 for (index, timer) in self.timers.iter_mut().enumerate() {
                     let enable = value & (1 << index) != 0;
-                    if enable && !timer.enable {
+                    let rising = enable && !timer.enable;
+                    timer.enable = enable;
+                    if rising {
                         timer.stage2 = 0;
                         timer.stage3 = 0;
                     }
-                    timer.enable = enable;
                 }
                 *self.iplrom_enable = value & 0x80 != 0;
                 if value & 0x10 != 0 {
@@ -537,8 +569,8 @@ mod wait_state_tests {
         apu.spc.pc = 0x0200;
         {
             let mut bus = bus(&mut apu);
-            // External wait state 1 -> two units per RAM access.
-            bus.write(0xF0, 0x40);
+            // External wait state 1 (bits 4-5) -> two units per RAM access.
+            bus.write(0xF0, 0x10);
         }
         assert_eq!(apu.step(), 4);
 
@@ -547,10 +579,12 @@ mod wait_state_tests {
             let mut bus = bus(&mut apu);
             // Internal wait state 3 -> ten units for I/O and the IPL ROM;
             // RAM keeps using the external divider.
-            bus.write(0xF0, 0x30);
-            assert_eq!(bus.wait_cycles(Some(0x00F4)), 10);
+            // Internal wait state 2 (bits 6-7) -> five units for I/O and idle;
+            // RAM keeps using the external divider.
+            bus.write(0xF0, 0x80);
+            assert_eq!(bus.wait_cycles(Some(0x00F4)), 5);
             assert_eq!(bus.wait_cycles(Some(0x0200)), 1);
-            assert_eq!(bus.wait_cycles(None), 10);
+            assert_eq!(bus.wait_cycles(None), 5);
         }
     }
 }
@@ -564,7 +598,9 @@ mod timer_tests {
         let mut apu = Apu::new();
         apu.timers[0].target = 1;
         apu.timers[0].enable = true;
-        apu.timers_step(1000);
+        for _ in 0..2000 {
+            apu.timers[0].step(2, 128, true, false);
+        }
         assert!(apu.timers[0].stage3 > 0);
     }
 }

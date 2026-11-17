@@ -16,6 +16,9 @@ pub trait SpcBus {
     fn write(&mut self, address: u16, value: u8);
     /// Advance one idle cycle.
     fn idle(&mut self) {}
+    /// Advance peripherals (timers) by `cycles` units before an access.
+    fn advance(&mut self, _cycles: u32) {}
+
     /// S-SMP time units for an access. `None` is an internal/idle cycle.
     ///
     /// One unit is two APU clocks: the hardware SMP thread runs at 2.048 MHz
@@ -164,17 +167,24 @@ impl Spc700 {
     }
 
     fn read(&mut self, bus: &mut impl SpcBus, address: u16) -> u8 {
-        self.cycles += u64::from(bus.wait_cycles(Some(address)));
+        let wait = bus.wait_cycles(Some(address));
+        self.cycles += u64::from(wait);
+        // ares steps the timers during the wait, before the access.
+        bus.advance(wait);
         bus.read(address)
     }
 
     fn write(&mut self, bus: &mut impl SpcBus, address: u16, value: u8) {
-        self.cycles += u64::from(bus.wait_cycles(Some(address)));
+        let wait = bus.wait_cycles(Some(address));
+        self.cycles += u64::from(wait);
+        bus.advance(wait);
         bus.write(address, value);
     }
 
     fn idle(&mut self, bus: &mut impl SpcBus) {
-        self.cycles += u64::from(bus.wait_cycles(None));
+        let wait = bus.wait_cycles(None);
+        self.cycles += u64::from(wait);
+        bus.advance(wait);
         bus.idle();
     }
 
