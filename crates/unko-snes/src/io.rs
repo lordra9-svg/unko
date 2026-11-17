@@ -38,7 +38,7 @@ pub mod button {
 }
 
 /// The hardware multiply/divide unit (`$4202-$4206`, `$4214-$4217`).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct MathUnit {
     multiplicand: u8,
     multiplier: u8,
@@ -115,7 +115,7 @@ impl MathUnit {
 }
 
 /// State of the controller ports and CPU-side I/O registers.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CpuIo {
     /// Port 1 buttons, using the [`button`] layout.
     joypad1: u16,

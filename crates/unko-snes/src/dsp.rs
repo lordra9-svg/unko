@@ -50,7 +50,9 @@ const GAUSSIAN_TABLE: [i16; 512] = [
     1300, 1301, 1302, 1302, 1303, 1303, 1303, 1304, 1304, 1304, 1304, 1304, 1305, 1305,
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
+)]
 enum EnvelopeMode {
     Release,
     Attack,
@@ -58,13 +60,13 @@ enum EnvelopeMode {
     Sustain,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 struct Clock {
     counter: u16,
     sample: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 struct MainVol {
     reset: bool,
     mute: bool,
@@ -72,7 +74,7 @@ struct MainVol {
     output: [i32; 2],
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 struct Echo {
     feedback: i8,
     volume: [i8; 2],
@@ -113,13 +115,13 @@ impl Default for Echo {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 struct Noise {
     frequency: u8,
     lfsr: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 struct Brr {
     bank: u8,
     _bank: u8,
@@ -130,7 +132,7 @@ struct Brr {
     _byte: u8,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 struct Latch {
     adsr0: u8,
     envx: u8,
@@ -139,7 +141,7 @@ struct Latch {
     output: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 struct Voice {
     index: u8,
     volume: [i8; 2],
@@ -213,9 +215,10 @@ impl Default for Voice {
 }
 
 /// The S-DSP.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Dsp {
     /// Raw register file, `$00-$7F`.
+    #[serde(with = "serde_big_array::BigArray")]
     pub registers: [u8; DSP_REGISTERS],
     clock: Clock,
     mainvol: MainVol,
@@ -236,7 +239,7 @@ pub struct Dsp {
 /// Bounded S-DSP debug trace used to diff the voice pipeline against another
 /// emulator. Rows are one entry per finished output sample, writes one entry
 /// per S-SMP DSP register write.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct DspTrace {
     /// One row per finished output sample: `[sample, keyon_delay, envelope, envx,
     /// brr_address, brr_offset, gaussian_offset, latch_pitch, header, byte,

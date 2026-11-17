@@ -68,6 +68,11 @@ fn main() -> ExitCode {
         system.apu.set_port_logging(true);
     }
     system.reset();
+    if let Some(path) = std::env::var_os("STATE_LOAD") {
+        let bytes = std::fs::read(&path).expect("read STATE_LOAD");
+        system.load_state(&bytes).expect("load save state");
+        println!("state load:  {}", path.to_string_lossy());
+    }
     if std::env::var_os("DSP_TRACE_OUT").is_some() {
         system.apu.dsp_mut().enable_trace();
     }
@@ -188,6 +193,15 @@ fn main() -> ExitCode {
     } else {
         system.run_cycles(20_000_000, 5_000_000)
     };
+    if let Some(path) = std::env::var_os("STATE_SAVE") {
+        let bytes = system.save_state();
+        std::fs::write(&path, &bytes).expect("write STATE_SAVE");
+        println!(
+            "state save:  {} ({} bytes)",
+            path.to_string_lossy(),
+            bytes.len()
+        );
+    }
     println!(
         "cpu after:   {}  nmi_services={} irq_services={}",
         system.cpu, system.cpu.nmi_services, system.cpu.irq_services

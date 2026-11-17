@@ -41,4 +41,4 @@ pub use rom::{
     RomError, RomHeader,
 };
 pub use spc700::{Flags as Spc700Flags, Spc700, SpcBus};
-pub use system::Snes;
+pub use system::{Snes, SnesState, StateError, SAVE_STATE_MAGIC, SAVE_STATE_VERSION};

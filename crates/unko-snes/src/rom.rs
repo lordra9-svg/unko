@@ -452,7 +452,7 @@ pub const fn sram_size_bytes(code: u8) -> Option<usize> {
 /// ares treats the region as a *system* setting, but every commercial image
 /// declares one in its header; [`region_for_country`] maps that byte to the
 /// timing the cart was built for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Region {
     /// 60 Hz, 262-line frames, 21,477,272 Hz master clock.
     Ntsc,

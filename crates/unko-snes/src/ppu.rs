@@ -30,12 +30,14 @@ const DOTS_PER_LINE: u16 = 341;
 const LINES_PER_FRAME: u16 = 262;
 const VBLANK_LINE: u16 = 225;
 /// The S-PPU pair.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Ppu {
-    vram: Box<[u16; 0x8000]>,
+    vram: Box<[u16]>,
+    #[serde(with = "serde_big_array::BigArray")]
     cgram: [u16; 256],
+    #[serde(with = "serde_big_array::BigArray")]
     oam: [u8; 0x220],
-    framebuffer: Box<[u8; MAX_FRAME_SIZE]>,
+    framebuffer: Box<[u8]>,
     /// Whether the presented frame is hi-res (latched at frame start).
     frame_hires: bool,
     /// Whether the presented frame is interlaced (latched at frame start).
@@ -155,10 +157,10 @@ impl Ppu {
     /// Create a PPU in its power-on state.
     pub fn new() -> Self {
         Self {
-            vram: Box::new([0; 0x8000]),
+            vram: vec![0; 0x8000].into_boxed_slice(),
             cgram: [0; 256],
             oam: [0; 0x220],
-            framebuffer: Box::new([0; MAX_FRAME_SIZE]),
+            framebuffer: vec![0; MAX_FRAME_SIZE].into_boxed_slice(),
             frame_hires: false,
             frame_interlace: false,
             frame_lines: LINES_PER_FRAME,
@@ -257,6 +259,14 @@ impl Ppu {
     /// Console region.
     pub const fn region(&self) -> Region {
         self.region
+    }
+
+    /// Whether the heap-backed memory regions have their expected sizes.
+    ///
+    /// Deserialized save states carry variable-length boxed slices; a corrupt
+    /// blob must be rejected before indexing panics.
+    pub(crate) fn state_lengths_valid(&self) -> bool {
+        self.vram.len() == 0x8000 && self.framebuffer.len() == MAX_FRAME_SIZE
     }
 
     /// Current scanline.

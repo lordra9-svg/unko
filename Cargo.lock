@@ -3853,6 +3853,9 @@ dependencies = [
 name = "unko-snes"
 version = "0.1.1"
 dependencies = [
+ "bincode",
+ "serde",
+ "serde-big-array",
  "spc700",
  "w65c816",
 ]

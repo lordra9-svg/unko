@@ -12,7 +12,7 @@ use crate::dsp::{Dsp, Sample};
 use crate::spc700::{Spc700, SpcBus};
 
 /// Which side produced a port event and in which direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PortEventKind {
     /// S-CPU write to `$2140-$2143`.
     CpuWrite,
@@ -25,7 +25,7 @@ pub enum PortEventKind {
 }
 
 /// One S-CPU <-> S-SMP port event, captured by [`PortDebug`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PortEvent {
     /// Master clock of the access: the commit instant for an S-CPU write, the
     /// instruction-record instant for an S-SMP read.
@@ -43,7 +43,7 @@ pub struct PortEvent {
 }
 
 /// Debug state for the S-CPU/S-SMP port handshake log.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PortDebug {
     enabled: bool,
     /// Master clock the APU has been advanced to.
@@ -132,7 +132,7 @@ pub const APU_RAM_SIZE: usize = 0x1_0000;
 pub const IPL_SIZE: usize = 64;
 
 /// One S-SMP timer.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Timer {
     stage0: u16,
     stage1: bool,
@@ -183,7 +183,7 @@ impl Timer {
 /// visible to the S-CPU at the exact clock the access completes. Recording the
 /// access timeline lets us commit those port latches at the same instants while
 /// the S-CPU is in the middle of its own instruction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct PlanStep {
     /// S-SMP clocks (2.050560 MHz) this access consumes.
     clocks: u8,
@@ -196,11 +196,12 @@ struct PlanStep {
 }
 
 /// The S-SMP + S-DSP APU.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Apu {
     /// SPC700 CPU state.
     pub spc: Spc700,
-    ram: Box<[u8; APU_RAM_SIZE]>,
+    ram: Box<[u8]>,
+    #[serde(with = "serde_big_array::BigArray")]
     ipl: [u8; IPL_SIZE],
     ipl_loaded: bool,
     iplrom_enable: bool,
@@ -249,7 +250,7 @@ impl Apu {
     pub fn new() -> Self {
         Self {
             spc: Spc700::new(),
-            ram: Box::new([0; APU_RAM_SIZE]),
+            ram: vec![0; APU_RAM_SIZE].into_boxed_slice(),
             ipl: [0; IPL_SIZE],
             ipl_loaded: false,
             iplrom_enable: true,
@@ -579,6 +580,14 @@ impl Apu {
     /// Queued DSP samples without draining them.
     pub fn samples(&self) -> &VecDeque<Sample> {
         &self.samples
+    }
+
+    /// Whether the heap-backed APU RAM has its expected size.
+    ///
+    /// Deserialized save states carry a variable-length boxed slice; a corrupt
+    /// blob must be rejected before indexing panics.
+    pub(crate) fn state_lengths_valid(&self) -> bool {
+        self.ram.len() == APU_RAM_SIZE
     }
 
     /// Run the S-SMP until at least `cycles` 2.050560 MHz clocks have elapsed.

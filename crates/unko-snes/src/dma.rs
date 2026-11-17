@@ -8,7 +8,7 @@
 /// The registers power up zeroed (ares `channels[id] = {}`). Games such as
 /// Super Mario World rely on that: they program only the A-bus side of the
 /// indirect HDMA channel and leave A2A at zero.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct DmaChannel {
     /// `$43x0` mode, direction, fixed and reverse bits.
     pub control: u8,
@@ -29,7 +29,7 @@ pub struct DmaChannel {
 }
 
 /// Per-channel HDMA table cursor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 struct HdmaState {
     address: u16,
     indirect_address: u16,
@@ -39,7 +39,7 @@ struct HdmaState {
 }
 
 /// The eight DMA channels and their enable latches.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Dma {
     channels: [DmaChannel; 8],
     pending: u8,
@@ -260,7 +260,7 @@ impl Dma {
 /// PPU, APU and IRQ comparators for each eight-clock DMA cycle. ares runs the
 /// same way, which keeps a sprite or VRAM upload aligned with the scanline it
 /// lands on.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DmaTransfer {
     channels: [DmaChannel; 8],
     mask: u8,

@@ -48,7 +48,7 @@ pub trait CpuBus {
 }
 
 /// Processor status flags.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Flags {
     /// Carry.
     pub carry: bool,
@@ -84,7 +84,7 @@ impl Default for Flags {
 }
 
 /// WDC 65C816 register file and interpreter state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Cpu {
     /// Accumulator (C in 16-bit mode).
     pub a: u16,

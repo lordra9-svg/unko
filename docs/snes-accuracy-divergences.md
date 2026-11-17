@@ -621,12 +621,18 @@ with ares. The implementation follows ares, which is the primary source.
   (`spc_timer` at 600 frames vs ares at 602) is **100.000% exact**.
 - `diff-audio.py` aligns a small sample offset and reports the first sample
   above 1/32768, RMS and peak levels. Current audio baseline:
-  `blargg_near_cd_quality.smc` at 600 frames has matching peak levels
-  (0.465454 vs 0.465749) but is **not yet sample-exact** (first divergence
-  after alignment: sample 16080, RMS difference 8.6e-2). That is the next audio
-  target.
+  `blargg_near_cd_quality.smc` against ares' **pre-resampler** i16 stream is
+  **bit-exact** (0 differing samples over 639,700 stereo frames at 1,200
+  frames, -1-frame alignment). The earlier "RMS 8.6e-2" numbers came from
+  capturing ares at 32,000 Hz instead of its native 32,040, which left the host
+  resampler on.
 - `baseline.py` records a per-ROM manifest (ROM/frame/audio hashes) for
   regression comparison.
+- Save states are exercised by `snes-info` with `STATE_SAVE=<path>` /
+  `STATE_LOAD=<path>`: on `hvdma.sfc` a 60-frame state resumed for 60 more
+  frames yields a byte-identical frame to a straight 120-frame run, and on
+  `blargg_near_cd_quality.smc` the concatenated PCM matches the straight run
+  byte for byte.
 
 ## Validation
 

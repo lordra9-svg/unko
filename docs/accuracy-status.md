@@ -72,6 +72,13 @@ Implemented so far:
   clock, 262-line frames) and PAL (21,281,370 Hz, 312-line frames with the
   long V=311 line, and the `$213F` PAL flag), so the APU credit ratio follows
   the region's master clock
+- versioned save states (`Snes::save_state`/`load_state`): a `bincode`
+  serialization of the S-CPU, S-SMP/S-DSP, PPU (VRAM/CGRAM/OAM/framebuffer),
+  DMA/HDMA, CPU I/O, WRAM and cartridge SRAM plus the scheduler credits. A
+  round-trip test restores into a fresh system, asserts full-machine equality
+  and then checks that both machines evolve identically; end-to-end, a state
+  saved after 60 frames and resumed for 60 more produces a byte-identical frame
+  and bit-identical PCM stream to a straight 120-frame run
 - subscreen rendering and the full colour-math path: per-layer priority
   tables, `CGWSEL` fixed-colour/subscreen select, `CGADSUB` enable/halve/
   subtract and `COLDATA` channels, with the ares 15-bit blend and DAC luma

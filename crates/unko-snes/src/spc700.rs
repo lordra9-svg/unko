@@ -60,7 +60,7 @@ pub trait SpcBus {
 /// the rest of the machine (S-CPU port latches, timers, DSP registers) at the
 /// exact cycle of the access instead of at the start of the enclosing
 /// instruction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Pending {
     /// A direct-page read whose operand has been fetched.
     DirectRead {
@@ -72,7 +72,7 @@ pub enum Pending {
 }
 
 /// SPC700 processor status flags.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Flags {
     /// Carry.
     pub carry: bool,
@@ -121,7 +121,7 @@ impl Flags {
 }
 
 /// The S-SMP CPU register file.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Spc700 {
     /// Accumulator.
     pub a: u8,

@@ -13,6 +13,113 @@ use crate::io::CpuIo;
 use crate::ppu::Ppu;
 use crate::rom::{Cartridge, Region};
 
+/// Magic number at the start of a serialized save state (`"SNES"`).
+pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
+/// Save-state format version. Bump whenever the serialized shape changes.
+pub const SAVE_STATE_VERSION: u32 = 1;
+
+/// A complete `unko-snes` snapshot.
+///
+/// This is the typed form of [`Snes::save_state`]. It owns every piece of
+/// mutable state that affects future emulation: the S-CPU, S-SMP/S-DSP, PPU,
+/// DMA/HDMA engine, CPU I/O, WRAM, cartridge SRAM and the scheduler credits and
+/// latches. The ROM itself (and the derived region) are not stored because they
+/// come from the inserted cartridge.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SnesState {
+    /// [`SAVE_STATE_MAGIC`].
+    pub magic: u32,
+    /// [`SAVE_STATE_VERSION`].
+    pub version: u32,
+    /// S-CPU register file and counters.
+    pub cpu: Cpu,
+    /// S-SMP + S-DSP.
+    pub apu: Apu,
+    /// S-PPU pair.
+    pub ppu: Ppu,
+    /// DMA/HDMA channels.
+    pub dma: Dma,
+    /// Controller ports and CPU I/O registers.
+    pub io: CpuIo,
+    /// 128 KiB work RAM.
+    pub wram: Vec<u8>,
+    /// Cartridge save RAM (empty when the cart has none).
+    pub sram: Vec<u8>,
+    /// Carried APU master-clock credit.
+    pub apu_credit: i64,
+    /// Carried PPU dot-clock credit.
+    pub ppu_credit: i64,
+    /// `$4200` bit 7.
+    pub nmi_enable: bool,
+    /// `$4210` bit 7.
+    pub nmi_flag: bool,
+    /// `$420D` MEMSEL.
+    pub fast_rom: bool,
+    /// `$2180-$2183` data-port address.
+    pub wram_port: u32,
+    /// Master clocks still owed to the peripherals.
+    pub cpu_stall: u32,
+    /// Current line's DRAM refresh latch.
+    pub refresh_done: bool,
+    /// A refresh crossed this step and must be charged.
+    pub refresh_pending: bool,
+    /// Joypad auto-poll started this frame.
+    pub auto_poll_started: bool,
+    /// This line's HDMA run completed.
+    pub hdma_run_done: bool,
+    /// Latched IRQ output.
+    pub irq_line: bool,
+    /// NMI edge waiting for an instruction boundary.
+    pub nmi_line: bool,
+    /// NMI edges delivered (debug).
+    pub nmi_count: u64,
+    /// Master clocks since reset (debug).
+    pub clock: u64,
+}
+
+/// Errors from loading a save state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StateError {
+    /// The blob is too short, or its magic/version does not match.
+    InvalidHeader,
+    /// The blob could not be decoded.
+    Decode(String),
+    /// The saved WRAM is the wrong size.
+    WramSize {
+        /// Expected size in bytes.
+        expected: usize,
+        /// Saved size in bytes.
+        found: usize,
+    },
+    /// The saved SRAM does not match the inserted cartridge.
+    SramSize {
+        /// Size the cartridge expects.
+        expected: usize,
+        /// Size in the save state.
+        found: usize,
+    },
+    /// A memory region in the save state has the wrong length.
+    Corrupt(&'static str),
+}
+
+impl std::fmt::Display for StateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidHeader => write!(f, "not a valid unko-snes save state"),
+            Self::Decode(error) => write!(f, "could not decode save state: {error}"),
+            Self::WramSize { expected, found } => {
+                write!(f, "save state WRAM is {found} bytes, expected {expected}")
+            }
+            Self::SramSize { expected, found } => {
+                write!(f, "save state SRAM is {found} bytes, expected {expected}")
+            }
+            Self::Corrupt(what) => write!(f, "save state has an invalid {what} length"),
+        }
+    }
+}
+
+impl std::error::Error for StateError {}
+
 /// Size of the SNES work RAM.
 pub const WRAM_SIZE: usize = 0x2_0000;
 
@@ -112,6 +219,106 @@ impl Snes {
     /// Console video region, from the cartridge header.
     pub const fn region(&self) -> Region {
         self.region
+    }
+
+    /// Take a typed snapshot of the full mutable state.
+    ///
+    /// The ROM and the derived region are not included: a snapshot is meant to
+    /// be restored into a system with the same cartridge inserted.
+    pub fn snapshot(&self) -> SnesState {
+        SnesState {
+            magic: SAVE_STATE_MAGIC,
+            version: SAVE_STATE_VERSION,
+            cpu: self.cpu.clone(),
+            apu: self.apu.clone(),
+            ppu: self.ppu.clone(),
+            dma: self.dma.clone(),
+            io: self.io.clone(),
+            wram: self.wram.clone(),
+            sram: self.cart.sram().to_vec(),
+            apu_credit: self.apu_credit,
+            ppu_credit: self.ppu_credit,
+            nmi_enable: self.nmi_enable,
+            nmi_flag: self.nmi_flag,
+            fast_rom: self.fast_rom,
+            wram_port: self.wram_port,
+            cpu_stall: self.cpu_stall,
+            refresh_done: self.refresh_done,
+            refresh_pending: self.refresh_pending,
+            auto_poll_started: self.auto_poll_started,
+            hdma_run_done: self.hdma_run_done,
+            irq_line: self.irq_line,
+            nmi_line: self.nmi_line,
+            nmi_count: self.nmi_count,
+            clock: self.clock,
+        }
+    }
+
+    /// Restore a snapshot taken by [`Self::snapshot`].
+    ///
+    /// Fails if the snapshot was made for a different cartridge size (WRAM or
+    /// SRAM length mismatch) or is from an incompatible format.
+    pub fn restore(&mut self, state: &SnesState) -> Result<(), StateError> {
+        if state.magic != SAVE_STATE_MAGIC || state.version != SAVE_STATE_VERSION {
+            return Err(StateError::InvalidHeader);
+        }
+        if state.wram.len() != WRAM_SIZE {
+            return Err(StateError::WramSize {
+                expected: WRAM_SIZE,
+                found: state.wram.len(),
+            });
+        }
+        if state.sram.len() != self.cart.sram().len() {
+            return Err(StateError::SramSize {
+                expected: self.cart.sram().len(),
+                found: state.sram.len(),
+            });
+        }
+        if !state.ppu.state_lengths_valid() {
+            return Err(StateError::Corrupt("PPU memory"));
+        }
+        if !state.apu.state_lengths_valid() {
+            return Err(StateError::Corrupt("APU RAM"));
+        }
+
+        self.cpu = state.cpu.clone();
+        self.apu = state.apu.clone();
+        self.ppu = state.ppu.clone();
+        self.dma = state.dma.clone();
+        self.io = state.io.clone();
+        self.wram.copy_from_slice(&state.wram);
+        self.cart.sram_mut().copy_from_slice(&state.sram);
+        self.apu_credit = state.apu_credit;
+        self.ppu_credit = state.ppu_credit;
+        self.nmi_enable = state.nmi_enable;
+        self.nmi_flag = state.nmi_flag;
+        self.fast_rom = state.fast_rom;
+        self.wram_port = state.wram_port;
+        self.cpu_stall = state.cpu_stall;
+        self.refresh_done = state.refresh_done;
+        self.refresh_pending = state.refresh_pending;
+        self.auto_poll_started = state.auto_poll_started;
+        self.hdma_run_done = state.hdma_run_done;
+        self.irq_line = state.irq_line;
+        self.nmi_line = state.nmi_line;
+        self.nmi_count = state.nmi_count;
+        self.clock = state.clock;
+        Ok(())
+    }
+
+    /// Serialize the full state to bytes.
+    ///
+    /// The layout is `bincode` over [`SnesState`]; it is versioned by the
+    /// `magic`/`version` fields and is not a stable cross-version file format.
+    pub fn save_state(&self) -> Vec<u8> {
+        bincode::serialize(&self.snapshot()).expect("save state serialization cannot fail")
+    }
+
+    /// Deserialize and restore a state produced by [`Self::save_state`].
+    pub fn load_state(&mut self, bytes: &[u8]) -> Result<(), StateError> {
+        let state: SnesState =
+            bincode::deserialize(bytes).map_err(|error| StateError::Decode(error.to_string()))?;
+        self.restore(&state)
     }
 
     /// Mutable work RAM, for save states and tests.
@@ -912,6 +1119,86 @@ mod tests {
         }
         assert_eq!(wraps, 2);
         assert_eq!(dots, 2 * 312 * 341);
+    }
+
+    #[test]
+    fn save_state_round_trips_and_continues_identically() {
+        // JMP $8000: keeps the CPU busy so the peripherals advance too.
+        let code = [0x4Cu8, 0x00, 0x80];
+        let mut system = Snes::new(cartridge(&code));
+        system.reset();
+
+        // Touch every subsystem before saving.
+        system.ppu.write(0x2100, 0x0F); // display on
+        system.ppu.write(0x2105, 0x01); // mode 1
+        system.ppu.write(0x2107, 0x04);
+        system.ppu.write(0x210B, 0x00);
+        system.ppu.write(0x2121, 0x02);
+        system.ppu.write(0x2122, 0x1F);
+        system.ppu.write(0x2122, 0x00);
+        system.ppu.write(0x2115, 0x80); // VRAM increment after the high byte
+        system.ppu.write(0x2116, 0x00);
+        system.ppu.write(0x2117, 0x00);
+        system.ppu.write(0x2118, 0x34);
+        system.ppu.write(0x2119, 0x12);
+        system.ppu.write(0x2102, 0x00);
+        system.ppu.write(0x2103, 0x00);
+        for byte in [0x00, 0x10, 0x01, 0x20] {
+            system.ppu.write(0x2104, byte);
+        }
+        system.apu.cpu_write(0, 0x11);
+        system.apu.cpu_write(1, 0x22);
+        system.set_joypad(0, crate::io::button::A | crate::io::button::START);
+        system.write(0x42_07, 50); // HTIMEL
+        system.write(0x42_09, 100); // VTIMEL
+        system.write(0x42_00, 0x30); // H+V IRQ
+        system.cart.sram_mut()[0] = 0x5A;
+        system.wram_mut()[0x1234] = 0xA5;
+
+        system.run_cycles(120_000, 200_000);
+
+        let saved = system.save_state();
+        let snapshot = system.snapshot();
+
+        let mut restored = Snes::new(cartridge(&code));
+        restored.reset();
+        restored.load_state(&saved).expect("load state");
+        assert_eq!(restored.snapshot(), snapshot);
+        // `Snes` compares the whole machine, including cartridge SRAM.
+        assert_eq!(restored, system);
+
+        // The restored machine must evolve exactly like the original.
+        system.run_cycles(40_000, 200_000);
+        restored.run_cycles(40_000, 200_000);
+        assert_eq!(restored.snapshot(), system.snapshot());
+    }
+
+    #[test]
+    fn save_state_rejects_bad_input() {
+        let mut system = Snes::new(cartridge(&[0xDB]));
+
+        assert!(matches!(
+            system.load_state(b"not a save state"),
+            Err(StateError::Decode(_))
+        ));
+
+        let mut state = system.snapshot();
+        state.magic = 0;
+        assert_eq!(system.restore(&state), Err(StateError::InvalidHeader));
+
+        let mut state = system.snapshot();
+        state.sram.push(0);
+        assert!(matches!(
+            system.restore(&state),
+            Err(StateError::SramSize { .. })
+        ));
+
+        let mut state = system.snapshot();
+        state.wram.push(0);
+        assert!(matches!(
+            system.restore(&state),
+            Err(StateError::WramSize { .. })
+        ));
     }
 
     #[test]
