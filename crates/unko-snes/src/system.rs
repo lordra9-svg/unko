@@ -44,6 +44,10 @@ pub struct Snes {
     /// NMI edge seen while the CPU was mid-instruction, applied at the next
     /// instruction boundary.
     nmi_line: bool,
+    /// Master clocks advanced through the peripherals.
+    master_clock: u64,
+    /// S-CPU writes to `$2140-$2143`, timestamped on `master_clock`.
+    port_writes: Vec<(u64, u8, u8)>,
     /// Number of NMI edges delivered (debug).
     pub nmi_count: u64,
 }
@@ -67,6 +71,8 @@ impl Snes {
             wram_port: 0,
             irq_line: false,
             nmi_line: false,
+            master_clock: 0,
+            port_writes: Vec::new(),
             nmi_count: 0,
         }
     }
@@ -117,6 +123,8 @@ impl Snes {
         self.wram_port = 0;
         self.irq_line = false;
         self.nmi_line = false;
+        self.master_clock = 0;
+        self.port_writes.clear();
         self.nmi_count = 0;
         let mut bus = SnesBus {
             wram: &mut self.wram,
@@ -129,6 +137,8 @@ impl Snes {
             nmi_flag: &mut self.nmi_flag,
             fast_rom: &mut self.fast_rom,
             wram_port: &mut self.wram_port,
+            master_clock: self.master_clock,
+            port_writes: &mut self.port_writes,
             vblank: false,
             hblank: false,
         };
@@ -164,6 +174,8 @@ impl Snes {
                         nmi_flag: &mut self.nmi_flag,
                         fast_rom: &mut self.fast_rom,
                         wram_port: &mut self.wram_port,
+                        master_clock: self.master_clock,
+                        port_writes: &mut self.port_writes,
                         vblank,
                         hblank,
                     };
@@ -192,13 +204,16 @@ impl Snes {
         // NTSC master clock is 21.477272 MHz; the S-SMP runs at the documented
         // 1.024 MHz access rate (one unit per opcode cycle). The credit is
         // carried across instructions so long-term APU timing stays in step.
+        self.master_clock += u64::from(clocks);
         // ares: `apuFrequency = 32040 * 768 = 24,606,720 Hz`, so the S-SMP runs
         // at 2,050,560 Hz and retires one access unit (two clocks) every
         // 21,477,272 / 1,025,280 master clocks. Draining one unit at a time
-        // lets the S-SMP commit a port write at its exact master cycle.
+        // lets the S-SMP commit a port write at its exact master cycle, and the
+        // timestamped S-CPU port history lets an S-SMP read observe the latch
+        // as of its own access.
         self.apu_credit += i64::from(clocks) * 1_025_280;
         while self.apu_credit >= 21_477_272 {
-            self.apu.tick();
+            self.apu.tick(&self.port_writes);
             self.apu_credit -= 21_477_272;
         }
         // The PPU dot clock is the master clock divided by four on NTSC.
@@ -266,6 +281,8 @@ impl Snes {
             nmi_flag: &mut self.nmi_flag,
             fast_rom: &mut self.fast_rom,
             wram_port: &mut self.wram_port,
+            master_clock: self.master_clock,
+            port_writes: &mut self.port_writes,
             vblank,
             hblank,
         }
@@ -305,6 +322,8 @@ struct SnesBus<'a> {
     nmi_flag: &'a mut bool,
     fast_rom: &'a mut bool,
     wram_port: &'a mut u32,
+    master_clock: u64,
+    port_writes: &'a mut Vec<(u64, u8, u8)>,
     vblank: bool,
     hblank: bool,
 }
@@ -410,6 +429,13 @@ impl CpuBus for SnesBus<'_> {
                 if (0x2100..=0x213F).contains(&offset) {
                     self.ppu.write(offset as u16, value);
                 } else if (0x2140..=0x2143).contains(&offset) {
+                    // Timestamped so an S-SMP poll resolves the latch as of its
+                    // own access clock (ares synchronizes the threads there).
+                    self.port_writes
+                        .push((self.master_clock, (offset - 0x2140) as u8, value));
+                    if self.port_writes.len() > 32 {
+                        self.port_writes.remove(0);
+                    }
                     self.apu.cpu_write(offset - 0x2140, value);
                 } else if (0x2180..=0x2183).contains(&offset) {
                     self.write_wram_port(offset, value);
@@ -621,6 +647,7 @@ mod tests {
         system.wram_mut()[0x1234] = 0x5A;
         assert_eq!(system.wram()[0x1234], 0x5A);
 
+        let mut port_writes: Vec<(u64, u8, u8)> = Vec::new();
         let mut bus = SnesBus {
             wram: &mut system.wram,
             cart: &mut system.cart,
@@ -632,6 +659,8 @@ mod tests {
             nmi_flag: &mut system.nmi_flag,
             fast_rom: &mut system.fast_rom,
             wram_port: &mut system.wram_port,
+            master_clock: 0,
+            port_writes: &mut port_writes,
             vblank: false,
             hblank: false,
         };
@@ -659,6 +688,7 @@ mod tests {
     fn maps_cartridge_reads_and_sram() {
         let mut system = Snes::new(cartridge(&[0x11, 0x22, 0x33]));
         {
+            let mut port_writes: Vec<(u64, u8, u8)> = Vec::new();
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
@@ -670,6 +700,8 @@ mod tests {
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
+                master_clock: 0,
+                port_writes: &mut port_writes,
                 vblank: false,
                 hblank: false,
             };
@@ -733,6 +765,7 @@ mod tests {
         system.reset();
         system.set_joypad(0, crate::io::button::B | crate::io::button::A);
         {
+            let mut port_writes: Vec<(u64, u8, u8)> = Vec::new();
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
@@ -744,6 +777,8 @@ mod tests {
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
+                master_clock: 0,
+                port_writes: &mut port_writes,
                 vblank: false,
                 hblank: false,
             };
@@ -758,6 +793,7 @@ mod tests {
             system.io.step(6);
         }
         {
+            let mut port_writes: Vec<(u64, u8, u8)> = Vec::new();
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
@@ -769,6 +805,8 @@ mod tests {
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
+                master_clock: 0,
+                port_writes: &mut port_writes,
                 vblank: false,
                 hblank: false,
             };
@@ -783,6 +821,7 @@ mod tests {
         let mut system = Snes::new(cartridge(&[0xDB]));
         system.reset();
         let (first, second) = {
+            let mut port_writes: Vec<(u64, u8, u8)> = Vec::new();
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
@@ -794,6 +833,8 @@ mod tests {
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
+                master_clock: 0,
+                port_writes: &mut port_writes,
                 vblank: false,
                 hblank: false,
             };
@@ -824,6 +865,7 @@ mod tests {
         let vblank = system.ppu.in_vblank();
         let hblank = system.ppu.in_hblank();
         let (first, second) = {
+            let mut port_writes: Vec<(u64, u8, u8)> = Vec::new();
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
@@ -835,6 +877,8 @@ mod tests {
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
+                master_clock: 0,
+                port_writes: &mut port_writes,
                 vblank,
                 hblank,
             };
@@ -875,6 +919,7 @@ mod tests {
         let mut system = Snes::new(cartridge(&[0x58, 0xEA, 0xEA, 0xEA, 0xEA]));
         system.reset();
         {
+            let mut port_writes: Vec<(u64, u8, u8)> = Vec::new();
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
@@ -886,6 +931,8 @@ mod tests {
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
+                master_clock: 0,
+                port_writes: &mut port_writes,
                 vblank: false,
                 hblank: false,
             };
@@ -912,6 +959,7 @@ mod tests {
         system.wram_mut()[0x0102] = 0x56;
         system.wram_mut()[0x0103] = 0x78;
         {
+            let mut port_writes: Vec<(u64, u8, u8)> = Vec::new();
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
@@ -923,6 +971,8 @@ mod tests {
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
+                master_clock: 0,
+                port_writes: &mut port_writes,
                 vblank: false,
                 hblank: false,
             };
@@ -940,6 +990,7 @@ mod tests {
         }
         let (channels, mask) = system.dma.take_pending().expect("DMA pending");
         {
+            let mut port_writes: Vec<(u64, u8, u8)> = Vec::new();
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
@@ -951,6 +1002,8 @@ mod tests {
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
+                master_clock: 0,
+                port_writes: &mut port_writes,
                 vblank: false,
                 hblank: false,
             };
@@ -1002,6 +1055,7 @@ mod tests {
             system.wram_mut()[0x0100 + index] = value;
         }
         {
+            let mut port_writes: Vec<(u64, u8, u8)> = Vec::new();
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
@@ -1013,6 +1067,8 @@ mod tests {
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
+                master_clock: 0,
+                port_writes: &mut port_writes,
                 vblank: false,
                 hblank: false,
             };
@@ -1028,6 +1084,7 @@ mod tests {
         }
         let (channels, mask) = system.dma.take_pending().expect("DMA pending");
         {
+            let mut port_writes: Vec<(u64, u8, u8)> = Vec::new();
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
@@ -1039,6 +1096,8 @@ mod tests {
                 nmi_flag: &mut system.nmi_flag,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
+                master_clock: 0,
+                port_writes: &mut port_writes,
                 vblank: false,
                 hblank: false,
             };

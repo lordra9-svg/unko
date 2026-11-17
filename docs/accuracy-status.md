@@ -20,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **838 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **839 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -90,6 +90,12 @@ Implemented so far:
   the ares `$F0` internal/external wait dividers (`cycleWaitStates`
   2/4/10/20 for the CPU, `timerWaitStates` 2/4/8/16 for the timers), timer-line
   resynchronisation and `$F1` enable-edge stage resets
+- S-CPU port-write history: writes to `$2140-$2143` are timestamped on the
+  master clock, and an S-SMP read of `$F4-$F7` resolves the latch as of the
+  read access (ares synchronizes the two threads there). This gives the exact
+  ares observe point without a resumable interpreter; measured against Super
+  Mario World it leaves the frames bit-identical, so the title-screen phase is
+  not a port-read granularity artefact.
 - exact per-access scheduling: every S-CPU bus access advances the S-SMP,
   S-PPU, HDMA and IRQ comparators to the ares ordering (`wait - 4` clocks
   before a read sample, the whole wait before a write), so port reads observe
@@ -106,7 +112,7 @@ Implemented so far:
 
 Validation so far:
 
-- **838 workspace tests**, 0 failed
+- **839 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -121,7 +127,8 @@ Validation so far:
   `RET`/`RETI` being one access short and `SLEEP`/`STP` five accesses short.
 - **3 DSP unit tests** cover register mirroring, KON/ENDX, non-silent BRR
   playback and global mute; the APU integration test confirms SPC execution
-  drives sample generation.
+  drives sample generation. The BRR and echo address sums now wrap at 16 bits
+  (they panicked in debug builds on blargg `spc_dsp6` before).
 - **9 PPU tests** cover vblank/NMI timing, CGRAM/OAM access (word-address
   base, pair latch and high-table mirroring), sprite object-grid addressing,
   the Y offset, the OAM-index overlap order, window masks/combine logic, the
@@ -155,6 +162,10 @@ Validation so far:
   since the boot takes a different number of frames). Two blocking bugs were
   fixed: the `$2180-$2183` WRAM data port and `$4210` bit 7 latching at
   vblank even when NMI is disabled.
+- blargg **`spc_timer` reports `PASSED TESTS`**; `spc_smp` reports
+  `Failed 02` (test 02 is CPU Instructions/Full BRK) and `spc_dsp6` reports
+  `Failed 02` (Echo/esa_changes), both reproduced with the previous build and
+  recorded in the divergence ledger.
 - blargg **`spc_timer` now reports `PASSED TESTS`**. The ROM prints a CRC of
   ten timer readings and compares it with `D06CD0A9`; ours printed
   `1111111111` (`B358FA31`) until `RET`/`RETI`/`SLEEP`/`STP` were given their

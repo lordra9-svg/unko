@@ -482,7 +482,9 @@ impl Dsp {
     fn tick(&mut self) {}
 
     fn voice1(&mut self, _ram: &mut [u8], index: usize) {
-        self.brr._address = (u16::from(self.brr._bank) << 8) + (u16::from(self.brr._source) << 2);
+        // 16-bit sample address; the sum wraps in hardware (ares `n16`).
+        self.brr._address =
+            (u16::from(self.brr._bank) << 8).wrapping_add(u16::from(self.brr._source) << 2);
         self.brr._source = self.voice[index].source;
     }
 
@@ -846,7 +848,8 @@ impl Dsp {
 
     fn echo22(&mut self, ram: &mut [u8]) {
         self.echo._history_offset = (self.echo._history_offset + 1) & 0x07;
-        self.echo._address = (u16::from(self.echo._page) << 8) + self.echo._offset;
+        // The echo pointer is a 16-bit address and wraps on overflow.
+        self.echo._address = (u16::from(self.echo._page) << 8).wrapping_add(self.echo._offset);
         self.echo_read(ram, 0);
         self.echo.input[0] = self.calculate_fir(0, 0);
         self.echo.input[1] = self.calculate_fir(1, 0);

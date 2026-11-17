@@ -246,11 +246,11 @@ impl Apu {
     /// Execute one SPC700 instruction.
     pub fn step(&mut self) -> u32 {
         if self.plan_pos >= self.plan.len() {
-            self.record_instruction();
+            self.record_instruction(&[]);
         }
         let mut total = 0;
         while self.plan_pos < self.plan.len() {
-            total += self.drain_unit();
+            total += self.drain_unit(&[]);
         }
         total
     }
@@ -259,16 +259,18 @@ impl Apu {
     ///
     /// The system calls this from inside an S-CPU access, so an S-SMP port write
     /// commits at the exact master clock of the S-SMP access that produced it.
-    pub fn tick(&mut self) -> u32 {
-        self.drain_unit()
+    pub fn tick(&mut self, port_history: &[(u64, u8, u8)]) -> u32 {
+        self.drain_unit(port_history)
     }
 
     /// Execute the next instruction into a fresh micro-op timeline.
-    fn record_instruction(&mut self) {
+    fn record_instruction(&mut self, port_history: &[(u64, u8, u8)]) {
         self.plan.clear();
         self.plan_pos = 0;
         self.plan_sub = 0;
         let page_flag = self.spc.flags.page;
+        // The S-SMP's logical time is exactly its retired access units.
+        let start_time = (self.units * 21_477_272) / 1_025_280;
         let mut plan = std::mem::take(&mut self.plan);
         {
             let mut bus = ApuBus {
@@ -291,10 +293,13 @@ impl Apu {
                 aux5: &mut self.aux5,
                 timer_targets: &mut self.timer_targets,
                 page_flag,
+                port_history,
+                start_time,
             };
             let mut recorder = RecordBus {
                 inner: &mut bus,
                 plan: &mut plan,
+                units: 0,
             };
             self.spc.step(&mut recorder);
         }
@@ -309,9 +314,9 @@ impl Apu {
     }
 
     /// Drain one base-clock unit (two clocks) from the recorded timeline.
-    fn drain_unit(&mut self) -> u32 {
+    fn drain_unit(&mut self, port_history: &[(u64, u8, u8)]) -> u32 {
         if self.plan_pos >= self.plan.len() {
-            self.record_instruction();
+            self.record_instruction(port_history);
         }
         self.units += 1;
         let step = self.plan[self.plan_pos];
@@ -375,7 +380,7 @@ impl Apu {
     pub fn run_cycles(&mut self, cycles: u64) -> u64 {
         let mut total = 0;
         while total < cycles {
-            total += u64::from(self.tick());
+            total += u64::from(self.drain_unit(&[]));
         }
         total
     }
@@ -401,9 +406,27 @@ struct ApuBus<'a> {
     aux5: &'a mut u8,
     timer_targets: &'a mut [u8; 3],
     page_flag: bool,
+    /// S-CPU writes to `$2140-$2143`, timestamped on the master clock.
+    port_history: &'a [(u64, u8, u8)],
+    /// Master-clock time of the instruction being recorded.
+    start_time: u64,
 }
 
 impl ApuBus<'_> {
+    /// Value the S-CPU had latched on `$2140-$2143` at master-clock `time`.
+    ///
+    /// ares synchronizes the two threads at a port access, so an S-SMP read of
+    /// `$F4-$F7` observes the S-CPU latch as of that exact clock. The S-SMP may
+    /// run its instruction in one batch, so the latched value is resolved from
+    /// the S-CPU's timestamped write history instead of the current latch.
+    fn cpu_port_at(&self, port: u64, time: u64) -> u8 {
+        self.port_history
+            .iter()
+            .rev()
+            .find(|(stamp, index, _)| *stamp <= time && u64::from(*index) == port)
+            .map_or(0, |(_, _, value)| *value)
+    }
+
     /// Write the underlying APU RAM (ares `writeRAM`).
     fn write_ram(&mut self, address: u16, value: u8) {
         if *self.ram_writable && !*self.ram_disable {
@@ -459,7 +482,7 @@ impl SpcBus for ApuBus<'_> {
             0xF0 | 0xF1 | 0xFA | 0xFB | 0xFC => 0,
             0xF2 => *self.dsp_address,
             0xF3 => self.dsp.read(*self.dsp_address),
-            0xF4..=0xF7 => self.apu_ports[usize::from(address - 0xF4)],
+            0xF4..=0xF7 => self.cpu_port_at(u64::from(address - 0xF4), self.start_time),
             0xF8 => *self.aux4,
             0xF9 => *self.aux5,
             0xFD..=0xFF => {
@@ -541,6 +564,8 @@ impl SpcBus for ApuBus<'_> {
 struct RecordBus<'a, 'b> {
     inner: &'a mut ApuBus<'b>,
     plan: &'a mut Vec<PlanStep>,
+    /// Access units recorded so far in this instruction.
+    units: u64,
 }
 
 impl SpcBus for RecordBus<'_, '_> {
@@ -562,16 +587,26 @@ impl SpcBus for RecordBus<'_, '_> {
 
     fn read(&mut self, address: u16) -> u8 {
         let clocks = self.inner.timer_cycles(Some(address)) as u8;
-        let value = self.inner.read(address);
+        let value = if (0xF4..=0xF7).contains(&address) {
+            // ares `SMP::read` samples the S-CPU latch at this access; the
+            // S-SMP is running a whole instruction at once, so resolve the
+            // latch from the S-CPU write history at the access's master clock.
+            let time = self.inner.start_time + (self.units * 21_477_272) / 1_025_280;
+            self.inner.cpu_port_at(u64::from(address - 0xF4), time)
+        } else {
+            self.inner.read(address)
+        };
         self.plan.push(PlanStep {
             clocks,
             port_write: None,
         });
+        self.units += u64::from(clocks) / 2;
         value
     }
 
     fn write(&mut self, address: u16, value: u8) {
         let clocks = self.inner.timer_cycles(Some(address)) as u8;
+        self.units += u64::from(clocks) / 2;
         if (0xF4..=0xF7).contains(&address) {
             // ares writes the RAM mirror immediately and latches the port; the
             // latch itself is only visible to the S-CPU at the access's end.
@@ -595,6 +630,7 @@ impl SpcBus for RecordBus<'_, '_> {
             clocks,
             port_write: None,
         });
+        self.units += u64::from(clocks) / 2;
     }
 }
 
@@ -628,6 +664,44 @@ mod tests {
     }
 
     #[test]
+    fn port_reads_resolve_by_timestamp() {
+        let mut apu = Apu::new();
+        let history = [(10u64, 0u8, 0x11u8), (20, 0, 0x22), (15, 1, 0x33)];
+        let bus = ApuBus {
+            ram: &mut apu.ram[..],
+            ipl: &apu.ipl,
+            ipl_loaded: apu.ipl_loaded,
+            iplrom_enable: &mut apu.iplrom_enable,
+            ram_writable: &mut apu.ram_writable,
+            ram_disable: &mut apu.ram_disable,
+            timers_enable: &mut apu.timers_enable,
+            timers_disable: &mut apu.timers_disable,
+            internal_wait: &mut apu.internal_wait,
+            external_wait: &mut apu.external_wait,
+            timers: &mut apu.timers,
+            dsp_address: &mut apu.dsp_address,
+            dsp: &mut apu.dsp,
+            apu_ports: &mut apu.apu_ports,
+            cpu_ports: &mut apu.cpu_ports,
+            aux4: &mut apu.aux4,
+            aux5: &mut apu.aux5,
+            timer_targets: &mut apu.timer_targets,
+            page_flag: false,
+            port_history: &history,
+            start_time: 0,
+        };
+        // Before the first write the latch is zero.
+        assert_eq!(bus.cpu_port_at(0, 9), 0);
+        assert_eq!(bus.cpu_port_at(0, 10), 0x11);
+        assert_eq!(bus.cpu_port_at(0, 19), 0x11);
+        assert_eq!(bus.cpu_port_at(0, 20), 0x22);
+        assert_eq!(bus.cpu_port_at(0, 100), 0x22);
+        // Ports are resolved independently.
+        assert_eq!(bus.cpu_port_at(1, 14), 0);
+        assert_eq!(bus.cpu_port_at(1, 15), 0x33);
+    }
+
+    #[test]
     fn control_disables_ipl_rom() {
         let mut apu = Apu::with_ipl(ipl());
         apu.ram_mut()[0xFFC0] = 0xAA;
@@ -651,6 +725,8 @@ mod tests {
             aux5: &mut apu.aux5,
             timer_targets: &mut apu.timer_targets,
             page_flag: false,
+            port_history: &[],
+            start_time: 0,
         };
         assert_eq!(bus.read(0xFFC0), 0x00);
         bus.write(0xF1, 0x00);
@@ -744,6 +820,8 @@ mod wait_state_tests {
             aux5: &mut apu.aux5,
             timer_targets: &mut apu.timer_targets,
             page_flag: false,
+            port_history: &[],
+            start_time: 0,
         }
     }
 

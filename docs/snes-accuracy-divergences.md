@@ -26,7 +26,10 @@ rendering difference:
   reference content two frames earlier, so same-index comparisons at 600/900
   show 92.4%/91.5%.
   - Measured and rejected as causes: port-write placement (committing S-SMP
-    latches at their exact clocks left the frames **bit-identical**), the APU
+    latches at their exact clocks left the frames **bit-identical**), port
+    *read* timing (timestamping every S-CPU `$2140-$2143` write and resolving
+    S-SMP `$F4-$F7` reads at the read access also left the frames
+    bit-identical), the APU
     clock (using ares' 24,606,720 Hz changed the S-SMP instruction count but
     not the frames), timer rate (ticks match RustySNES 4,077 vs 4,078 by frame
     600), and the ares `$4210`/`$4200` NMI hold/enable model (it moved the
@@ -64,6 +67,13 @@ rendering difference:
   differing pixels.
 
 S-DSP output is now instrumented but not sample-identical:
+
+- blargg `spc_smp` reports `Failed 02` (CPU Instructions/Full BRK) and
+  `spc_dsp6` reports `Failed 02` (Echo/esa_changes). Both failures predate the
+  current scheduling work (the framebuffers are byte-identical to the previous
+  build) and are the concrete audio/SPC items to fix next. `spc_dsp6` used to
+  panic in a debug build on a 16-bit BRR/echo address overflow; those sums now
+  wrap like ares' `n16` arithmetic.
 
 - At 600 frames, 36 of the 128 DSP registers differ from the RustySNES oracle;
   voices 6 and 7 match exactly and voices 0-4 are at different song positions.
