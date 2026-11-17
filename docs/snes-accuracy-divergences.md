@@ -899,12 +899,30 @@ $949B: BEQ $9498
 
 ares spins at `$9498/$949B` waiting for BWRAM `$602A` and is still there when
 the NMI arrives; in ours `$602A` is already non-zero, so we fall through
-immediately. Related: ares' BWRAM holds the SA-1 API table at `$0222`
-(`3A 0A`/bank `C1`, built by `$00:E98A` from the ROM table at `$FC02`), while
-ours is still all zeros at frame 120 even though the dispatch pointer
-`$72AC = $00EF31` matches ares exactly. So the remaining KDL3 defect is on the
-SA-1 API registration path (`$E98A` and whatever seeds BWRAM `$0022`/`$602A`),
-not in the controller or interrupt logic fixed above.
+immediately.
+
+`SA1_BWLOG=1` records every BWRAM write with its master clock, which corrects
+an earlier guess: **`$602A` is not an SA-1 flag** - the only `STA $602A` in the
+image sits inside compressed graphics data. The writers we actually observe
+(all side `CPU`, i.e. the S-CPU through the `$00-$3F:$6000-$7FFF` window):
+
+| Clock | Write | Origin |
+|---|---|---|
+| 36,412,000 | `$6002 = $81` | `$B8B5`, enabling NMI + auto-poll |
+| 36,412,594 | `$602A = 1` | the first NMI handler |
+| 36,527,620 | S-CPU reaches `$9498` (`PC_WATCH`) | main-loop frame wait |
+| 36,527,714 | `$602A = 0` | `$94AB` |
+
+So our first NMI handler runs about **115,000 master clocks (≈0.32 frame,
+≈84 scanlines) before** the main loop first reaches `$9498`, which is the
+opposite order from ares (whose loop is already spinning at `$9498` when the
+NMI lands). The frame-rendezvous phase is therefore inverted, and that is what
+shifts every later frame. ares also runs the SA-1 API registration routines
+(`$00:E98A` twice, `$00:ABB1`, `$00:F54F`, `$00:B8C8`) that we never reach, and
+its BWRAM API table at `$0222` (`3A 0A`, bank `C1`, built by `$00:E98A` from
+the ROM table at `$FC02`) is populated while ours is still zero - but the
+dispatch pointer `$72AC = $00EF31` matches exactly, so the table is downstream
+of the phase problem rather than a separate defect.
 
 ## SA-1 (Super Accelerator 1)
 

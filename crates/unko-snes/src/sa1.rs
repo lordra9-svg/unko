@@ -456,6 +456,20 @@ impl Sa1 {
         self.iram[index] = data;
     }
 
+    fn log_bwram(side: &str, address: u32, data: u8, clock: u64) {
+        if std::env::var_os("SA1_BWLOG").is_none() {
+            return;
+        }
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/opencode/sa1bw.log")
+        {
+            let _ = writeln!(f, "{side} off={address:06X} val={data:02X} clock={clock}");
+        }
+    }
+
     fn bwram_read_raw(bwram: &[u8], address: u32, data: u8) -> u8 {
         if bwram.is_empty() {
             return data;
@@ -573,6 +587,12 @@ impl Sa1 {
             } else if address & 0x40_0000 != 0 {
                 Self::bwram_write_raw(bwram, address, data);
             } else {
+                Self::log_bwram(
+                    "SA1",
+                    mirror(address, bwram.len() as u32),
+                    data,
+                    self.master_clock,
+                );
                 self.bwram_write_sa1(bwram, address, data);
             }
             return;
@@ -708,6 +728,7 @@ impl Sa1 {
         if !self.io.swen && !self.io.cwen && offset < (0x100u32 << self.io.bwp) {
             return;
         }
+        Self::log_bwram("CPU", offset, data, self.master_clock);
         Self::bwram_write_raw(bwram, offset, data);
     }
 
