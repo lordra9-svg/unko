@@ -135,6 +135,14 @@ impl RomHeader {
         region_for_country(self.country_code)
     }
 
+    /// Whether the cartridge declares an SPC7110 coprocessor.
+    ///
+    /// mia selects an `SPC7110-` board from cartridge type `$F5` (Epson RTC
+    /// variants use `$F9`) or the `SPC7110-` HiROM map modes `$2A`/`$3A`.
+    pub const fn has_spc7110(&self) -> bool {
+        matches!(self.cartridge_type, 0xf5 | 0xf9) || matches!(self.map_mode, 0x2a | 0x3a)
+    }
+
     /// Whether the cartridge declares an SA-1 (Super Accelerator) coprocessor.
     ///
     /// ares/mia select the `SA1-` board from map modes `$23`/`$33`.

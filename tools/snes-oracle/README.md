@@ -187,6 +187,23 @@ Polling loops (`CMP $2140`/`BNE`-style) legitimately differ in iteration count,
 so canonicalise by removing every PC that participates in a repeated
 1-3 instruction cycle before diffing.
 
+## SPC7110
+
+No firmware is needed: the program ROM is the first MiB of the image and the
+data ROM is the rest. `Momotarou Dentetsu Happy (Japan)` is a good oracle
+because the cartridge runs a built-in SPC7110 self-test (press Start) and
+prints its own verdict for the register file, the save-RAM buses, the data
+port, the multiply/divide units and the decompression length:
+
+```sh
+SPC7110_STATE=1 JOYPAD0=4096 JOYPAD0_FROM=150 FRAMES=600 \
+  ./target/release/examples/snes-info "Momotarou Dentetsu Happy (Japan).sfc" ipl.rom
+```
+
+`ALL OK` means every sub-test passed; the frame is also 100.000% identical to
+ares at 120/300/600. Without input the cartridge halts on that screen, so a
+frame diff alone only covers the self-test display.
+
 ## Regression baseline
 
 `baseline.py` runs every ROM under `test-roms/snes/` for a fixed frame count and

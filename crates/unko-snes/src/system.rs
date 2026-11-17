@@ -17,11 +17,12 @@ use crate::ppu::Ppu;
 use crate::rom::{Cartridge, Region};
 use crate::sa1::Sa1;
 use crate::sdd1::Sdd1;
+use crate::spc7110::Spc7110;
 
 /// Magic number at the start of a serialized save state (`"SNES"`).
 pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
 /// Save-state format version. Bump whenever the serialized shape changes.
-pub const SAVE_STATE_VERSION: u32 = 6;
+pub const SAVE_STATE_VERSION: u32 = 7;
 
 /// A complete `unko-snes` snapshot.
 ///
@@ -58,6 +59,8 @@ pub struct SnesState {
     pub sdd1: Option<Sdd1>,
     /// SA-1 coprocessor, when the cartridge has one.
     pub sa1: Option<Sa1>,
+    /// SPC7110 coprocessor, when the cartridge has one.
+    pub spc7110: Option<Spc7110>,
     /// Carried SA-1 instruction credit (master clocks).
     pub sa1_credit: i64,
     /// Last S-CPU bus address, for SA-1 bus-conflict penalties.
@@ -183,6 +186,8 @@ pub struct Snes {
     pub sdd1: Option<Sdd1>,
     /// SA-1 coprocessor, when the cartridge has one.
     pub sa1: Option<Sa1>,
+    /// SPC7110 coprocessor, when the cartridge has one.
+    pub spc7110: Option<Spc7110>,
     /// Carried SA-1 instruction credit (master clocks).
     sa1_credit: i64,
     /// Last S-CPU bus address, for SA-1 bus-conflict penalties.
@@ -236,6 +241,13 @@ impl Snes {
         let has_superfx = cart.header().has_superfx();
         let has_sdd1 = cart.header().has_sdd1();
         let has_sa1 = cart.header().has_sa1();
+        let has_spc7110 = cart.header().has_spc7110();
+        // Built before `cart` moves into the machine below.
+        let spc7110 = if has_spc7110 {
+            Some(Spc7110::new(cart.rom(), cart.sram().len()))
+        } else {
+            None
+        };
         let mut ppu = Ppu::new();
         ppu.set_region(region);
         Self {
@@ -256,6 +268,7 @@ impl Snes {
             } else {
                 None
             },
+            spc7110,
             sa1_credit: 0,
             snes_mar: 0,
             refresh_active: false,
@@ -341,6 +354,7 @@ impl Snes {
             cx4_credit: self.cx4_credit,
             sdd1: self.sdd1.clone(),
             sa1: self.sa1.clone(),
+            spc7110: self.spc7110.clone(),
             sa1_credit: self.sa1_credit,
             snes_mar: self.snes_mar,
             dma: self.dma.clone(),
@@ -403,6 +417,14 @@ impl Snes {
         self.cx4_credit = state.cx4_credit;
         self.sdd1 = state.sdd1.clone();
         self.sa1 = state.sa1.clone();
+        self.spc7110 = state.spc7110.clone();
+        if self.spc7110.is_some() {
+            // The program/data ROM is not serialized; re-attach it.
+            let rom = self.cart.rom().to_vec();
+            if let Some(spc7110) = self.spc7110.as_mut() {
+                spc7110.attach_rom(&rom);
+            }
+        }
         self.sa1_credit = state.sa1_credit;
         self.snes_mar = state.snes_mar;
         self.dma = state.dma.clone();
@@ -495,6 +517,9 @@ impl Snes {
         if let Some(sa1) = self.sa1.as_mut() {
             sa1.power(self.region);
         }
+        if let Some(spc7110) = self.spc7110.as_mut() {
+            spc7110.power();
+        }
         self.sa1_credit = 0;
         self.snes_mar = 0;
         self.refresh_active = false;
@@ -522,6 +547,7 @@ impl Snes {
             cx4: &mut self.cx4,
             sdd1: &mut self.sdd1,
             sa1: &mut self.sa1,
+            spc7110: &mut self.spc7110,
             snes_mar: &mut self.snes_mar,
             snes_refresh: self.refresh_active,
             apu: &mut self.apu,
@@ -575,6 +601,7 @@ impl Snes {
                         cx4: &mut self.cx4,
                         sdd1: &mut self.sdd1,
                         sa1: &mut self.sa1,
+                        spc7110: &mut self.spc7110,
                         snes_mar: &mut self.snes_mar,
                         snes_refresh: self.refresh_active,
                         apu: &mut self.apu,
@@ -627,14 +654,21 @@ impl Snes {
     /// step call that reaches `dramRefreshPosition`).
     fn advance_peripherals(&mut self, clocks: u32) -> u32 {
         self.advance_peripherals_inner(clocks);
+        // The SPC7110's pending units stall the S-CPU for their latency
+        // (20 clocks for a DCU transfer, 30/40 for multiply/divide).
+        let spc7110 = if let Some(chip) = self.spc7110.as_mut() {
+            chip.run(clocks)
+        } else {
+            0
+        };
         if self.refresh_pending {
             self.refresh_pending = false;
             self.refresh_active = true;
             self.advance_peripherals_inner(DRAM_REFRESH_CLOCKS);
             self.refresh_active = false;
-            DRAM_REFRESH_CLOCKS
+            DRAM_REFRESH_CLOCKS + spc7110
         } else {
-            0
+            spc7110
         }
     }
 
@@ -828,6 +862,7 @@ impl Snes {
             cx4: &mut self.cx4,
             sdd1: &mut self.sdd1,
             sa1: &mut self.sa1,
+            spc7110: &mut self.spc7110,
             snes_mar: &mut self.snes_mar,
             snes_refresh: self.refresh_active,
             apu: &mut self.apu,
@@ -891,6 +926,7 @@ struct SnesBus<'a> {
     cx4: &'a mut Option<Cx4>,
     sdd1: &'a mut Option<Sdd1>,
     sa1: &'a mut Option<Sa1>,
+    spc7110: &'a mut Option<Spc7110>,
     snes_mar: &'a mut u32,
     snes_refresh: bool,
     dma: &'a mut Dma,
@@ -1097,6 +1133,21 @@ impl CpuBus for SnesBus<'_> {
         if let Some(value) = self.sa1_read(address, mdr) {
             return value;
         }
+        if self.spc7110.is_some() {
+            if let Some(offset) = Spc7110::register_offset(address) {
+                let chip = self.spc7110.as_mut().expect("SPC7110 present");
+                return chip.read(offset, mdr);
+            }
+            if let Some(index) = Spc7110::ram_index(address) {
+                let chip = self.spc7110.as_ref().expect("SPC7110 present");
+                return chip.ram_read(index, mdr);
+            }
+            if Spc7110::in_rom_window(address) {
+                let reduced = Spc7110::reduce_rom(address);
+                let chip = self.spc7110.as_ref().expect("SPC7110 present");
+                return chip.mcurom_read(reduced, mdr);
+            }
+        }
         if let Some(sdd1) = self.sdd1.as_mut() {
             if Sdd1::in_io_window(address) {
                 return sdd1.read_io(address, self.cart.rom());
@@ -1194,6 +1245,21 @@ impl CpuBus for SnesBus<'_> {
             return;
         }
         *self.snes_mar = address;
+        if self.spc7110.is_some() {
+            if let Some(offset) = Spc7110::register_offset(address) {
+                let chip = self.spc7110.as_mut().expect("SPC7110 present");
+                chip.write(offset, value);
+                return;
+            }
+            if let Some(index) = Spc7110::ram_index(address) {
+                let chip = self.spc7110.as_mut().expect("SPC7110 present");
+                chip.ram_write(index, value);
+                return;
+            }
+            if Spc7110::in_rom_window(address) {
+                return; // program/data ROM is read-only
+            }
+        }
         if self.sa1_write(address, value) {
             return;
         }
@@ -1488,6 +1554,7 @@ mod tests {
             cx4: &mut system.cx4,
             sdd1: &mut system.sdd1,
             sa1: &mut system.sa1,
+            spc7110: &mut system.spc7110,
             snes_mar: &mut system.snes_mar,
             snes_refresh: system.refresh_active,
             apu: &mut system.apu,
@@ -1522,6 +1589,7 @@ mod tests {
             cx4: &mut system.cx4,
             sdd1: &mut system.sdd1,
             sa1: &mut system.sa1,
+            spc7110: &mut system.spc7110,
             snes_mar: &mut system.snes_mar,
             snes_refresh: system.refresh_active,
             apu: &mut system.apu,
@@ -1559,6 +1627,7 @@ mod tests {
             cx4: &mut system.cx4,
             sdd1: &mut system.sdd1,
             sa1: &mut system.sa1,
+            spc7110: &mut system.spc7110,
             snes_mar: &mut system.snes_mar,
             snes_refresh: system.refresh_active,
             apu: &mut system.apu,
@@ -1918,6 +1987,7 @@ mod tests {
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
                 sa1: &mut system.sa1,
+                spc7110: &mut system.spc7110,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 dma: &mut system.dma,
@@ -1938,6 +2008,52 @@ mod tests {
         // test for the rest of its instruction, so delivery slips one
         // instruction (KDL3 matches ares only with this).
         assert!(system.nmi_lock, "$4200 writes must lock the interrupt test");
+    }
+
+    fn spc7110_cartridge(code: &[u8]) -> Cartridge {
+        let mut rom = build_lorom(code);
+        let header = Mapping::LoRom.header_offset();
+        rom[header + 0x15] = 0x3A; // SPC7110 HiROM map mode
+        rom[header + 0x16] = 0xF5; // SPC7110
+        Cartridge::from_bytes(&rom).expect("valid SPC7110 image")
+    }
+
+    #[test]
+    fn spc7110_cartridges_attach_the_chip() {
+        let mut system = Snes::new(spc7110_cartridge(&[0x4C, 0x00, 0x80]));
+        assert!(system.cart.header().has_spc7110());
+        assert!(system.spc7110.is_some());
+        // Register window round-trip.
+        system.write(0x00_4801, 0x5A);
+        assert_eq!(system.read(0x00_4801, 0), 0x5A);
+        // Save RAM is gated by $4830 bit 7.
+        system.write(0x00_6000, 0x11);
+        assert_eq!(system.read(0x00_6000, 0), 0x00);
+        system.write(0x00_4830, 0x80);
+        system.write(0x00_6000, 0x11);
+        assert_eq!(system.read(0x00_6000, 0), 0x11);
+        // A plain LoROM cartridge has no SPC7110.
+        let plain = Snes::new(cartridge(&[0x4C, 0x00, 0x80]));
+        assert!(plain.spc7110.is_none());
+    }
+
+    #[test]
+    fn save_state_round_trips_an_spc7110_machine() {
+        let code = [0x4C, 0x00, 0x80];
+        let mut system = Snes::new(spc7110_cartridge(&code));
+        system.reset();
+        system.write(0x00_4830, 0x80);
+        system.write(0x00_4812, 0x01);
+        system.write(0x00_4820, 6);
+        system.write(0x00_4824, 7);
+        system.write(0x00_4825, 0);
+        system.run_cycles(50_000, 200_000);
+        let saved = system.save_state();
+
+        let mut restored = Snes::new(spc7110_cartridge(&code));
+        restored.reset();
+        restored.load_state(&saved).expect("load SPC7110 state");
+        assert_eq!(restored, system);
     }
 
     #[test]
@@ -1994,6 +2110,7 @@ mod tests {
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
                 sa1: &mut system.sa1,
+                spc7110: &mut system.spc7110,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -2077,6 +2194,7 @@ mod tests {
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
                 sa1: &mut system.sa1,
+                spc7110: &mut system.spc7110,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -2111,6 +2229,7 @@ mod tests {
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
                 sa1: &mut system.sa1,
+                spc7110: &mut system.spc7110,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -2145,6 +2264,7 @@ mod tests {
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
                 sa1: &mut system.sa1,
+                spc7110: &mut system.spc7110,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -2195,6 +2315,7 @@ mod tests {
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
                 sa1: &mut system.sa1,
+                spc7110: &mut system.spc7110,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -2255,6 +2376,7 @@ mod tests {
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
                 sa1: &mut system.sa1,
+                spc7110: &mut system.spc7110,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -2301,6 +2423,7 @@ mod tests {
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
                 sa1: &mut system.sa1,
+                spc7110: &mut system.spc7110,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -2338,6 +2461,7 @@ mod tests {
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
                 sa1: &mut system.sa1,
+                spc7110: &mut system.spc7110,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -2425,6 +2549,7 @@ mod tests {
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
                 sa1: &mut system.sa1,
+                spc7110: &mut system.spc7110,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -2460,6 +2585,7 @@ mod tests {
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
                 sa1: &mut system.sa1,
+                spc7110: &mut system.spc7110,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,

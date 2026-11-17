@@ -232,6 +232,17 @@ Validation so far:
   verified against ares below. A release SuperFX image (e.g. Star Fox) is not
   present locally, so the end-to-end game path is not yet measured; Final
   Fantasy V was still in its boot sequence at the 20M-cycle sample.
+- The SPC7110 is implemented (`spc7110.rs`): the memory control unit (HiROM
+  windows folded with ares' masks, `$4830-$4834` banking and ROM-size select,
+  1 MiB program ROM + data ROM, 8 KiB save RAM gated by `$4830`), the
+  decompression unit with the full `q_zip` arithmetic coder, the data port unit
+  (base/adjust/stride with sign extension), and the 16x16 multiply / 32-bit
+  divide ALU. Pending units run on the next master-clock tick and stall the
+  S-CPU for their latency. `Momotarou Dentetsu Happy (Japan)` contains a
+  built-in SPC7110 self-test which our run passes in full (`REG. INIT.`,
+  `SRAM DATA/ADDR BUS`, `SRAM R/W`, `DATA PORT ACC`, `MUL`, `DIV`,
+  `C-LENGTH`, `DATA PORT B+O+S` all `OK`), and its frames are **100.000%**
+  pixel-identical to ares at 120, 300 and 600.
 - The SA-1 (Super Accelerator 1) is implemented (`sa1.rs`): a second 65C816
   backed by the super-MMC ROM banking, shared BWRAM (banking, bit-map formats
   and write protection), 2 KiB I-RAM, the three DMA modes including both

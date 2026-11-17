@@ -984,6 +984,57 @@ frames of gameplay HUD rendering.
 - The SA-1's `$40-$4F` BWRAM window is the only extra S-CPU mapping modelled;
   the boot ROM / BS-X slot and the `$50-$6F` open-bus windows are not.
 
+## SPC7110
+
+`crates/unko-snes/src/spc7110.rs` ports the ares `SPC7110` component:
+
+- the **memory control unit**: the `$00-$3F,$80-$BF:$8000-$FFFF` window folded
+  with ares' `mask=0x800000`, the `$C0-$FF:$0000-$FFFF` window with
+  `mask=0xc00000` (both reduce to `((bank & 0x3f) << 16) | offset`), the
+  `$4830-$4834` bank/size registers, the 1 MiB program ROM split from the data
+  ROM, and the optional 8 KiB save RAM gated by `$4830` bit 7;
+- the **decompression unit**: `$4801-$4804` table base/index, `$4805/$4806`
+  seek length, `$4807` stride, `$4809-$480C` counter and status, and the
+  neviksti/talarubi `q_zip` arithmetic coder (53-state evolution table,
+  per-context MPS/LPS swap, the 5x15 context model, the inverse Morton
+  transform and the most-recently-used colour list);
+- the **data port unit**: `$4810-$481A` with the base+adjust+stride addressing
+  modes and the `$4818` settings bits (stride enable, adjust enable, sign
+  extension, adjust-instead-of-base);
+- the **arithmetic logic unit**: `$4820-$482F` with unsigned/signed 16x16
+  multiply and 32/16 divide, including the divide-by-zero clamp;
+- the register window `$00-$3F,$80-$BF:$4800-$483F` plus ares' `$50`/`$58`
+  full-bank aliases.
+
+Timing: the chip runs at the master clock. Each pending unit (DCU transfer,
+multiply, divide) executes on the next tick and then stalls the S-CPU for its
+latency (20 clocks for a DCU transfer, 30/40 for multiply/divide), which is
+added to the CPU's access debt like the DRAM refresh stalls.
+
+**Verification.** `Momotarou Dentetsu Happy (Japan)` (sha256
+`9fc7a66464e71d0f056fed2b560f527a5af69034c96293a2731107479763a9d8`, cartridge
+type `$F5`, map mode `$3A`) turns out to contain a **built-in SPC7110
+self-test**, which makes it an unusually good oracle: with start pressed it
+runs the firmware's own checks and reports
+
+```
+REG. INIT. OK   SRAM DATA BUS OK   SRAM ADDR BUS OK   SRAM R/W OK
+DATA PORT ACC OK   MUL OK   DIV OK   C-LENGTH OK   DATA PORT B+O+S OK
+COMPLETE / ALL OK
+```
+
+covering the register file, the save-RAM data/address buses, the data port
+accumulator and base+offset+stride paths, the multiply and divide units and the
+decompression length, and our run prints `ALL OK` with the same screen.
+Frames are also **100.000% pixel-identical** to ares at 120, 300 and 600
+(57,344/57,344 each, mean channel difference 0.000); without input the cartridge
+halts on that "POWER OFF PLEASE" screen, which is why both emulators stay
+static there.
+
+Known limitations: the Epson RTC variant (`SPC7110-RAM-EPSONRTC`, cartridge
+type `$F9`) is detected but the `$4840-$4842` RTC registers are not modelled,
+and the `EXSPC7110` (7 MiB) layout is not handled.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

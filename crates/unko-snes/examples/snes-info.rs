@@ -276,6 +276,23 @@ fn main() -> ExitCode {
             eprintln!("CX4 not attached");
         }
     }
+    if std::env::var_os("SPC7110_STATE").is_some() {
+        if let Some(chip) = &system.spc7110 {
+            eprintln!(
+                "SPC7110 prom={} drom={} ram={} busy_clocks={} bpp={} dcu_mode={} r480c={:02X} r4834={:02X}",
+                chip.prom.len(),
+                chip.drom.len(),
+                chip.ram.len(),
+                chip.busy_clocks,
+                chip.decompressor.bpp,
+                chip.dcu_mode,
+                chip.r480c,
+                chip.r4834
+            );
+        } else {
+            eprintln!("SPC7110 not attached");
+        }
+    }
     if std::env::var_os("SA1_STATE").is_some() {
         if let Some(sa1) = &system.sa1 {
             eprintln!(
