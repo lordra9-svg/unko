@@ -70,9 +70,20 @@ S-DSP output is now instrumented but not sample-identical:
 
 - blargg `spc_smp` reports `Failed 02` (CPU Instructions/Full BRK) and
   `spc_dsp6` reports `Failed 02` (Echo/esa_changes). For `spc_smp` the
-  suppressed readings CRC is `40E4B4BE` where the ROM expects `654FF73E`;
-  the test's BRK matches ares instruction-for-instruction, so the failing
-  reading comes from the later stack-fingerprint checks (`E7-FB` table). Both failures predate the
+  suppressed readings CRC is `40E4B4BE` where the ROM expects `654FF73E`.
+  The test's BRK matches ares instruction-for-instruction (stack `02,01,P`,
+  `I=0`, `B=1`), so the failure is later.
+  - The framework's CRC-input stream (`$0613` called with A) was logged in
+    both emulators. The first divergence is at character 510: for one
+    stack-fingerprint entry we emit `D0 R1 W0 W1` and RustySNES emits
+    `D0 W0 R1 W1`. Same checks, different order, so a data-dependent branch
+    in the test's check routine takes the other path; the CRC difference is
+    the consequence, not a broken CRC.
+  - Next step: decode that check routine's `D`/`W`/`R` marker branches (the
+    markers are not `lda #imm` constants, so they come from a table) to see
+    which stack/DP value drives the branch, or single-step the `$072D`
+    handler in both emulators and diff `SP`/`P`/`PCL`/`PCH` after each stack
+    operation. Both failures predate the
   current scheduling work (the framebuffers are byte-identical to the previous
   build) and are the concrete audio/SPC items to fix next. `spc_dsp6` used to
   panic in a debug build on a 16-bit BRR/echo address overflow; those sums now
