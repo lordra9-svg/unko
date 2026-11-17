@@ -21,19 +21,35 @@ The remaining known video divergence is **dot-level sprite evaluation**:
   it is 99.927% at the same offset and at 1500 frames 99.912% at the same
   index; every differing pixel lies in the overlap of two equal-priority
   sprites.
-- **Open: one-extra-NMI title-screen offset.** Both emulators turn the display
-  on at frame 86 and match exactly at 1500, but our title screen reaches the
+- **Open: title-screen content offset.** Both emulators turn the display on at
+  frame 86 and match exactly at 1500, but our title screen reaches the
   reference content two frames earlier, so same-index comparisons at 600/900
-  show 92.4%/91.5%. By frame 600 we have delivered 440 CPU interrupts and
-  RustySNES 439, and the game's own frame counter at WRAM `$13` is one ahead
-  from frame ~195. S-SMP timer activity matches (4,077 vs 4,078 non-zero
-  `$FD` reads by frame 600) and committing port writes at their exact clocks
-  left the frames bit-identical, so the remaining error is on the S-SMP
-  **read** side: our recorder executes a whole S-SMP instruction when a plan is
-  formed, so an S-SMP read of `$F4-$F7` can observe a CPU write a fraction of
-  an instruction early. Removing it requires a resumable SPC700 interpreter
-  that executes each access as its clocks elapse (the ares cooperative-thread
-  model), not instruction-at-a-time recording.
+  show 92.4%/91.5%.
+  - Measured and rejected as causes: port-write placement (committing S-SMP
+    latches at their exact clocks left the frames **bit-identical**), the APU
+    clock (using ares' 24,606,720 Hz changed the S-SMP instruction count but
+    not the frames), timer rate (ticks match RustySNES 4,077 vs 4,078 by frame
+    600), and the ares `$4210`/`$4200` NMI hold/enable model (it moved the
+    *request* count to 441 with identical frames, and was reverted).
+  - The earlier "one extra NMI" was an accounting artefact: `nmi_count` counted
+    NMI *requests* while RustySNES counts *vectored* interrupts. Matching the
+    accounting (`cpu.nmi_services`) gives identical counts at frames 190-200
+    (106..116) and differences of +/-1 at other frames that move with the
+    capture point. The game's WRAM `$13` is likewise within one increment.
+  - What remains is a genuine phase difference in the boot handshake, and the
+    only exact model is ares' bidirectional cooperative threads: the S-CPU and
+    S-SMP can each suspend mid-instruction at a port access and run the other
+    forward to the same clock. Our single-threaded `Spc700::step` executes a
+    whole instruction at once, so an S-SMP poll of `$F4-$F7` observes the CPU
+    latch as of the instruction start. Two ways to remove it:
+    1. **Resumable SPC700** — rewrite the interpreter as an explicit
+       state machine (or a generator) that yields at every bus access; exact,
+       but it touches every instruction and addressing-mode helper.
+    2. **Coroutine S-CPU/S-SMP** — run the S-SMP interpreter on a second OS
+       thread and hand-shake at port accesses; exact and localized, but adds
+       threading, synchronization cost and unsafe/shared state.
+    This is an architecture decision, not a bug fix; the current model keeps
+    the port *writes* exact and the port *reads* one instruction early.
 - VRAM (32,768 words), CGRAM (256 entries) and OAM are bit-identical to the
   RustySNES oracle at 600 frames.
 - **Frame-index caveat:** the local ares build's `--frames N --dump-frame`

@@ -176,13 +176,13 @@ Validation so far:
     text and the scrolling BG1 landscape all match
   - **open:** `unko-snes` reaches the same title-screen content two frames
     before RustySNES/ares, so same-index comparisons show 92.4% (600) and
-    91.5% (900). Both emulators turn the display on at frame 86. The offset is
-    pinned to **one extra NMI**: by frame 600 we have delivered 440 CPU
-    interrupts and RustySNES 439, and the game's own frame counter at WRAM
-    `$13` is exactly one ahead from frame ~195 on. The APU is not the cause:
-    S-SMP timer ticks by frame 600 match RustySNES (4,077 vs 4,078 non-zero
-    `$FD` reads), and committing S-SMP port latches at their exact clocks left
-    the frames bit-identical. See the divergence ledger for the next step.
+    91.5% (900). Both emulators turn the display on at frame 86. Port-latch
+    timing, the APU clock, the timer rate and the ares NMI hold/enable model
+    were each changed independently and either left the frames
+    bit-identical or made the NMI accounting worse, so the residual is a boot
+    handshake phase difference that needs exact bidirectional S-CPU/S-SMP
+    synchronization (a resumable SPC700 interpreter or coroutine scheduling).
+    See the divergence ledger.
 - The residual pixels are the overlap of two equal-priority sprites where the
   32-entry sprite list resolves the tie differently; dot-level sprite
   evaluation and the 34-tile limit are the remaining PPU scheduling work.
