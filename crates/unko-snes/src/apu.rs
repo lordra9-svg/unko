@@ -748,6 +748,44 @@ mod tests {
     }
 
     #[test]
+    fn dspdata_write_reads_back_immediately() {
+        // ares `DSP::write` stores the value in the register file before the
+        // per-register side effect, and `DSP::read` returns that file, so a
+        // write followed by a read of `$F3` returns the new value even for a
+        // read-only register such as `VxENVX` (`$x8`). blargg `spc_dsp6` spins
+        // on exactly this (`str $F2=#$08`, write `$88`, read back until the
+        // per-sample latch replaces it).
+        let mut apu = Apu::new();
+        let mut bus = ApuBus {
+            ram: &mut apu.ram[..],
+            ipl: &apu.ipl,
+            ipl_loaded: apu.ipl_loaded,
+            iplrom_enable: &mut apu.iplrom_enable,
+            ram_writable: &mut apu.ram_writable,
+            ram_disable: &mut apu.ram_disable,
+            timers_enable: &mut apu.timers_enable,
+            timers_disable: &mut apu.timers_disable,
+            internal_wait: &mut apu.internal_wait,
+            external_wait: &mut apu.external_wait,
+            timers: &mut apu.timers,
+            dsp_address: &mut apu.dsp_address,
+            dsp: &mut apu.dsp,
+            apu_ports: &mut apu.apu_ports,
+            cpu_ports: &mut apu.cpu_ports,
+            aux4: &mut apu.aux4,
+            aux5: &mut apu.aux5,
+            timer_targets: &mut apu.timer_targets,
+            page_flag: false,
+        };
+        SpcBus::write(&mut bus, 0x00F2, 0x08); // DSPADDR = V0ENVX
+        SpcBus::write(&mut bus, 0x00F3, 0x88); // DSPDATA = $88
+        assert_eq!(SpcBus::read(&mut bus, 0x00F3), 0x88);
+        // The register file keeps the value until the S-DSP's per-sample latch
+        // update overwrites it, which is what the test loop waits for.
+        assert_eq!(bus.dsp.read(0x08), 0x88);
+    }
+
+    #[test]
     fn control_disables_ipl_rom() {
         let mut apu = Apu::with_ipl(ipl());
         apu.ram_mut()[0xFFC0] = 0xAA;

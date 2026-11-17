@@ -118,6 +118,23 @@ S-DSP output is now instrumented but not sample-identical:
     divergence at **entry 8729**, unchanged. Combined with the null results for
     the coarse phase sweep and the tick ordering, the slip is not explained by
     any of the three plausible DSP/SPC phase adjustments.
+  - **DSP step index logged at each V0ENVX read (both emulators).** Adding the
+    S-DSP micro-step position to the `$F3` read log shows our step index is
+    exactly RustySNES' phase minus one at *every* read (its `phase` is the
+    current micro-step, ours the next one), so the DSP/SPC **phase is correct**
+    and the slip is not a phase error - consistent with the sweep.
+  - What does differ is the *read value at the same instruction PC*: in the
+    sample-boundary routine RustySNES reads `$88` (the value just written)
+    several times before the latch replaces it, while we read `00` at those
+    same PCs and see `$88` one read later, i.e. our read/write pairing is out
+    of step by one access. The bus path itself is correct and now pinned by
+    `dspdata_write_reads_back_immediately` (write `$F3` = `$88` to `V0ENVX`,
+    read back `$88`, register file retains it until the sample latch).
+  - Consequence for the next attempt: the remaining question is the
+    *instruction-level* ordering of the write and the following read inside
+    `$04F3`-`$050A` (which instruction's access the value is sampled on), not
+    the DSP phase nor the DSPDATA visibility. Logging the write PC alongside
+    the read PC across a slip point will show the pairing.
   - Consequence for the next attempt: the slip is a *discrete* difference in
     when the sample boundary is deemed to fall inside the write->read window,
     not a phase offset. The instrument that will settle it is a log of the DSP
