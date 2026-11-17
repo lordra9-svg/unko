@@ -89,7 +89,11 @@ S-DSP output is now instrumented but not sample-identical:
     `$F6` return a stale CPU-side value (`0x30`) instead of the real latch
     (`0x00`) - exactly what test 9 checks. Reading the latch directly fixed
     it; `smp_port_reads_see_only_the_cpu_latches` pins both directions.
-- blargg `spc_dsp6` reports `Failed 02` (Echo/esa_changes). It used to panic in
+- blargg `spc_dsp6` reports `Failed 02` (Echo/esa_changes). It is **parked**:
+  five turns of instrumentation excluded every DSP-side cause (see above) and
+  showed the `$F0` ramp is written by the test itself, so closing it needs a
+  TAS-style trace of the test's own SPC stores rather than more DSP work. It
+  used to panic in
   a debug build on a 16-bit BRR/echo address overflow; those sums now wrap like
   ares' `n16` arithmetic. This is the concrete audio item to fix next.
   - Measured state: at frame 1200 only **5 of 128 DSP registers** differ from
@@ -276,7 +280,19 @@ with ares. The implementation follows ares, which is the primary source.
 - Display brightness follows ares' DAC luma `(1 + l) / 16 * (l ? 1 : 0.25)`
   with integer rounding. Measured frames match ares at `INIDISP = $0F` and at
   `$0B`; sub-1/255 rounding differences are possible at other levels.
-- Hires output, interlace and offset-per-tile are not implemented.
+- Hires output and interlace are not implemented (both need a wider/taller
+  framebuffer than the 256x224 line renderer produces).
+- Offset per tile **is** implemented for modes 2, 4 and 6, transcribed from
+  ares `Background::fetchNameTable`/`fetchOffset`: the per-column horizontal and
+  vertical words are read from BG3's tilemap (horizontal at `voffset + 0`,
+  vertical at `voffset + 8`, horizontal position snapped to the tile column)
+  and applied when bit `13 + layer` of the word is set; mode 4 packs both
+  directions into one word, selected by bit 15. Verified by
+  `offset_per_tile_shifts_a_bg_column_from_bg3`, which renders the same line
+  with and without the lookup word and asserts the column moves from tile 1 to
+  tile 2. No public prebuilt offset-per-tile test ROM exists in the collections
+  already used here, so this is verified against the ares rule rather than
+  against an oracle frame dump.
 - Mode 7 is complete for the base console: the matrix/centre registers share
   ares' `latch.mode7` byte (first write low, second high, shared with
   `$210D/$210E`), `M7SEL` bits 6-7 follow ares `io.repeatMode7` (0/1 repeat,

@@ -20,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **843 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **844 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -114,7 +114,7 @@ Implemented so far:
 
 Validation so far:
 
-- **843 workspace tests**, 0 failed
+- **844 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -213,8 +213,9 @@ Validation so far:
 - Star Fox remains black without the SuperFX coprocessor; Final Fantasy V was
   still in its boot sequence at the 20M-cycle sample.
 
-The PPU is line-based rather than dot-scheduled; hires, interlace and
-offset-per-tile are still missing. Mode 7 is complete and verified against
+The PPU is line-based rather than dot-scheduled; hires and interlace are still
+missing (they need a 512-wide and/or 448-line framebuffer). Offset per tile is
+implemented for modes 2/4/6. Mode 7 is complete and verified against
 RustySNES on a rotation test ROM (100.000% at two frames). S-DSP output has not yet been
 sample-compared against ares. Exact audio parity, the two-frame content phase
 and the remaining PPU scheduling work are the open accuracy items.
