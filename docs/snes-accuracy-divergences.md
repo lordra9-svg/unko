@@ -150,6 +150,16 @@ rendering difference:
     clock comparisons beyond ~148 frames are therefore unusable as-is, and the
     harness's frame/clock correspondence must be fixed before extending the
     trace further.
+  - **Window trace instrumented; reference side still blocked.** The
+    set->clear window trace is implemented on our side and captures the full
+    sequence: **390 instructions, 15,860 master clocks**, from `$81E9` (first
+    instruction after `inc $10`) to `$8075` (the instruction that clears the
+    flag) - consistent with the 15,434/15,924-clock flag windows. The matching
+    RustySNES-side window never closes (it records 526,628 instructions over
+    15.4M clocks instead of one ~390-instruction window), because its debug hook
+    restarts on the `$10` set but does not stop on the clear; that harness bug
+    has to be fixed before the per-instruction diff can be produced. No fix was
+    landed for the phase itself this turn.
   - Also note the cumulative totals: our `$806B` sits at 472,528 by frame 190
     against the reference's 454,144 (+4%), and `$809A` at 266,693 against
     253,713 (+5%), so the CPU spends slightly more iterations spinning in both
