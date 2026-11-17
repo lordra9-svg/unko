@@ -128,6 +128,12 @@ pub struct Ppu {
     range_over: bool,
     /// ares `Object::io.timeOver`: more than 34 object tiles on the line.
     time_over: bool,
+    /// ares `latch.oamAddress`: the sprite index the renderer last evaluated;
+    /// OAM accesses during active display are redirected here.
+    latch_oam_address: u8,
+    /// ares `latch.cgramAddress`: the palette index the renderer last looked
+    /// up; CGRAM accesses during active display are redirected here.
+    latch_cgram_address: u8,
     line_event: bool,
     layer_mask: Option<u8>,
 }
@@ -214,6 +220,8 @@ impl Ppu {
             ppu2_mdr: 0,
             range_over: false,
             time_over: false,
+            latch_oam_address: 0,
+            latch_cgram_address: 0,
             line_event: false,
             layer_mask: None,
         }
@@ -495,8 +503,7 @@ impl Ppu {
             0x2139 => {
                 self.ppu1_mdr = self.vram_read_latch as u8;
                 if self.vmain & 0x80 == 0 {
-                    self.vram_read_latch =
-                        self.vram[usize::from(self.vram_word_address() & 0x7FFF)];
+                    self.vram_read_latch = self.read_vram_word();
                     self.vram_address = self.vram_address.wrapping_add(self.vram_increment());
                 }
                 self.ppu1_mdr
@@ -504,14 +511,13 @@ impl Ppu {
             0x213A => {
                 self.ppu1_mdr = (self.vram_read_latch >> 8) as u8;
                 if self.vmain & 0x80 != 0 {
-                    self.vram_read_latch =
-                        self.vram[usize::from(self.vram_word_address() & 0x7FFF)];
+                    self.vram_read_latch = self.read_vram_word();
                     self.vram_address = self.vram_address.wrapping_add(self.vram_increment());
                 }
                 self.ppu1_mdr
             }
             0x213B => {
-                let address = usize::from(self.cgram_address);
+                let address = self.cgram_target();
                 if self.cgram_latch {
                     self.cgram_latch = false;
                     self.ppu2_mdr =
@@ -674,7 +680,7 @@ impl Ppu {
                 self.cgram_latch = false;
             }
             0x2122 => {
-                let address = usize::from(self.cgram_address);
+                let address = self.cgram_target();
                 if self.cgram_latch {
                     self.cgram_latch = false;
                     self.cgram[address] =
@@ -742,12 +748,16 @@ impl Ppu {
 
     fn write_vram_byte(&mut self, data: u8, high: bool) {
         let address = self.vram_word_address() & 0x7FFF;
-        let word = self.vram[usize::from(address)];
-        self.vram[usize::from(address)] = if high {
-            (word & 0x00FF) | (u16::from(data) << 8)
-        } else {
-            (word & 0xFF00) | u16::from(data)
-        };
+        // ares `PPU::writeVRAM`: writes during active display are dropped, but
+        // the address still advances.
+        if self.display_disable || self.line >= VBLANK_LINE {
+            let word = self.vram[usize::from(address)];
+            self.vram[usize::from(address)] = if high {
+                (word & 0x00FF) | (u16::from(data) << 8)
+            } else {
+                (word & 0xFF00) | u16::from(data)
+            };
+        }
         let increment = self.vram_increment();
         if (high && self.vmain & 0x80 != 0) || (!high && self.vmain & 0x80 == 0) {
             self.vram_address = self.vram_address.wrapping_add(increment);
@@ -846,21 +856,49 @@ impl Ppu {
         }
     }
 
-    fn read_oam(&self, address: u16) -> u8 {
-        // ares `PPU::readOAM`: OAM is inaccessible during active display unless
-        // forced blank is on; the address counter still advances.
+    /// ares `PPU::readVRAM`: VRAM reads return 0 during active display.
+    fn read_vram_word(&self) -> u16 {
         if !self.display_disable && self.line < VBLANK_LINE {
             return 0;
         }
-        self.oam[Self::oam_index(address)]
+        self.vram[usize::from(self.vram_word_address() & 0x7FFF)]
+    }
+
+    /// ares `PPU::readCGRAM`/`writeCGRAM`: during the visible window the access
+    /// is redirected to the palette index the renderer last looked up.
+    fn cgram_target(&self) -> usize {
+        let visible = !self.display_disable
+            && self.line > 0
+            && self.line < VBLANK_LINE
+            && self.dot >= 22
+            && self.dot < 274;
+        usize::from(if visible {
+            self.latch_cgram_address
+        } else {
+            self.cgram_address
+        })
+    }
+
+    /// OAM address during active display: ares `PPU::readOAM`/`writeOAM`
+    /// redirect the access to the sprite the renderer last evaluated.
+    fn oam_access_index(&self, address: u16) -> usize {
+        if !self.display_disable && self.line < VBLANK_LINE {
+            if address & 0x200 == 0 {
+                usize::from(self.latch_oam_address) * 4 + usize::from(address & 1)
+            } else {
+                0x200 + (usize::from(self.latch_oam_address) >> 2)
+            }
+        } else {
+            Self::oam_index(address)
+        }
+    }
+
+    fn read_oam(&self, address: u16) -> u8 {
+        self.oam[self.oam_access_index(address)]
     }
 
     fn write_oam(&mut self, address: u16, data: u8) {
-        // ares `PPU::writeOAM`: writes during active display are dropped.
-        if !self.display_disable && self.line < VBLANK_LINE {
-            return;
-        }
-        let index = Self::oam_index(address);
+        let index = self.oam_access_index(address);
         self.oam[index] = data;
     }
 
@@ -882,12 +920,19 @@ impl Ppu {
                 self.render_background(&mut main, &mut sub, y, layer, mode, priority);
             }
         }
-        if main_mask & 0x10 != 0 || self.ts & 0x10 != 0 {
-            let (range_over, time_over) =
-                self.render_sprites(&mut main, &mut sub, y, &obj_priority);
-            self.range_over |= range_over;
-            self.time_over |= time_over;
-        }
+        // ares evaluates the object layer on every line (for OAM latching and
+        // the $213E overflow flags) and only draws it when enabled.
+        let obj_enabled = main_mask & 0x10 != 0 || self.ts & 0x10 != 0;
+        let (range_over, time_over, latch_oam) = if obj_enabled {
+            self.render_sprites(&mut main, &mut sub, y, &obj_priority)
+        } else {
+            let mut scratch_main = [Pixel::default(); SCREEN_WIDTH];
+            let mut scratch_sub = [Pixel::default(); SCREEN_WIDTH];
+            self.render_sprites(&mut scratch_main, &mut scratch_sub, y, &obj_priority)
+        };
+        self.range_over |= range_over;
+        self.time_over |= time_over;
+        self.latch_oam_address = latch_oam;
         self.present_line(row, &main, &sub);
     }
 
@@ -1261,18 +1306,20 @@ impl Ppu {
 
     /// Render the object layer for one line.
     ///
-    /// Returns the line's `(rangeOver, timeOver)` sprite flags; the caller
-    /// latches them for the frame (ares `Object::evaluate`/`fetch`).
+    /// Returns the line's `(rangeOver, timeOver, latchOamAddress)` sprite
+    /// state; the caller latches it for the frame (ares `Object::evaluate`/
+    /// `fetch` and `latch.oamAddress`).
     fn render_sprites(
         &self,
         main: &mut [Pixel; SCREEN_WIDTH],
         sub: &mut [Pixel; SCREEN_WIDTH],
         y: usize,
         priority: &[u8; 4],
-    ) -> (bool, bool) {
+    ) -> (bool, bool, u8) {
         let base_size = (self.obsel >> 5) & 0x07;
         let mut range_over = false;
         let mut time_over = false;
+        let mut latch_oam = 0u8;
         let nameselect = (self.obsel >> 3) & 0x03;
         let tiledata = u32::from(self.obsel & 0x07) << 13;
         let main_enable = self.layer_mask.unwrap_or(self.tm) & 0x10 != 0;
@@ -1308,6 +1355,7 @@ impl Ppu {
             if y < first || y >= first + usize::from(height) {
                 continue;
             }
+            latch_oam = sprite;
             if item_count == 32 {
                 // ares `Object::evaluate` stops once more than 32 sprites are
                 // on-line and latches `rangeOver` for the frame.
@@ -1417,7 +1465,7 @@ impl Ppu {
                 }
             }
         }
-        (range_over, time_over)
+        (range_over, time_over, latch_oam)
     }
 
     fn present_line(
@@ -1443,6 +1491,8 @@ impl Ppu {
             let above = main[x];
             let below = sub[x];
             let above_backdrop = above.priority == 0;
+            // ares `DAC::paletteColor` latches the palette index it looked up.
+            self.latch_cgram_address = if above_backdrop { 0 } else { above.color };
             let above_layer = if above_backdrop { 5 } else { above.layer };
             let above_color = if above_backdrop {
                 self.cgram[0]
@@ -2215,18 +2265,21 @@ mod tests {
     }
 
     #[test]
-    fn oam_is_inaccessible_during_active_display() {
+    fn oam_access_is_redirected_during_active_display() {
         let mut ppu = Ppu::new();
         ppu.write(0x2100, 0x0F); // display on (leaves force blank)
         ppu.line = 100; // active display
+        ppu.latch_oam_address = 1; // the renderer last evaluated sprite 1
         ppu.write(0x2102, 0);
         ppu.write(0x2103, 0);
         for byte in [0x11, 0x22, 0x33, 0x44] {
             ppu.write(0x2104, byte);
         }
-        assert_eq!(ppu.oam[..4], [0, 0, 0, 0], "OAM writes must be dropped");
-        assert_eq!(ppu.read(0x2138, 0), 0x00, "OAM reads must return 0");
-        // Force blank makes OAM accessible again.
+        // ares redirects to `latch.oamAddress << 2 | address & 1`, so only the
+        // first word of sprite 1 is touched.
+        assert_eq!(ppu.oam[4..8], [0x33, 0x44, 0, 0]);
+        assert_eq!(ppu.read(0x2138, 0), 0x33);
+        // Force blank addresses OAM normally again.
         ppu.write(0x2100, 0x80);
         ppu.write(0x2102, 0);
         ppu.write(0x2103, 0);
@@ -2237,6 +2290,55 @@ mod tests {
         ppu.write(0x2102, 0);
         ppu.write(0x2103, 0);
         assert_eq!(ppu.read(0x2138, 0), 0x11);
+    }
+
+    #[test]
+    fn vram_is_inaccessible_during_active_display() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2100, 0x0F);
+        ppu.write(0x2115, 0x80); // increment after the high byte
+        ppu.line = 100;
+        ppu.write(0x2116, 0x00);
+        ppu.write(0x2117, 0x00);
+        ppu.write(0x2118, 0x12);
+        ppu.write(0x2119, 0x34);
+        assert_ne!(ppu.vram[0], 0x3412, "VRAM writes must be dropped");
+        // The address still advances after the high byte.
+        assert_eq!(ppu.vram_address, 1);
+        // Reads return 0 during active display.
+        ppu.vram[0] = 0xABCD;
+        ppu.write(0x2116, 0);
+        ppu.write(0x2117, 0);
+        assert_eq!(ppu.read(0x2139, 0), 0);
+        // Force blank makes VRAM accessible again.
+        ppu.write(0x2100, 0x80);
+        ppu.write(0x2116, 0);
+        ppu.write(0x2117, 0);
+        ppu.write(0x2118, 0x12);
+        ppu.write(0x2119, 0x34);
+        assert_eq!(ppu.vram[0], 0x3412);
+    }
+
+    #[test]
+    fn cgram_access_is_redirected_during_active_display() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2100, 0x0F);
+        ppu.line = 100;
+        ppu.dot = 100; // inside the visible window
+        ppu.latch_cgram_address = 7; // the DAC last looked up palette 7
+        ppu.write(0x2121, 0x02);
+        ppu.write(0x2122, 0x1F);
+        ppu.write(0x2122, 0x00);
+        assert_eq!(ppu.cgram[7], 0x001F);
+        ppu.write(0x2121, 0x02);
+        assert_eq!(ppu.read(0x213B, 0), 0x1F);
+        assert_eq!(ppu.read(0x213B, 0), 0x00);
+        // Outside the visible window the CPU address is used.
+        ppu.dot = 10;
+        ppu.write(0x2121, 0x02);
+        ppu.write(0x2122, 0xE0);
+        ppu.write(0x2122, 0x03);
+        assert_eq!(ppu.cgram[2], 0x03E0);
     }
 
     #[test]
