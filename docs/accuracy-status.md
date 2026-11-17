@@ -232,16 +232,18 @@ Validation so far:
   verified against ares below. A release SuperFX image (e.g. Star Fox) is not
   present locally, so the end-to-end game path is not yet measured; Final
   Fantasy V was still in its boot sequence at the 20M-cycle sample.
-- The NEC DSP-1 (uPD7725) coprocessor is implemented (`necdsp.rs`): the full
-  24-bit-word interpreter (OP/RT/JP/LD with every ALU and branch mode), the
-  2K program ROM / 1K data ROM / 256-word data RAM, the DR/SR byte-pair
-  handshake (RQM/DRS/DRC) and the board window selected from the mapping and
-  ROM size. Firmware is installed at runtime from the user-supplied 8 KiB
-  `dsp1.rom`/`dsp1b.rom`; a lenient header fallback boots headerless demos.
-  Verified against ares on Super Mario Kart (USA) at the same frame:
-  **99.981%** (57,333/57,344; the 11 residuals are two left-edge sprite
-  columns), and on the DSP-1 Tech Demo at **95.714%** with the DSP-driven grid
-  exact and only the sprite-font text differing.
+- The NEC uPD7725 family (DSP-1/1A/1B and DSP-2/3/4) is implemented
+  (`necdsp.rs`): the full 24-bit-word interpreter (OP/RT/JP/LD with every ALU
+  and branch mode), the 2K program ROM / 1K data ROM / 256-word data RAM, the
+  DR/SR byte-pair handshake (RQM/DRS/DRC) and the board window selected from
+  the mapping, ROM size and SRAM size. Any of the 8 KiB `dsp1.rom`/`dsp1b.rom`/
+  `dsp2.rom`/`dsp3.rom`/`dsp4.rom` firmwares can be installed at runtime from
+  the user-supplied dump; a lenient header fallback boots headerless demos.
+  Verified against ares at the same frame: Super Mario Kart (USA) **99.981%**
+  (57,333/57,344; the 11 residuals are two left-edge sprite columns), DSP-1
+  Tech Demo **95.714%** with the DSP-driven grid exact, and
+  **Dungeon Master (DSP-2), SD Gundam GX (DSP-3) and Top Gear 3000 (DSP-4) all
+  at 100.000%** (Top Gear also 100.000% at frame 1,500).
 
 The PPU is line-based rather than dot-scheduled. **Interlace is implemented**
 (448-line output, odd field on the odd output rows, sprite and hires BG vertical

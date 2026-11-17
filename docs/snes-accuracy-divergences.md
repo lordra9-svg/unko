@@ -671,7 +671,7 @@ Known limitations:
 - Only the GSU-1/GSU-2 (same-clock) boards are modelled; the Mario Chip 1
   clock-select differences are treated as the same master clock.
 
-## NEC DSP-1 (uPD7725)
+## NEC DSP-1/2/3/4 (uPD7725)
 
 `crates/unko-snes/src/necdsp.rs` ports the ares `uPD96050` engine for the
 uPD7725 revision (DSP-1/1A/1B, DSP-2/3/4):
@@ -693,8 +693,12 @@ uPD7725 revision (DSP-1/1A/1B, DSP-2/3/4):
   `NEC-LOROM` (`$30-$3F,$B0-$BF:$8000-$FFFF`) and `NEC-LOROM-RAM`
   (`$60-$6F,$E0-$EF:$0000-$7FFF`) boards;
 - firmware installed at runtime from the user-supplied 8 KiB
-  `dsp1.rom`/`dsp1b.rom` (`Snes::set_dsp1_firmware`); the firmware is
-  copyrighted chip data and is never embedded in this crate;
+  `dsp1.rom`/`dsp1b.rom`/`dsp2.rom`/`dsp3.rom`/`dsp4.rom`
+  (`Snes::set_dsp1_firmware`); the firmware is copyrighted chip data and is
+  never embedded in this crate;
+- the window heuristic also covers the wide `NEC-LOROM-RAM#A` window
+  (`$20-$3F,$A0-$BF:$8000-$FFFF`) used by 1 MiB LoROM DSP carts with SRAM, in
+  addition to the plain `$30-$3F` and >1 MiB `$60-$6F` windows;
 - save-state coverage: the whole `NecDsp` (ROMs, RAM, registers, flags and
   window) is part of `SnesState`;
 - `Cartridge::from_bytes_lenient` recovers a LoROM/HiROM header from the reset
@@ -712,8 +716,18 @@ Verification:
   entry forcing the `NEC-LOROM` board, the frame at 302 is **95.714%** exact.
   The DSP-driven grid is pixel-exact; only the demo's sprite-font glyphs
   differ (its custom bitplane/VRAM decompressor, not the DSP core).
-- `snes-info` accepts `DSP1_ROM=<path>`; the firmware and the commercial ROMs
-  are not committed.
+- **DSP-2/3/4**: Dungeon Master (USA, DSP-2), SD Gundam GX (Japan, DSP-3) and
+  Top Gear 3000 (USA, DSP-4) are all **100.000%** exact against ares at frame
+  600 (Top Gear also at frame 1,500). The firmware is selected by the local
+  verification entries in the ares database (`DSP2`/`DSP3`/`DSP4`) or by
+  `DSP1_ROM`. Liveness check: running Dungeon Master/Gundam/Top Gear with a
+  mismatched firmware changes the frame for DSP-3 (16,869 pixels) and DSP-4
+  (1,764 pixels at frame 1,500), proving the chip output reaches the screen;
+  Dungeon Master's title screen is DSP-independent (its in-game 3D view is
+  reached only after input, and the test harness does not yet inject a working
+  Start press).
+- `snes-info` accepts `DSP1_ROM=<path>` and `JOYPAD0`/`JOYPAD0_FROM`; the
+  firmware and the commercial ROMs are not committed.
 
 ## Oracle toolkit
 

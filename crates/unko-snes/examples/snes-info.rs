@@ -78,6 +78,18 @@ fn main() -> ExitCode {
         system.set_ipl(ipl);
         println!("ipl:         {ipl_path}");
     }
+    let joypad0 = std::env::var("JOYPAD0")
+        .ok()
+        .and_then(|bits| u16::from_str_radix(bits.trim_start_matches("0x"), 16).ok());
+    let joypad0_from: u32 = std::env::var("JOYPAD0_FROM")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+    if let Some(value) = joypad0 {
+        if joypad0_from == 0 {
+            system.set_joypad(0, value);
+        }
+    }
     if std::env::var_os("PORT_OUT").is_some() || std::env::var_os("SPC_TRACE").is_some() {
         system.apu.set_port_logging(true);
     }
@@ -110,6 +122,9 @@ fn main() -> ExitCode {
         let mut frames = 0u32;
         let instruction_limit = target_frames.saturating_mul(20_000).max(20_000_000);
         while frames < target_frames && instructions < instruction_limit && !system.cpu.stp {
+            if let Some(value) = joypad0 {
+                system.set_joypad(0, if frames >= joypad0_from { value } else { 0 });
+            }
             if watched_pcs.contains(&system.cpu.pc) {
                 eprintln!(
                         "WATCH {:02X}:{:04X} clock={} frame={frames} A={:04X} X={:04X} Y={:04X} D={:04X} db={:02X} dp12={:02X}{:02X}{:02X}",

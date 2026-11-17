@@ -124,6 +124,12 @@ tools/snes-oracle/diff-frame.py /tmp/smk/frame.raw /tmp/smk-ares/frame.raw
 Super Mario Kart (USA) is **99.981%** exact at the same frame (the 11 residual
 pixels are two left-edge sprite columns).
 
+The same core runs the DSP-2/3/4 firmware (8 KiB `dsp2.rom`/`dsp3.rom`/
+`dsp4.rom`). Dungeon Master (DSP-2), SD Gundam GX (DSP-3) and Top Gear 3000
+(DSP-4) are **100.000%** exact against ares at frame 600 (Top Gear also at
+1,500); the local ares database has verification entries forcing their boards
+and firmware identifiers.
+
 The bundled `DSP1 Tech Demo` has an empty header table, so ares cannot infer
 its board. The local ares database (`mia/Database/Super Famicom.bml`) carries a
 verification entry keyed by the ROM's SHA-256 that forces `NEC-LOROM`; with it,

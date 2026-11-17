@@ -34,20 +34,30 @@ const SR_RQM: u16 = 1 << 15;
 pub enum DspWindow {
     /// HiROM: `$00-$1F,$80-$9F : $6000-$7FFF`; SR when address bit 12 is set.
     HiRom,
-    /// LoROM, ROM <= 1 MiB: `$30-$3F,$B0-$BF : $8000-$FFFF`; SR when bit 14 is set.
+    /// LoROM with SRAM, ROM <= 1 MiB: `$20-$3F,$A0-$BF : $8000-$FFFF`; SR when
+    /// bit 14 is set (ares `NEC-LOROM-RAM#A`).
+    LoRomWide,
+    /// LoROM without SRAM: `$30-$3F,$B0-$BF : $8000-$FFFF`; SR when bit 14 is
+    /// set (ares `NEC-LOROM`).
     LoRomSmall,
     /// LoROM, ROM > 1 MiB: `$60-$6F,$E0-$EF : $0000-$7FFF`; SR when bit 14 is set.
     LoRomLarge,
 }
 
 impl DspWindow {
-    /// Pick the window for a cartridge's mapping and ROM size.
-    pub const fn select(mapping: Mapping, rom_len: usize) -> Self {
+    /// Pick the window for a cartridge's mapping, ROM size and SRAM size.
+    ///
+    /// This follows ares/mia's fallback board choice: a LoROM DSP cart with
+    /// battery RAM of at most 1 MiB uses the wide `$20-$3F` window, a plain
+    /// LoROM cart uses `$30-$3F`, and a >1 MiB LoROM cart uses `$60-$6F`.
+    pub const fn select(mapping: Mapping, rom_len: usize, sram_len: usize) -> Self {
         match mapping {
             Mapping::HiRom | Mapping::ExHiRom => Self::HiRom,
             Mapping::LoRom | Mapping::ExLoRom => {
                 if rom_len > 0x10_0000 {
                     Self::LoRomLarge
+                } else if sram_len != 0 {
+                    Self::LoRomWide
                 } else {
                     Self::LoRomSmall
                 }
@@ -69,6 +79,13 @@ impl DspWindow {
             Self::HiRom => {
                 if (0x00..=0x1F).contains(&bank) && (0x6000..=0x7FFF).contains(&addr) {
                     Some(addr & 0x1000 != 0)
+                } else {
+                    None
+                }
+            }
+            Self::LoRomWide => {
+                if (0x20..=0x3F).contains(&bank) && (0x8000..=0xFFFF).contains(&addr) {
+                    Some(addr & 0x4000 != 0)
                 } else {
                     None
                 }
@@ -723,13 +740,20 @@ mod tests {
 
     #[test]
     fn window_selection_and_classification() {
-        assert_eq!(DspWindow::select(Mapping::HiRom, 0x80000), DspWindow::HiRom);
         assert_eq!(
-            DspWindow::select(Mapping::LoRom, 0x20000),
+            DspWindow::select(Mapping::HiRom, 0x80000, 0x800),
+            DspWindow::HiRom
+        );
+        assert_eq!(
+            DspWindow::select(Mapping::LoRom, 0x20000, 0),
             DspWindow::LoRomSmall
         );
         assert_eq!(
-            DspWindow::select(Mapping::LoRom, 0x200000),
+            DspWindow::select(Mapping::LoRom, 0x10_0000, 0x8000),
+            DspWindow::LoRomWide
+        );
+        assert_eq!(
+            DspWindow::select(Mapping::LoRom, 0x20_0000, 0x8000),
             DspWindow::LoRomLarge
         );
 
@@ -738,6 +762,10 @@ mod tests {
         assert_eq!(DspWindow::HiRom.classify(0x00_7000), Some(true));
         assert_eq!(DspWindow::HiRom.classify(0x9F_7FFF), Some(true));
         assert_eq!(DspWindow::HiRom.classify(0x00_5000), None);
+        // LoROM wide: $20-$3F,$A0-$BF:$8000-$FFFF.
+        assert_eq!(DspWindow::LoRomWide.classify(0xA0_8000), Some(false));
+        assert_eq!(DspWindow::LoRomWide.classify(0x3F_C000), Some(true));
+        assert_eq!(DspWindow::LoRomWide.classify(0x1F_8000), None);
         // LoROM small: $30-$3F,$B0-$BF:$8000-$FFFF.
         assert_eq!(DspWindow::LoRomSmall.classify(0xBF_8000), Some(false));
         assert_eq!(DspWindow::LoRomSmall.classify(0xBF_C000), Some(true));

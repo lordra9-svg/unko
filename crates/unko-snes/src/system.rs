@@ -252,7 +252,11 @@ impl Snes {
     /// length is rejected. Firmware is copyrighted chip data, so it is supplied
     /// by the host rather than embedded in this crate.
     pub fn set_dsp1_firmware(&mut self, firmware: &[u8]) -> Result<(), DspError> {
-        let window = DspWindow::select(self.cart.header().mapping, self.cart.rom().len());
+        let window = DspWindow::select(
+            self.cart.header().mapping,
+            self.cart.rom().len(),
+            self.cart.sram().len(),
+        );
         let dsp = NecDsp::from_firmware(firmware, window)?;
         self.dsp1 = Some(dsp);
         self.dsp_credit = 0;
