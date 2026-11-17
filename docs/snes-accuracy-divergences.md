@@ -87,10 +87,20 @@ S-DSP output is now instrumented but not sample-identical:
     the print routine reads, not from the CPU registers.
   - The first *flow* difference is later, in a timer2 poll (`$06D0` is
     `E4 FF F0 FC`, `lda $FF; beq`): we exit with A=1 while RustySNES still
-    reads 0, i.e. a timer2 read phase difference.
-  - Next step: compare full ARAM dumps at the same *instruction step* (not
-    frame) to find the RAM word that feeds the swapped marker, and settle the
-    timer2 phase with the `Timers/random timer2` sub-test. Both failures predate the
+    reads 0, i.e. a timer2 read phase difference. Forcing the `$F1`
+    timer2-reset behaviour to RustySNES' variant (rising edge only) leaves the
+    failure CRC unchanged, so it is not that quirk.
+  - **The failure originates before test 2.** Full-ARAM comparison at frame
+    300 (best-aligned RS frame) differs by only five bytes: the cumulative
+    `$DC-$DF` CRC state and `$0745` (`0x34` ours vs `0x35` RS). The test-2
+    compare checks the CRC accumulated over *all* earlier output, so a
+    divergence in test 1 (CPU Instructions/Edge arith) fails test 2 even
+    though its BRK/handler trace is identical. `$0745` is written through
+    indexed addressing (no absolute reference in the ROM), so it is framework
+    scratch rather than a directly named variable.
+  - Next step: target test 1's ALU edge cases (its binary is ROM bank 1 and
+    maps to ARAM `$0400`), and decode the check routine's `D`/`W`/`R` marker
+    table to see which arithmetic result flips the order. Both failures predate the
   current scheduling work (the framebuffers are byte-identical to the previous
   build) and are the concrete audio/SPC items to fix next. `spc_dsp6` used to
   panic in a debug build on a 16-bit BRR/echo address overflow; those sums now
