@@ -168,6 +168,18 @@ S-DSP output is now instrumented but not sample-identical:
     `Failed 03` (test 1 `Echo/basics`, which passes today). So our current
     commit-at-execution write timing is closer to ares than the deferred one,
     and this is not the one-sample echo offset either.
+  - **The envelope/shared-latch family is ruled out by data.** Logging
+    `(sample, voice4.envelope, latch.adsr0, latch.output, echo.output[0])` for
+    16 samples after every `$47` (V4GAIN) write gives **all zeros** for the
+    envelope, `latch.adsr0` and `latch.output` in every window (192 entries).
+    The voice therefore contributes nothing while the echo ramp is written, so
+    the ramp comes purely from the echo feedback/FIR path
+    (`echo.output = sclamp16(echo.input * feedback >> 7) & ~1` with
+    `echo.input` = FIR of the echo history). The one-sample-early step is
+    therefore in the FIR history phase or in how many samples elapse between
+    echo writes - not in the envelope cadence, `misc29`/`misc30` order,
+    `clock.counter`, or the shared `latch.adsr0`/`latch.envx` (all of which the
+    log shows to be irrelevant here).
   - **`clock.counter` phase is ruled out structurally.** `Dsp::reset` is called
     exactly once (`Apu::reset` from `Snes::reset`), so `clock.counter` starts at
     zero exactly as in the reference (ares does not reset `clock` at all, and it
