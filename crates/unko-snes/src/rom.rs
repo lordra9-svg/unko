@@ -271,7 +271,7 @@ impl Cartridge {
         Ok(Self {
             rom: rom.to_vec(),
             header,
-            sram: vec![0; sram_size],
+            sram: vec![0xFF; sram_size],
             has_copier_header,
         })
     }

@@ -835,6 +835,32 @@ Cartridges are detected as S-DD1 from map modes `$22`/`$32` (the ares/mia
 board layouts (no extra coprocessor RAM) are modelled; save-state coverage
 includes the register file, DMA shadows and decompressor state.
 
+## Resolved 2026-11-17 - blank save RAM is 0xFF, not 0x00
+
+ares allocates every memory with a fill value: `WritableMemory::allocate(size,
+n8 fill = 0xff)`, so a cartridge's save RAM powers up as **0xFF** (a save file
+overwrites it). We initialised it to 0x00.
+
+That is not cosmetic: a blank 0x00 save area looks like *data*, while 0xFF is
+the "erased" marker games scan for. SMRPG's save-slot scan at `$C3:4C4A` reads
+`$40:0000 + slot*8`, compares against `$FF` and takes a completely different
+branch depending on the answer, so our whole boot differed.
+
+Evidence that this was the SMRPG root cause:
+
+- with the fix, the S-CPU instruction streams for **frames 0-30 are identical**
+  (`ARES_PC_TRACE` vs `PC_TRACE` with polling loops canonicalised; before the
+  fix the first divergence was inside that save-slot scan at `$C3:4C58`);
+- our `$2100` (INIDISP) timeline now matches ares **exactly** instead of
+  running 5-6 frames late:
+
+  | event | ares | ours (before) | ours (after) |
+  |---|---|---|---|
+  | fade-in `$01..$0f` | 30.81-37.80 | 36-43 | 30-37 |
+  | fade-out `$0f..$01` | 374.24-381.23 | 380-387 | 374-381 |
+  | force blank `$8f` | 382.23 | 388 | 382 |
+  | fade-in `$02,$03,$04` | 491.07/495.07/499.06 | 497 | 491/495/499 |
+
 ## Resolved 2026-11-17 - joypad serial ports and the NMI-enable edge
 
 Found by diffing ares' and our S-CPU **instruction traces** from power-on
@@ -980,7 +1006,17 @@ frames of gameplay HUD rendering.
   where ares is fully lit. So the scene, the tilemap and the register setup
   all agree; only the brightness/palette ramp into it is late in ours.
 
-  **Root cause: a constant timeline lag, not the palette.** Logging every
+  **Update: the ~5-frame lag was the save-RAM fill (see "blank save RAM is
+  0xFF" above) and is fixed** - the INIDISP timelines now agree exactly and
+  frames 0-30 trace-identically. What remains at frame 493 is a small residual:
+  the same scene at the same brightness, but the red and green channels are
+  higher in ours (`(61,61,79)` vs ares' `(0,0,63)` at frame 500, `(30,30,47)`
+  vs `(0,0,47)` at 493 - blue matches, and the difference scales with
+  `INIDISP`), so a palette entry or colour-math setup still differs. Frame 493
+  is now 1.339% exact rather than 0%.
+
+  The historical analysis below still explains why the mismatch surfaced at
+  frame 493 rather than earlier. Logging every
   `$2100` (INIDISP) write with a frame stamp in both cores (`PPU_LOG` /
   `ARES_PPU_LOG`) gives:
 
