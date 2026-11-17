@@ -332,6 +332,9 @@ pub struct Sa1 {
     pub snes_refresh: bool,
     /// Instructions retired (debug).
     pub ticks: u64,
+    /// Address of the instruction currently executing (debug).
+    #[serde(skip)]
+    pub live_pc: u32,
     /// Normal DMA transfers executed (debug).
     pub dma_count: u64,
 }
@@ -354,6 +357,7 @@ impl Sa1 {
             snes_mar: 0,
             snes_refresh: false,
             ticks: 0,
+            live_pc: 0,
             dma_count: 0,
         };
         sa1.power(region);
@@ -553,6 +557,29 @@ impl Sa1 {
         }
         if address & 0x40_F800 == 0x00_0000 || address & 0x40_F800 == 0x00_3000 {
             let protect = (address >> 8) & 0x07;
+            if std::env::var_os("SA1_LOG").is_some() {
+                let off = address & 0xFFFF;
+                if (0x36D0..=0x3700).contains(&off) {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("/tmp/opencode/sa1.log")
+                    {
+                        let _ = writeln!(
+                            f,
+                            "IW {:04X} <- {:02X} live={:06X} bs={:04X} bd={:04X} bdb={:02X} bp={:02X}",
+                            off,
+                            data,
+                            self.live_pc,
+                            self.cpu.s,
+                            self.cpu.d,
+                            self.cpu.dbr,
+                            self.cpu.p()
+                        );
+                    }
+                }
+            }
             if self.io.ciwp & (1 << protect) != 0 {
                 self.iram_write(address, data);
             }
@@ -692,6 +719,7 @@ impl Sa1 {
         } else if self.interrupt_pending {
             self.interrupt_pending = false;
             let vector = self.vector;
+            self.live_pc = self.cpu.pc_address();
             let mut cpu = std::mem::take(&mut self.cpu);
             let mut bus = Sa1Bus {
                 sa1: self,
@@ -702,6 +730,7 @@ impl Sa1 {
             self.cpu = cpu;
             extra += cost;
         } else {
+            self.live_pc = self.cpu.pc_address();
             let mut cpu = std::mem::take(&mut self.cpu);
             let mut bus = Sa1Bus {
                 sa1: self,

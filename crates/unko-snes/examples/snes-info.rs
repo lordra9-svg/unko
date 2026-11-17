@@ -307,6 +307,12 @@ fn main() -> ExitCode {
                 sa1.io.dtc,
                 sa1.io.dmaen
             );
+            eprintln!(
+                "SA1 iram[0200..]={:02X?} iram[0222..0226]={:02X?} iram[36D0..36E4]={:02X?}",
+                &sa1.iram[0x200..0x210],
+                &sa1.iram[0x222..0x226],
+                &sa1.iram[0x6D0..0x6E4]
+            );
             let sram = system.cart.sram();
             eprintln!(
                 "SA1 sram[12A4]={:02X} sram[72A4]={:02X} sram[7FF4..]={:02X?}",

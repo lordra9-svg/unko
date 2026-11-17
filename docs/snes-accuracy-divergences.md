@@ -892,9 +892,15 @@ frames of gameplay HUD rendering.
   (the S-CPU clears `$7E:36DE`, the SA-1 writes 0 into I-RAM) and **no SA-1 DMA
   runs at all** (`$2230` stays 0), so the dispatch pointer is never produced.
   The BWRAM `$72A4` handshake itself *does* progress (`0 -> 1 -> 0x85`, seen
-  through both the `$00-$3F:$6000-$7FFF` and `$40-$4F` windows), so the
-  remaining question is which routine is supposed to install the `$36xx` I-RAM
-  dispatch table that `$00:EF34` reads.
+  through both the `$00-$3F:$6000-$7FFF` and `$40-$4F` windows).
+  With the SA-1's live PC logged alongside its I-RAM writes, the `$36xx`
+  dispatch table is written by the shared ROM routine at `$00:EDD7`
+  (`STA $DE` with `DP = $3600`), which copies its pointer from
+  `LDA $0222,X` using the index in `$36D2/$36D3`. The table it copies from
+  (`I-RAM $0222+`) is uploaded by the S-CPU and, at frame 106, still holds
+  zeros; by frame 120 it holds a repeating `00 05 05 60` pattern. So the
+  remaining bug is in the S-CPU -> I-RAM upload / index (`$36D2`, `$36D3`) that
+  feeds that copy, not in the super-MMC or the handshake.
 - The SA-1's `$40-$4F` BWRAM window is the only extra S-CPU mapping modelled;
   the boot ROM / BS-X slot and the `$50-$6F` open-bus windows are not.
 
