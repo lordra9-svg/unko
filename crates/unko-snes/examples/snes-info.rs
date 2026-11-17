@@ -276,6 +276,15 @@ fn main() -> ExitCode {
             eprintln!("CX4 not attached");
         }
     }
+    if let Some(path) = std::env::var_os("CGRAM_OUT") {
+        let mut bytes = Vec::with_capacity(512);
+        for address in 0..256u16 {
+            bytes.extend_from_slice(&system.ppu.cgram_word(address as u8).to_le_bytes());
+        }
+        if let Err(error) = std::fs::write(&path, &bytes) {
+            eprintln!("{}: {error}", path.to_string_lossy());
+        }
+    }
     if std::env::var_os("SPC7110_STATE").is_some() {
         if let Some(chip) = &system.spc7110 {
             eprintln!(

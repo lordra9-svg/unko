@@ -1015,6 +1015,36 @@ frames of gameplay HUD rendering.
   `INIDISP`), so a palette entry or colour-math setup still differs. Frame 493
   is now 1.339% exact rather than 0%.
 
+  **Colour math is ruled out.** The ares `ARES_PPU_LOG` hook now also records
+  `$2130-$2132`; both cores write the *same* values at the same frames -
+  `$2130=$30, $2131=$00, $2132=$e0` at frames 0 and 27, then
+  `$2130=$00, $2131=$a4, $2132=$e0` at frame 384 (subtract, backdrop + BG3,
+  fixed colour black at intensity 0, i.e. a no-op).
+
+  **The residual is the CGRAM contents.** `CGRAM_OUT` dumps all 256 palette
+  words, and replaying the `$2121`/`$2122` streams from both logs reproduces
+  the emulator's palette exactly, so the two can be compared:
+
+  | frame | entries differing | our CGRAM |
+  |---|---|---|
+  | 30 | - | 29 non-zero, plausible palette |
+  | 380 | - | 31 non-zero, plausible palette |
+  | 493 | **37 / 256** | **239 non-zero**, a bogus grey ramp at 0-11 |
+
+  The full palette *upload* itself is byte-identical in both cores (the
+  `$2122` stream `CA 29 FF 7F 10 6E 60 44 8D 36 10 ...` at frame 442.82 in
+  ares and 443.00 in ours), so the corruption happens in the **per-frame fade
+  write stream** during the loading period:
+
+  | frames 487-492 | `$2121` | `$2122` |
+  |---|---|---|
+  | ares | 1122 | 304 |
+  | ours | 996 | 364 |
+
+  We issue ~11% fewer `$2121` and ~20% more `$2122` writes than ares, so the
+  fade lands on different entries and the scene appears at a slightly
+  different palette. That is now the concrete target.
+
   The historical analysis below still explains why the mismatch surfaced at
   frame 493 rather than earlier. Logging every
   `$2100` (INIDISP) write with a frame stamp in both cores (`PPU_LOG` /
@@ -1039,6 +1069,13 @@ frames of gameplay HUD rendering.
   frames costs us ~5 frames of game time. The next step is to find the clock of
   the first `$2100 = $01` in both cores and work backwards, or trace-diff
   SMRPG's S-CPU; the palette and `INIDISP` handling can be ruled out.
+- Kirby's Dream Land 3 improved again with the save-RAM fill fix: the S-CPU
+  now reaches the frame rendezvous at `$00:9498`/`$00:949B` and waits there
+  (NMIs climbing normally: 18/198/498 at frames 120/300/600) instead of
+  derailing, and BWRAM `$0200-$023f` is the expected blank `$ff`. Its frames
+  still differ from ares (ours 1 colour, ares 10 at frame 600) and its S-CPU
+  trace still first separates at the first NMI: ares enters the `$82f6` handler
+  while ours is at `$949d`, so the frame-rendezvous phase is still inverted.
 - Kirby's Dream Land 3 no longer derails. The null `$36DE` pointer turned out
   to be a symptom of two unrelated CPU bugs (both fixed, see "Resolved
   2026-11-17 - joypad serial ports and the NMI-enable edge" below): the game
