@@ -244,7 +244,11 @@ impl Snes {
         let has_spc7110 = cart.header().has_spc7110();
         // Built before `cart` moves into the machine below.
         let spc7110 = if has_spc7110 {
-            Some(Spc7110::new(cart.rom(), cart.sram().len()))
+            Some(Spc7110::new(
+                cart.rom(),
+                cart.sram().len(),
+                cart.header().has_epson_rtc(),
+            ))
         } else {
             None
         };

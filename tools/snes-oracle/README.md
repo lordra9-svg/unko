@@ -204,6 +204,11 @@ SPC7110_STATE=1 JOYPAD0=4096 JOYPAD0_FROM=150 FRAMES=600 \
 ares at 120/300/600. Without input the cartridge halts on that screen, so a
 frame diff alone only covers the self-test display.
 
+`Super Power League 4` (type `$F5`) and `Tengai Makyou Zero` (type `$F9`, which
+adds the Epson RTC at `$4840-$4842`) are both 100.000% identical to ares at
+frames 300 and 600 as well. Clear any `time.rtc` save under ares' `Saves`
+directory between runs so the RTC starts from the same state.
+
 ## Regression baseline
 
 `baseline.py` runs every ROM under `test-roms/snes/` for a fixed frame count and

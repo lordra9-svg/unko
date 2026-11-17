@@ -289,6 +289,15 @@ fn main() -> ExitCode {
                 chip.r480c,
                 chip.r4834
             );
+            match &chip.rtc {
+                Some(rtc) => eprintln!(
+                    "SPC7110 rtc present chipselect={} seconds={} calendar={:?}",
+                    rtc.chipselect(),
+                    rtc.seconds,
+                    rtc.calendar()
+                ),
+                None => eprintln!("SPC7110 rtc absent"),
+            }
         } else {
             eprintln!("SPC7110 not attached");
         }

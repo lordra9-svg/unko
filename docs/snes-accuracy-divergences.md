@@ -1003,6 +1003,13 @@ frames of gameplay HUD rendering.
   extension, adjust-instead-of-base);
 - the **arithmetic logic unit**: `$4820-$482F` with unsigned/signed 16x16
   multiply and 32/16 divide, including the divide-by-zero clamp;
+- the **Epson RTC-4513** on `$F9` boards at `$00-$3F,$80-$BF:$4840-$4842`
+  (`epsonrtc.rs`): the three-port serial protocol (`$4840` chip select, `$4841`
+  nibble stream, `$4842` ready), the full BCD calendar with ares' bit-perfect
+  emulation of the chip's *invalid* BCD values, leap years, `hold`/`stop`/
+  `pause`, the 12/24-hour modes, the resync/battery-failure flags and the
+  periodic IRQ flag with its mask/duty/period registers. It runs at
+  `32768 * 64` Hz from a master-clock credit;
 - the register window `$00-$3F,$80-$BF:$4800-$483F` plus ares' `$50`/`$58`
   full-bank aliases.
 
@@ -1031,9 +1038,18 @@ Frames are also **100.000% pixel-identical** to ares at 120, 300 and 600
 halts on that "POWER OFF PLEASE" screen, which is why both emulators stay
 static there.
 
-Known limitations: the Epson RTC variant (`SPC7110-RAM-EPSONRTC`, cartridge
-type `$F9`) is detected but the `$4840-$4842` RTC registers are not modelled,
-and the `EXSPC7110` (7 MiB) layout is not handled.
+Two more local SPC7110 titles were diffed against ares at frames 300 and 600,
+both **100.000%** exact: `Super Power League 4 (Japan)` (type `$F5`, 2 MiB:
+1 MiB program + 1 MiB data ROM) and `Tengai Makyou Zero (Japan)` (type `$F9`,
+5 MiB: 1 MiB program + 4 MiB data ROM, with the Epson RTC). Neither gets past
+its opening screen without input, so those diffs verify the MCU banking and
+(through the RTC's 1 Hz tick, `seconds = 9` at 600 frames) that the clock runs;
+the RTC register protocol itself is covered by unit tests rather than by a
+frame comparison, because no local `$F9` title talks to the RTC before its
+first interactive screen.
+
+Known limitation: the `EXSPC7110` (7 MiB, with the extra 1 MiB expansion ROM at
+`$40-$4F`) layout is not handled.
 
 ## Oracle toolkit
 

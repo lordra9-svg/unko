@@ -242,7 +242,13 @@ Validation so far:
   built-in SPC7110 self-test which our run passes in full (`REG. INIT.`,
   `SRAM DATA/ADDR BUS`, `SRAM R/W`, `DATA PORT ACC`, `MUL`, `DIV`,
   `C-LENGTH`, `DATA PORT B+O+S` all `OK`), and its frames are **100.000%**
-  pixel-identical to ares at 120, 300 and 600.
+  pixel-identical to ares at 120, 300 and 600. The Epson RTC-4513 on `$F9`
+  boards is implemented too (`epsonrtc.rs`): the three-port serial protocol,
+  the BCD calendar with the chip's invalid-BCD behaviour, leap years,
+  hold/stop/pause, 12/24-hour modes and the periodic IRQ flag, ticking at
+  `32768 * 64` Hz. `Super Power League 4` (type `$F5`) and `Tengai Makyou Zero`
+  (type `$F9`, with the RTC) are also **100.000%** exact against ares at
+  frames 300 and 600.
 - The SA-1 (Super Accelerator 1) is implemented (`sa1.rs`): a second 65C816
   backed by the super-MMC ROM banking, shared BWRAM (banking, bit-map formats
   and write protection), 2 KiB I-RAM, the three DMA modes including both

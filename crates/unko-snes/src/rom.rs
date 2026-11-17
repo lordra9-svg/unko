@@ -143,6 +143,11 @@ impl RomHeader {
         matches!(self.cartridge_type, 0xf5 | 0xf9) || matches!(self.map_mode, 0x2a | 0x3a)
     }
 
+    /// Whether the cartridge carries an Epson RTC-4513 (`$F9` boards).
+    pub const fn has_epson_rtc(&self) -> bool {
+        matches!(self.cartridge_type, 0xf9)
+    }
+
     /// Whether the cartridge declares an SA-1 (Super Accelerator) coprocessor.
     ///
     /// ares/mia select the `SA1-` board from map modes `$23`/`$33`.

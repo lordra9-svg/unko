@@ -18,6 +18,8 @@
 //! (the first MiB) and the tables/compressed data in its data ROM (the rest of
 //! the image), so the board works with just the game.
 
+use crate::epsonrtc::EpsonRtc;
+
 /// Program ROM size for a `SPC7110-` board (ares/mia `promSize`).
 pub const PROM_SIZE: usize = 0x10_0000;
 
@@ -418,6 +420,11 @@ pub struct Spc7110 {
     /// `$4834` MCU mapping/size (debug).
     pub r4834: u8,
 
+    /// The Epson RTC-4513 on `$F9` boards (`$4840-$4842`).
+    pub rtc: Option<EpsonRtc>,
+    /// RTC oscillator credit, in 1/2^21 s units.
+    rtc_credit: i64,
+
     /// Master clocks consumed by pending-unit work (debug/timing).
     pub busy_clocks: u64,
 }
@@ -427,7 +434,7 @@ impl Spc7110 {
     ///
     /// ares/mia split a `SPC7110-` image into `program.rom` (the first MiB)
     /// and `data.rom` (everything after it).
-    pub fn new(rom: &[u8], sram_size: usize) -> Self {
+    pub fn new(rom: &[u8], sram_size: usize, has_rtc: bool) -> Self {
         let prom_len = PROM_SIZE.min(rom.len());
         let mut chip = Self {
             prom: rom[..prom_len].to_vec(),
@@ -483,6 +490,8 @@ impl Spc7110 {
             r4832: 1,
             r4833: 2,
             r4834: 0,
+            rtc: if has_rtc { Some(EpsonRtc::new()) } else { None },
+            rtc_credit: 0,
             busy_clocks: 0,
         };
         chip.power();
@@ -548,12 +557,17 @@ impl Spc7110 {
         self.r4832 = 1;
         self.r4833 = 2;
         self.r4834 = 0;
+        if let Some(rtc) = self.rtc.as_mut() {
+            rtc.power();
+        }
+        self.rtc_credit = 0;
     }
 
     // --- Bus windows ------------------------------------------------------
 
-    /// The register window `$00-$3F,$80-$BF:$4800-$483F`, plus the `$50`/`$58`
-    /// full-bank aliases ares maps.
+    /// The register window `$00-$3F,$80-$BF:$4800-$483F`, the `$50`/`$58`
+    /// full-bank aliases ares maps, and the Epson RTC ports at `$4840-$4842`
+    /// (encoded as `$40-$42`).
     pub const fn register_offset(address: u32) -> Option<usize> {
         let bank = (address >> 16) as u8;
         let offset = (address & 0xFFFF) as usize;
@@ -563,9 +577,13 @@ impl Spc7110 {
         if bank == 0x58 {
             return Some(0x08);
         }
-        if (bank <= 0x3F || (bank >= 0x80 && bank <= 0xBF)) && offset >= 0x4800 && offset <= 0x483F
-        {
-            return Some(offset & 0x3F);
+        if bank <= 0x3F || (bank >= 0x80 && bank <= 0xBF) {
+            if offset >= 0x4800 && offset <= 0x483F {
+                return Some(offset & 0x3F);
+            }
+            if offset >= 0x4840 && offset <= 0x4842 {
+                return Some(0x40 + (offset - 0x4840));
+            }
         }
         None
     }
@@ -601,6 +619,12 @@ impl Spc7110 {
 
     /// Read the `$4800-$483F` register window (ares `SPC7110::read`).
     pub fn read(&mut self, offset: usize, data: u8) -> u8 {
+        if (0x40..=0x42).contains(&offset) {
+            return match self.rtc.as_mut() {
+                Some(rtc) => rtc.read(offset - 0x40, data),
+                None => data,
+            };
+        }
         match 0x4800 | (offset & 0x3F) {
             // Decompression unit.
             0x4800 => {
@@ -673,6 +697,12 @@ impl Spc7110 {
 
     /// Write the `$4800-$483F` register window (ares `SPC7110::write`).
     pub fn write(&mut self, offset: usize, data: u8) {
+        if (0x40..=0x42).contains(&offset) {
+            if let Some(rtc) = self.rtc.as_mut() {
+                rtc.write(offset - 0x40, data);
+            }
+            return;
+        }
         match 0x4800 | (offset & 0x3F) {
             // Decompression unit.
             0x4801 => self.r4801 = data,
@@ -1041,6 +1071,15 @@ impl Spc7110 {
     /// its latency (20 clocks for a DCU transfer, 30/40 for multiply/divide).
     /// Returns the stall clocks so the system can charge them to the CPU.
     pub fn run(&mut self, clocks: u32) -> u32 {
+        if let Some(rtc) = self.rtc.as_mut() {
+            // ares runs the RTC at 32,768 * 64 Hz; tick it with a credit.
+            self.rtc_credit += i64::from(clocks) * i64::from(crate::epsonrtc::RTC_CLOCK);
+            let den = crate::rom::Region::Ntsc.master_clock() as i64;
+            while self.rtc_credit >= den {
+                rtc.tick();
+                self.rtc_credit -= den;
+            }
+        }
         let mut spent = 0u32;
         let mut extra = 0u32;
         while spent < clocks {
@@ -1085,7 +1124,7 @@ mod tests {
         for (i, byte) in rom.iter_mut().enumerate() {
             *byte = (i / 0x10_0000) as u8;
         }
-        Spc7110::new(&rom, RAM_SIZE)
+        Spc7110::new(&rom, RAM_SIZE, false)
     }
 
     #[test]
@@ -1125,7 +1164,8 @@ mod tests {
         // $50 and $58 alias the whole bank onto $4800 / $4808.
         assert_eq!(Spc7110::register_offset(0x50_1234), Some(0x00));
         assert_eq!(Spc7110::register_offset(0x58_ABCD), Some(0x08));
-        assert_eq!(Spc7110::register_offset(0x00_4840), None);
+        // $4840-$4842 are the Epson RTC ports, encoded as $40-$42.
+        assert_eq!(Spc7110::register_offset(0x00_4840), Some(0x40));
         assert_eq!(Spc7110::register_offset(0x40_4800), None);
 
         assert!(Spc7110::in_rom_window(0x00_8000));
@@ -1278,6 +1318,34 @@ mod tests {
         assert_eq!(moved, 0xfedc_ba98_7643_2105);
         // A nibble already at the front leaves the list unchanged.
         assert_eq!(Spc7110Decompressor::move_to_front(moved, 0x5), moved);
+    }
+
+    #[test]
+    fn rtc_ports_are_only_present_on_f9_boards() {
+        assert_eq!(Spc7110::register_offset(0x00_4840), Some(0x40));
+        assert_eq!(Spc7110::register_offset(0x80_4841), Some(0x41));
+        assert_eq!(Spc7110::register_offset(0x00_4842), Some(0x42));
+        assert_eq!(Spc7110::register_offset(0x00_4843), None);
+
+        // No RTC: the ports read as open bus and writes are dropped.
+        let mut plain = make_chip();
+        assert!(plain.rtc.is_none());
+        assert_eq!(plain.read(0x40, 0x5A), 0x5A);
+        plain.write(0x41, 0x03);
+
+        // With an RTC the serial protocol works through the same window.
+        let rom = vec![0u8; PROM_SIZE];
+        let mut chip = Spc7110::new(&rom, RAM_SIZE, true);
+        assert!(chip.rtc.is_some());
+        chip.write(0x40, 0x01); // chip select
+        assert_eq!(chip.read(0x40, 0), 0x01);
+        chip.write(0x41, 0x0C); // read command
+        chip.write(0x41, 0x00); // start at register 0
+                                // The port needs eight oscillator ticks before it is ready again.
+        for _ in 0..8 {
+            chip.rtc.as_mut().expect("rtc").tick();
+        }
+        assert_eq!(chip.read(0x41, 0), 0x00); // secondlo
     }
 
     #[test]
