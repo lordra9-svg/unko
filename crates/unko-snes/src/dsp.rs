@@ -271,6 +271,8 @@ impl Dsp {
 
     /// Write a DSP register.
     pub fn write(&mut self, address: u8, data: u8) {
+        // ares `SMP::writeIO` case 0xf3: "0x80-0xff are read-only mirrors of
+        // 0x00-0x7f", so a write with bit 7 set is dropped. Reads alias.
         if address >= 0x80 {
             return;
         }
@@ -1007,8 +1009,10 @@ mod tests {
         dsp.write(0x12, 0x34);
         assert_eq!(dsp.read(0x12), 0x34);
         assert_eq!(dsp.read(0x92), 0x34);
-        dsp.write(0x92, 0x00);
+        // `$80-$FF` read as mirrors of `$00-$7F`, but writes there are dropped.
+        dsp.write(0x92, 0x56);
         assert_eq!(dsp.read(0x12), 0x34);
+        assert_eq!(dsp.read(0x92), 0x34);
     }
 
     #[test]

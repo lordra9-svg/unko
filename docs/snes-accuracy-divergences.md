@@ -92,11 +92,29 @@ S-DSP output is now instrumented but not sample-identical:
 - blargg `spc_dsp6` reports `Failed 02` (Echo/esa_changes). It used to panic in
   a debug build on a 16-bit BRR/echo address overflow; those sums now wrap like
   ares' `n16` arithmetic. This is the concrete audio item to fix next.
+  - Measured state: at frame 1200 only **5 of 128 DSP registers** differ from
+    RustySNES and they are the ones the test wrote most recently
+    (`$00=0x20`, `$07=0xE0`, `$4C=0x01`, `$4D=0x01`, `$5D=0x0F`), i.e. a
+    progress/phase difference, not a register-mapping error. The S-SMP
+    instruction count matches (5,078,844 vs 5,148,410 at 1200 frames).
+  - The `Echo/esa_changes` readings are close but not equal (e.g. `003F` vs
+    `0020`, `0626` vs `05E8`), which points at the *sample* boundary rather
+    than the address arithmetic: the DSP main-loop order, echo `_address`
+    latching, `_length`/`_offset` wrap and the `$F1`/`FLG` gating all match
+    ares line for line. Shifting the DSP sample trigger by one S-SMP access
+    unit in either direction does not change the failure.
+  - Next probe: compare the echo buffer contents sample by sample against a
+    reference run (ares `--dump-audio` plus an ARAM dump at a known sample
+    index), rather than at a whole frame.
 - At 600 frames, 36 of the 128 DSP registers differ from the RustySNES oracle;
   voices 6 and 7 match exactly and voices 0-4 are at different song positions.
 - The queued audio is non-silent (RMS about 0.012 vs ares 0.023) and the best
   cross-correlation against ares's dumped 395-sample window is about 0.43 at a
   232-sample lag; the remaining difference is a different point in the song.
+- **`$F1` CONTROL port-reset bits.** ares `SMP::writeIO` case 0xf1 clears
+  `io.apu0`/`io.apu1` when bit 4 is set and `io.apu2`/`io.apu3` when bit 5 is
+  set - the latches the S-SMP reads at `$F4-$F7`. This was missing. It is now
+  implemented and pinned by `control_clears_the_port_latches`.
 - **Blargg `spc_timer` passes.** It previously reported `Failed 02` ("timer
   read vs write") because `RET`/`RETI` were one access short and `SLEEP`/`STP`
   five accesses short, so the delay loops around each timer reading cost fewer

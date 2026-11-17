@@ -513,6 +513,17 @@ impl SpcBus for ApuBus<'_> {
                         timer.stage3 = 0;
                     }
                 }
+                // ares: `$F1` bit 4 clears the S-CPU`s `$2140/$2141` latches
+                // and bit 5 clears `$2142/$2143` (the sound driver's port
+                // reset). The SMP reads these at `$F4-$F7`.
+                if value & 0x10 != 0 {
+                    self.apu_ports[0] = 0;
+                    self.apu_ports[1] = 0;
+                }
+                if value & 0x20 != 0 {
+                    self.apu_ports[2] = 0;
+                    self.apu_ports[3] = 0;
+                }
                 *self.iplrom_enable = value & 0x80 != 0;
                 if value & 0x10 != 0 {
                     self.apu_ports[0] = 0;
@@ -674,6 +685,68 @@ mod tests {
         }
         // And the S-SMP write became visible to the S-CPU.
         assert_eq!(apu.cpu_read(2), 0xFF);
+    }
+
+    #[test]
+    fn control_clears_the_port_latches() {
+        // ares `SMP::writeIO` case 0xf1: bit 4 clears `io.apu0`/`io.apu1` and
+        // bit 5 clears `io.apu2`/`io.apu3` (the latches the S-SMP reads at
+        // `$F4-$F7`, i.e. whatever the S-CPU last wrote to `$2140-$2143`).
+        let mut apu = Apu::new();
+        apu.cpu_write(0, 0xAA);
+        apu.cpu_write(1, 0xBB);
+        apu.cpu_write(2, 0xCC);
+        apu.cpu_write(3, 0xDD);
+        {
+            let mut bus = ApuBus {
+                ram: &mut apu.ram[..],
+                ipl: &apu.ipl,
+                ipl_loaded: apu.ipl_loaded,
+                iplrom_enable: &mut apu.iplrom_enable,
+                ram_writable: &mut apu.ram_writable,
+                ram_disable: &mut apu.ram_disable,
+                timers_enable: &mut apu.timers_enable,
+                timers_disable: &mut apu.timers_disable,
+                internal_wait: &mut apu.internal_wait,
+                external_wait: &mut apu.external_wait,
+                timers: &mut apu.timers,
+                dsp_address: &mut apu.dsp_address,
+                dsp: &mut apu.dsp,
+                apu_ports: &mut apu.apu_ports,
+                cpu_ports: &mut apu.cpu_ports,
+                aux4: &mut apu.aux4,
+                aux5: &mut apu.aux5,
+                timer_targets: &mut apu.timer_targets,
+                page_flag: false,
+            };
+            SpcBus::write(&mut bus, 0x00F1, 0x10);
+        }
+        assert_eq!(apu.apu_ports, [0x00, 0x00, 0xCC, 0xDD]);
+        {
+            let mut bus = ApuBus {
+                ram: &mut apu.ram[..],
+                ipl: &apu.ipl,
+                ipl_loaded: apu.ipl_loaded,
+                iplrom_enable: &mut apu.iplrom_enable,
+                ram_writable: &mut apu.ram_writable,
+                ram_disable: &mut apu.ram_disable,
+                timers_enable: &mut apu.timers_enable,
+                timers_disable: &mut apu.timers_disable,
+                internal_wait: &mut apu.internal_wait,
+                external_wait: &mut apu.external_wait,
+                timers: &mut apu.timers,
+                dsp_address: &mut apu.dsp_address,
+                dsp: &mut apu.dsp,
+                apu_ports: &mut apu.apu_ports,
+                cpu_ports: &mut apu.cpu_ports,
+                aux4: &mut apu.aux4,
+                aux5: &mut apu.aux5,
+                timer_targets: &mut apu.timer_targets,
+                page_flag: false,
+            };
+            SpcBus::write(&mut bus, 0x00F1, 0x20);
+        }
+        assert_eq!(apu.apu_ports, [0x00, 0x00, 0x00, 0x00]);
     }
 
     #[test]
