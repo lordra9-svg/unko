@@ -121,11 +121,29 @@ S-DSP output is now instrumented but not sample-identical:
   - The DSP *tick placement* is not the cause: moving the tick from the
     plan-drain path to the S-SMP access path (ares synchronises the DSP inside
     `SMP::step`) leaves the readings byte-identical.
-  - Next probe: the test polls `$F3` for `$48`/`$4C` (`VxENVX`, `ENDX`) inside
-    its timing loop, and those registers are only refreshed at DSP sample
-    boundaries, so a one-sample phase difference shows up as these near-miss
-    values. Compare the DSP step index at the moment of a `$F3` read against
-    ares, i.e. instrument `Apu`'s DSP step counter at the read.
+  - **Measured divergence.** Logging every `$F3` read of `VxENVX`/`VxOUTX`
+    (`$08`/`$09`/`$18`/... ) in both emulators gives **34 identical reads**,
+    then we read `00` where RustySNES reads `88`. That register is only
+    refreshed by the DSP at a sample boundary and the surrounding loop
+    (`$0732`..`$0747`) spins until two consecutive reads differ, i.e. the test
+    *is* a sample-boundary detector. The burst lengths then differ (ours 14
+    reads, RustySNES 19), so the two emulators catch a different boundary.
+  - **DSP sample phase is correct.** Sweeping the DSP step machine's initial
+    phase over all 32 offsets gives common prefixes of 34 (phase 0), 11, 9,
+    13, 13, 3, 3, 2, 3 for the sampled offsets - phase 0 is optimal, so this is
+    not a sub-sample offset.
+  - **DSP tick placement is correct too.** Ticking the DSP inside the S-SMP
+    access (as ares does inside `SMP::step`) rather than at the plan drain makes
+    the first divergence *earlier* (read 7 instead of 34), so the drain-time
+    model is the closer one and was kept.
+  - **Root cause.** A `$F3` read inside an instruction must observe the DSP as of
+    that access, but our SPC executes a whole instruction when its plan is
+    formed, so every read inside it observes the DSP as of the instruction
+    start - up to ~12 S-Clock early. Boundary detection is exactly the
+    operation for which that skew changes the answer, which is why only this
+    test fails. Fixing it needs the DSP (and therefore the S-SMP) to be
+    advanced per access by the scheduler, i.e. the resumable-SPC design, not
+    another arithmetic fix.
 - At 600 frames, 36 of the 128 DSP registers differ from the RustySNES oracle;
   voices 6 and 7 match exactly and voices 0-4 are at different song positions.
 - The queued audio is non-silent (RMS about 0.012 vs ares 0.023) and the best
