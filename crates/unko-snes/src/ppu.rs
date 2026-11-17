@@ -156,7 +156,8 @@ impl Ppu {
             nmi: false,
             frame_ready: false,
             display_brightness: 0,
-            display_disable: false,
+            // ares `PPU::power`: the PPU powers up force-blanked.
+            display_disable: true,
             obsel: 0,
             oam_base: 0,
             oam_address: 0,
@@ -846,10 +847,19 @@ impl Ppu {
     }
 
     fn read_oam(&self, address: u16) -> u8 {
+        // ares `PPU::readOAM`: OAM is inaccessible during active display unless
+        // forced blank is on; the address counter still advances.
+        if !self.display_disable && self.line < VBLANK_LINE {
+            return 0;
+        }
         self.oam[Self::oam_index(address)]
     }
 
     fn write_oam(&mut self, address: u16, data: u8) {
+        // ares `PPU::writeOAM`: writes during active display are dropped.
+        if !self.display_disable && self.line < VBLANK_LINE {
+            return;
+        }
         let index = Self::oam_index(address);
         self.oam[index] = data;
     }
@@ -2114,6 +2124,7 @@ mod tests {
     #[test]
     fn oam_round_trip() {
         let mut ppu = Ppu::new();
+        ppu.write(0x2100, 0x80); // force blank: OAM is otherwise inaccessible
         ppu.write(0x2102, 0x00);
         ppu.write(0x2103, 0x00);
         ppu.write(0x2104, 0x12);
@@ -2129,6 +2140,7 @@ mod tests {
     #[test]
     fn sprite_rows_use_the_object_tile_grid() {
         let mut ppu = Ppu::new();
+        ppu.write(0x2100, 0x80); // force blank for OAM access
         ppu.write(0x2101, 0x03); // OBSEL: base size 0, tiledata $6000 words
         ppu.write(0x212C, 0x10); // objects on the main screen
         ppu.write(0x2102, 0x00);
@@ -2157,7 +2169,8 @@ mod tests {
     #[test]
     fn oam_base_is_a_word_address() {
         let mut ppu = Ppu::new();
-        // Word address 2 -> byte address 4.
+        ppu.write(0x2100, 0x80); // force blank for OAM access
+                                 // Word address 2 -> byte address 4.
         ppu.write(0x2102, 0x02);
         ppu.write(0x2104, 0xAA);
         ppu.write(0x2104, 0xBB);
@@ -2202,6 +2215,31 @@ mod tests {
     }
 
     #[test]
+    fn oam_is_inaccessible_during_active_display() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2100, 0x0F); // display on (leaves force blank)
+        ppu.line = 100; // active display
+        ppu.write(0x2102, 0);
+        ppu.write(0x2103, 0);
+        for byte in [0x11, 0x22, 0x33, 0x44] {
+            ppu.write(0x2104, byte);
+        }
+        assert_eq!(ppu.oam[..4], [0, 0, 0, 0], "OAM writes must be dropped");
+        assert_eq!(ppu.read(0x2138, 0), 0x00, "OAM reads must return 0");
+        // Force blank makes OAM accessible again.
+        ppu.write(0x2100, 0x80);
+        ppu.write(0x2102, 0);
+        ppu.write(0x2103, 0);
+        for byte in [0x11, 0x22, 0x33, 0x44] {
+            ppu.write(0x2104, byte);
+        }
+        assert_eq!(ppu.oam[..4], [0x11, 0x22, 0x33, 0x44]);
+        ppu.write(0x2102, 0);
+        ppu.write(0x2103, 0);
+        assert_eq!(ppu.read(0x2138, 0), 0x11);
+    }
+
+    #[test]
     fn forced_blank_at_vblank_resets_the_oam_address() {
         let mut ppu = Ppu::new();
         // ares only resets while force blank is *already* enabled.
@@ -2224,7 +2262,7 @@ mod tests {
     #[test]
     fn sprite_overflow_flags_latch_for_the_frame() {
         let mut ppu = Ppu::new();
-        ppu.write(0x2100, 0x0F);
+        ppu.write(0x2100, 0x8F); // force blank (OAM access) + full brightness
         ppu.write(0x2101, 0x20); // OBSEL base size 1: 16x16 / 32x32 sprites
         ppu.write(0x212C, 0x10); // OBJ on the main screen
                                  // 33 sprites on line 100 (a sprite's first visible line is OAM Y + 1).
