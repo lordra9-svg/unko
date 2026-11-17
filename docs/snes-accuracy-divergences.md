@@ -74,12 +74,9 @@ with ares. The implementation follows ares, which is the primary source.
 - Display brightness follows ares' DAC luma `(1 + l) / 16 * (l ? 1 : 0.25)`
   with integer rounding. Measured frames match ares at `INIDISP = $0F` and at
   `$0B`; sub-1/255 rounding differences are possible at other levels.
-- PPU windows, hires output, interlace, mosaic and offset-per-tile are not
-  applied. A window implementation was prototyped and unit-tested but had to be
-  held back: Super Mario World rewrites `$2126/$2127` and `$212E/$212F` inside
-  its H/V-IRQ handler every line, and our line-phase sampling of those writes
-  differs from ares, so enabling the mask turned BG1/BG3/OBJ off. Window
-  masking depends on dot-exact IRQ/HBlank phase, which is the next PPU task.
+- Hires output, interlace, mosaic and offset-per-tile are not implemented.
+- The 32-sprite/34-tile limits and the 32-entry per-line sprite list are not
+  enforced, so equal-priority sprite overlaps can resolve differently.
 - Mode 7 `EXTBG` is partial and the 32-sprite/34-tile limits are not enforced.
 - `WAI`/`STP` retire two internal cycles after the opcode; the real devices
   idle indefinitely, which the system model represents by not advancing the

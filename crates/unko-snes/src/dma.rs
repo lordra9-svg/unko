@@ -1,10 +1,14 @@
 //! S-CPU DMA channels.
 //!
-//! General-purpose DMA is implemented here; HDMA is represented by the same
-//! channel registers but its per-scanline table engine is not enabled yet.
+//! General-purpose DMA is executed one byte at a time; HDMA walks a table once
+//! per scanline and supports direct and indirect entries.
 
 /// One DMA channel's register state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// The registers power up zeroed (ares `channels[id] = {}`). Games such as
+/// Super Mario World rely on that: they program only the A-bus side of the
+/// indirect HDMA channel and leave A2A at zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DmaChannel {
     /// `$43x0` mode, direction, fixed and reverse bits.
     pub control: u8,
@@ -22,21 +26,6 @@ pub struct DmaChannel {
     pub hdma_address: u16,
     /// `$43xA` HDMA line counter.
     pub line_counter: u8,
-}
-
-impl Default for DmaChannel {
-    fn default() -> Self {
-        Self {
-            control: 0xFF,
-            target: 0xFF,
-            source: 0xFFFF,
-            bank: 0xFF,
-            size: 0xFFFF,
-            indirect_bank: 0xFF,
-            hdma_address: 0xFFFF,
-            line_counter: 0xFF,
-        }
-    }
 }
 
 /// Per-channel HDMA table cursor.
@@ -137,21 +126,53 @@ impl Dma {
 
     /// Take the latched `$420B` write as an in-progress transfer.
     pub fn begin_transfer(&mut self) -> Option<DmaTransfer> {
-        self.take_pending()
-            .map(|(channels, mask)| DmaTransfer::new(channels, mask))
+        let transfer = self
+            .take_pending()
+            .map(|(channels, mask)| DmaTransfer::new(channels, mask));
+        if std::env::var_os("DMA_TRACE").is_some() {
+            if let Some(transfer) = &transfer {
+                for (index, channel) in transfer.channels.iter().enumerate() {
+                    if transfer.mask & (1 << index) != 0 {
+                        eprintln!(
+                            "DMA{index} ctrl={:02X} target={:02X} src={:02X}:{:04X} size={}",
+                            channel.control,
+                            channel.target,
+                            channel.bank,
+                            channel.source,
+                            channel.size
+                        );
+                    }
+                }
+            }
+        }
+        transfer
     }
 
     /// Enable HDMA channels and reset their table cursors.
     pub fn set_hdma_enable(&mut self, mask: u8) {
+        if std::env::var_os("HDMA_TRACE").is_some() {
+            eprintln!("HDMAEN <- {mask:02X}");
+            for (index, channel) in self.channels.iter().enumerate() {
+                if mask & (1 << index) != 0 {
+                    eprintln!(
+                        "  ch{index} ctrl={:02X} target={:02X} bank={:02X} table={:04X}",
+                        channel.control, channel.target, channel.bank, channel.hdma_address
+                    );
+                }
+            }
+        }
         self.hdma_enable = mask;
         self.hdma_reset();
     }
 
     /// Reset every HDMA table cursor to the channel's table address.
+    ///
+    /// The HDMA table lives at `A1T`/`A1B` (`$4302-$4304`), not at `A2A`
+    /// (`$4308`); ares `Channel::hdmaSetup` sets `hdmaAddress = sourceAddress`.
     pub fn hdma_reset(&mut self) {
         for (index, channel) in self.channels.iter().enumerate() {
             self.hdma[index] = HdmaState {
-                address: channel.hdma_address,
+                address: channel.source,
                 indirect_address: 0,
                 line_counter: 0,
                 completed: false,
@@ -395,8 +416,8 @@ mod tests {
         dma.write(0x4300, 0x00); // direct, one byte
         dma.write(0x4301, 0x00); // B-bus target
         dma.write(0x4304, 0x7E); // table bank
-        dma.write(0x4308, 0x00);
-        dma.write(0x4309, 0x10); // table at $7E:1000
+        dma.write(0x4302, 0x00); // A1T low
+        dma.write(0x4303, 0x10); // A1T high: table at $7E:1000
         dma.set_hdma_enable(0x01);
 
         let mut bus = Bus {

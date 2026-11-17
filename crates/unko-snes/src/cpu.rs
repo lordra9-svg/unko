@@ -99,6 +99,8 @@ pub struct Cpu {
     pub cycles: u64,
     /// Number of NMI edges serviced (debug).
     pub nmi_services: u64,
+    /// Number of IRQ edges serviced (debug).
+    pub irq_services: u64,
 }
 
 impl Default for Cpu {
@@ -136,6 +138,7 @@ impl Cpu {
             nmi_pending: false,
             cycles: 0,
             nmi_services: 0,
+            irq_services: 0,
         }
     }
 
@@ -227,6 +230,7 @@ impl Cpu {
         }
 
         if self.irq_line && !self.flags.irq_disable {
+            self.irq_services += 1;
             let vector = if self.emulation { 0xFFFE } else { 0xFFEE };
             self.service_interrupt(bus, vector, false);
             return (self.cycles - start) as u32;

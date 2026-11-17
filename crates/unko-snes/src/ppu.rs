@@ -73,8 +73,13 @@ pub struct Ppu {
     cgram_address: u8,
     cgram_latch: bool,
     cgram_read_latch: u16,
-    /// $2123-$212F windows and main/sub screens
-    window: [u8; 6],
+    /// $2123-$2129 windows and main/sub screens
+    w12sel: u8,
+    w34sel: u8,
+    wobjsel: u8,
+    wh: [u8; 4],
+    wbglog: u8,
+    wobjlog: u8,
     tm: u8,
     ts: u8,
     tmw: u8,
@@ -148,7 +153,12 @@ impl Ppu {
             cgram_address: 0,
             cgram_latch: false,
             cgram_read_latch: 0,
-            window: [0; 6],
+            w12sel: 0,
+            w34sel: 0,
+            wobjsel: 0,
+            wh: [0; 4],
+            wbglog: 0,
+            wobjlog: 0,
             tm: 0,
             ts: 0,
             tmw: 0,
@@ -512,7 +522,12 @@ impl Ppu {
                     self.cgram[address] = (self.cgram[address] & 0xFF00) | u16::from(data);
                 }
             }
-            0x2123..=0x212B => self.window[usize::from((address - 0x2123) / 2)] = data,
+            0x2123 => self.w12sel = data,
+            0x2124 => self.w34sel = data,
+            0x2125 => self.wobjsel = data,
+            0x2126..=0x2129 => self.wh[usize::from(address - 0x2126)] = data,
+            0x212A => self.wbglog = data,
+            0x212B => self.wobjlog = data,
             0x212C => self.tm = data,
             0x212D => self.ts = data,
             0x212E => self.tmw = data,
@@ -570,6 +585,69 @@ impl Ppu {
         if (high && self.vmain & 0x80 != 0) || (!high && self.vmain & 0x80 == 0) {
             self.vram_address = self.vram_address.wrapping_add(increment);
         }
+    }
+
+    /// Window configuration for a layer: BG1-4 = 0-3, OBJ = 4, colour = 5.
+    fn window_config(&self, layer: usize) -> (bool, bool, bool, bool, u8) {
+        let (selector, mask) = match layer {
+            0 => (self.w12sel & 0x0F, self.wbglog & 0x03),
+            1 => (self.w12sel >> 4, (self.wbglog >> 2) & 0x03),
+            2 => (self.w34sel & 0x0F, (self.wbglog >> 4) & 0x03),
+            3 => (self.w34sel >> 4, (self.wbglog >> 6) & 0x03),
+            4 => (self.wobjsel & 0x0F, self.wobjlog & 0x03),
+            _ => (self.wobjsel >> 4, (self.wobjlog >> 2) & 0x03),
+        };
+        // W12SEL/W34SEL/WOBJSEL use invert on the even bit and enable on the
+        // odd bit (ares `Window` register decode).
+        (
+            selector & 0x02 != 0,
+            selector & 0x01 != 0,
+            selector & 0x08 != 0,
+            selector & 0x04 != 0,
+            mask,
+        )
+    }
+
+    /// Whether the window masks pixel `x` for `layer`, matching ares
+    /// `Window::test`.
+    fn window_masks(&self, layer: usize, x: usize) -> bool {
+        let (one_enable, one_invert, two_enable, two_invert, mask) = self.window_config(layer);
+        // ares `Window::run` samples the right edge before stopping, so the
+        // window is inclusive of both ends.
+        let inside_one =
+            (x >= usize::from(self.wh[0]) && x <= usize::from(self.wh[1])) ^ one_invert;
+        let inside_two =
+            (x >= usize::from(self.wh[2]) && x <= usize::from(self.wh[3])) ^ two_invert;
+        if !one_enable {
+            return two_enable && inside_two;
+        }
+        if !two_enable {
+            return inside_one;
+        }
+        match mask {
+            0 => inside_one | inside_two,
+            1 => inside_one & inside_two,
+            2 => inside_one ^ inside_two,
+            _ => !(inside_one | inside_two),
+        }
+    }
+
+    /// Colour-window gate: `(above, below)`, from `CGWSEL` bits 4-7.
+    fn colour_window(&self, x: usize) -> (bool, bool) {
+        let test = self.window_masks(5, x);
+        let above = match (self.cgwsel >> 6) & 0x03 {
+            0 => true,
+            1 => test,
+            2 => !test,
+            _ => false,
+        };
+        let below = match (self.cgwsel >> 4) & 0x03 {
+            0 => true,
+            1 => test,
+            2 => !test,
+            _ => false,
+        };
+        (above, below)
     }
 
     /// Recompute the OAM priority-rotation start sprite (`$2103` bit 7).
@@ -737,10 +815,10 @@ impl Ppu {
                 priority: priority[usize::from(attributes & 0x2000 != 0)],
                 layer: layer as u8,
             };
-            if main_enable {
+            if main_enable && !(self.tmw & (1 << layer) != 0 && self.window_masks(layer, x)) {
                 plot(main, x, pixel);
             }
-            if sub_enable {
+            if sub_enable && !(self.tsw & (1 << layer) != 0 && self.window_masks(layer, x)) {
                 plot(sub, x, pixel);
             }
         }
@@ -814,11 +892,13 @@ impl Ppu {
                 priority,
                 layer: layer as u8,
             };
-            if main_enable {
-                plot(main, x as usize, pixel);
+            let screen_x = x as usize;
+            if main_enable && !(self.tmw & (1 << layer) != 0 && self.window_masks(layer, screen_x))
+            {
+                plot(main, screen_x, pixel);
             }
-            if sub_enable {
-                plot(sub, x as usize, pixel);
+            if sub_enable && !(self.tsw & (1 << layer) != 0 && self.window_masks(layer, screen_x)) {
+                plot(sub, screen_x, pixel);
             }
         }
     }
@@ -906,10 +986,11 @@ impl Ppu {
                         layer: 4,
                     };
                     let index = usize::from(screen_x);
-                    if main_enable {
+                    let masked = self.window_masks(4, index);
+                    if main_enable && !(self.tmw & 0x10 != 0 && masked) {
                         plot_sprite(main, index, pixel);
                     }
-                    if sub_enable {
+                    if sub_enable && !(self.tsw & 0x10 != 0 && masked) {
                         plot_sprite(sub, index, pixel);
                     }
                 }
@@ -949,11 +1030,13 @@ impl Ppu {
             } else {
                 self.cgram[usize::from(below.color)]
             };
-            let enable = if backdrop {
+            let (colour_above, colour_below) = self.colour_window(x);
+            let enable = (if backdrop {
                 self.cgadsub & 0x20 != 0
             } else {
                 self.cgadsub & (1 << layer) != 0
-            };
+            }) && colour_above
+                && colour_below;
             if enable {
                 let use_sub = self.cgwsel & 0x02 != 0 && !sub_transparent;
                 let operand = if use_sub { sub_color } else { fixed };
@@ -1096,6 +1179,47 @@ mod tests {
         ppu.write(0x2122, 0x1F);
         ppu.write(0x2122, 0x00);
         assert_eq!(ppu.cgram[2], 0x001F);
+    }
+
+    #[test]
+    fn window_masks_follow_the_selector_and_logic() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2126, 10); // WH0: window 1 left
+        ppu.write(0x2127, 20); // WH1: window 1 right
+                               // BG1 window 1 enabled, not inverted (enable is bit 1).
+        ppu.write(0x2123, 0x02);
+        assert!(!ppu.window_masks(0, 9));
+        assert!(ppu.window_masks(0, 10));
+        assert!(ppu.window_masks(0, 19));
+        // The right edge is inclusive, matching ares' sampling order.
+        assert!(ppu.window_masks(0, 20));
+        assert!(!ppu.window_masks(0, 21));
+
+        // Invert BG1's window 1.
+        ppu.write(0x2123, 0x03);
+        assert!(ppu.window_masks(0, 9));
+        assert!(!ppu.window_masks(0, 10));
+
+        // Both windows with AND logic: only the overlap masks.
+        ppu.write(0x2128, 10); // WH2
+        ppu.write(0x2129, 15); // WH3
+        ppu.write(0x212A, 0x01); // BG1 logic = AND
+        ppu.write(0x2123, 0x0A); // BG1 window 1 + window 2
+        assert!(!ppu.window_masks(0, 17));
+        assert!(ppu.window_masks(0, 12));
+    }
+
+    #[test]
+    fn colour_window_gates_colour_math() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2126, 0);
+        ppu.write(0x2127, 32);
+        // Colour window uses window 1 (enable is bit 5).
+        ppu.write(0x2125, 0x20);
+        // CGWSEL above mask = 1 (inside), below mask = 0 (always).
+        ppu.write(0x2130, 0x40);
+        assert_eq!(ppu.colour_window(16), (true, true));
+        assert_eq!(ppu.colour_window(40), (false, true));
     }
 
     #[test]
