@@ -1,9 +1,10 @@
-//! Minimal SNES system bus and CPU frame driver.
+//! SNES system: S-CPU bus, WRAM, cartridge access and the peripheral clock.
 //!
-//! The PPU, SPC700/S-DSP and DMA engine are not implemented yet. This module
-//! currently provides the S-CPU memory map, WRAM, cartridge access and a bus
-//! implementation suitable for CPU tests and for booting retail images far
-//! enough to exercise the 65C816.
+//! The S-CPU, S-SMP/S-DSP, S-PPU and DMA/HDMA engines are clocked here. Every
+//! S-CPU bus access advances the peripherals by its wait-state count, so the
+//! S-SMP and S-PPU observe the same master-clock instants as ares' cooperative
+//! threads. Coprocessors (SuperFX, SA-1, CX4, S-DD1, SPC7110, DSP1-4) are not
+//! implemented yet.
 
 use crate::apu::Apu;
 use crate::cpu::{Cpu, CpuBus};

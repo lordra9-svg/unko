@@ -339,9 +339,7 @@ impl Ppu {
     ///
     /// `SCREEN_WIDTH` normally and `MAX_SCREEN_WIDTH` in hi-res modes, matching
     /// the reference model: the compositing stage always produces 256 above/
-    /// below pixel pairs per line and only the output stage doubles. Hi-res
-    /// rendering itself is not implemented yet, so this is always
-    /// `SCREEN_WIDTH` today.
+    /// below pixel pairs per line and only the output stage doubles.
     pub const fn frame_width(&self) -> usize {
         if self.frame_hires {
             MAX_SCREEN_WIDTH

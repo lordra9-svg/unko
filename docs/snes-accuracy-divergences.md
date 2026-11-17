@@ -454,29 +454,30 @@ with ares. The implementation follows ares, which is the primary source.
   few hundred clocks early. Games that read them at the end of NMI are
   unaffected in every measured frame.
 - The S-SMP timers advance by ares' `timerWaitStates` (2/4/8/16 clocks) per
-  access, including the two half-steps around `$F4-$F7` reads. CPU time is
-  accounted in access units (one unit = two clocks) at the documented
-  1.024 MHz; the credit is exact, but an individual access is executed at an
-  S-CPU instruction boundary rather than at its exact master clock.
-- S-SMP port writes are committed at the exact base clock of the access (a
-  recorded micro-op plan), but the instruction's **reads** still happen when
-  the plan is formed, so an S-SMP poll of `$F4-$F7` can observe a fresh CPU
-  latch slightly early. ares' cooperative threads synchronize both directions
-  at the exact cycle.
-- The S-CPU now advances the peripherals per access (ares `CPU::read/write`
+  access, including the two half-steps around `$F4-$F7` reads. The S-SMP is now
+  drained one clock at a time (2,050,560 Hz) on an exact master-clock credit.
+- S-SMP port writes are committed at the exact clock of the access (a recorded
+  micro-op plan). The instruction's **reads** still happen when the plan is
+  formed, so an S-SMP poll of `$F4-$F7` can observe a fresh CPU latch up to one
+  instruction early. ares' cooperative threads synchronize both directions at
+  the exact cycle. This is the remaining cause of the occasional one-iteration
+  IPL `$FFDA`/`$FFDC` slips; it no longer changes any DSP test verdict.
+- The S-CPU advances the peripherals per access (ares `CPU::read/write`
   ordering), but the PPU renders one scanline at a time when the line event
   fires, so mid-scanline register writes are not yet dot-exact.
-- S-DSP synthesis runs one 32-clock sample pass per 32 SPC cycles. The ares
-  interleaving granularity is finer; this is the main DSP timing approximation
-  to remove once there is an audio oracle.
+- S-DSP synthesis now runs one micro-step per two S-SMP clocks inside the
+  S-SMP access path (ares `SMP::wait` → `synchronize(dsp)`), rather than a
+  whole 32-step sample per instruction. The remaining audio question is not
+  timing granularity but whether the emitted PCM stream is sample-identical to
+  ares; there is still no audio oracle in the harness.
 - S-CPU/APU/PPU scheduling uses an exact master-clock credit (21,477,272 Hz;
-  four clocks per PPU dot, 1,024,000 Hz SPC700). Memory wait states follow the
-  ares table, but the sub-cycle phase of an individual access is rounded to the
-  instruction boundary.
+  four clocks per PPU dot, 2,050,560 Hz SPC700). Memory wait states follow the
+  ares table, and the DRAM refresh is charged inside the crossing CPU step.
 - Echo writes are active whenever EDL/ESA enable them, but the exact echo
-  buffer page wrap and read-only behavior need an ares sample comparison.
-- `Cpu::reset` uses the documented reset-vector fetch and a short internal
-  delay sequence; exact reset pin timing is pending hardware capture.
+  buffer page wrap and read-only behavior still need an ares sample comparison.
+- `Cpu::reset` now follows ares `CPU::main`: `step(132)` then the
+  emulation-mode interrupt sequence. Exact reset pin timing is pending hardware
+  capture.
 - Display brightness follows ares' DAC luma `(1 + l) / 16 * (l ? 1 : 0.25)`
   with integer rounding. Measured frames match ares at `INIDISP = $0F` and at
   `$0B`; sub-1/255 rounding differences are possible at other levels.

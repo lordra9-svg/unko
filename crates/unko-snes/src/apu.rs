@@ -1,9 +1,10 @@
-//! S-SMP APU wrapper: 64 KiB APU RAM, IPL ROM, CPU ports and the S-DSP stub.
+//! S-SMP APU: 64 KiB APU RAM, IPL ROM, the four CPU ports and the S-DSP.
 //!
-//! The SPC700 CPU is implemented in [`crate::spc700`]. This module owns the
-//! APU address space and the four bidirectional S-CPU ports. Audio synthesis is
-//! not implemented yet; the DSP register file is present so games can upload
-//! their sound driver and complete the boot handshake.
+//! The SPC700 CPU is implemented in [`crate::spc700`] and the S-DSP in
+//! [`crate::dsp`]. This module owns the APU address space, the timers, and the
+//! two independent four-byte port latches, and it records each SPC700
+//! instruction as a micro-op timeline so an S-CPU access can observe an S-SMP
+//! port write at its exact master clock.
 
 use std::collections::VecDeque;
 
