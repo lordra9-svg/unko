@@ -262,7 +262,8 @@ fn main() -> ExitCode {
         );
     }
     println!(
-        "ppu:         brightness={} nmi={} nmi_count={} irq={} line={} vblank={} frame_ready={} nonzero_pixels={} rgb_sum={checksum}",
+        "spc inst:    {}\nppu:         brightness={} nmi={} nmi_count={} irq={} line={} vblank={} frame_ready={} nonzero_pixels={} rgb_sum={checksum}",
+        system.apu.instructions,
         system.ppu.display_brightness(),
         system.nmi_enabled(),
         system.nmi_count,

@@ -16,17 +16,30 @@ pub trait SpcBus {
     fn write(&mut self, address: u16, value: u8);
     /// Advance one idle cycle.
     fn idle(&mut self) {}
-    /// Advance peripherals (timers) by `cycles` units before an access.
-    fn advance(&mut self, _cycles: u32) {}
+    /// Advance the S-SMP timers by `clocks` 2.048 MHz clocks.
+    fn advance(&mut self, _clocks: u32) {}
 
-    /// S-SMP time units for an access. `None` is an internal/idle cycle.
+    /// Access cost in S-SMP time units (ares `cycleWaitStates` / 2).
     ///
     /// One unit is two APU clocks: the hardware SMP thread runs at 2.048 MHz
-    /// and an opcode cycle costs two clocks by default, so a unit is one
-    /// access at the documented 1.024 MHz rate. `$F0` bits 4-7 can raise the
-    /// internal/external wait states.
+    /// and an opcode cycle costs two clocks by default. `$F0` bits 4-7 select
+    /// the internal/external wait states, including the glitchy 10/20 values.
     fn wait_cycles(&mut self, _address: Option<u16>) -> u32 {
         1
+    }
+
+    /// Clocks the timers advance for an access (ares `timerWaitStates`).
+    ///
+    /// The timers are *not* affected by the 8/16-clock glitch: ares steps them
+    /// by 2/4/8/16 clocks, not 2/4/10/20.
+    fn timer_cycles(&mut self, _address: Option<u16>) -> u32 {
+        2
+    }
+
+    /// Whether an access splits its wait around the data fetch. ares reads of
+    /// the `$F4-$F7` ports call `wait(halve)` twice.
+    fn split_port_read(&mut self, _address: u16) -> bool {
+        false
     }
 }
 
@@ -169,22 +182,34 @@ impl Spc700 {
     fn read(&mut self, bus: &mut impl SpcBus, address: u16) -> u8 {
         let wait = bus.wait_cycles(Some(address));
         self.cycles += u64::from(wait);
+        if bus.split_port_read(address) {
+            // ares `SMP::read`: $F4-$F7 split the wait into two halves around
+            // the data fetch, halving both the CPU cost and the timer step.
+            let half = bus.timer_cycles(Some(address)) / 2;
+            bus.advance(half);
+            let value = bus.read(address);
+            bus.advance(half);
+            return value;
+        }
         // ares steps the timers during the wait, before the access.
-        bus.advance(wait);
+        let timer = bus.timer_cycles(Some(address));
+        bus.advance(timer);
         bus.read(address)
     }
 
     fn write(&mut self, bus: &mut impl SpcBus, address: u16, value: u8) {
         let wait = bus.wait_cycles(Some(address));
         self.cycles += u64::from(wait);
-        bus.advance(wait);
+        let timer = bus.timer_cycles(Some(address));
+        bus.advance(timer);
         bus.write(address, value);
     }
 
     fn idle(&mut self, bus: &mut impl SpcBus) {
         let wait = bus.wait_cycles(None);
         self.cycles += u64::from(wait);
-        bus.advance(wait);
+        let timer = bus.timer_cycles(None);
+        bus.advance(timer);
         bus.idle();
     }
 
@@ -1059,6 +1084,8 @@ impl Spc700 {
     }
 
     fn return_subroutine(&mut self, bus: &mut impl SpcBus) {
+        // ares `instructionReturnSubroutine`: read(PC) then idle before the pulls.
+        self.idle(bus);
         self.idle(bus);
         let low = self.pull(bus);
         let high = self.pull(bus);
@@ -1066,6 +1093,8 @@ impl Spc700 {
     }
 
     fn return_interrupt(&mut self, bus: &mut impl SpcBus) {
+        // ares `instructionReturnInterrupt`: read(PC) then idle before the pulls.
+        self.idle(bus);
         self.idle(bus);
         let psw = self.pull(bus);
         self.set_psw(psw);
@@ -1218,12 +1247,20 @@ impl Spc700 {
 
     fn wait_instruction(&mut self, bus: &mut impl SpcBus) {
         self.wait = true;
-        self.idle(bus);
+        // ares `instructionSleep` loops `read(PC); idle()` until the thread
+        // synchronizes; its measured cost is 7 accesses including the fetch.
+        for _ in 0..6 {
+            self.idle(bus);
+        }
     }
 
     fn stop_instruction(&mut self, bus: &mut impl SpcBus) {
         self.stop = true;
-        self.idle(bus);
+        // ares `instructionStop` loops `read(PC); idle()` until the thread
+        // synchronizes; its measured cost is 7 accesses including the fetch.
+        for _ in 0..6 {
+            self.idle(bus);
+        }
     }
 
     fn branch_bit(&mut self, bus: &mut impl SpcBus, bit: u8, match_value: bool) {

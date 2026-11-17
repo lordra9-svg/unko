@@ -20,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **818 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **837 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -84,7 +84,10 @@ Implemented so far:
   per-layer masking and the CGWSEL colour-window gate
 - PPU mosaic: per-BG `$2106` enable, 1-16 pixel size, horizontal pixel repeats
   and vertical row reuse aligned like ares
-- S-SMP timers 0-2 with targets, enable/reset bits and `$FD-$FF` output latching
+- S-SMP timers 0-2 with targets, enable/reset bits, `$FD-$FF` output latching,
+  the ares `$F0` internal/external wait dividers (`cycleWaitStates`
+  2/4/10/20 for the CPU, `timerWaitStates` 2/4/8/16 for the timers), timer-line
+  resynchronisation and `$F1` enable-edge stage resets
 - S-CPU I/O: serial controller ports at `$4016/$4017`, hardware auto-poll into
   `$4218-$421F`, `$4210/$4211/$4212` flags (NTSC version 2, vblank, hblank,
   poll-busy), the hardware multiply/divide unit at `$4202-$4206` with its
@@ -96,7 +99,7 @@ Implemented so far:
 
 Validation so far:
 
-- **836 workspace tests**, 0 failed
+- **837 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -105,6 +108,10 @@ Validation so far:
   all-opcode sweep. The only excluded opcode is `$6A` because `spc700` 0.1.0
   computes `AND1 C,/membit` as `!(bit & C)` instead of `C & !bit`; the ares
   behaviour is pinned by `spc700_bit_logic`.
+- **SPC700 cycle oracle**: `spc700_cycles` runs all 256 opcodes in four
+  register states and matches the RustySNES (ares-derived) base-clock totals
+  exactly, covering both directions of every branch. It caught `RET`/`RETI`
+  being one access short and `SLEEP`/`STP` five accesses short.
 - **3 DSP unit tests** cover register mirroring, KON/ENDX, non-silent BRR
   playback and global mute; the APU integration test confirms SPC execution
   drives sample generation.
@@ -139,22 +146,34 @@ Validation so far:
   since the boot takes a different number of frames). Two blocking bugs were
   fixed: the `$2180-$2183` WRAM data port and `$4210` bit 7 latching at
   vblank even when NMI is disabled.
-- Super Mario World with the local 64-byte IPL ROM, measured against ares
-  (`--system 'Super Famicom' --frames N --dump-frame`) and RustySNES on the
-  same ROM:
-  - **600 frames**: **99.950%** of pixels bit-identical to ares, mean absolute
-    channel difference 0.084; 33 differing pixels, all inside one
-    equal-priority sprite overlap (bbox 117-121 x 162-172)
-  - **900 frames**: **99.927%** bit-identical, mean difference 0.097; 49
-    differing pixels in the equivalent overlap
-  - **1500 frames**: **99.912%** bit-identical, mean difference 0.121; 58
-    differing pixels, so the long-run state stays in lockstep
+- blargg **`spc_timer` now reports `PASSED TESTS`**. The ROM prints a CRC of
+  ten timer readings and compares it with `D06CD0A9`; ours printed
+  `1111111111` (`B358FA31`) until `RET`/`RETI`/`SLEEP`/`STP` were given their
+  ares cycle counts and the timer stage counters were stepped by the ares
+  `timerWaitStates` table (2/4/8/16 clocks) instead of the glitchy
+  CPU table (2/4/10/20).
+- Super Mario World with the local 64-byte IPL ROM, measured against RustySNES
+  frame dumps (cross-checked against ares `--dump-frame`; the ares dump's
+  content index runs two frames behind its `--frames` label):
+  - **aligned 600** (`unko-snes` frame 598 vs RustySNES 600): **99.950%** of
+    pixels bit-identical, mean absolute channel difference 0.084; 33 differing
+    pixels, all inside one equal-priority sprite overlap (bbox 117-121 x
+    162-172)
+  - **aligned 900** (898 vs 900): **99.927%** bit-identical, mean difference
+    0.097; 49 differing pixels in the equivalent overlap
+  - **1500**: **99.912%** bit-identical at the same frame index (the title
+    screen is static there), mean difference 0.121; 58 differing pixels
   - **VRAM: 0 of 32,768 words differ** from RustySNES at 600 frames;
     **CGRAM: 0 of 256 entries differ**; **OAM: identical**
   - title logo, sky gradient, cloud sprites, border, "© 1990, 1991 Nintendo"
     text and the scrolling BG1 landscape all match
-- The residual pixels are the overlap of two equal-priority sprites where
-  ares' 32-entry sprite list resolves the tie differently; dot-level sprite
+  - **open:** `unko-snes` reaches the same title-screen content two frames
+    before RustySNES/ares, so same-index comparisons show 92.4% (600) and
+    91.5% (900). Both emulators turn the display on at frame 86, so the extra
+    two frames are accumulated during the first ~500 title frames. See the
+    APU port-latch granularity note in the divergence ledger.
+- The residual pixels are the overlap of two equal-priority sprites where the
+  32-entry sprite list resolves the tie differently; dot-level sprite
   evaluation and the 34-tile limit are the remaining PPU scheduling work.
 - Star Fox remains black without the SuperFX coprocessor; Final Fantasy V was
   still in its boot sequence at the 20M-cycle sample.

@@ -58,6 +58,15 @@ material used to implement it. No GPL emulator source is translated or copied.
   `tests/spc700_oracle.rs`; no code or tables were copied. Its `$6A`
   (`AND1 C,/membit`) behaviour is known to differ from ares and is excluded
   from the sweep.
+- The per-opcode access counts in `tests/spc700_cycles.rs` were **measured**
+  from the local RustySNES build (`debug_execute_one`), which is an
+  ares-derived cycle-accurate dispatch; they are data, not copied code.
+- ares `ares/sfc/smp/timing.cpp` (`SMP::wait`, `stepTimers`) and
+  `ares/sfc/smp/io.cpp` document the `$F0` divider tables
+  (`cycleWaitStates` 2/4/10/20, `timerWaitStates` 2/4/8/16), the `$F4-$F7`
+  split read, the `$F1` enable-edge timer resets and the `$FD-$FF`
+  read-and-clear behaviour. `unko-snes` transcribes those rules; no ares code
+  is linked.
 
 ## `src/io.rs`
 

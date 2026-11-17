@@ -35,9 +35,10 @@ SNES track: the isolated `unko-snes` crate now has ROM parsing and checksum
 validation, LoROM/HiROM/ExLoROM/ExHiROM mapping, a cycle-stepped 65C816, the
 full SPC700, an APU wrapper with IPL/ports, the S-DSP voice pipeline, a
 line-based PPU with modes 0-7, sprites, subscreen/colour math and HDMA, plus
-S-CPU DMA and APU timers. Retail Super Mario World is now **99.5% pixel-identical
-to ares at 600 frames** with bit-identical VRAM/CGRAM/OAM; only a one-sprite
-sub-frame scheduling difference remains.
+S-CPU DMA and APU timers. Retail Super Mario World is **99.950% pixel-identical
+to ares/RustySNES with frames aligned** (99.912% at 1500 frames) with
+bit-identical VRAM/CGRAM/OAM; a two-frame title-screen content offset and a
+one-sprite sub-frame scheduling difference remain.
 
 Reference gates:
 
@@ -48,7 +49,7 @@ Reference gates:
 - mapper matrix (Holy Mapperel, blargg MMC3, MMC5, VRC2a, MMC1-A12):
   **65/65**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW**, 0 failed, 5 DRAW skips
-- `cargo test --workspace`: **836 passed, 0 failed**; clippy/fmt clean
+- `cargo test --workspace`: **837 passed, 0 failed**; clippy/fmt clean
 - VS. System: mapper 99, cabinet input, UniSystem/DualSystem parsing,
   2C03/2C04/2C05 palettes and 2C05 security; 13 repaired local images boot
   (including Gumshoe's outer bank)
@@ -85,7 +86,7 @@ and run-ahead. The legacy input-framing session remains for tests and
 |---|---:|
 | Workspace crates | 12 |
 | First-party Rust lines | ~105,200 |
-| Workspace tests | 836 pass, 0 failed |
+| Workspace tests | 837 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images | 7,101 |
 

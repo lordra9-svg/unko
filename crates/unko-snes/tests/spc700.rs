@@ -132,7 +132,8 @@ fn call_and_return() {
     assert_eq!(step(&mut cpu, &mut ram), 8);
     assert_eq!(cpu.pc, 0x3000);
     assert_eq!(cpu.sp, 0xED);
-    assert_eq!(step(&mut cpu, &mut ram), 4);
+    // ares `instructionReturnSubroutine`: read(PC), idle, two pulls.
+    assert_eq!(step(&mut cpu, &mut ram), 5);
     assert_eq!(cpu.pc, 0x0203);
     assert_eq!(cpu.sp, 0xEF);
 }

@@ -15,12 +15,25 @@ master-clock totals (six per oracle bus cycle) across all 18 suites.
 
 The remaining known video divergence is **dot-level sprite evaluation**:
 
-- *Super Mario World* at 600 frames is **99.950%** pixel-identical to ares
-  (mean absolute channel difference 0.084), with 33 differing pixels. At 900
-  frames it is 99.927% and at 1500 frames 99.912%; every differing pixel lies
-  in the overlap of two equal-priority sprites.
+- *Super Mario World* is **99.950%** pixel-identical to the RustySNES oracle
+  with a two-frame content offset (`unko-snes` frame 598 vs RustySNES 600;
+  mean absolute channel difference 0.084, 33 differing pixels). At 900 frames
+  it is 99.927% at the same offset and at 1500 frames 99.912% at the same
+  index; every differing pixel lies in the overlap of two equal-priority
+  sprites.
+- **Open: two-frame content offset during the title screen.** Both emulators
+  turn the display on at frame 86 and match exactly at 1500, but our title
+  screen reaches the reference content two frames earlier, so same-index
+  comparisons at 600/900 show 92.4%/91.5%. Changing only the timer stepping
+  rate or one SPC opcode's access count flips this by exactly two frames, which
+  identifies it as a phase/race at the APU↔CPU port handshake rather than a
+  rate error; see the port-latch approximation below.
 - VRAM (32,768 words), CGRAM (256 entries) and OAM are bit-identical to the
   RustySNES oracle at 600 frames.
+- **Frame-index caveat:** the local ares build's `--frames N --dump-frame`
+  dumps the content of frame `N - 2` (its internal frame counter starts two
+  vblanks later than RustySNES' and ours). Compare ares dumps with `ours N-2`
+  or, preferably, use RustySNES' `vram_dump` at the same frame.
 - ares evaluates sprites with a 32-entry per-line list, the 34-tile limit and
   the `firstSprite` rotation; `unko-snes` renders all 128 entries per line and
   uses OAM-order tie-breaking. The backlog only shows up when sprites of equal
@@ -33,16 +46,13 @@ S-DSP output is now instrumented but not sample-identical:
 - The queued audio is non-silent (RMS about 0.012 vs ares 0.023) and the best
   cross-correlation against ares's dumped 395-sample window is about 0.43 at a
   232-sample lag; the remaining difference is a different point in the song.
-- **Blargg `spc_timer` fails test 02 ("timer read vs write").** Our screen
-  shows `Failed 02` with status `006278F6`; RustySNES on the same ROM at the
-  same frame shows `PASSED TESTS`. The test waits at ARAM `$04C5` for `$FD` to
-  become non-zero after `target = 1`, and our recorded result differs even
-  though APU RAM is otherwise identical to RustySNES (5 bytes differ at frame
-  300). Our timer state at frame 300 is `t0 stage3=9` vs RustySNES `14`,
-  `t1 2 vs 6`, `t2 4 vs 3`. This is the next concrete audio task.
-- Doubling the timer stage rate (2.048 MHz clocks per access) makes the test
-  still fail and advances the Super Mario World boot/attract by two frames, so
-  the current rate is retained until the ROM passes.
+- **Blargg `spc_timer` passes.** It previously reported `Failed 02` ("timer
+  read vs write") because `RET`/`RETI` were one access short and `SLEEP`/`STP`
+  five accesses short, so the delay loops around each timer reading cost fewer
+  SPC cycles than ares; the timer stage counters were also stepped by the
+  glitchy CPU wait table (2/4/10/20) instead of ares' `timerWaitStates`
+  (2/4/8/16). Both are fixed and pinned by the new `spc700_cycles` oracle and
+  the timer wait-state unit test.
 - ares' DRAM refresh (5 x 6+2 clocks per scanline) is not modelled. Adding it
   shifts the SWM boot by three frames; the exact interaction with the SPC
   handshake still needs a timer/refresh-specific test.
@@ -74,11 +84,15 @@ with ares. The implementation follows ares, which is the primary source.
   event rather than ares' exact hcounter window, so `$4218-$421F` can settle a
   few hundred clocks early. Games that read them at the end of NMI are
   unaffected in every measured frame.
-- The S-SMP APU timers advance once per access (the 1.024 MHz rate). ares
-  advances the same stage counters by two 2.048 MHz clocks per access; using
-  that rate makes our Super Mario World boot/attract timing diverge from ares,
-  so the access rate is retained until a timer-specific oracle (blargg
-  `spc_timer`) is wired up.
+- The S-SMP timers advance by ares' `timerWaitStates` (2/4/8/16 clocks) per
+  access, including the two half-steps around `$F4-$F7` reads. CPU time is
+  accounted in access units (one unit = two clocks) at the documented
+  1.024 MHz; the credit is exact, but an individual access is executed at an
+  S-CPU instruction boundary rather than at its exact master clock.
+- S-SMP port latches ($F4-$F7 writes) become visible to the S-CPU at the end
+  of the SPC instruction that wrote them. ares and RustySNES commit them at the
+  exact base clock of the write, so a CPU poll can observe a value up to one
+  SPC instruction early.
 - S-DSP synthesis runs one 32-clock sample pass per 32 SPC cycles. The ares
   interleaving granularity is finer; this is the main DSP timing approximation
   to remove once there is an audio oracle.
@@ -105,6 +119,8 @@ with ares. The implementation follows ares, which is the primary source.
 
 - 18 differential tests against the MIT `w65c816` crate, now also asserting
   exact master-clock totals.
+- `spc700_cycles`: all 256 SPC700 opcodes in four register states, asserting
+  exact base-clock totals against the RustySNES (ares-derived) oracle.
 - All 15 read addressing modes across 7 ALU operations (105 opcode cases),
   24 write modes and 35 modify modes.
 - 10 retail images (LoROM, HiROM and ExHiROM): header detection and stored

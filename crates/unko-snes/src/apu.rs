@@ -87,6 +87,8 @@ pub struct Apu {
     aux5: u8,
     timer_targets: [u8; 3],
     dsp_credit: u64,
+    /// Number of SPC700 instructions executed (debug).
+    pub instructions: u64,
     samples: VecDeque<Sample>,
 }
 
@@ -121,6 +123,7 @@ impl Apu {
             aux5: 0,
             timer_targets: [0; 3],
             dsp_credit: 0,
+            instructions: 0,
             samples: VecDeque::new(),
         }
     }
@@ -233,8 +236,10 @@ impl Apu {
             aux4: &mut self.aux4,
             aux5: &mut self.aux5,
             timer_targets: &mut self.timer_targets,
+            page_flag: self.spc.flags.page,
         };
         let cycles = self.spc.step(&mut bus);
+        self.instructions += 1;
         self.dsp_credit += u64::from(cycles);
         while self.dsp_credit >= 32 {
             self.dsp_credit -= 32;
@@ -257,10 +262,18 @@ impl Apu {
         self.samples.drain(..)
     }
 
-    /// Timer internals for diagnostics: `(stage3, stage2, target, enable)`.
-    pub fn timer_state(&self, index: usize) -> (u8, u8, u8, bool) {
+    /// Timer internals for diagnostics: `(stage0, stage1, stage2, stage3,
+    /// target, enable)`.
+    pub fn timer_state(&self, index: usize) -> (u16, bool, u8, u8, u8, bool) {
         let timer = &self.timers[index];
-        (timer.stage3, timer.stage2, timer.target, timer.enable)
+        (
+            timer.stage0,
+            timer.stage1,
+            timer.stage2,
+            timer.stage3,
+            timer.target,
+            timer.enable,
+        )
     }
 
     /// Global timer enable/disable latches for diagnostics.
@@ -303,26 +316,15 @@ struct ApuBus<'a> {
     aux4: &'a mut u8,
     aux5: &'a mut u8,
     timer_targets: &'a mut [u8; 3],
+    page_flag: bool,
 }
 
-impl SpcBus for ApuBus<'_> {
-    // (logging lives in the APU bus read/write below)
-    fn advance(&mut self, cycles: u32) {
-        // One unit is two 2.048 MHz clocks; ares advances the stage counters
-        // by two clocks per opcode cycle (timer divisors 128 and 16).
-        for (index, timer) in self.timers.iter_mut().enumerate() {
-            let frequency = if index == 2 { 16 } else { 128 };
-            timer.step(cycles, frequency, *self.timers_enable, *self.timers_disable);
-        }
-    }
-
-    fn wait_cycles(&mut self, address: Option<u16>) -> u32 {
-        // ares SMP::wait: RAM uses the external dividers, I/O and the IPL ROM
-        // use the internal dividers. The 8/16 settings are the documented
-        // hardware glitch (10/20 clocks per opcode cycle). One unit here is
-        // two APU clocks, so the table is half of ares'.
-        const CYCLE_WAIT: [u32; 4] = [1, 2, 5, 10];
-        let states = match address {
+impl ApuBus<'_> {
+    /// Wait-state selector for an access: RAM uses the external dividers;
+    /// I/O, the IPL ROM and idle cycles use the internal dividers
+    /// (ares `SMP::wait`).
+    fn wait_selector(&self, address: Option<u16>) -> u8 {
+        match address {
             None => *self.internal_wait,
             Some(address)
                 if address & 0xFFF0 == 0x00F0 || (address >= 0xFFC0 && *self.iplrom_enable) =>
@@ -330,8 +332,35 @@ impl SpcBus for ApuBus<'_> {
                 *self.internal_wait
             }
             _ => *self.external_wait,
-        };
-        CYCLE_WAIT[usize::from(states & 0x03)]
+        }
+        .min(3)
+    }
+}
+
+impl SpcBus for ApuBus<'_> {
+    fn advance(&mut self, clocks: u32) {
+        for (index, timer) in self.timers.iter_mut().enumerate() {
+            let frequency = if index == 2 { 16 } else { 128 };
+            timer.step(clocks, frequency, *self.timers_enable, *self.timers_disable);
+        }
+    }
+
+    fn wait_cycles(&mut self, address: Option<u16>) -> u32 {
+        // Time is accounted in access units (one unit is two S-SMP clocks).
+        // ares `cycleWaitStates` is 2/4/10/20 clocks: the 8/16 settings cost
+        // 10/20 on silicon, the documented hardware glitch.
+        const CYCLE_WAIT: [u32; 4] = [1, 2, 5, 10];
+        CYCLE_WAIT[usize::from(self.wait_selector(address))]
+    }
+
+    fn timer_cycles(&mut self, address: Option<u16>) -> u32 {
+        // ares `timerWaitStates`: the timers are not affected by the glitch.
+        const TIMER_WAIT: [u32; 4] = [2, 4, 8, 16];
+        TIMER_WAIT[usize::from(self.wait_selector(address))]
+    }
+
+    fn split_port_read(&mut self, address: u16) -> bool {
+        address & 0xFFFC == 0x00F4
     }
 
     fn read(&mut self, address: u16) -> u8 {
@@ -366,6 +395,10 @@ impl SpcBus for ApuBus<'_> {
         }
         match address {
             0xF0 => {
+                // ares: writes are only valid when the SPC700 P flag is clear.
+                if self.page_flag {
+                    return;
+                }
                 *self.timers_disable = value & 0x01 != 0;
                 *self.ram_writable = value & 0x02 != 0;
                 *self.ram_disable = value & 0x04 != 0;
@@ -382,7 +415,9 @@ impl SpcBus for ApuBus<'_> {
                     let enable = value & (1 << index) != 0;
                     let rising = enable && !timer.enable;
                     timer.enable = enable;
-                    if rising {
+                    // ares resets timers 0/1 on a rising enable edge, but
+                    // timer 2 on every write that is not a rising edge.
+                    if rising != (index == 2) {
                         timer.stage2 = 0;
                         timer.stage3 = 0;
                     }
@@ -463,6 +498,7 @@ mod tests {
             aux4: &mut apu.aux4,
             aux5: &mut apu.aux5,
             timer_targets: &mut apu.timer_targets,
+            page_flag: false,
         };
         assert_eq!(bus.read(0xFFC0), 0x00);
         bus.write(0xF1, 0x00);
@@ -555,6 +591,7 @@ mod wait_state_tests {
             aux4: &mut apu.aux4,
             aux5: &mut apu.aux5,
             timer_targets: &mut apu.timer_targets,
+            page_flag: false,
         }
     }
 
@@ -564,12 +601,13 @@ mod wait_state_tests {
         apu.ram_mut()[0x0200] = 0xE8; // LDA #$42
         apu.ram_mut()[0x0201] = 0x42;
         apu.spc.pc = 0x0200;
+        // Two RAM accesses at one unit each (two clocks each).
         assert_eq!(apu.step(), 2);
 
         apu.spc.pc = 0x0200;
         {
             let mut bus = bus(&mut apu);
-            // External wait state 1 (bits 4-5) -> two units per RAM access.
+            // External wait state 1 (bits 4-5): 4 clocks = two units.
             bus.write(0xF0, 0x10);
         }
         assert_eq!(apu.step(), 4);
@@ -577,14 +615,16 @@ mod wait_state_tests {
         apu.spc.pc = 0x0200;
         {
             let mut bus = bus(&mut apu);
-            // Internal wait state 3 -> ten units for I/O and the IPL ROM;
-            // RAM keeps using the external divider.
-            // Internal wait state 2 (bits 6-7) -> five units for I/O and idle;
+            // Internal wait state 2 (bits 6-7) applies to I/O and idle cycles;
             // RAM keeps using the external divider.
             bus.write(0xF0, 0x80);
             assert_eq!(bus.wait_cycles(Some(0x00F4)), 5);
-            assert_eq!(bus.wait_cycles(Some(0x0200)), 1);
             assert_eq!(bus.wait_cycles(None), 5);
+            assert_eq!(bus.wait_cycles(Some(0x0200)), 1);
+            // The timers are not affected by the 10/20-clock glitch: an
+            // internal wait state of 2 costs 8 timer clocks, not 10.
+            assert_eq!(bus.timer_cycles(Some(0x00F4)), 8);
+            assert_eq!(bus.timer_cycles(None), 8);
         }
     }
 }

@@ -34,7 +34,7 @@ in another Rust project. A future `unko-snes-host` crate will provide the
   `$2100-$213F` PPU registers and `$2140-$2143` APU ports
 - Oracle differential tests against the MIT `w65c816` and `spc700` crates
 
-Super Mario World is 99.5% pixel-identical to ares at 600 frames with
+Super Mario World is 99.950% pixel-identical to ares with frames aligned (600) with
 bit-identical VRAM/CGRAM/OAM. The next work is dot-level PPU scheduling,
 windows/hires/interlace and S-DSP audio parity.
 

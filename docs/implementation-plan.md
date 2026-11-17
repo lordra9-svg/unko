@@ -53,7 +53,7 @@ implementation source, MesenCE is a black-box oracle, and RustySNES
 4. PPU dot/scanline timing, background/sprite rendering, then the first
    frame. **Done for the base console**: line-based modes 0-7, sprites,
    subscreen/colour math, vblank/NMI, DMA/HDMA and exact S-CPU wait states.
-   Super Mario World matches ares on 99.5% of pixels at 600 frames with
+   Super Mario World matches ares on 99.95% of pixels with frames aligned at 600 with
    bit-identical VRAM/CGRAM/OAM. Remaining: dot-level sprite scheduling,
    windows, hires, interlace, mosaic and offset-per-tile.
 5. `unko-snes-host` adapter once the core surface is stable.
