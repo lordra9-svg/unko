@@ -1043,7 +1043,33 @@ frames of gameplay HUD rendering.
 
   We issue ~11% fewer `$2121` and ~20% more `$2122` writes than ares, so the
   fade lands on different entries and the scene appears at a slightly
-  different palette. That is now the concrete target.
+  different palette.
+
+  **The HDMA is not at fault.** `HDMA_LOG` shows the fade is driven by two
+  channels writing one value per scanline:
+
+  | channel | target | mode | indirect table |
+  |---|---|---|---|
+  | 5 | `$2121` (CGADD) | 1 byte | `$7E:C000` |
+  | 7 | `$2122` (CGDATA) | 2 bytes (`ctrl=$42`) | `$7E:4010` |
+
+  and dumping WRAM at frame 490 shows **the tables themselves are wrong in
+  ours**:
+
+  ```
+  $7E:4000  4F 10 40 4F 10 40 9B 10 40 3C 44 40 01 46 40 00 00 7C 21 7C 42 7C 63 7C 84 ...
+  $7E:C000  00 00 34 74 FC EC FE EA FC E2 7F C1 2F 59 23 45 00 00 74 04 F4 04 F2 02 ...
+  ```
+
+  Everything after the leading `00 00` is palette-like data rather than the
+  per-scanline CGADD/CGDATA values ares sees (`$7E:C000` should read all
+  `$00` there, i.e. "CGADD = 0 every line" - the classic per-scanline backdrop
+  gradient). The ramp `7C 21 7C 42 7C 63 7C 84 7C A5 7C C6 7C E7` is exactly
+  what appears in our CGRAM entries 1-7, so the HDMA and the PPU are faithfully
+  applying a table that is already garbage.
+
+  The remaining SMRPG defect is therefore **whatever generates the fade table
+  at `$7E:4000`/`$7E:C000`**, not HDMA, the PPU or the palette logic.
 
   The historical analysis below still explains why the mismatch surfaced at
   frame 493 rather than earlier. Logging every

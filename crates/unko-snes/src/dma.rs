@@ -236,6 +236,28 @@ impl Dma {
                         (u32::from(channel.bank) << 16) | u32::from(state.address)
                     };
                     let value = bus.read_a(address);
+                    if std::env::var_os("HDMA_LOG").is_some() && (0x21..=0x22).contains(&target) {
+                        use std::io::Write;
+                        if let Ok(mut f) = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open("/tmp/opencode/hdma.log")
+                        {
+                            let _ = writeln!(
+                                f,
+                                "ch{} target={:02X} value={:02X} addr={:06X} indirect={} ctrl={:02X} bank={:02X} iaddr={:04X} ibank={:02X}",
+                                index,
+                                target,
+                                value,
+                                address,
+                                indirect,
+                                channel.control,
+                                channel.bank,
+                                state.indirect_address,
+                                channel.indirect_bank
+                            );
+                        }
+                    }
                     bus.write_b(target, value);
                     cost += 16;
                     if indirect {
