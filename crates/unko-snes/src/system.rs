@@ -53,6 +53,8 @@ pub struct Snes {
     /// Set when this peripheral advance crossed the refresh position; the
     /// wrapper then runs the 40 refresh clocks and reports them to the CPU.
     refresh_pending: bool,
+    /// Whether this frame's joypad auto-poll has started.
+    auto_poll_started: bool,
     /// IRQ line state latched by the H/V comparator, applied at the next
     /// instruction boundary.
     irq_line: bool,
@@ -85,6 +87,7 @@ impl Snes {
             cpu_stall: 0,
             refresh_done: false,
             refresh_pending: false,
+            auto_poll_started: false,
             irq_line: false,
             nmi_line: false,
             nmi_count: 0,
@@ -139,6 +142,7 @@ impl Snes {
         self.irq_line = false;
         self.nmi_line = false;
         self.nmi_count = 0;
+        self.auto_poll_started = false;
         self.clock = 0;
         self.apu.debug.set_clock(0);
         let mut bus = SnesBus {
@@ -290,10 +294,17 @@ impl Snes {
                 self.refresh_pending = true;
             }
             self.irq_line = self.io.poll_irq(self.ppu.line(), self.ppu.dot());
+            if pre_dot == 32 && self.ppu.line() == 225 && !self.auto_poll_started {
+                // ares `CPU::joypadEdge` starts the sequence on line 225 at
+                // hcounter 130-384, not at the start of the line.
+                self.auto_poll_started = true;
+                self.io.begin_auto_poll();
+            }
             if let Some(line) = self.ppu.take_line_event() {
                 self.refresh_done = false;
                 if line == 0 {
                     self.dma.hdma_reset();
+                    self.auto_poll_started = false;
                 }
                 let mut bus = HdmaBus {
                     wram: &mut self.wram,
@@ -304,9 +315,6 @@ impl Snes {
                 let bytes = self.dma.hdma_line(&mut bus);
                 // ares: an HDMA byte costs the CPU eight master clocks.
                 self.cpu_stall += bytes * 8;
-                if line == 225 {
-                    self.io.begin_auto_poll();
-                }
                 self.ppu.render_current_line();
             }
         }

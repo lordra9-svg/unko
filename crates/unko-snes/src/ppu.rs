@@ -317,10 +317,11 @@ impl Ppu {
 
     /// Whether the current dot is in horizontal blanking.
     ///
-    /// ares reports `hcounter <= 2 || hcounter >= 1096` on its 1365-clock
-    /// line; a dot is four of those clocks.
+    /// ares `PPU::readIO` reports `hcounter <= 2 || hcounter >= 1096`; its
+    /// `hcounter` is in master clocks and a dot is four of them, so blanking
+    /// starts at dot 274.
     pub const fn in_hblank(&self) -> bool {
-        self.dot == 0 || self.dot >= 271
+        self.dot == 0 || self.dot >= 274
     }
 
     /// Take a pending NMI edge.
