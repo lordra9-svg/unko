@@ -466,13 +466,16 @@ with ares. The implementation follows ares, which is the primary source.
 - The S-CPU advances the peripherals per access (ares `CPU::read/write`
   ordering), but the PPU renders one scanline at a time when the line event
   fires, so mid-scanline register writes are not yet dot-exact.
-- HDMA now triggers at ares' dot 276 and its setup at V=0, but the transfer is
-  applied **atomically** at the trigger instead of costing eight master clocks
-  per byte interleaved with CPU work. That is why `hvdma.sfc` (eight channels,
-  ~20 bytes each, deliberately overflowing hblank) still renders differently:
-  its VRAM and CGRAM are byte-identical to RustySNES at the same frame, while
-  the framebuffer differs because the write *timing* inside the line does.
-  Normal HDMA (a few bytes per line) is unaffected in every measured frame.
+- HDMA follows ares exactly at line granularity: setup at V=0, run at
+  `hdmaPosition` (hcounter 1104, dot 276) including line 0, transfer before
+  decrement, reload when the low seven counter bits reach zero, and a stall of
+  8 clocks for the run plus 8 per table read and 16 per transferred byte
+  (read + write). The transfer is still applied **atomically** at the trigger
+  rather than interleaved byte-by-byte with CPU work, but that no longer changes
+  any measured frame: `hvdma.sfc` (eight channels deliberately overflowing
+  hblank) is now **100.000% pixel-identical to ares**. `hvdma_max.sfc`, which
+  triggers a general-purpose DMA from an H-IRQ to land at a particular dot,
+  still differs; that one needs dot-exact DMA/PPU scheduling.
 - S-DSP synthesis now runs one micro-step per two S-SMP clocks inside the
   S-SMP access path (ares `SMP::wait` → `synchronize(dsp)`), rather than a
   whole 32-step sample per instruction. The remaining audio question is not

@@ -141,54 +141,80 @@ impl Dma {
     /// The HDMA table lives at `A1T`/`A1B` (`$4302-$4304`), not at `A2A`
     /// (`$4308`); ares `Channel::hdmaSetup` sets `hdmaAddress = sourceAddress`.
     pub fn hdma_reset(&mut self) {
-        for (index, channel) in self.channels.iter().enumerate() {
-            self.hdma[index] = HdmaState {
-                address: channel.source,
-                indirect_address: 0,
-                line_counter: 0,
-                completed: false,
-                do_transfer: false,
-            };
+        // ares `Channel::hdmaReset`: only the completion/transfer latches; the
+        // address and counter are set by the per-frame setup.
+        for state in &mut self.hdma {
+            state.completed = false;
+            state.do_transfer = false;
         }
     }
 
-    /// Advance one scanline of HDMA transfers.
-    ///
-    /// Returns the number of bytes transferred, so the caller can stall the CPU
-    /// by ares' eight master clocks per byte (an HDMA transfer inside hblank
-    /// steals cycles from the CPU; without it the CPU runs ahead).
-    pub fn hdma_line(&mut self, bus: &mut impl DmaBus) -> u32 {
-        let mut transferred = 0u32;
-        for (index, channel) in self.channels.iter().copied().enumerate() {
+    /// Read the next HDMA table entry when the current block has run out
+    /// (ares `Channel::hdmaReload`).
+    fn hdma_reload(&mut self, bus: &mut impl DmaBus, index: usize, channel: DmaChannel) -> u32 {
+        let state = &mut self.hdma[index];
+        if state.line_counter & 0x7F != 0 {
+            return 0;
+        }
+        let mut reads = 1;
+        let address = (u32::from(channel.bank) << 16) | u32::from(state.address);
+        let count = bus.read_a(address);
+        state.address = state.address.wrapping_add(1);
+        state.line_counter = count;
+        state.completed = count == 0;
+        state.do_transfer = count != 0;
+        if channel.control & 0x40 != 0 {
+            let low = bus.read_a((u32::from(channel.bank) << 16) | u32::from(state.address));
+            state.address = state.address.wrapping_add(1);
+            let high = bus.read_a((u32::from(channel.bank) << 16) | u32::from(state.address));
+            state.address = state.address.wrapping_add(1);
+            state.indirect_address = u16::from_le_bytes([low, high]);
+            reads += 2;
+        }
+        reads
+    }
+
+    /// Per-frame HDMA setup at V=0 (ares `Channel::hdmaSetup`): restart every
+    /// enabled channel at its table and load the first block's counter.
+    pub fn hdma_setup(&mut self, bus: &mut impl DmaBus) -> u32 {
+        if self.hdma_enable == 0 {
+            return 0;
+        }
+        // ares `CPU::hdmaSetup`: one 8-clock cycle plus 8 clocks per table read.
+        let mut cost = 8;
+        for index in 0..8 {
+            self.hdma[index].do_transfer = true;
             if self.hdma_enable & (1 << index) == 0 {
                 continue;
             }
+            let channel = self.channels[index];
             let state = &mut self.hdma[index];
-            if state.completed {
+            state.address = channel.source;
+            state.line_counter = 0;
+            state.completed = false;
+            cost += 8 * self.hdma_reload(bus, index, channel);
+        }
+        cost
+    }
+
+    /// Run one scanline of HDMA transfers (ares `hdmaRun`): transfer the
+    /// current block's bytes, then decrement the line counter and reload the
+    /// next entry when the block is exhausted.
+    ///
+    /// Returns the master clocks the transfer steals from the CPU (ares
+    /// `CPU::hdmaRun`: 8 for the run plus 8 per table read and 8 per byte
+    /// read + write).
+    pub fn hdma_line(&mut self, bus: &mut impl DmaBus) -> u32 {
+        if self.hdma_enable == 0 {
+            return 0;
+        }
+        let mut cost = 8u32;
+        for index in 0..8 {
+            if self.hdma_enable & (1 << index) == 0 || self.hdma[index].completed {
                 continue;
             }
-            if state.line_counter == 0 {
-                let address = (u32::from(channel.bank) << 16) | u32::from(state.address);
-                let count = bus.read_a(address);
-                state.address = state.address.wrapping_add(1);
-                if count == 0 {
-                    state.completed = true;
-                    state.do_transfer = false;
-                    continue;
-                }
-                state.line_counter = count;
-                state.do_transfer = count & 0x80 != 0;
-                if channel.control & 0x40 != 0 {
-                    let low =
-                        bus.read_a((u32::from(channel.bank) << 16) | u32::from(state.address));
-                    state.address = state.address.wrapping_add(1);
-                    let high =
-                        bus.read_a((u32::from(channel.bank) << 16) | u32::from(state.address));
-                    state.address = state.address.wrapping_add(1);
-                    state.indirect_address = u16::from_le_bytes([low, high]);
-                }
-            }
-            if state.do_transfer {
+            let channel = self.channels[index];
+            if self.hdma[index].do_transfer {
                 let length = match channel.control & 0x07 {
                     0 => 1,
                     1 | 2 | 6 => 2,
@@ -203,6 +229,7 @@ impl Dma {
                     };
                     let target = channel.target.wrapping_add(target_offset);
                     let indirect = channel.control & 0x40 != 0;
+                    let state = &mut self.hdma[index];
                     let address = if indirect {
                         (u32::from(channel.indirect_bank) << 16) | u32::from(state.indirect_address)
                     } else {
@@ -210,7 +237,7 @@ impl Dma {
                     };
                     let value = bus.read_a(address);
                     bus.write_b(target, value);
-                    transferred += 1;
+                    cost += 16;
                     if indirect {
                         state.indirect_address = state.indirect_address.wrapping_add(1);
                     } else {
@@ -218,13 +245,12 @@ impl Dma {
                     }
                 }
             }
+            let state = &mut self.hdma[index];
             state.line_counter = state.line_counter.wrapping_sub(1);
             state.do_transfer = state.line_counter & 0x80 != 0;
-            if state.line_counter & 0x7F == 0 {
-                state.line_counter = 0;
-            }
+            cost += 8 * self.hdma_reload(bus, index, channel);
         }
-        transferred
+        cost
     }
 }
 
@@ -416,6 +442,7 @@ mod tests {
         bus.ram[0x1002] = 0x22;
         bus.ram[0x1003] = 0x00; // end
 
+        dma.hdma_setup(&mut bus);
         dma.hdma_line(&mut bus);
         dma.hdma_line(&mut bus);
         dma.hdma_line(&mut bus);

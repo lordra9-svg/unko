@@ -307,11 +307,7 @@ impl Snes {
             // ares `CPU::step`: HDMA triggers at hcounter 1104 (dot 276) of
             // every visible line, so its register writes land before the next
             // line is rendered but after the current line's CPU work.
-            if pre_dot == 275
-                && self.ppu.line() >= 1
-                && !self.ppu.in_vblank()
-                && !self.hdma_run_done
-            {
+            if pre_dot == 275 && !self.ppu.in_vblank() && !self.hdma_run_done {
                 self.hdma_run_done = true;
                 let mut bus = HdmaBus {
                     wram: &mut self.wram,
@@ -319,9 +315,8 @@ impl Snes {
                     apu: &mut self.apu,
                     ppu: &mut self.ppu,
                 };
-                let bytes = self.dma.hdma_line(&mut bus);
-                // ares: an HDMA byte costs the CPU eight master clocks.
-                self.cpu_stall += bytes * 8;
+                let cost = self.dma.hdma_line(&mut bus);
+                self.cpu_stall += cost;
             }
             if let Some(line) = self.ppu.take_line_event() {
                 self.refresh_done = false;
@@ -338,8 +333,7 @@ impl Snes {
                         apu: &mut self.apu,
                         ppu: &mut self.ppu,
                     };
-                    let bytes = self.dma.hdma_line(&mut bus);
-                    self.cpu_stall += bytes * 8;
+                    self.cpu_stall += self.dma.hdma_setup(&mut bus);
                 }
                 self.ppu.render_current_line();
             }
