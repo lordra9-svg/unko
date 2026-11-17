@@ -146,6 +146,17 @@ S-DSP output is now instrumented but not sample-identical:
     **byte-identical to `main`**, as is `spc_smp`'s. So access-exact S-SMP I/O
     reads change nothing for this ROM: the `Echo/esa_changes` failure is on the
     DSP side, not the S-SMP read granularity.
+  - **ARAM diff vs RustySNES (same SPC code point).** Snapshotting APU RAM at the
+    first execution of a given SPC address gives an exact byte diff:
+    `$06CA` (test entry), `$0714` (echo setup) and `$0732` (poll-loop entry) are
+    **byte-identical**; by `$0787` (end of the first check block) exactly 13 bytes
+    differ - the cumulative CRC `$DC-$DF`, `$01F2`, and nine bytes of the echo
+    buffer page (`$F008`, `$F010`, `$F018`, `$F020`, `$F028`, `$F030`, `$F038`).
+    The echo words form a descending ramp (0800, 07F8, 07F0, ...) where ares
+    holds each value for two samples; ours steps down one sample early
+    (`$F008`: ours `07F8`, reference `0800`). So the first divergence is a
+    **voice-to-echo value stepped one sample early**, not the CRC, not the
+    S-SMP and not the echo addressing.
   - Two intermediate variants (over-counting one access unit per deferred read,
     so the S-SMP ran slower than real time) *did* move the Super Mario World
     content offset from two frames to one (`ours 599 == RS 600` at 100.000%).
