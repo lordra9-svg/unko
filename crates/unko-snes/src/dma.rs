@@ -61,6 +61,11 @@ pub trait DmaBus {
 }
 
 impl Dma {
+    /// One channel's register state (debug and tests).
+    pub const fn channel(&self, index: usize) -> DmaChannel {
+        self.channels[index]
+    }
+
     /// Create eight idle channels.
     pub fn new() -> Self {
         Self::default()

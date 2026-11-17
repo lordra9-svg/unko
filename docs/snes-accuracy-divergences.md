@@ -1112,12 +1112,37 @@ frames of gameplay HUD rendering.
   deltas against ares are now under 60 master clocks across the whole run, so
   the timeline is effectively exact.)
 
-  So `$0A84` is ruled out, and with it the gradient *counts*. That leaves the
-  **`$7E:C000` / `$7E:4010` contents**, i.e. the output of the `$C0:F7xx`
-  decompressor - whose mode dispatch is `JMP ($FBCC,X)` - as the only
-  remaining candidate. Off-by-one: we also issue two extra `$2100` writes that
-  ares does not (`$01` at frame 24 and `$AC` at frame 418), both invisible
-  because both cores are force-blanked there.
+  **The tables are byte-identical - the decompressor is innocent.** Exfiltrating
+  ares' WRAM (`ARES_WRAM_LOG`, dumped on every `$2100` write) and diffing
+  against our `WRAM_OUT` at the frame-491 `$2100 = $02` write gives exactly the
+  same bytes in both:
+
+  ```
+  $7E:c000  00 00 34 74 fc ec fe ea fc e2 7f c1 2f 59 23 45 00 00 74 04 f4 04 ...
+  $7E:4010  00 7c 21 7c 42 7c 63 7c 84 7c a5 7c c6 7c e7 7c 08 7d 29 7d 4a 7d ...
+  ```
+
+  **The HDMA channel setup is identical too.** ares' channel dump
+  (`CPU::oracleDumpChannels`) and our `HDMA_DUMP` agree field-for-field:
+
+  | | target | mode | indirect | srcBank:srcAddr | indBank |
+  |---|---|---|---|---|---|
+  | ch5 (ares) | `$21` | 0 | yes | `$c3:$c299` | `$7e` |
+  | ch5 (ours) | `$21` | 0 | yes | `$c3:$c299` | `$7e` |
+  | ch7 (ares) | `$22` | 2 | yes | `$7e:$4000` | `$7e` |
+  | ch7 (ours) | `$22` | 2 | yes | `$7e:$4000` | `$7e` |
+
+  and the ROM table at `$C3:C299` decodes as two `count=$F0, ptr=$7E:5000`
+  blocks followed by a terminator.
+
+  **So the defect is in the HDMA runtime**, not the data: our channel 5 was
+  observed dereferencing `$7E:C00F` where that table prescribes `$7E:5000`.
+  That is the next thing to chase (the per-frame `hdmaSetup` position, or the
+  game reprogramming `$43x2-$43x4` after our setup has run).
+
+  Off-by-one: we also issue two extra `$2100` writes ares does not (`$01` at
+  frame 24 and `$AC` at frame 418), both invisible because both cores are
+  force-blanked there.
 
   The historical analysis below still explains why the mismatch surfaced at
   frame 493 rather than earlier. Logging every

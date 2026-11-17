@@ -285,6 +285,16 @@ fn main() -> ExitCode {
             eprintln!("{}: {error}", path.to_string_lossy());
         }
     }
+    if std::env::var_os("HDMA_DUMP").is_some() {
+        for index in 0..8 {
+            let ch = system.dma.channel(index);
+            eprintln!(
+                "ch{index} target={:02X} control={:02X} bank={:02X} source={:04X} indbank={:02X} hdmaAddr={:04X} lineCounter={:02X}",
+                ch.target, ch.control, ch.bank, ch.source, ch.indirect_bank, ch.hdma_address,
+                ch.line_counter
+            );
+        }
+    }
     if std::env::var_os("SPC7110_STATE").is_some() {
         if let Some(chip) = &system.spc7110 {
             eprintln!(
