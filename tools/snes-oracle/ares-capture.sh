@@ -3,6 +3,9 @@
 #
 # Writes <outdir>/frame.raw   last captured RGBA8 frame (564x242 for NTSC)
 #        <outdir>/audio.f32   whole run, interleaved stereo f32 at $ARES_AUDIO_RATE
+#
+# Set ARES_RAW_AUDIO=<path> to also capture the S-DSP's pre-resampler i16
+# output (see README.md); the local ares build must include that hook.
 #        <outdir>/trace.txt   per-frame FNV hashes (video, audio)
 #
 # Requires the local patched build (see README.md). Runs ares under cage with a
@@ -17,7 +20,7 @@ mkdir -p "$out"
 
 ares=${ARES:-/var/home/Lordra/ai/refs/ares/build_headless/desktop-ui/ares}
 system=${ARES_SYSTEM:-Super Famicom}
-rate=${ARES_AUDIO_RATE:-32000}
+rate=${ARES_AUDIO_RATE:-32040}
 
 trace=$out/trace.txt
 frame=$out/frame.raw

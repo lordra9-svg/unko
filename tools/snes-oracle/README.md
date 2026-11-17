@@ -13,9 +13,15 @@ the locally built ares (patched for capture); RustySNES is the second oracle.
 The ares build in `refs/ares` carries local capture patches:
 
 - `--frames N`, `--dump-trace path`, `--dump-frame path`, `--dump-audio path`
-- `ARES_AUDIO_RATE=32000` forces the audio stream to the S-DSP's native rate
-  (no host resampler), and `--dump-audio` writes the **whole** run's stereo
-  samples as interleaved `f32` (`L,R,...`).
+- `ARES_AUDIO_RATE=32040` forces the audio stream to the S-DSP's native rate,
+  and `--dump-audio` writes the **whole** run's stereo samples as interleaved
+  `f32` (`L,R,...`). The native rate is **32,040 Hz**, not 32,000: ares'
+  `apuFrequency = 32040 * 768 = 24,606,720`, and one S-DSP sample is 768 of
+  those clocks. Using 32,000 leaves the host resampler active and produces a
+  structurally different (filtered) stream.
+- `ARES_RAW_AUDIO=<path>` captures the S-DSP's **pre-resampler** output as
+  interleaved `i16` (`L,R,...`) from `DSP::sample`, which is the bit-exact
+  reference for PCM comparison.
 
 Rebuild it with:
 
@@ -74,9 +80,12 @@ The manifest is intentionally not committed; compare two CSVs instead.
 
 - Video geometry: `spc_timer` at 600 frames vs ares at 602 — **100.000% exact**
   (57,344 / 57,344 pixels, mean |d| 0.000).
-- Audio: `blargg_near_cd_quality.smc` at 600 frames — peak levels match
-  (0.465454 vs 0.465749), but the streams are **not yet sample-exact**
-  (first sample above 1/32768 at 16080 after alignment; RMS 8.6e-2).
+- Audio: `blargg_near_cd_quality.smc` at 600 frames against ares' raw
+  pre-resampler output — after a -25-frame alignment the two 16-bit streams
+  differ in **3 samples out of 319,805** (all in an envelope-release tail at
+  frame 8086, where ares holds one value one sample longer). RustySNES and
+  ours agree to ~1e-8 RMS. The residual is the known ~25-sample APU boot-phase
+  difference, not DSP arithmetic.
 - Regression manifest: all **212** ROMs under `test-roms/snes/` run to 180
   frames without an emulator error (`baseline.py --frames 180`).
 

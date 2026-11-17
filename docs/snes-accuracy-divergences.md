@@ -476,11 +476,15 @@ with ares. The implementation follows ares, which is the primary source.
   hblank) is now **100.000% pixel-identical to ares**. `hvdma_max.sfc`, which
   triggers a general-purpose DMA from an H-IRQ to land at a particular dot,
   still differs; that one needs dot-exact DMA/PPU scheduling.
-- S-DSP synthesis now runs one micro-step per two S-SMP clocks inside the
-  S-SMP access path (ares `SMP::wait` → `synchronize(dsp)`), rather than a
-  whole 32-step sample per instruction. The remaining audio question is not
-  timing granularity but whether the emitted PCM stream is sample-identical to
-  ares; there is still no audio oracle in the harness.
+- S-DSP synthesis runs one micro-step per two S-SMP clocks inside the S-SMP
+  access path (ares `SMP::wait` → `synchronize(dsp)`). The PCM stream is now
+  measured against ares' **pre-resampler** i16 output: for
+  `blargg_near_cd_quality.smc` the two 16-bit streams differ in **3 samples out
+  of 319,805** after a -25-frame alignment, all in an envelope-release tail.
+  RustySNES and ours agree to ~1e-8 RMS. The residual is the ~25-sample APU
+  boot-phase difference (the same sub-clock S-SMP/IPL race), not DSP
+  arithmetic. (Earlier "RMS 8.6e-2" numbers came from capturing ares at
+  32,000 Hz instead of its native 32,040, which left the host resampler on.)
 - S-CPU/APU/PPU scheduling uses an exact master-clock credit (21,477,272 Hz;
   four clocks per PPU dot, 2,050,560 Hz SPC700). Memory wait states follow the
   ares table, and the DRAM refresh is charged inside the crossing CPU step.
