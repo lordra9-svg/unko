@@ -44,6 +44,36 @@ rendering difference:
     the `$806B`/`$806D` wait loop (472,529 of 2,691,653 instructions at frame
     190, +4,503 per frame); a matching RustySNES histogram needs the counter in
     `run_frame`'s inner loop, because `step_instruction` is not the path it uses.
+  - **The two loops are now decoded, and the cause is a race, not the APU.**
+    Bank 00 maps LoROM `$8000-$FFFF` to ROM `$0000-$7FFF`, so ROM `$006B` is the
+    wait loop:
+    ```
+    $806B: A5 10     lda $10      ; direct-page $10, a game flag set by the NMI handler
+    $806D: F0 FC     beq $806B
+    ```
+    and ROM `$009A` is the APU handshake loop:
+    ```
+    $809A: CD 40 21  cmp $2140    ; APU port 0
+    $809D: D0 FB     bne $809A
+    ```
+    Instruction counts at the two frame samples (ours / RustySNES):
+    ```
+    PC      ours 190   ours 191   delta | RS 190    RS 191   delta
+    $806B    472,528    477,031  +4,503 | 454,144   454,144      0
+    $806D    472,529    477,032  +4,503 | 454,143   454,143      0
+    $809A    266,693    266,693       0 | 253,713   253,713      0
+    $B974      7,547      7,635     +88 |   7,193     7,507   +314
+    ```
+    In frame 191 we enter the `$10` wait loop and spin 4,503 times; the reference
+    never enters it in that frame (its count is unchanged). The `$2140` loop is
+    untouched in that frame for both. So the extra iteration is decided by
+    **whether the main loop reaches `$806B` before or after the NMI handler sets
+    `\$10`** - a cycle-level race between the main loop and the NMI, with the APU
+    handshake not involved.
+  - Also note the cumulative totals: our `$806B` sits at 472,528 by frame 190
+    against the reference's 454,144 (+4%), and `$809A` at 266,693 against
+    253,713 (+5%), so the CPU spends slightly more iterations spinning in both
+    loops overall - a systematic skew too, not only the single frame.
   - The earlier "one extra NMI" was an accounting artefact: `nmi_count` counted
     NMI *requests* while RustySNES counts *vectored* interrupts. Matching the
     accounting (`cpu.nmi_services`) gives identical counts at frames 190-200
