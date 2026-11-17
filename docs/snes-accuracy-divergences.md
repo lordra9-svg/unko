@@ -21,15 +21,19 @@ The remaining known video divergence is **dot-level sprite evaluation**:
   it is 99.927% at the same offset and at 1500 frames 99.912% at the same
   index; every differing pixel lies in the overlap of two equal-priority
   sprites.
-- **Open: two-frame content offset during the title screen.** Both emulators
-  turn the display on at frame 86 and match exactly at 1500, but our title
-  screen reaches the reference content two frames earlier, so same-index
-  comparisons at 600/900 show 92.4%/91.5%. Changing only the timer stepping
-  rate or one SPC opcode's access count flips this by exactly two frames, which
-  identifies it as a phase/race at the APU↔CPU port handshake rather than a
-  rate error; see the port-latch approximation below. Removing it requires
-  scheduling the APU (and PPU) at per-base-clock granularity so port latches
-  commit at the exact master cycle, as ares' cooperative threads do.
+- **Open: one-extra-NMI title-screen offset.** Both emulators turn the display
+  on at frame 86 and match exactly at 1500, but our title screen reaches the
+  reference content two frames earlier, so same-index comparisons at 600/900
+  show 92.4%/91.5%. By frame 600 we have delivered 440 CPU interrupts and
+  RustySNES 439, and the game's own frame counter at WRAM `$13` is one ahead
+  from frame ~195. S-SMP timer activity matches (4,077 vs 4,078 non-zero
+  `$FD` reads by frame 600) and committing port writes at their exact clocks
+  left the frames bit-identical, so the remaining error is on the S-SMP
+  **read** side: our recorder executes a whole S-SMP instruction when a plan is
+  formed, so an S-SMP read of `$F4-$F7` can observe a CPU write a fraction of
+  an instruction early. Removing it requires a resumable SPC700 interpreter
+  that executes each access as its clocks elapse (the ares cooperative-thread
+  model), not instruction-at-a-time recording.
 - VRAM (32,768 words), CGRAM (256 entries) and OAM are bit-identical to the
   RustySNES oracle at 600 frames.
 - **Frame-index caveat:** the local ares build's `--frames N --dump-frame`
@@ -91,10 +95,14 @@ with ares. The implementation follows ares, which is the primary source.
   accounted in access units (one unit = two clocks) at the documented
   1.024 MHz; the credit is exact, but an individual access is executed at an
   S-CPU instruction boundary rather than at its exact master clock.
-- S-SMP port latches ($F4-$F7 writes) become visible to the S-CPU at the end
-  of the SPC instruction that wrote them. ares and RustySNES commit them at the
-  exact base clock of the write, so a CPU poll can observe a value up to one
-  SPC instruction early.
+- S-SMP port writes are committed at the exact base clock of the access (a
+  recorded micro-op plan), but the instruction's **reads** still happen when
+  the plan is formed, so an S-SMP poll of `$F4-$F7` can observe a fresh CPU
+  latch slightly early. ares' cooperative threads synchronize both directions
+  at the exact cycle.
+- The S-CPU now advances the peripherals per access (ares `CPU::read/write`
+  ordering), but the PPU renders one scanline at a time when the line event
+  fires, so mid-scanline register writes are not yet dot-exact.
 - S-DSP synthesis runs one 32-clock sample pass per 32 SPC cycles. The ares
   interleaving granularity is finer; this is the main DSP timing approximation
   to remove once there is an audio oracle.

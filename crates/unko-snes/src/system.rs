@@ -38,6 +38,12 @@ pub struct Snes {
     fast_rom: bool,
     /// `$2180-$2183` WRAM data-port address (17 bits).
     wram_port: u32,
+    /// IRQ line state latched by the H/V comparator, applied at the next
+    /// instruction boundary.
+    irq_line: bool,
+    /// NMI edge seen while the CPU was mid-instruction, applied at the next
+    /// instruction boundary.
+    nmi_line: bool,
     /// Number of NMI edges delivered (debug).
     pub nmi_count: u64,
 }
@@ -59,6 +65,8 @@ impl Snes {
             nmi_flag: false,
             fast_rom: false,
             wram_port: 0,
+            irq_line: false,
+            nmi_line: false,
             nmi_count: 0,
         }
     }
@@ -107,6 +115,8 @@ impl Snes {
         self.nmi_flag = false;
         self.fast_rom = false;
         self.wram_port = 0;
+        self.irq_line = false;
+        self.nmi_line = false;
         self.nmi_count = 0;
         let mut bus = SnesBus {
             wram: &mut self.wram,
@@ -126,27 +136,17 @@ impl Snes {
     }
 
     /// Execute one CPU instruction or interrupt.
+    ///
+    /// The instruction runs against [`Snes`] itself, so every bus access can
+    /// advance the S-SMP, S-PPU and DMA engines to the exact master clock of
+    /// that access (ares' cooperative-thread ordering). The CPU is swapped out
+    /// for the duration of the call so the system bus can borrow the rest of
+    /// the machine.
     pub fn step(&mut self) -> u32 {
-        let cpu_cycles = {
-            let vblank = self.ppu.in_vblank();
-            let hblank = self.ppu.in_hblank();
-            let mut bus = SnesBus {
-                wram: &mut self.wram,
-                cart: &mut self.cart,
-                apu: &mut self.apu,
-                ppu: &mut self.ppu,
-                dma: &mut self.dma,
-                io: &mut self.io,
-                nmi_enable: &mut self.nmi_enable,
-                nmi_flag: &mut self.nmi_flag,
-                fast_rom: &mut self.fast_rom,
-                wram_port: &mut self.wram_port,
-                vblank,
-                hblank,
-            };
-            self.cpu.step(&mut bus)
-        };
-        self.advance(cpu_cycles);
+        let mut cpu = std::mem::take(&mut self.cpu);
+        let cpu_cycles = cpu.step(self);
+        self.cpu = cpu;
+        self.apply_interrupts();
         let mut cycles = cpu_cycles;
         while let Some(mut transfer) = self.dma.begin_transfer() {
             while transfer.busy() {
@@ -170,29 +170,43 @@ impl Snes {
                     transfer.step(&mut bus)
                 };
                 cycles += clocks;
-                self.advance(clocks);
+                self.advance_peripherals(clocks);
             }
         }
+        self.apply_interrupts();
         cycles
     }
 
-    /// Advance the APU, PPU, HDMA, IRQ and NMI by `clocks` master clocks.
-    fn advance(&mut self, clocks: u32) {
+    /// Feed the latched IRQ/NMI edges to the CPU at an instruction boundary.
+    fn apply_interrupts(&mut self) {
+        self.cpu.set_irq(self.irq_line);
+        if self.nmi_line {
+            self.nmi_line = false;
+            self.cpu.trigger_nmi();
+        }
+    }
+
+    /// Advance the APU, PPU, HDMA and IRQ comparators by `clocks` master
+    /// clocks. NMI/IRQ edges are latched for the next instruction boundary.
+    fn advance_peripherals(&mut self, clocks: u32) {
         // NTSC master clock is 21.477272 MHz; the S-SMP runs at the documented
         // 1.024 MHz access rate (one unit per opcode cycle). The credit is
         // carried across instructions so long-term APU timing stays in step.
-        self.apu_credit += i64::from(clocks) * 1_024_000;
+        // ares: `apuFrequency = 32040 * 768 = 24,606,720 Hz`, so the S-SMP runs
+        // at 2,050,560 Hz and retires one access unit (two clocks) every
+        // 21,477,272 / 1,025,280 master clocks. Draining one unit at a time
+        // lets the S-SMP commit a port write at its exact master cycle.
+        self.apu_credit += i64::from(clocks) * 1_025_280;
         while self.apu_credit >= 21_477_272 {
-            let spent = self.apu.step();
-            self.apu_credit -= i64::from(spent) * 21_477_272;
+            self.apu.tick();
+            self.apu_credit -= 21_477_272;
         }
         // The PPU dot clock is the master clock divided by four on NTSC.
         self.ppu_credit += i64::from(clocks);
         while self.ppu_credit >= 4 {
             self.ppu.tick();
             self.ppu_credit -= 4;
-            let irq = self.io.poll_irq(self.ppu.line(), self.ppu.dot());
-            self.cpu.set_irq(irq);
+            self.irq_line = self.io.poll_irq(self.ppu.line(), self.ppu.dot());
             if let Some(line) = self.ppu.take_line_event() {
                 if line == 0 {
                     self.dma.hdma_reset();
@@ -211,14 +225,13 @@ impl Snes {
             }
         }
         self.io.step(clocks);
-        let irq = self.io.poll_irq(self.ppu.line(), self.ppu.dot());
-        self.cpu.set_irq(irq);
+        self.irq_line = self.io.poll_irq(self.ppu.line(), self.ppu.dot());
         // The $4210 flag latches at vblank regardless of $4200 bit 7; only the
         // CPU interrupt output is gated by NMI enable.
         if self.ppu.take_nmi() {
             self.nmi_flag = true;
             if self.nmi_enable {
-                self.cpu.trigger_nmi();
+                self.nmi_line = true;
                 self.nmi_count += 1;
             }
         }
@@ -234,6 +247,50 @@ impl Snes {
             instructions += 1;
         }
         (cycles, instructions)
+    }
+}
+
+impl Snes {
+    /// Build a bus view over the machine's fields for one access.
+    fn bus(&mut self) -> SnesBus<'_> {
+        let vblank = self.ppu.in_vblank();
+        let hblank = self.ppu.in_hblank();
+        SnesBus {
+            wram: &mut self.wram,
+            cart: &mut self.cart,
+            apu: &mut self.apu,
+            ppu: &mut self.ppu,
+            dma: &mut self.dma,
+            io: &mut self.io,
+            nmi_enable: &mut self.nmi_enable,
+            nmi_flag: &mut self.nmi_flag,
+            fast_rom: &mut self.fast_rom,
+            wram_port: &mut self.wram_port,
+            vblank,
+            hblank,
+        }
+    }
+}
+
+impl CpuBus for Snes {
+    fn read(&mut self, address: u32) -> u8 {
+        self.bus().read(address)
+    }
+
+    fn write(&mut self, address: u32, value: u8) {
+        self.bus().write(address, value);
+    }
+
+    fn access_cycles(&mut self, address: u32) -> u32 {
+        self.bus().access_cycles(address)
+    }
+
+    fn idle(&mut self) {
+        self.bus().idle();
+    }
+
+    fn advance(&mut self, clocks: u32) {
+        self.advance_peripherals(clocks);
     }
 }
 

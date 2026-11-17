@@ -194,6 +194,9 @@ fn main() -> ExitCode {
         }
         let _ = std::fs::write(path, bytes);
     }
+    if let Some(path) = std::env::var_os("WRAM_OUT") {
+        let _ = std::fs::write(path, system.wram());
+    }
     if let Some(path) = std::env::var_os("FRAME_OUT") {
         let _ = std::fs::write(path, system.ppu.frame_buffer());
     }
@@ -262,8 +265,9 @@ fn main() -> ExitCode {
         );
     }
     println!(
-        "spc inst:    {}\nppu:         brightness={} nmi={} nmi_count={} irq={} line={} vblank={} frame_ready={} nonzero_pixels={} rgb_sum={checksum}",
+        "spc inst:    {}  spc units: {}\nppu:         brightness={} nmi={} nmi_count={} irq={} line={} vblank={} frame_ready={} nonzero_pixels={} rgb_sum={checksum}",
         system.apu.instructions,
+        system.apu.units,
         system.ppu.display_brightness(),
         system.nmi_enabled(),
         system.nmi_count,

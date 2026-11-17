@@ -84,10 +84,17 @@ Implemented so far:
   per-layer masking and the CGWSEL colour-window gate
 - PPU mosaic: per-BG `$2106` enable, 1-16 pixel size, horizontal pixel repeats
   and vertical row reuse aligned like ares
+- S-SMP at the ares `apuFrequency = 32040 * 768 = 24,606,720 Hz` (2,050,560 Hz
+  S-SMP clock), with time accounted in access units at that rate
 - S-SMP timers 0-2 with targets, enable/reset bits, `$FD-$FF` output latching,
   the ares `$F0` internal/external wait dividers (`cycleWaitStates`
   2/4/10/20 for the CPU, `timerWaitStates` 2/4/8/16 for the timers), timer-line
   resynchronisation and `$F1` enable-edge stage resets
+- exact per-access scheduling: every S-CPU bus access advances the S-SMP,
+  S-PPU, HDMA and IRQ comparators to the ares ordering (`wait - 4` clocks
+  before a read sample, the whole wait before a write), so port reads observe
+  the other chips at the right master clock; S-SMP port writes are recorded in
+  a micro-op plan and committed at the exact clock of the access
 - S-CPU I/O: serial controller ports at `$4016/$4017`, hardware auto-poll into
   `$4218-$421F`, `$4210/$4211/$4212` flags (NTSC version 2, vblank, hblank,
   poll-busy), the hardware multiply/divide unit at `$4202-$4206` with its
@@ -108,10 +115,10 @@ Validation so far:
   all-opcode sweep. The only excluded opcode is `$6A` because `spc700` 0.1.0
   computes `AND1 C,/membit` as `!(bit & C)` instead of `C & !bit`; the ares
   behaviour is pinned by `spc700_bit_logic`.
-- **SPC700 cycle oracle**: `spc700_cycles` runs all 256 opcodes in four
+- **SPC700 cycle oracle**: `spc700_cycles` runs all 256 opcodes in eight
   register states and matches the RustySNES (ares-derived) base-clock totals
-  exactly, covering both directions of every branch. It caught `RET`/`RETI`
-  being one access short and `SLEEP`/`STP` five accesses short.
+  exactly, covering both directions of every branch and bit test. It caught
+  `RET`/`RETI` being one access short and `SLEEP`/`STP` five accesses short.
 - **3 DSP unit tests** cover register mirroring, KON/ENDX, non-silent BRR
   playback and global mute; the APU integration test confirms SPC execution
   drives sample generation.
@@ -169,9 +176,13 @@ Validation so far:
     text and the scrolling BG1 landscape all match
   - **open:** `unko-snes` reaches the same title-screen content two frames
     before RustySNES/ares, so same-index comparisons show 92.4% (600) and
-    91.5% (900). Both emulators turn the display on at frame 86, so the extra
-    two frames are accumulated during the first ~500 title frames. See the
-    APU port-latch granularity note in the divergence ledger.
+    91.5% (900). Both emulators turn the display on at frame 86. The offset is
+    pinned to **one extra NMI**: by frame 600 we have delivered 440 CPU
+    interrupts and RustySNES 439, and the game's own frame counter at WRAM
+    `$13` is exactly one ahead from frame ~195 on. The APU is not the cause:
+    S-SMP timer ticks by frame 600 match RustySNES (4,077 vs 4,078 non-zero
+    `$FD` reads), and committing S-SMP port latches at their exact clocks left
+    the frames bit-identical. See the divergence ledger for the next step.
 - The residual pixels are the overlap of two equal-priority sprites where the
   32-entry sprite list resolves the tie differently; dot-level sprite
   evaluation and the 34-tile limit are the remaining PPU scheduling work.

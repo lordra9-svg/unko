@@ -26,6 +26,15 @@ pub trait CpuBus {
 
     /// Advance one idle CPU cycle.
     fn idle(&mut self) {}
+
+    /// Advance peripherals (S-SMP, S-PPU, DMA/HDMA, IRQ comparators) by
+    /// `clocks` master clocks while the CPU is mid-instruction.
+    ///
+    /// The S-CPU and the other chips run as cooperative threads in ares: every
+    /// access steps the CPU and its peripherals by the wait-state count and
+    /// samples the bus at a precise point inside that window. Implementations
+    /// that do not care about sub-instruction timing can leave this empty.
+    fn advance(&mut self, _clocks: u32) {}
 }
 
 /// Processor status flags.
@@ -269,18 +278,30 @@ impl Cpu {
 
     fn read(&mut self, bus: &mut impl CpuBus, address: u32) -> u8 {
         let address = address & 0x00FF_FFFF;
-        self.cycles += u64::from(bus.access_cycles(address));
-        bus.read(address)
+        let clocks = bus.access_cycles(address);
+        self.cycles += u64::from(clocks);
+        // ares `CPU::read`: the CPU and its peripherals step `wait - 4` clocks
+        // before the data is sampled, then four more clocks after it, so a port
+        // read observes the S-SMP exactly `wait - 4` clocks into the access.
+        bus.advance(clocks.saturating_sub(4));
+        let value = bus.read(address);
+        bus.advance(4);
+        value
     }
 
     fn write(&mut self, bus: &mut impl CpuBus, address: u32, value: u8) {
         let address = address & 0x00FF_FFFF;
-        self.cycles += u64::from(bus.access_cycles(address));
+        let clocks = bus.access_cycles(address);
+        self.cycles += u64::from(clocks);
+        // ares `CPU::write`: the peripherals advance for the whole access
+        // before the write commits.
+        bus.advance(clocks);
         bus.write(address, value);
     }
 
     fn idle(&mut self, bus: &mut impl CpuBus) {
         self.cycles += 6;
+        bus.advance(6);
         bus.idle();
     }
 

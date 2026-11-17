@@ -61,6 +61,12 @@ material used to implement it. No GPL emulator source is translated or copied.
 - The per-opcode access counts in `tests/spc700_cycles.rs` were **measured**
   from the local RustySNES build (`debug_execute_one`), which is an
   ares-derived cycle-accurate dispatch; they are data, not copied code.
+- ares `ares/sfc/system/system.hpp` fixes the APU clock at
+  `32040 * 768 = 24,606,720 Hz`, so the S-SMP runs at 2,050,560 Hz. `unko-snes`
+  accounts S-SMP time in access units at that rate.
+- ares `ares/sfc/cpu/memory.cpp` (`CPU::read`/`CPU::write`) gives the
+  per-access ordering used by the system bus: `wait - 4` clocks before a read
+  sample, the whole wait before a write, then four clocks after a read.
 - ares `ares/sfc/smp/timing.cpp` (`SMP::wait`, `stepTimers`) and
   `ares/sfc/smp/io.cpp` document the `$F0` divider tables
   (`cycleWaitStates` 2/4/10/20, `timerWaitStates` 2/4/8/16), the `$F4-$F7`

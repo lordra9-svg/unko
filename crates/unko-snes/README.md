@@ -27,7 +27,8 @@ in another Rust project. A future `unko-snes-host` crate will provide the
 - Line-based S-PPU: register map, VRAM/CGRAM/OAM, vblank/NMI, modes 0-7,
   tile backgrounds, Mode 7 affine mapping, sprites, subscreen and colour math
 - Exact S-CPU memory timing in NTSC master clocks with the ares wait-state
-  table, plus DMA/HDMA stalls
+  table, per-access peripheral stepping, an S-SMP micro-op plan that commits
+  port writes at their exact clock, and DMA/HDMA stalls
 - S-CPU general-purpose DMA, HDMA, controller ports/auto-poll and the
   hardware multiply/divide unit
 - Minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM, reset,
