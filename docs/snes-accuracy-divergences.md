@@ -968,10 +968,22 @@ frames of gameplay HUD rendering.
 
 **Known gaps (not yet verified):**
 
-- Super Mario RPG diverges at about frame 500 (4.954% exact at 600): both
-  machines show the same scene but with a different palette/scroll, so a later
-  SA-1 data path (probably the character-conversion DMA or a BWRAM protection
-  case) is still wrong.
+- Super Mario RPG diverges at about frame 500 (4.954% exact at 600). Bisected
+  against ares: frames 400, 450, 475, 488, 490 and 492 are **100.000%** exact
+  and **frame 493 is the first divergence**, staying different afterwards.
+
+  The cause is a fade/palette ramp, not a wrong palette: at frame 492 both
+  machines are black and identical, at 493 ares shows the incoming scene at
+  full palette (30 distinct colours, every pixel lit) while ours is still
+  black, and by frame 500 ours shows the *same* scene (identical BG mode 1,
+  `TM=$17`, `TS=$00`, BG bases and scroll) with `INIDISP` brightness **2**
+  where ares is fully lit. So the scene, the tilemap and the register setup
+  all agree; only the brightness/palette ramp into it is late in ours.
+
+  Note that at 492 our `INIDISP` brightness is already 15 while the screen is
+  black, so the fade is being done through CGRAM (palette toward black) as well
+  as `INIDISP`; the next step is to compare the CGRAM/`INIDISP` write sequence
+  between frames 488 and 500 in both emulators.
 - Kirby's Dream Land 3 no longer derails. The null `$36DE` pointer turned out
   to be a symptom of two unrelated CPU bugs (both fixed, see "Resolved
   2026-11-17 - joypad serial ports and the NMI-enable edge" below): the game
