@@ -288,6 +288,25 @@ impl Dma {
             state.line_counter = state.line_counter.wrapping_sub(1);
             state.do_transfer = state.line_counter & 0x80 != 0;
             cost += 8 * self.hdma_reload(bus, index, channel);
+            if std::env::var_os("HDMA_LINE_LOG").is_some() && index == 5 {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/opencode/hdmaline.log")
+                {
+                    let st = &self.hdma[index];
+                    let _ = writeln!(
+                        f,
+                        "ours ch5 table={:04X} ind={:04X} lc={:02X} done={} xfer={}",
+                        st.address,
+                        st.indirect_address,
+                        st.line_counter,
+                        st.completed,
+                        st.do_transfer
+                    );
+                }
+            }
         }
         cost
     }
