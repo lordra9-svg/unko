@@ -188,7 +188,10 @@ fn main() -> ExitCode {
     } else {
         system.run_cycles(20_000_000, 5_000_000)
     };
-    println!("cpu after:   {}", system.cpu);
+    println!(
+        "cpu after:   {}  nmi_services={} irq_services={}",
+        system.cpu, system.cpu.nmi_services, system.cpu.irq_services
+    );
     println!("spc after:   {}", system.apu.spc);
     println!(
         "apu ports:   cpu<-apu {:02X?}  apu<-cpu {:02X?}",

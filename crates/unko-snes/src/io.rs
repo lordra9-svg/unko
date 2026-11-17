@@ -297,9 +297,14 @@ impl CpuIo {
     ///
     /// The comparator fires on the rising edge of the compare condition, then
     /// the flag stays latched until `$4211` is read.
-    pub fn poll_irq(&mut self, line: u16, dot: u16) -> bool {
+    /// Poll the H/V IRQ comparator at `hcounter` master clocks into the line.
+    ///
+    /// ares `irqPoll`: the H comparator is sampled ten master clocks before the
+    /// counter read, and `$4207/$4208` store `4 * (dot + 1)` clocks.
+    pub fn poll_irq(&mut self, line: u16, hcounter: u32) -> bool {
         let v_match = !self.v_irq || line == self.vtime;
-        let h_match = !self.h_irq || dot == (self.htime + 1);
+        let target = (u32::from(self.htime) + 1) * 4;
+        let h_match = !self.h_irq || hcounter.saturating_sub(10) == target;
         let condition = (self.h_irq || self.v_irq) && v_match && h_match;
         if condition && !self.irq_condition {
             self.irq_flag = true;
@@ -424,10 +429,11 @@ mod tests {
         io.write(0x4207, 50);
         io.write(0x4209, 120);
         io.write(0x4200, 0x30);
-        assert!(!io.poll_irq(120, 50));
-        assert!(io.poll_irq(120, 51));
+        // ares fires when hcounter - 10 == 4 * (htime + 1) = 204.
+        assert!(!io.poll_irq(120, 213));
+        assert!(io.poll_irq(120, 214));
         assert!(io.read(0x4211).unwrap() & 0x80 != 0);
-        assert!(!io.poll_irq(120, 52));
+        assert!(!io.poll_irq(120, 215));
     }
 
     #[test]

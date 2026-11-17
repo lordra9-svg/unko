@@ -465,8 +465,10 @@ with ares. The implementation follows ares, which is the primary source.
   so an S-SMP read observes the S-CPU latches, timers and DSP at the exact
   cycle of the access. The PCM stream is bit-exact against ares as a result.
 - The S-CPU advances the peripherals per access (ares `CPU::read/write`
-  ordering), but the PPU renders one scanline at a time when the line event
-  fires, so mid-scanline register writes are not yet dot-exact.
+  ordering), and the PPU renders a scanline after hblank (dot 21), so register
+  writes on dots 0-21 apply to that line. Writes inside the visible area are
+  still applied to the whole line rather than from their dot onward; no measured
+  ROM depends on that yet.
 - HDMA follows ares exactly at line granularity: setup at V=0, run at
   `hdmaPosition` (hcounter 1104, dot 276) including line 0, transfer before
   decrement, reload when the low seven counter bits reach zero, and a stall of
@@ -474,9 +476,13 @@ with ares. The implementation follows ares, which is the primary source.
   (read + write). The transfer is still applied **atomically** at the trigger
   rather than interleaved byte-by-byte with CPU work, but that no longer changes
   any measured frame: `hvdma.sfc` (eight channels deliberately overflowing
-  hblank) is now **100.000% pixel-identical to ares**. `hvdma_max.sfc`, which
-  triggers a general-purpose DMA from an H-IRQ to land at a particular dot,
-  still differs; that one needs dot-exact DMA/PPU scheduling.
+  hblank) is **100.000% pixel-identical to ares**. `hvdma_max.sfc`, which
+  triggers a general-purpose DMA from an H-IRQ aligned to a particular dot, is
+  also **100.000% exact** after three fixes: `$4201` WRIO is routed to the CPU
+  I/O (its bit 7 gates `$2137` counter latching, and dropping it hung the ROM's
+  NMI handler), the H-IRQ comparator now matches ares' ten-clock
+  `hcounter(10) == 4 * (dot + 1)` rule, and the line is rendered after hblank so
+  the DMA's line-boundary `INIDISP` unblank applies to that line.
 - S-DSP synthesis runs one micro-step per two S-SMP clocks inside the S-SMP
   access path (ares `SMP::wait` → `synchronize(dsp)`). The PCM stream is
   measured against ares' **pre-resampler** i16 output: for

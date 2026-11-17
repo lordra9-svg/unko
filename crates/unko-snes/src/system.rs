@@ -297,7 +297,11 @@ impl Snes {
                 self.refresh_done = true;
                 self.refresh_pending = true;
             }
-            self.irq_line = self.io.poll_irq(self.ppu.line(), self.ppu.dot());
+            // Sample the comparator at the midpoint of the dot just completed;
+            // ares polls every two master clocks with `hcounter(10)`.
+            self.irq_line = self
+                .io
+                .poll_irq(self.ppu.line(), u32::from(pre_dot) * 4 + 2);
             if pre_dot == 32 && self.ppu.line() == 225 && !self.auto_poll_started {
                 // ares `CPU::joypadEdge` starts the sequence on line 225 at
                 // hcounter 130-384, not at the start of the line.
@@ -335,11 +339,21 @@ impl Snes {
                     };
                     self.cpu_stall += self.dma.hdma_setup(&mut bus);
                 }
+            }
+            // ares renders a line's visible pixels from dot 22 onward; render
+            // after hblank so register writes on dots 0-21 (e.g. a DMA that
+            // unblanks INIDISP at the line boundary) apply to this line.
+            if pre_dot == 21
+                && self.ppu.line() >= 1
+                && self.ppu.line() <= crate::ppu::SCREEN_HEIGHT as u16
+            {
                 self.ppu.render_current_line();
             }
         }
         self.io.step(clocks);
-        self.irq_line = self.io.poll_irq(self.ppu.line(), self.ppu.dot());
+        self.irq_line = self
+            .io
+            .poll_irq(self.ppu.line(), u32::from(self.ppu.dot()) * 4 + 2);
         // The $4210 flag latches at vblank regardless of $4200 bit 7; only the
         // CPU interrupt output is gated by NMI enable.
         if self.ppu.take_nmi() {
@@ -558,6 +572,10 @@ impl CpuBus for SnesBus<'_> {
                 } else if offset == 0x4200 {
                     *self.nmi_enable = value & 0x80 != 0;
                     self.io.write(0x4200, value);
+                } else if offset == 0x4201 {
+                    // WRIO bit 7 enables $2137 counter latching; without it
+                    // $213C/$213D never change (Mesen/ares `io.pio`).
+                    self.io.write(0x4201, value);
                 } else if (0x4202..=0x4206).contains(&offset) || (0x4207..=0x420A).contains(&offset)
                 {
                     self.io.write(offset as u16, value);
