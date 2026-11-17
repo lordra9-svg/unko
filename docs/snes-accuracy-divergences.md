@@ -110,6 +110,28 @@ rendering difference:
     so the CPU's cumulative clock equals system master time. Before this, any
     analysis based on `cpu.cycles` was short by the DMA time (it made the NMI
     interval look 5,600 clocks too short).
+  - **Root cause found: DP `$10` differs at `$81DC`.** A per-instruction trace of
+    one NMI interval, aligned on the common PC sequence, is identical for **48
+    instructions** and then diverges at the branch:
+    ```
+    $81DA: A5 10     lda $10
+    $81DC: F0 09     beq $81E7      ; ours: taken (22 clocks) -> $81E7: E6 10 (inc $10)
+                                     ; reference: not taken (16 clocks) -> $81DE
+    $81DE: AD 9B 0D  lda $0D9B ...
+    ```
+    So DP `$10` - the very flag the `$806B` loop polls - is **zero in ours and
+    non-zero in the reference** at that point, so we take a branch the reference
+    does not, and from there the control flow (and the frame's work) diverges.
+    That is the 512-clock gap and the extra game-loop iteration: a single byte of
+    game state out of phase, not a timing/stall mechanism.
+    Before the branch, only two per-instruction costs differ ($81DC itself and
+    $81DC's predecessor $81DC/$81DC: `$818C` `stz $1DFB` costs 32 in ours vs 72
+    in the reference, and `$81DC` 22 vs 16) - i.e. the trace is cycle-consistent
+    until the branch flips.
+    Next: find who leaves `$10` in the other state. The 48 identical instructions
+    do not write it, so the difference is established before the NMI - trace the
+    writes to DP `$10` across a whole frame in both emulators and diff the value
+    at the NMI entry.
   - Also note the cumulative totals: our `$806B` sits at 472,528 by frame 190
     against the reference's 454,144 (+4%), and `$809A` at 266,693 against
     253,713 (+5%), so the CPU spends slightly more iterations spinning in both
