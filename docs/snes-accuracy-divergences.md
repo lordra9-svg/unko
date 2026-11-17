@@ -870,9 +870,41 @@ when the enable rises while `nmi_flag` is set **and the PPU is in vblank**
 flag could survive into the visible period and produce a spurious NMI, which
 shifted Super Mario Kart's DSP-1 frames).
 
+### 3. `irqLock` delay after a `$4200` write
+
+ares clears `status.irqLock` at the start of every bus access and sets it in
+`nmitimenUpdate`, so the interrupt test at the end of the instruction that
+writes `$4200` is **skipped** and the NMI lands one instruction later. Adding
+that delay (`Snes::nmi_lock`, cleared at the top of every `Snes::step`) made
+the traces agree through the first NMI: the earlier mismatch
+(`$B8BC` vs `$B8BD`) disappeared.
+
 Verification: KDL3 now runs its NMI loop (19 NMIs by frame 120, previously the
 S-CPU crashed at `$00:5FFF` with a corrupted stack); all other results are
 unchanged (see the regression table at the end of this document).
+
+### Where the KDL3 trace now diverges
+
+With all three fixes the two instruction streams agree for the first ~1.2
+million S-CPU instructions. The first remaining difference is the frame
+rendezvous at `$00:9490`:
+
+```
+$9490: INC $602C
+$9493: BIT $6002
+$9496: BPL $949F          ; no SA-1 handshake -> wait on $4212 vblank edges
+$9498: LDA $602A          ; SA-1 handshake -> wait for the SA-1's frame flag
+$949B: BEQ $9498
+```
+
+ares spins at `$9498/$949B` waiting for BWRAM `$602A` and is still there when
+the NMI arrives; in ours `$602A` is already non-zero, so we fall through
+immediately. Related: ares' BWRAM holds the SA-1 API table at `$0222`
+(`3A 0A`/bank `C1`, built by `$00:E98A` from the ROM table at `$FC02`), while
+ours is still all zeros at frame 120 even though the dispatch pointer
+`$72AC = $00EF31` matches ares exactly. So the remaining KDL3 defect is on the
+SA-1 API registration path (`$E98A` and whatever seeds BWRAM `$0022`/`$602A`),
+not in the controller or interrupt logic fixed above.
 
 ## SA-1 (Super Accelerator 1)
 

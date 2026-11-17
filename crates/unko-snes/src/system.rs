@@ -198,6 +198,10 @@ pub struct Snes {
     ppu_credit: i64,
     nmi_enable: bool,
     nmi_flag: bool,
+    /// ares `status.irqLock`: a `$4200` write suppresses the interrupt test
+    /// for the rest of that instruction, so the NMI lands one instruction
+    /// later.
+    nmi_lock: bool,
     fast_rom: bool,
     /// `$2180-$2183` WRAM data-port address (17 bits).
     wram_port: u32,
@@ -262,6 +266,7 @@ impl Snes {
             ppu_credit: 0,
             nmi_enable: false,
             nmi_flag: false,
+            nmi_lock: false,
             fast_rom: false,
             wram_port: 0,
             cpu_stall: 0,
@@ -417,6 +422,7 @@ impl Snes {
         self.hdma_run_done = state.hdma_run_done;
         self.irq_line = state.irq_line;
         self.nmi_line = state.nmi_line;
+        self.nmi_lock = false;
         self.nmi_count = state.nmi_count;
         self.clock = state.clock;
         Ok(())
@@ -498,6 +504,7 @@ impl Snes {
         self.ppu_credit = 0;
         self.nmi_enable = false;
         self.nmi_flag = false;
+        self.nmi_lock = false;
         self.fast_rom = false;
         self.wram_port = 0;
         self.irq_line = false;
@@ -524,6 +531,7 @@ impl Snes {
             nmi_enable: &mut self.nmi_enable,
             nmi_flag: &mut self.nmi_flag,
             nmi_line: &mut self.nmi_line,
+            nmi_lock: &mut self.nmi_lock,
             fast_rom: &mut self.fast_rom,
             wram_port: &mut self.wram_port,
             vblank: false,
@@ -540,6 +548,10 @@ impl Snes {
     /// for the duration of the call so the system bus can borrow the rest of
     /// the machine.
     pub fn step(&mut self) -> u32 {
+        // ares `CPU::step` clears `irqLock` as each bus access starts; the one
+        // case that matters is a `$4200` write, which is its instruction's last
+        // access, so clearing once per instruction is equivalent.
+        self.nmi_lock = false;
         if let Some(sa1) = self.sa1.as_mut() {
             sa1.snes_live_pc = self.cpu.pc_address();
             sa1.master_clock = self.clock;
@@ -572,6 +584,7 @@ impl Snes {
                         nmi_enable: &mut self.nmi_enable,
                         nmi_flag: &mut self.nmi_flag,
                         nmi_line: &mut self.nmi_line,
+                        nmi_lock: &mut self.nmi_lock,
                         fast_rom: &mut self.fast_rom,
                         wram_port: &mut self.wram_port,
                         vblank,
@@ -599,7 +612,7 @@ impl Snes {
         let sa1_irq = self.sa1.as_ref().is_some_and(|sa1| sa1.cpu_irq_line());
         self.cpu
             .set_irq(self.irq_line || gsu_irq || cx4_irq || sa1_irq);
-        if self.nmi_line {
+        if self.nmi_line && !self.nmi_lock {
             self.nmi_line = false;
             self.cpu.trigger_nmi();
         }
@@ -824,6 +837,7 @@ impl Snes {
             nmi_enable: &mut self.nmi_enable,
             nmi_flag: &mut self.nmi_flag,
             nmi_line: &mut self.nmi_line,
+            nmi_lock: &mut self.nmi_lock,
             fast_rom: &mut self.fast_rom,
             wram_port: &mut self.wram_port,
             vblank,
@@ -884,6 +898,7 @@ struct SnesBus<'a> {
     nmi_enable: &'a mut bool,
     nmi_flag: &'a mut bool,
     nmi_line: &'a mut bool,
+    nmi_lock: &'a mut bool,
     fast_rom: &'a mut bool,
     wram_port: &'a mut u32,
     vblank: bool,
@@ -1245,6 +1260,7 @@ impl CpuBus for SnesBus<'_> {
                     // so a game that enables NMIs partway through vblank still
                     // sees one that frame.
                     let enable = value & 0x80 != 0;
+                    *self.nmi_lock = true;
                     if !*self.nmi_enable && enable && *self.nmi_flag && self.vblank {
                         *self.nmi_line = true;
                     }
@@ -1481,6 +1497,7 @@ mod tests {
             nmi_enable: &mut system.nmi_enable,
             nmi_flag: &mut system.nmi_flag,
             nmi_line: &mut system.nmi_line,
+            nmi_lock: &mut system.nmi_lock,
             fast_rom: &mut system.fast_rom,
             wram_port: &mut system.wram_port,
             vblank: false,
@@ -1514,6 +1531,7 @@ mod tests {
             nmi_enable: &mut system.nmi_enable,
             nmi_flag: &mut system.nmi_flag,
             nmi_line: &mut system.nmi_line,
+            nmi_lock: &mut system.nmi_lock,
             fast_rom: &mut system.fast_rom,
             wram_port: &mut system.wram_port,
             vblank: false,
@@ -1550,6 +1568,7 @@ mod tests {
             nmi_enable: &mut system.nmi_enable,
             nmi_flag: &mut system.nmi_flag,
             nmi_line: &mut system.nmi_line,
+            nmi_lock: &mut system.nmi_lock,
             fast_rom: &mut system.fast_rom,
             wram_port: &mut system.wram_port,
             vblank: false,
@@ -1906,6 +1925,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 nmi_line: &mut system.nmi_line,
+                nmi_lock: &mut system.nmi_lock,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: true,
@@ -1914,6 +1934,10 @@ mod tests {
             bus.write(0x4200, 0x80);
         }
         assert!(system.nmi_line, "raising NMI enable mid-vblank must latch");
+        // ares `status.irqLock`: the `$4200` write suppresses the interrupt
+        // test for the rest of its instruction, so delivery slips one
+        // instruction (KDL3 matches ares only with this).
+        assert!(system.nmi_lock, "$4200 writes must lock the interrupt test");
     }
 
     #[test]
@@ -1979,6 +2003,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 nmi_line: &mut system.nmi_line,
+                nmi_lock: &mut system.nmi_lock,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2061,6 +2086,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 nmi_line: &mut system.nmi_line,
+                nmi_lock: &mut system.nmi_lock,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2094,6 +2120,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 nmi_line: &mut system.nmi_line,
+                nmi_lock: &mut system.nmi_lock,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2127,6 +2154,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 nmi_line: &mut system.nmi_line,
+                nmi_lock: &mut system.nmi_lock,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2176,6 +2204,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 nmi_line: &mut system.nmi_line,
+                nmi_lock: &mut system.nmi_lock,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank,
@@ -2235,6 +2264,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 nmi_line: &mut system.nmi_line,
+                nmi_lock: &mut system.nmi_lock,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2280,6 +2310,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 nmi_line: &mut system.nmi_line,
+                nmi_lock: &mut system.nmi_lock,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2316,6 +2347,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 nmi_line: &mut system.nmi_line,
+                nmi_lock: &mut system.nmi_lock,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2402,6 +2434,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 nmi_line: &mut system.nmi_line,
+                nmi_lock: &mut system.nmi_lock,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2436,6 +2469,7 @@ mod tests {
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
                 nmi_line: &mut system.nmi_line,
+                nmi_lock: &mut system.nmi_lock,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
