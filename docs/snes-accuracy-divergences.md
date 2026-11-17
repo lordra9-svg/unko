@@ -27,7 +27,9 @@ The remaining known video divergence is **dot-level sprite evaluation**:
   comparisons at 600/900 show 92.4%/91.5%. Changing only the timer stepping
   rate or one SPC opcode's access count flips this by exactly two frames, which
   identifies it as a phase/race at the APU↔CPU port handshake rather than a
-  rate error; see the port-latch approximation below.
+  rate error; see the port-latch approximation below. Removing it requires
+  scheduling the APU (and PPU) at per-base-clock granularity so port latches
+  commit at the exact master cycle, as ares' cooperative threads do.
 - VRAM (32,768 words), CGRAM (256 entries) and OAM are bit-identical to the
   RustySNES oracle at 600 frames.
 - **Frame-index caveat:** the local ares build's `--frames N --dump-frame`
