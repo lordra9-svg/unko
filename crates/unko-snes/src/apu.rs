@@ -101,7 +101,6 @@ pub struct Apu {
     aux4: u8,
     aux5: u8,
     timer_targets: [u8; 3],
-    dsp_credit: u64,
     /// Number of SPC700 instructions executed (debug).
     pub instructions: u64,
     /// Number of S-SMP clock units (two clocks each) retired (debug).
@@ -143,7 +142,6 @@ impl Apu {
             aux4: 0,
             aux5: 0,
             timer_targets: [0; 3],
-            dsp_credit: 0,
             instructions: 0,
             units: 0,
             plan: Vec::new(),
@@ -205,7 +203,6 @@ impl Apu {
         self.timers = std::array::from_fn(|_| Timer::default());
         self.dsp_address = 0;
         self.dsp.reset();
-        self.dsp_credit = 0;
         self.plan.clear();
         self.plan_pos = 0;
         self.plan_sub = 0;
@@ -326,11 +323,12 @@ impl Apu {
             self.plan_pos += 1;
             self.plan_sub = 0;
         }
-        // The DSP emits one 32 kHz sample every 64 S-SMP clocks.
-        self.dsp_credit += 2;
-        while self.dsp_credit >= 64 {
-            self.dsp_credit -= 64;
-            let sample = self.dsp.run_sample(&mut self.ram[..]);
+        // ares synchronizes the DSP thread on every S-SMP access and its tick
+        // is exactly one access unit, so the DSP advances one micro-step here
+        // and finishes a sample every 32 accesses. Advancing the whole sample
+        // at once would hide the echo buffer's partial state from an S-SMP
+        // read that lands mid-sample.
+        if let Some(sample) = self.dsp.tick(&mut self.ram[..]) {
             self.samples.push_back(sample);
             if self.samples.len() > 16_384 {
                 self.samples.pop_front();

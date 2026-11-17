@@ -101,8 +101,13 @@ S-DSP output is now instrumented but not sample-identical:
     `0020`, `0626` vs `05E8`), which points at the *sample* boundary rather
     than the address arithmetic: the DSP main-loop order, echo `_address`
     latching, `_length`/`_offset` wrap and the `$F1`/`FLG` gating all match
-    ares line for line. Shifting the DSP sample trigger by one S-SMP access
-    unit in either direction does not change the failure.
+    ares line for line.
+  - The DSP now advances **one micro-step per S-SMP access**, as ares does
+    (`DSP::tick` is `3 * 8` apu clocks = one 2-clock S-SMP access, and the
+    thread is synchronized on every access), instead of running the whole
+    32-step sample at once. That makes the echo buffer's partial state visible
+    at the exact moment an S-SMP read lands. The readings are unchanged, so
+    this particular test observes the buffer only at sample boundaries.
   - Next probe: compare the echo buffer contents sample by sample against a
     reference run (ares `--dump-audio` plus an ARAM dump at a known sample
     index), rather than at a whole frame.

@@ -224,6 +224,8 @@ pub struct Dsp {
     brr: Brr,
     latch: Latch,
     voice: [Voice; 8],
+    /// Index of the next micro-step in the 32-step sample sequence.
+    step: u8,
     sample_out: Sample,
 }
 
@@ -255,12 +257,14 @@ impl Dsp {
             brr: Brr::default(),
             latch: Latch::default(),
             voice,
+            step: 0,
             sample_out: (0, 0),
         }
     }
 
     /// Reset the DSP state and register file.
     pub fn reset(&mut self) {
+        self.step = 0;
         *self = Self::new();
     }
 
@@ -354,134 +358,192 @@ impl Dsp {
     }
 
     /// Run one 32 kHz stereo sample through the DSP.
+    /// Advance the S-DSP by one micro-step, returning the finished sample when
+    /// the 32-step sequence wraps.
+    pub fn tick(&mut self, ram: &mut [u8]) -> Option<Sample> {
+        self.step_once(ram);
+        self.step = (self.step + 1) & 0x1F;
+        if self.step == 0 {
+            Some(self.sample_out)
+        } else {
+            None
+        }
+    }
+
+    /// Run a whole sample (32 ticks). Used by the unit tests.
     pub fn run_sample(&mut self, ram: &mut [u8]) -> Sample {
-        self.main(ram);
-        self.sample_out
+        let mut sample = self.sample_out;
+        for _ in 0..32 {
+            if let Some(done) = self.tick(ram) {
+                sample = done;
+            }
+        }
+        sample
     }
 
-    fn main(&mut self, ram: &mut [u8]) {
-        self.voice5(ram, 0);
-        self.voice2(ram, 1);
-        self.tick();
-        self.voice6(ram, 0);
-        self.voice3(ram, 1);
-        self.tick();
-        self.voice7(ram, 0);
-        self.voice4(ram, 1);
-        self.voice1(ram, 3);
-        self.tick();
-        self.voice8(ram, 0);
-        self.voice5(ram, 1);
-        self.voice2(ram, 2);
-        self.tick();
-        self.voice9(ram, 0);
-        self.voice6(ram, 1);
-        self.voice3(ram, 2);
-        self.tick();
-        self.voice7(ram, 1);
-        self.voice4(ram, 2);
-        self.voice1(ram, 4);
-        self.tick();
-        self.voice8(ram, 1);
-        self.voice5(ram, 2);
-        self.voice2(ram, 3);
-        self.tick();
-        self.voice9(ram, 1);
-        self.voice6(ram, 2);
-        self.voice3(ram, 3);
-        self.tick();
-        self.voice7(ram, 2);
-        self.voice4(ram, 3);
-        self.voice1(ram, 5);
-        self.tick();
-        self.voice8(ram, 2);
-        self.voice5(ram, 3);
-        self.voice2(ram, 4);
-        self.tick();
-        self.voice9(ram, 2);
-        self.voice6(ram, 3);
-        self.voice3(ram, 4);
-        self.tick();
-        self.voice7(ram, 3);
-        self.voice4(ram, 4);
-        self.voice1(ram, 6);
-        self.tick();
-        self.voice8(ram, 3);
-        self.voice5(ram, 4);
-        self.voice2(ram, 5);
-        self.tick();
-        self.voice9(ram, 3);
-        self.voice6(ram, 4);
-        self.voice3(ram, 5);
-        self.tick();
-        self.voice7(ram, 4);
-        self.voice4(ram, 5);
-        self.voice1(ram, 7);
-        self.tick();
-        self.voice8(ram, 4);
-        self.voice5(ram, 5);
-        self.voice2(ram, 6);
-        self.tick();
-        self.voice9(ram, 4);
-        self.voice6(ram, 5);
-        self.voice3(ram, 6);
-        self.tick();
-        self.voice1(ram, 0);
-        self.voice7(ram, 5);
-        self.voice4(ram, 6);
-        self.tick();
-        self.voice8(ram, 5);
-        self.voice5(ram, 6);
-        self.voice2(ram, 7);
-        self.tick();
-        self.voice9(ram, 5);
-        self.voice6(ram, 6);
-        self.voice3(ram, 7);
-        self.tick();
-        self.voice1(ram, 1);
-        self.voice7(ram, 6);
-        self.voice4(ram, 7);
-        self.tick();
-        self.voice8(ram, 6);
-        self.voice5(ram, 7);
-        self.voice2(ram, 0);
-        self.tick();
-        self.voice3a(ram, 0);
-        self.voice9(ram, 6);
-        self.voice6(ram, 7);
-        self.echo22(ram);
-        self.tick();
-        self.voice7(ram, 7);
-        self.echo23(ram);
-        self.tick();
-        self.voice8(ram, 7);
-        self.echo24(ram);
-        self.tick();
-        self.voice3b(ram, 0);
-        self.voice9(ram, 7);
-        self.echo25(ram);
-        self.tick();
-        self.echo26(ram);
-        self.tick();
-        self.misc27();
-        self.echo27();
-        self.tick();
-        self.misc28();
-        self.echo28();
-        self.tick();
-        self.misc29();
-        self.echo29(ram);
-        self.tick();
-        self.misc30();
-        self.voice3c(ram, 0);
-        self.echo30(ram);
-        self.tick();
-        self.voice4(ram, 0);
-        self.voice1(ram, 2);
-        self.tick();
+    /// Run one of the 32 S-DSP micro-steps that make up a sample.
+    ///
+    /// ares' DSP thread steps `3 * 8` apu clocks per tick and is synchronized
+    /// with the S-SMP on every access, so exactly one tick elapses per S-SMP
+    /// access unit (2 clocks). Running the whole 32-step sample at once would
+    /// hide the echo buffer's partial state from an S-SMP read that lands
+    /// mid-sample, which is what blargg's echo ordering tests probe.
+    fn step_once(&mut self, ram: &mut [u8]) {
+        match self.step {
+            0 => {
+                self.voice5(ram, 0);
+                self.voice2(ram, 1);
+            }
+            1 => {
+                self.voice6(ram, 0);
+                self.voice3(ram, 1);
+            }
+            2 => {
+                self.voice7(ram, 0);
+                self.voice4(ram, 1);
+                self.voice1(ram, 3);
+            }
+            3 => {
+                self.voice8(ram, 0);
+                self.voice5(ram, 1);
+                self.voice2(ram, 2);
+            }
+            4 => {
+                self.voice9(ram, 0);
+                self.voice6(ram, 1);
+                self.voice3(ram, 2);
+            }
+            5 => {
+                self.voice7(ram, 1);
+                self.voice4(ram, 2);
+                self.voice1(ram, 4);
+            }
+            6 => {
+                self.voice8(ram, 1);
+                self.voice5(ram, 2);
+                self.voice2(ram, 3);
+            }
+            7 => {
+                self.voice9(ram, 1);
+                self.voice6(ram, 2);
+                self.voice3(ram, 3);
+            }
+            8 => {
+                self.voice7(ram, 2);
+                self.voice4(ram, 3);
+                self.voice1(ram, 5);
+            }
+            9 => {
+                self.voice8(ram, 2);
+                self.voice5(ram, 3);
+                self.voice2(ram, 4);
+            }
+            10 => {
+                self.voice9(ram, 2);
+                self.voice6(ram, 3);
+                self.voice3(ram, 4);
+            }
+            11 => {
+                self.voice7(ram, 3);
+                self.voice4(ram, 4);
+                self.voice1(ram, 6);
+            }
+            12 => {
+                self.voice8(ram, 3);
+                self.voice5(ram, 4);
+                self.voice2(ram, 5);
+            }
+            13 => {
+                self.voice9(ram, 3);
+                self.voice6(ram, 4);
+                self.voice3(ram, 5);
+            }
+            14 => {
+                self.voice7(ram, 4);
+                self.voice4(ram, 5);
+                self.voice1(ram, 7);
+            }
+            15 => {
+                self.voice8(ram, 4);
+                self.voice5(ram, 5);
+                self.voice2(ram, 6);
+            }
+            16 => {
+                self.voice9(ram, 4);
+                self.voice6(ram, 5);
+                self.voice3(ram, 6);
+            }
+            17 => {
+                self.voice1(ram, 0);
+                self.voice7(ram, 5);
+                self.voice4(ram, 6);
+            }
+            18 => {
+                self.voice8(ram, 5);
+                self.voice5(ram, 6);
+                self.voice2(ram, 7);
+            }
+            19 => {
+                self.voice9(ram, 5);
+                self.voice6(ram, 6);
+                self.voice3(ram, 7);
+            }
+            20 => {
+                self.voice1(ram, 1);
+                self.voice7(ram, 6);
+                self.voice4(ram, 7);
+            }
+            21 => {
+                self.voice8(ram, 6);
+                self.voice5(ram, 7);
+                self.voice2(ram, 0);
+            }
+            22 => {
+                self.voice3a(ram, 0);
+                self.voice9(ram, 6);
+                self.voice6(ram, 7);
+                self.echo22(ram);
+            }
+            23 => {
+                self.voice7(ram, 7);
+                self.echo23(ram);
+            }
+            24 => {
+                self.voice8(ram, 7);
+                self.echo24(ram);
+            }
+            25 => {
+                self.voice3b(ram, 0);
+                self.voice9(ram, 7);
+                self.echo25(ram);
+            }
+            26 => {
+                self.echo26(ram);
+            }
+            27 => {
+                self.misc27();
+                self.echo27();
+            }
+            28 => {
+                self.misc28();
+                self.echo28();
+            }
+            29 => {
+                self.misc29();
+                self.echo29(ram);
+            }
+            30 => {
+                self.misc30();
+                self.voice3c(ram, 0);
+                self.echo30(ram);
+            }
+            31 => {
+                self.voice4(ram, 0);
+                self.voice1(ram, 2);
+            }
+            _ => unreachable!(),
+        }
     }
-
-    fn tick(&mut self) {}
 
     fn voice1(&mut self, _ram: &mut [u8], index: usize) {
         // 16-bit sample address; the sum wraps in hardware (ares `n16`).
