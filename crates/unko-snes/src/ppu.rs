@@ -1274,6 +1274,28 @@ mod tests {
     }
 
     #[test]
+    fn lowest_oam_index_wins_a_sprite_overlap() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2101, 0x03); // OBSEL: 8x8 base size, tiles at $6000
+        ppu.write(0x212C, 0x10); // objects on the main screen
+        ppu.write(0x2102, 0x00);
+        ppu.write(0x2103, 0x00);
+        // Sprite 0: priority 0, one pixel at (0, line 1).
+        for byte in [0x00, 0x00, 0x00, 0x00] {
+            ppu.write(0x2104, byte);
+        }
+        // Sprite 1: priority 3 at the same place, different tile.
+        for byte in [0x00, 0x00, 0x01, 0x30] {
+            ppu.write(0x2104, byte);
+        }
+        ppu.vram[0x6000] = 0x0080; // tile 0, row 0: colour 1
+        ppu.vram[0x6010] = 0x0080; // tile 1, row 0: colour 1
+                                   // ares draws the per-line list backwards, so sprite 0 is drawn last and
+                                   // wins even though sprite 1 has the higher priority bits.
+        assert_eq!(ppu.debug_sprite_row(1), vec![(0, 129, 3)]);
+    }
+
+    #[test]
     fn window_masks_follow_the_selector_and_logic() {
         let mut ppu = Ppu::new();
         ppu.write(0x2126, 10); // WH0: window 1 left

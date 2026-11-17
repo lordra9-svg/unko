@@ -104,7 +104,7 @@ plaintext/unauthenticated transport remains an Internet-facing trust boundary.
 
 ## Gate results from this pass
 
-- `cargo test --workspace`: 837 passed, 0 failed
+- `cargo test --workspace`: 838 passed, 0 failed
 - `cargo clippy --workspace --all-targets -- -D warnings`: clean
 - `cargo fmt --all -- --check`: clean
 - `nestest`: 8,980 / 8,980 lines exact

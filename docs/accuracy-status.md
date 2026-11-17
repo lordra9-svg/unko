@@ -20,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **837 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **838 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -106,7 +106,7 @@ Implemented so far:
 
 Validation so far:
 
-- **837 workspace tests**, 0 failed
+- **838 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
