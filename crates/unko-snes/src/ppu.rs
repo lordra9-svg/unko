@@ -946,10 +946,38 @@ impl Ppu {
         let tiledata = u32::from(self.obsel & 0x07) << 13;
         let main_enable = self.layer_mask.unwrap_or(self.tm) & 0x10 != 0;
         let sub_enable = self.ts & 0x10 != 0 && self.layer_mask.is_none();
-        // Sprites are evaluated from `firstSprite` upward; the earliest one
-        // wins an equal-priority overlap.
-        for k in 0..128 {
-            let sprite = (usize::from(self.first_sprite) + k) & 0x7F;
+
+        // ares `Object::evaluate`: sprites are scanned from `firstSprite`
+        // (the `$2103` priority rotation) and the first 32 on-line sprites are
+        // kept, however many off-line entries that takes.
+        let mut items = [0u8; 32];
+        let mut item_count = 0usize;
+        for index in 0..128u8 {
+            let sprite = self.first_sprite.wrapping_add(index) & 0x7F;
+            let base = usize::from(sprite) * 4;
+            let high = self.oam[0x200 + usize::from(sprite) / 4];
+            let high_bit = (usize::from(sprite) & 3) * 2;
+            let size = (high >> (high_bit + 1)) & 1;
+            let height = sprite_size(base_size, size, true);
+            // Hardware quirk: a sprite's first visible line is OAM Y + 1.
+            let first = usize::from(self.oam[base + 1]) + 1;
+            if y < first || y >= first + usize::from(height) {
+                continue;
+            }
+            items[item_count] = sprite;
+            item_count += 1;
+            if item_count == 32 {
+                break;
+            }
+        }
+
+        // ares `Object::run`: walk the list backwards and overwrite opaque
+        // pixels, so the lowest OAM index wins every overlap regardless of the
+        // per-sprite priority bits (those only order the layer). The line also
+        // draws at most 34 object tiles, in that same order.
+        let mut tile_count = 0u32;
+        for slot in (0..item_count).rev() {
+            let sprite = usize::from(items[slot]);
             let base = sprite * 4;
             let attr = self.oam[base + 3];
             let high = self.oam[0x200 + sprite / 4];
@@ -958,48 +986,47 @@ impl Ppu {
             let width = sprite_size(base_size, size, false);
             let height = sprite_size(base_size, size, true);
             let x = u16::from(self.oam[base]) | (u16::from((high >> high_bit) & 1) << 8);
-            let y0 = u16::from(self.oam[base + 1]);
-            // Hardware quirk: a sprite's first visible line is OAM Y + 1.
-            let first = usize::from(y0) + 1;
-            if y < first || y >= first + usize::from(height) {
-                continue;
-            }
+            let first = u16::from(self.oam[base + 1]) + 1;
             let row = if attr & 0x80 != 0 {
-                height - 1 - (y as u16 - first as u16)
+                height - 1 - (y as u16 - first)
             } else {
-                y as u16 - first as u16
+                y as u16 - first
             };
             let character = self.oam[base + 2];
             let tile_width = width / 8;
-            let priority = priority[usize::from((attr >> 4) & 0x03)];
+            let layer_priority = priority[usize::from((attr >> 4) & 0x03)];
             for tx in 0..tile_width {
                 let sx = x + tx * 8;
+                if sx >= SCREEN_WIDTH as u16 {
+                    continue;
+                }
+                if tile_count >= 34 {
+                    break;
+                }
+                tile_count += 1;
+                let chrx = (u16::from(character) & 0x0F)
+                    + if attr & 0x40 != 0 {
+                        tile_width - 1 - tx
+                    } else {
+                        tx
+                    };
+                // Object tiles live in a 16-column grid: the row nibble
+                // selects a 256-word line and the column nibble a 16-word tile.
+                let chry = ((u16::from(character) >> 4) + row / 8) & 0x0F;
+                let chrx = chrx & 0x0F;
+                let mut address =
+                    tiledata + (u32::from(chry) << 8) + (u32::from(chrx) << 4) + u32::from(row & 7);
+                if attr & 0x01 != 0 {
+                    address += (u32::from(nameselect) + 1) << 12;
+                }
                 for px in 0..8 {
-                    let screen_x = sx + px;
-                    if screen_x >= SCREEN_WIDTH as u16 {
+                    let screen_x = usize::from(sx) + px;
+                    if screen_x >= SCREEN_WIDTH {
                         continue;
                     }
-                    let chrx = (u16::from(character) & 0x0F)
-                        + if attr & 0x40 != 0 {
-                            tile_width - 1 - tx
-                        } else {
-                            tx
-                        };
-                    // Object tiles live in a 16-column grid: the row nibble
-                    // selects a 256-word line and the column nibble a 16-word
-                    // tile, matching ares `Object::fetch`.
-                    let chry = ((u16::from(character) >> 4) + row / 8) & 0x0F;
-                    let chrx = chrx & 0x0F;
-                    let mut address = tiledata
-                        + (u32::from(chry) << 8)
-                        + (u32::from(chrx) << 4)
-                        + u32::from(row & 7);
-                    if attr & 0x01 != 0 {
-                        address += (u32::from(nameselect) + 1) << 12;
-                    }
                     // Horizontal flip reverses the tile order and reads each
-                    // tile from bit 0 upward; it does not mirror the plane
-                    // bits a second time.
+                    // tile from bit 0 upward; it does not mirror the plane bits
+                    // a second time.
                     let bit = if attr & 0x40 != 0 { px } else { 7 - px };
                     let word0 = self.vram[(address & 0x7FFF) as usize];
                     let word1 = self.vram[((address + 8) & 0x7FFF) as usize];
@@ -1013,16 +1040,15 @@ impl Ppu {
                     let palette = 128u16 + ((u16::from(attr) >> 1) & 0x07) * 16 + color;
                     let pixel = Pixel {
                         color: palette as u8,
-                        priority,
+                        priority: layer_priority,
                         layer: 4,
                     };
-                    let index = usize::from(screen_x);
-                    let masked = self.window_masks(4, index);
+                    let masked = self.window_masks(4, screen_x);
                     if main_enable && !(self.tmw & 0x10 != 0 && masked) {
-                        plot_sprite(main, index, pixel);
+                        plot_object(main, screen_x, pixel);
                     }
                     if sub_enable && !(self.tsw & 0x10 != 0 && masked) {
-                        plot_sprite(sub, index, pixel);
+                        plot_object(sub, screen_x, pixel);
                     }
                 }
             }
@@ -1102,26 +1128,23 @@ struct Pixel {
     layer: u8,
 }
 
+/// Plot an object pixel: a later draw replaces an earlier object pixel
+/// unconditionally (ares draws the per-line list backwards, so the lowest OAM
+/// index wins every overlap), but a background pixel still wins on an equal or
+/// higher layer priority.
+fn plot_object(buffer: &mut [Pixel; SCREEN_WIDTH], x: usize, pixel: Pixel) {
+    let current = buffer[x];
+    if current.layer == 4 || pixel.priority > current.priority {
+        buffer[x] = pixel;
+    }
+}
+
 /// Plot a background pixel: higher priority wins, ties keep the earlier layer.
 fn plot(buffer: &mut [Pixel; SCREEN_WIDTH], x: usize, pixel: Pixel) {
     if pixel.priority == 0 {
         return;
     }
     if pixel.priority > buffer[x].priority {
-        buffer[x] = pixel;
-    }
-}
-
-/// Plot a sprite pixel: later sprites win ties within the object layer, but a
-/// sprite never displaces a background pixel of equal priority.
-fn plot_sprite(buffer: &mut [Pixel; SCREEN_WIDTH], x: usize, pixel: Pixel) {
-    if pixel.priority == 0 {
-        return;
-    }
-    let current = buffer[x];
-    if pixel.priority > current.priority
-        || (current.layer == 4 && pixel.priority == current.priority)
-    {
         buffer[x] = pixel;
     }
 }

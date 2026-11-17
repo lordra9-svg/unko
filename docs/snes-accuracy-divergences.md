@@ -13,14 +13,14 @@ None known in the implemented 65C816/SPC700 instruction semantics or in the
 documented S-CPU wait-state table. The 65C816 differential suite asserts exact
 master-clock totals (six per oracle bus cycle) across all 18 suites.
 
-The remaining known video divergence is **dot-level sprite evaluation**:
+The remaining known video divergence is a **two-frame content phase**, not a
+rendering difference:
 
-- *Super Mario World* is **99.950%** pixel-identical to the RustySNES oracle
-  with a two-frame content offset (`unko-snes` frame 598 vs RustySNES 600;
-  mean absolute channel difference 0.084, 33 differing pixels). At 900 frames
-  it is 99.927% at the same offset and at 1500 frames 99.912% at the same
-  index; every differing pixel lies in the overlap of two equal-priority
-  sprites.
+- With frames aligned, *Super Mario World* is **100.000%** pixel-identical to
+  the RustySNES oracle: `unko-snes` frame 598 vs RustySNES 600 (mean absolute
+  channel difference 0.000), 898 vs 900, and 1500 vs 1500. This includes the
+  previous 33-58 pixel sprite-overlap residual, which was the sprite
+  evaluation model (see below).
 - **Open: title-screen content offset.** Both emulators turn the display on at
   frame 86 and match exactly at 1500, but our title screen reaches the
   reference content two frames earlier, so same-index comparisons at 600/900
@@ -56,10 +56,12 @@ The remaining known video divergence is **dot-level sprite evaluation**:
   dumps the content of frame `N - 2` (its internal frame counter starts two
   vblanks later than RustySNES' and ours). Compare ares dumps with `ours N-2`
   or, preferably, use RustySNES' `vram_dump` at the same frame.
-- ares evaluates sprites with a 32-entry per-line list, the 34-tile limit and
-  the `firstSprite` rotation; `unko-snes` renders all 128 entries per line and
-  uses OAM-order tie-breaking. The backlog only shows up when sprites of equal
-  priority overlap.
+- Sprite evaluation now follows ares `Object::evaluate`/`Object::run`: scan
+  OAM from `firstSprite`, keep the first 32 on-line sprites, draw the line's
+  list backwards with a 34-tile cap, and overwrite object pixels
+  unconditionally so the lowest OAM index wins every overlap regardless of the
+  per-sprite priority bits (those only order the layer). This removed the last
+  differing pixels.
 
 S-DSP output is now instrumented but not sample-identical:
 
@@ -134,9 +136,7 @@ with ares. The implementation follows ares, which is the primary source.
   with integer rounding. Measured frames match ares at `INIDISP = $0F` and at
   `$0B`; sub-1/255 rounding differences are possible at other levels.
 - Hires output, interlace and offset-per-tile are not implemented.
-- The 32-sprite/34-tile limits and the 32-entry per-line sprite list are not
-  enforced, so equal-priority sprite overlaps can resolve differently.
-- Mode 7 `EXTBG` is partial and the 32-sprite/34-tile limits are not enforced.
+- Mode 7 `EXTBG` is partial.
 - `WAI`/`STP` retire two internal cycles after the opcode; the real devices
   idle indefinitely, which the system model represents by not advancing the
   CPU until an interrupt or reset.

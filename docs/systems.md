@@ -30,7 +30,7 @@ beside it; the host chooses by `CoreInfo.id`.
 | Oracles | **MesenCE `Core/SNES`** (C++, GPL-3.0) — reference only · **RustySNES** (Rust, Apache-2.0) — oracle/reference only |
 | Size | ares 19.9k LOC; Mesen 35.7k LOC |
 | Coverage target | 65816, SPC700, S-DSP, dot/scanline PPU, SuperFX, SA-1, SDD1, SPC7110, CX4, DSP1-4, OBC1, ST018, MSU1, Satellaview, Sufami Turbo, BS-X |
-| Status | isolated core started 2026-11-16: ROM parsing/checksums/mapping, SRAM, cycle-exact 65C816 timing, full SPC700, APU IPL/ports/timers, S-DSP, PPU modes 0-7 + sprites + subscreen/colour math, DMA/HDMA and the memory map are implemented. Super Mario World is 99.950% pixel-identical to ares with frames aligned; dot-level PPU scheduling, the two-frame title-screen offset and audio parity are next. |
+| Status | isolated core started 2026-11-16: ROM parsing/checksums/mapping, SRAM, cycle-exact 65C816 timing, full SPC700, APU IPL/ports/timers, S-DSP, PPU modes 0-7 + sprites + subscreen/colour math, DMA/HDMA and the memory map are implemented. Super Mario World is 100.000% pixel-identical to ares with frames aligned; dot-level PPU scheduling, the two-frame title-screen offset and audio parity are next. |
 
 Why an isolated Rust core: the SNES crate has no `unko-core` or shell
 dependency, exactly like `unko-nes`. ares remains the primary implementation

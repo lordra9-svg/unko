@@ -162,14 +162,10 @@ Validation so far:
 - Super Mario World with the local 64-byte IPL ROM, measured against RustySNES
   frame dumps (cross-checked against ares `--dump-frame`; the ares dump's
   content index runs two frames behind its `--frames` label):
-  - **aligned 600** (`unko-snes` frame 598 vs RustySNES 600): **99.950%** of
-    pixels bit-identical, mean absolute channel difference 0.084; 33 differing
-    pixels, all inside one equal-priority sprite overlap (bbox 117-121 x
-    162-172)
-  - **aligned 900** (898 vs 900): **99.927%** bit-identical, mean difference
-    0.097; 49 differing pixels in the equivalent overlap
-  - **1500**: **99.912%** bit-identical at the same frame index (the title
-    screen is static there), mean difference 0.121; 58 differing pixels
+  - **aligned 600** (`unko-snes` frame 598 vs RustySNES 600): **100.000%**
+    of pixels bit-identical, mean absolute channel difference 0.000
+  - **aligned 900** (898 vs 900): **100.000%** bit-identical
+  - **1500**: **100.000%** bit-identical at the same frame index
   - **VRAM: 0 of 32,768 words differ** from RustySNES at 600 frames;
     **CGRAM: 0 of 256 entries differ**; **OAM: identical**
   - title logo, sky gradient, cloud sprites, border, "© 1990, 1991 Nintendo"
@@ -183,15 +179,17 @@ Validation so far:
     handshake phase difference that needs exact bidirectional S-CPU/S-SMP
     synchronization (a resumable SPC700 interpreter or coroutine scheduling).
     See the divergence ledger.
-- The residual pixels are the overlap of two equal-priority sprites where the
-  32-entry sprite list resolves the tie differently; dot-level sprite
-  evaluation and the 34-tile limit are the remaining PPU scheduling work.
+- Sprite rendering follows ares exactly: OAM is scanned from `firstSprite`,
+  the first 32 on-line sprites are kept, the line draws at most 34 object
+  tiles, and the per-line list is drawn backwards so the lowest OAM index wins
+  every overlap regardless of the sprite priority bits. This removed the last
+  33-58 differing pixels; with frames aligned the output is now bit-identical.
 - Star Fox remains black without the SuperFX coprocessor; Final Fantasy V was
   still in its boot sequence at the 20M-cycle sample.
 
-The PPU is line-based rather than dot-scheduled; windows, hires, interlace,
-mosaic, offset-per-tile and the 32-sprite/34-tile limits are still missing.
-S-DSP output has not yet been sample-compared against ares. Exact audio parity
+The PPU is line-based rather than dot-scheduled; hires, interlace and
+offset-per-tile are still missing. S-DSP output has not yet been
+sample-compared against ares. Exact audio parity, the two-frame content phase
 and the remaining PPU scheduling work are the open accuracy items.
 
 Performance: `unko bench --synthetic 3000 --min-fps 300` measures **791.6 fps**

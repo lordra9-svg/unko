@@ -35,10 +35,10 @@ SNES track: the isolated `unko-snes` crate now has ROM parsing and checksum
 validation, LoROM/HiROM/ExLoROM/ExHiROM mapping, a cycle-stepped 65C816, the
 full SPC700, an APU wrapper with IPL/ports, the S-DSP voice pipeline, a
 line-based PPU with modes 0-7, sprites, subscreen/colour math and HDMA, plus
-S-CPU DMA and APU timers. Retail Super Mario World is **99.950% pixel-identical
-to ares/RustySNES with frames aligned** (99.912% at 1500 frames) with
-bit-identical VRAM/CGRAM/OAM; a two-frame title-screen content offset and a
-one-sprite sub-frame scheduling difference remain.
+S-CPU DMA and APU timers. Retail Super Mario World is **100.000%
+pixel-identical to ares/RustySNES with frames aligned** at 600, 900 and 1500
+frames, with bit-identical VRAM/CGRAM/OAM; only a two-frame title-screen
+content phase remains.
 
 Reference gates:
 
