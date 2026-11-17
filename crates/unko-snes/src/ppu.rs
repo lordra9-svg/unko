@@ -6,6 +6,8 @@
 //! cycle-exact background fetch timing are still approximations; the public
 //! base modes 0-7 and sprites are covered.
 
+use crate::rom::Region;
+
 /// Visible frame width.
 pub const SCREEN_WIDTH: usize = 256;
 /// Visible frame height.
@@ -27,7 +29,6 @@ const MAX_FRAME_SIZE: usize = MAX_SCREEN_WIDTH * MAX_SCREEN_HEIGHT * 4;
 const DOTS_PER_LINE: u16 = 341;
 const LINES_PER_FRAME: u16 = 262;
 const VBLANK_LINE: u16 = 225;
-
 /// The S-PPU pair.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ppu {
@@ -40,8 +41,14 @@ pub struct Ppu {
     /// Whether the presented frame is interlaced (latched at frame start).
     frame_interlace: bool,
     /// Number of scanlines in the frame being rendered: 262 normally, 263 on
-    /// an interlaced even field (ares `PPUcounter::tickScanline`).
+    /// an interlaced even field (ares `PPUcounter::tickScanline`), and the
+    /// PAL equivalents 312/313.
     frame_lines: u16,
+    /// Dots in the current scanline: 341 normally, 342 on PAL's long
+    /// interlaced line (V=311) and 340 on NTSC's short line at V=240.
+    line_dots: u16,
+    /// Console region: selects the frame geometry and the `$213F` PAL bit.
+    region: Region,
     line: u16,
     dot: u16,
     field: bool,
@@ -155,6 +162,8 @@ impl Ppu {
             frame_hires: false,
             frame_interlace: false,
             frame_lines: LINES_PER_FRAME,
+            line_dots: DOTS_PER_LINE,
+            region: Region::Ntsc,
             line: 0,
             dot: 0,
             field: false,
@@ -229,7 +238,25 @@ impl Ppu {
 
     /// Reset the PPU.
     pub fn reset(&mut self) {
+        let region = self.region;
         *self = Self::new();
+        self.set_region(region);
+    }
+
+    /// Select the console region.
+    ///
+    /// ares uses the region for the frame length (`vperiod`), the `$213F` PAL
+    /// flag and the vertical output offset. The PPU keeps the same 225-line
+    /// non-overscan visible window in both regions (`PPU::updateVideoMode`).
+    pub fn set_region(&mut self, region: Region) {
+        self.region = region;
+        self.frame_lines = region.lines_per_frame();
+        self.line_dots = DOTS_PER_LINE;
+    }
+
+    /// Console region.
+    pub const fn region(&self) -> Region {
+        self.region
     }
 
     /// Current scanline.
@@ -410,7 +437,7 @@ impl Ppu {
     /// Advance one PPU dot.
     pub fn tick(&mut self) {
         self.dot += 1;
-        if self.dot < DOTS_PER_LINE {
+        if self.dot < self.line_dots {
             return;
         }
         self.dot = 0;
@@ -421,14 +448,24 @@ impl Ppu {
             self.field = !self.field;
             // ares `hires = pseudoHires || bgMode == 5 || bgMode == 6`.
             self.frame_hires = self.setini & 0x08 != 0 || matches!(self.bg_mode & 0x07, 5 | 6);
-            // ares `PPUcounter::tickScanline`: a 525-line NTSC frame is one
-            // 263-line even field and one 262-line odd field.
+            // ares `PPUcounter::tickScanline`: the interlaced frame with
+            // `field == 0` has one extra line (263 NTSC / 313 PAL).
             self.frame_interlace = self.setini & 0x01 != 0;
             self.frame_lines = if self.frame_interlace && !self.field {
-                LINES_PER_FRAME + 1
+                self.region.lines_per_frame() + 1
             } else {
-                LINES_PER_FRAME
+                self.region.lines_per_frame()
             };
+        }
+        // ares `PPUcounter::tickScanline`: NTSC has one short scanline and PAL
+        // one long scanline so the average rate tracks the color burst.
+        self.line_dots = DOTS_PER_LINE;
+        if self.region.is_pal() {
+            if self.frame_interlace && self.field && self.line == 311 {
+                self.line_dots = DOTS_PER_LINE + 1;
+            }
+        } else if !self.frame_interlace && self.field && self.line == 240 {
+            self.line_dots = DOTS_PER_LINE - 1;
         }
         match self.line {
             0 => {
@@ -557,12 +594,15 @@ impl Ppu {
                 self.ppu1_mdr
             }
             0x213F => {
-                // ares `latch.hcounter`/`latch.vcounter` reset; the latch-status
-                // bit (6) reports whether $2137 latched the counters.
+                // ares `latch.hcounter`/`latch.vcounter` reset; bit 4 is the
+                // region (0 = NTSC, 1 = PAL) and bit 6 reports whether $2137
+                // latched the counters.
                 self.counter_latch_h = false;
                 self.counter_latch_v = false;
-                self.ppu2_mdr =
-                    (self.ppu2_mdr & 0x80) | 0x03 | (u8::from(self.counters_latched) << 6);
+                self.ppu2_mdr = (self.ppu2_mdr & 0x80)
+                    | 0x03
+                    | (u8::from(self.region.is_pal()) << 4)
+                    | (u8::from(self.counters_latched) << 6);
                 self.counters_latched = false;
                 self.ppu2_mdr | (u8::from(self.field) << 7)
             }
@@ -2425,5 +2465,42 @@ mod tests {
         assert_ne!(stat & 0x40, 0);
         let stat = ppu.read(0x213F, 0);
         assert_eq!(stat & 0x40, 0);
+    }
+
+    #[test]
+    fn stat78_reports_the_pal_region_bit() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2133, 0);
+        let ntsc = ppu.read(0x213F, 0);
+        assert_eq!(ntsc & 0x10, 0);
+        ppu.set_region(crate::rom::Region::Pal);
+        let pal = ppu.read(0x213F, 0);
+        assert_ne!(pal & 0x10, 0);
+    }
+
+    #[test]
+    fn pal_interlaced_line_311_is_342_dots() {
+        let mut ppu = Ppu::new();
+        ppu.set_region(crate::rom::Region::Pal);
+        ppu.setini = 0x01; // SETINI interlace
+        ppu.frame_interlace = true;
+        ppu.field = true;
+        ppu.frame_lines = 312;
+        ppu.line = 310;
+        ppu.line_dots = DOTS_PER_LINE;
+        for _ in 0..DOTS_PER_LINE {
+            ppu.tick();
+        }
+        assert_eq!(ppu.line, 311);
+        assert_eq!(ppu.line_dots, DOTS_PER_LINE + 1);
+        // The long line is the last of the 312-line field, so it wraps to 0 and
+        // the next field is the 313-line one.
+        for _ in 0..DOTS_PER_LINE + 1 {
+            ppu.tick();
+        }
+        assert_eq!(ppu.line, 0);
+        assert!(!ppu.field);
+        assert_eq!(ppu.frame_lines, 313);
+        assert_eq!(ppu.line_dots, DOTS_PER_LINE);
     }
 }

@@ -37,7 +37,8 @@ pub use dsp::Dsp;
 pub use io::CpuIo;
 pub use ppu::Ppu;
 pub use rom::{
-    rom_size_bytes, sram_size_bytes, BusTarget, Cartridge, Mapping, RomError, RomHeader,
+    region_for_country, rom_size_bytes, sram_size_bytes, BusTarget, Cartridge, Mapping, Region,
+    RomError, RomHeader,
 };
 pub use spc700::{Flags as Spc700Flags, Spc700, SpcBus};
 pub use system::Snes;

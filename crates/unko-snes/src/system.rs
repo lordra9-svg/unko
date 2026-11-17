@@ -11,7 +11,7 @@ use crate::cpu::{Cpu, CpuBus};
 use crate::dma::{Dma, DmaBus};
 use crate::io::CpuIo;
 use crate::ppu::Ppu;
-use crate::rom::Cartridge;
+use crate::rom::{Cartridge, Region};
 
 /// Size of the SNES work RAM.
 pub const WRAM_SIZE: usize = 0x2_0000;
@@ -33,6 +33,8 @@ pub struct Snes {
     pub apu: Apu,
     /// The S-PPU pair.
     pub ppu: Ppu,
+    /// Console video region, taken from the cartridge header.
+    region: Region,
     /// General-purpose DMA channels.
     pub dma: Dma,
     /// Controller ports, auto-poll and the multiply/divide unit.
@@ -72,11 +74,15 @@ pub struct Snes {
 impl Snes {
     /// Create a system around a parsed cartridge.
     pub fn new(cart: Cartridge) -> Self {
+        let region = cart.header().region();
+        let mut ppu = Ppu::new();
+        ppu.set_region(region);
         Self {
             cpu: Cpu::new(),
             cart,
             apu: Apu::new(),
-            ppu: Ppu::new(),
+            ppu,
+            region,
             dma: Dma::new(),
             io: CpuIo::new(),
             wram: vec![0; WRAM_SIZE],
@@ -101,6 +107,11 @@ impl Snes {
     /// Work RAM.
     pub fn wram(&self) -> &[u8] {
         &self.wram
+    }
+
+    /// Console video region, from the cartridge header.
+    pub const fn region(&self) -> Region {
+        self.region
     }
 
     /// Mutable work RAM, for save states and tests.
@@ -134,6 +145,9 @@ impl Snes {
     pub fn reset(&mut self) -> u32 {
         self.apu.reset();
         self.ppu.reset();
+        // `Ppu::reset` preserves the region, but re-assert it in case the field
+        // order changes; the master clock ratio also depends on it.
+        self.ppu.set_region(self.region);
         self.dma.hdma_reset();
         self.io.reset();
         self.apu_credit = 0;
@@ -242,16 +256,14 @@ impl Snes {
     }
 
     fn advance_peripherals_inner(&mut self, clocks: u32) {
-        // NTSC master clock is 21.477272 MHz; the S-SMP runs at 2,050,560 Hz,
-        // so one SMP clock is 21,477,272 / 2,050,560 master clocks. The credit
-        // is carried across instructions so long-term APU timing stays in step.
-        // Draining *one SMP clock* at a time (rather than one two-clock access
-        // unit) is what makes an S-SMP port write become visible at the exact
-        // master clock it lands on: ares/bsnes synchronize the S-SMP on every
-        // S-CPU step, so an S-CPU poll must observe every SMP write up to that
-        // instant and no further.
+        // The S-SMP runs at 2,050,560 Hz regardless of region; the master clock
+        // differs (21,477,272 NTSC / 21,281,370 PAL). Draining *one SMP clock*
+        // at a time (rather than one two-clock access unit) is what makes an
+        // S-SMP port write become visible at the exact master clock it lands
+        // on: ares/bsnes synchronize the S-SMP on every S-CPU step, so an S-CPU
+        // poll must observe every SMP write up to that instant and no further.
         const APU_UNIT_NUM: i64 = 2_050_560;
-        const APU_UNIT_DEN: i64 = 21_477_272;
+        let apu_unit_den = self.region.master_clock() as i64;
         if self.apu.port_logging_enabled() {
             // Resolve every access unit to the master clock it starts on, so the
             // port handshake log can be compared event-for-event with a
@@ -261,13 +273,13 @@ impl Snes {
             let mut spent = 0u32;
             loop {
                 // Clocks from `credit` to the next unit boundary (both positive).
-                let need = u32::try_from((APU_UNIT_DEN - credit + APU_UNIT_NUM - 1) / APU_UNIT_NUM)
+                let need = u32::try_from((apu_unit_den - credit + APU_UNIT_NUM - 1) / APU_UNIT_NUM)
                     .unwrap_or(0);
                 if spent + need > clocks {
                     break;
                 }
                 spent += need;
-                credit += i64::from(need) * APU_UNIT_NUM - APU_UNIT_DEN;
+                credit += i64::from(need) * APU_UNIT_NUM - apu_unit_den;
                 self.apu.debug.set_clock(self.clock + u64::from(spent));
                 self.apu.tick();
             }
@@ -275,13 +287,15 @@ impl Snes {
             self.apu_credit = credit;
         } else {
             self.apu_credit += i64::from(clocks) * APU_UNIT_NUM;
-            while self.apu_credit >= APU_UNIT_DEN {
+            while self.apu_credit >= apu_unit_den {
                 self.apu.tick();
-                self.apu_credit -= APU_UNIT_DEN;
+                self.apu_credit -= apu_unit_den;
             }
         }
         self.clock += u64::from(clocks);
-        // The PPU dot clock is the master clock divided by four on NTSC.
+        // One PPU dot is four master clocks in both regions; the PAL frame is
+        // longer because it has 312 lines (and one 342-dot line), not because
+        // the line clock differs.
         self.ppu_credit += i64::from(clocks);
         while self.ppu_credit >= 4 {
             let pre_dot = self.ppu.dot();
@@ -856,6 +870,48 @@ mod tests {
         assert_eq!(bus.read(0x004211, 0x7F), 0x7F);
         // $4212: bits 1-5 open bus; vblank/hblank/busy are all false here.
         assert_eq!(bus.read(0x004212, 0x3E), 0x3E);
+    }
+
+    #[test]
+    fn region_follows_the_header_country() {
+        let mut rom = build_lorom(&[0xDB]);
+        let header = Mapping::LoRom.header_offset();
+        rom[header + 0x19] = 0x02; // Europe
+        let system = Snes::new(Cartridge::from_bytes(&rom).expect("valid LoROM"));
+        assert_eq!(system.region(), crate::rom::Region::Pal);
+        assert!(system.ppu.region().is_pal());
+
+        rom[header + 0x19] = 0x01; // USA / Canada
+        let system = Snes::new(Cartridge::from_bytes(&rom).expect("valid LoROM"));
+        assert_eq!(system.region(), crate::rom::Region::Ntsc);
+        assert!(!system.ppu.region().is_pal());
+    }
+
+    #[test]
+    fn pal_frame_advances_312_scanlines() {
+        let mut rom = build_lorom(&[0xDB]);
+        let header = Mapping::LoRom.header_offset();
+        rom[header + 0x19] = 0x02; // Europe
+        let mut system = Snes::new(Cartridge::from_bytes(&rom).expect("valid LoROM"));
+        system.reset();
+        // Tick dots directly (one dot = four master clocks). A non-interlaced
+        // PAL frame is 312 lines of 341 dots.
+        let mut dots = 0u32;
+        let mut wraps = 0u32;
+        let mut last = system.ppu.line();
+        for _ in 0..400_000 {
+            system.ppu.tick();
+            dots += 1;
+            if system.ppu.line() < last {
+                wraps += 1;
+                if wraps == 2 {
+                    break;
+                }
+            }
+            last = system.ppu.line();
+        }
+        assert_eq!(wraps, 2);
+        assert_eq!(dots, 2 * 312 * 341);
     }
 
     #[test]

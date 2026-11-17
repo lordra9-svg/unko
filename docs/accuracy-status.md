@@ -68,6 +68,10 @@ Implemented so far:
   envelopes, noise/LFSR, pitch modulation, echo and stereo sample generation
 - line-based S-PPU: registers, VRAM/CGRAM/OAM, vblank/NMI, modes 0-7, tile
   backgrounds, Mode 7 affine mapping and sprites; 256x224 RGBA8888 frames
+- region selection from the header country byte: NTSC (21,477,272 Hz master
+  clock, 262-line frames) and PAL (21,281,370 Hz, 312-line frames with the
+  long V=311 line, and the `$213F` PAL flag), so the APU credit ratio follows
+  the region's master clock
 - subscreen rendering and the full colour-math path: per-layer priority
   tables, `CGWSEL` fixed-colour/subscreen select, `CGADSUB` enable/halve/
   subtract and `COLDATA` channels, with the ares 15-bit blend and DAC luma

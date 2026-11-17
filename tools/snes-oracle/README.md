@@ -22,6 +22,9 @@ The ares build in `refs/ares` carries local capture patches:
 - `ARES_RAW_AUDIO=<path>` captures the S-DSP's **pre-resampler** output as
   interleaved `i16` (`L,R,...`) from `DSP::sample`, which is the bit-exact
   reference for PCM comparison.
+- `ARES_REGION=PAL|NTSC` forces the console region. ares normally picks it from
+  the mia game database, which has no entry for homebrew/test images; the forced
+  name is `[Nintendo] Super Famicom (PAL)`. PAL capture dumps a 564x288 frame.
 
 Rebuild it with:
 
@@ -38,8 +41,13 @@ deleted `Cellar/<pkg>/<version>` paths. Re-point them at the current versions
 ## Capture
 
 ```sh
-# ares: <outdir>/frame.raw (RGBA8 564x242), audio.f32 (stereo f32 @ 32 kHz), trace.txt
+# ares: <outdir>/frame.raw (RGBA8 564x242 NTSC / 564x288 PAL),
+#        audio.f32 (stereo f32 at the native S-DSP rate), trace.txt
 tools/snes-oracle/ares-capture.sh ROM.sfc 602 /tmp/ares-cap
+
+# PAL: ares selects the region from its game database, so force it here. The
+# local build accepts ARES_REGION=PAL (an oracle-only hook).
+ARES_REGION=PAL tools/snes-oracle/ares-capture.sh ROM.sfc 602 /tmp/ares-cap-pal
 
 # ours: <outdir>/frame.raw (RGBA8 256x224), audio.f32 (stereo f32 @ 32 kHz)
 IPL=.../ipl.rom tools/snes-oracle/ours-capture.sh ROM.sfc 600 /tmp/ours-cap
@@ -48,14 +56,28 @@ IPL=.../ipl.rom tools/snes-oracle/ours-capture.sh ROM.sfc 600 /tmp/ours-cap
 ares' internal frame counter starts two vblanks later than ours, so capture
 ares at `N` and ours at `N - 2` (or compare a static screen).
 
+Our core picks the region from the cartridge header country byte
+(`Region::Ntsc`/`Region::Pal`), which selects the master clock, the 262/312-line
+frame geometry and the `$213F` PAL bit. `unko-snes` reports it as `region:` in
+the example output.
+
 ## Compare
 
-Video geometry (NTSC, non-hires): ares' 564x242 dump contains our 256x224 frame
-at crop **(26, 9)** with **horizontal scale 2** — i.e. our pixel `x` is ares
-columns `26 + 2x` and `27 + 2x`. Verified 100.000% exact on a static screen.
+Video geometry (non-hires):
+
+| Region | ares dump | crop | horizontal scale |
+|---|---|---|---|
+| NTSC | 564x242 | **(26, 9)** | 2 |
+| PAL | 564x288 | **(22, 29)** | 2 |
+
+i.e. our pixel `x` is ares columns `x0 + 2x` and `x0 + 2x + 1`. Both are verified
+100.000% exact on a static screen.
 
 ```sh
 tools/snes-oracle/diff-frame.py /tmp/ours-cap/frame.raw /tmp/ares-cap/frame.raw
+# PAL needs the larger dump and the shifted crop:
+tools/snes-oracle/diff-frame.py /tmp/ours-cap/frame.raw /tmp/ares-cap-pal/frame.raw \
+  --ares-h 288 --x0 22 --y0 29
 tools/snes-oracle/diff-audio.py /tmp/ours-cap/audio.f32 /tmp/ares-cap/audio.f32
 ```
 
@@ -79,9 +101,11 @@ The manifest is intentionally not committed; compare two CSVs instead.
 ## Current baseline (2026-11-17)
 
 - Video geometry: `spc_timer` at 600 frames vs ares at 602 — **100.000% exact**
-  (57,344 / 57,344 pixels, mean |d| 0.000).
+  (57,344 / 57,344 pixels, mean |d| 0.000). PAL (`HblankEmuTest.sfc` at 300 vs
+  ares `ARES_REGION=PAL` 302) is also **100.000% exact** at crop (22, 29) in
+  ares' 564x288 dump.
 - Audio: `blargg_near_cd_quality.smc` against ares' raw pre-resampler output is
-  **bit-exact**: 0 differing samples over 639,704 stereo frames (1,200 frames)
+  **bit-exact**: 0 differing samples over 639,700 stereo frames (1,200 frames)
   at a -1-frame alignment. (Before `$00F0-$00FF` reads were deferred to their
   own access clock it differed in 3 samples out of 319,805.)
 - Regression manifest: all **212** ROMs under `test-roms/snes/` run to 180

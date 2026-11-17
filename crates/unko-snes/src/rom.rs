@@ -130,6 +130,11 @@ impl RomHeader {
         country_name(self.country_code)
     }
 
+    /// Video region declared by the header country code.
+    pub const fn region(&self) -> Region {
+        region_for_country(self.country_code)
+    }
+
     /// Human-readable cartridge type.
     pub fn cartridge_type_name(&self) -> &'static str {
         cartridge_type_name(self.cartridge_type)
@@ -442,6 +447,61 @@ pub const fn sram_size_bytes(code: u8) -> Option<usize> {
     }
 }
 
+/// Console video region.
+///
+/// ares treats the region as a *system* setting, but every commercial image
+/// declares one in its header; [`region_for_country`] maps that byte to the
+/// timing the cart was built for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Region {
+    /// 60 Hz, 262-line frames, 21,477,272 Hz master clock.
+    Ntsc,
+    /// 50 Hz, 312-line frames, 21,281,370 Hz master clock.
+    Pal,
+}
+
+impl Region {
+    /// Whether this is the PAL 50 Hz region.
+    pub const fn is_pal(self) -> bool {
+        matches!(self, Self::Pal)
+    }
+
+    /// S-CPU master clock in Hz (ares `Constants::Colorburst::NTSC * 6` and
+    /// `Constants::Colorburst::PAL * 4.8`).
+    pub const fn master_clock(self) -> u64 {
+        match self {
+            Self::Ntsc => 21_477_272,
+            Self::Pal => 21_281_370,
+        }
+    }
+
+    /// Scanlines in a non-interlaced frame (ares `PPUcounter::vperiod`).
+    pub const fn lines_per_frame(self) -> u16 {
+        match self {
+            Self::Ntsc => 262,
+            Self::Pal => 312,
+        }
+    }
+
+    /// Scanline at which vblank begins in non-overscan mode (ares
+    /// `PPU::updateVideoMode`: `vdisp = 225`).
+    pub const fn vdisp(self) -> u16 {
+        225
+    }
+}
+
+/// Video region implied by a header country code.
+///
+/// Europe and its national variants, China, Australia and Russia shipped
+/// 50 Hz PAL hardware; Japan, the Americas and Korea are 60 Hz. Brazil's
+/// PAL-M is a 60 Hz system, so it stays on NTSC timing.
+pub const fn region_for_country(code: u8) -> Region {
+    match code {
+        2..=9 | 0x0B | 0x0C | 0x0E..=0x10 => Region::Pal,
+        _ => Region::Ntsc,
+    }
+}
+
 /// Country/region name for a header country code.
 pub const fn country_name(code: u8) -> &'static str {
     match code {
@@ -744,5 +804,23 @@ mod tests {
         assert_eq!(sram_size_bytes(0x01), Some(0x800));
         assert_eq!(sram_size_bytes(0x0A), Some(0x10_0000));
         assert_eq!(sram_size_bytes(0x0B), None);
+    }
+
+    #[test]
+    fn maps_country_codes_to_regions() {
+        // 60 Hz.
+        for code in [0x00u8, 0x01, 0x0A, 0x0D, 0xFF] {
+            assert_eq!(region_for_country(code), Region::Ntsc, "code {code:02X}");
+        }
+        // 50 Hz: Europe and national variants, China, Australia, Russia.
+        for code in [
+            0x02u8, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B, 0x0C, 0x0E, 0x0F, 0x10,
+        ] {
+            assert_eq!(region_for_country(code), Region::Pal, "code {code:02X}");
+        }
+        assert_eq!(Region::Ntsc.master_clock(), 21_477_272);
+        assert_eq!(Region::Pal.master_clock(), 21_281_370);
+        assert_eq!(Region::Ntsc.lines_per_frame(), 262);
+        assert_eq!(Region::Pal.lines_per_frame(), 312);
     }
 }

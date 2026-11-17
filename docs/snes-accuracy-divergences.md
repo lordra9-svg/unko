@@ -486,7 +486,7 @@ with ares. The implementation follows ares, which is the primary source.
 - S-DSP synthesis runs one micro-step per two S-SMP clocks inside the S-SMP
   access path (ares `SMP::wait` → `synchronize(dsp)`). The PCM stream is
   measured against ares' **pre-resampler** i16 output: for
-  `blargg_near_cd_quality.smc` over 1,200 frames (639,704 stereo samples) the
+  `blargg_near_cd_quality.smc` over 1,200 frames (639,700 stereo samples) the
   two 16-bit streams have **zero** differing samples at a -1-frame alignment.
   The earlier 3-sample residual was the boot-phase drift, removed by deferring
   `$00F0-$00FF` reads to their own access clocks. (Earlier "RMS 8.6e-2" numbers
@@ -520,6 +520,21 @@ with ares. The implementation follows ares, which is the primary source.
   makes the frame bit-identical **against RustySNES** - see the hires-sampling
   item below, which shows RustySNES shares our 256-column compositing model and
   is therefore not a hires oracle.
+- **PAL region timing is implemented.** The region comes from the cartridge
+  header country byte (`Region::Ntsc`/`Region::Pal`; Europe and its variants,
+  China, Australia and Russia are PAL, while Brazil's PAL-M stays 60 Hz). PAL
+  uses the 21,281,370 Hz master clock (ares `Colorburst::PAL * 4.8`), so the
+  S-SMP ticks per master clock change with it; frames are 312 lines (313 on the
+  interlaced even field) with one 342-dot line at V=311, and `$213F` bit 4
+  reports the region. Verified: `HblankEmuTest.sfc` (header country Europe) at
+  300 vs ares `ARES_REGION=PAL` 302 is **100.000% exact** at the PAL crop
+  (22, 29) with horizontal scale 2 in ares' 564x288 dump.
+  - The NTSC one-short-line rule is also implemented (ares
+    `PPUcounter::tickScanline`: 340 dots at V=240 on a non-interlaced odd
+    field).
+  - Overscan (`SETINI` bit 2) is still not modelled: ares switches `vdisp` to
+    240 and shows 240 lines, while we keep the 225-line non-overscan window and
+    a 224-row output. No measured ROM depends on it yet.
 - **Interlace is implemented** on the hires geometry above. `frame_interlace`
   is latched at frame start from `SETINI` bit 0, `frame_height()` returns 448
   for those frames, and each field writes only its own output rows
