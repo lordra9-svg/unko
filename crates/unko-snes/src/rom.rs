@@ -240,6 +240,75 @@ impl Cartridge {
         })
     }
 
+    /// Parse a ROM image, falling back to a synthesized LoROM/HiROM header when
+    /// no header passes validation.
+    ///
+    /// Homebrew images and tech demos often ship with an empty (`$FF`) header
+    /// table. The fallback keeps the reset vector and image size, assumes
+    /// LoROM when the `$7FFC` vector is plausible and HiROM when only the
+    /// `$FFFC` vector is, and reports no SRAM. Region defaults to NTSC/Japan
+    /// and the cartridge type to plain ROM, so a caller that knows the board
+    /// (e.g. a DSP-1 demo) must still attach the coprocessor explicitly.
+    pub fn from_bytes_lenient(bytes: &[u8]) -> Result<Self, RomError> {
+        match Self::from_bytes(bytes) {
+            Ok(cartridge) => return Ok(cartridge),
+            Err(RomError::NoValidHeader) => {}
+            Err(error) => return Err(error),
+        }
+
+        let (rom, has_copier_header) = strip_copier_header(bytes);
+        if rom.len() < 0x8000 {
+            return Err(RomError::TooSmall { size: rom.len() });
+        }
+
+        let lorom_reset = u16::from_le_bytes([rom[0x7FFC], rom[0x7FFD]]);
+        let hirom_reset = if rom.len() >= 0x1_0000 {
+            u16::from_le_bytes([rom[0xFFFC], rom[0xFFFD]])
+        } else {
+            0
+        };
+
+        let (mapping, header_offset, reset_vector) = if lorom_reset >= 0x8000 {
+            (Mapping::LoRom, LOROM_HEADER, lorom_reset)
+        } else if hirom_reset >= 0x8000 {
+            (Mapping::HiRom, HIROM_HEADER, hirom_reset)
+        } else {
+            return Err(RomError::NoValidHeader);
+        };
+
+        let map_mode = match mapping {
+            Mapping::LoRom => 0x20,
+            Mapping::HiRom => 0x21,
+            Mapping::ExLoRom => 0x22,
+            Mapping::ExHiRom => 0x25,
+        };
+        let header = RomHeader {
+            mapping,
+            header_offset,
+            title: String::new(),
+            map_mode,
+            cartridge_type: 0x00,
+            rom_size_code: 0,
+            sram_size_code: 0,
+            country_code: 0,
+            license_code: 0,
+            version: 0,
+            checksum: 0,
+            checksum_complement: 0,
+            reset_vector,
+            declared_rom_size: Some(rom.len()),
+            declared_sram_size: Some(0),
+            header_score: 0,
+        };
+
+        Ok(Self {
+            rom: rom.to_vec(),
+            header,
+            sram: Vec::new(),
+            has_copier_header,
+        })
+    }
+
     /// Headerless ROM image.
     pub fn rom(&self) -> &[u8] {
         &self.rom
@@ -812,6 +881,19 @@ mod tests {
         assert_eq!(sram_size_bytes(0x01), Some(0x800));
         assert_eq!(sram_size_bytes(0x0A), Some(0x10_0000));
         assert_eq!(sram_size_bytes(0x0B), None);
+    }
+
+    #[test]
+    fn lenient_parser_recovers_a_headerless_lorom() {
+        // An empty ($ff) header table with a plausible $7ffc reset vector.
+        let mut rom = vec![0xFFu8; 0x2_0000];
+        rom[0x7FFC..0x7FFE].copy_from_slice(&0x8000u16.to_le_bytes());
+        rom[0..4].copy_from_slice(&[0x78, 0x18, 0xFB, 0x4C]);
+        let cartridge = Cartridge::from_bytes_lenient(&rom).expect("lenient LoROM");
+        assert_eq!(cartridge.header().mapping, Mapping::LoRom);
+        assert_eq!(cartridge.header().reset_vector, 0x8000);
+        assert_eq!(cartridge.rom().len(), rom.len());
+        assert!(Cartridge::from_bytes(&rom).is_err());
     }
 
     #[test]

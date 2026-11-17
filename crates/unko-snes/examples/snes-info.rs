@@ -18,7 +18,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let cartridge = match Cartridge::from_bytes(&bytes) {
+    let cartridge = match Cartridge::from_bytes_lenient(&bytes) {
         Ok(cartridge) => cartridge,
         Err(error) => {
             eprintln!("{path}: {error}");
@@ -47,6 +47,20 @@ fn main() -> ExitCode {
     println!("copier head: {}", cartridge.has_copier_header());
 
     let mut system = Snes::new(cartridge);
+    if let Some(path) = std::env::var_os("DSP1_ROM") {
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!("{}: {error}", path.to_string_lossy());
+                return ExitCode::FAILURE;
+            }
+        };
+        if let Err(error) = system.set_dsp1_firmware(&bytes) {
+            eprintln!("{}: {error}", path.to_string_lossy());
+            return ExitCode::FAILURE;
+        }
+        println!("dsp1:        {}", path.to_string_lossy());
+    }
     if let Some(ipl_path) = env::args().nth(2) {
         let bytes = match std::fs::read(&ipl_path) {
             Ok(bytes) => bytes,
@@ -202,6 +216,23 @@ fn main() -> ExitCode {
             bytes.len()
         );
     }
+    if std::env::var_os("DSP_STATE").is_some() {
+        if let Some(dsp) = &system.dsp1 {
+            eprintln!(
+                "DSP pc={:04X} sr={:04X} dr={:04X} rp={:04X} dp={:04X} k={} l={} ticks={}",
+                dsp.regs.pc,
+                dsp.status(),
+                dsp.regs.dr,
+                dsp.regs.rp,
+                dsp.regs.dp,
+                dsp.regs.k,
+                dsp.regs.l,
+                dsp.ticks
+            );
+        } else {
+            eprintln!("DSP not attached");
+        }
+    }
     if std::env::var_os("PPU_STATE").is_some() {
         eprintln!(
             "PPU overscan={} interlace={} hires={} height={} width={} vdisp={} last={}",
@@ -212,6 +243,10 @@ fn main() -> ExitCode {
             system.ppu.frame_width(),
             system.ppu.vdisp(),
             system.ppu.visible_last(),
+        );
+        let (mode, tm, ts, sc, nba, bh, bv) = system.ppu.debug_regs();
+        eprintln!(
+            "PPU mode={mode} tm={tm:02X} ts={ts:02X} sc={sc:02X?} nba={nba:02X?} h={bh:?} v={bv:?}"
         );
     }
     println!(

@@ -26,6 +26,7 @@ pub mod dma;
 pub mod dsp;
 pub mod gsu;
 pub mod io;
+pub mod necdsp;
 pub mod ppu;
 pub mod rom;
 pub mod spc700;
@@ -37,6 +38,7 @@ pub use dma::{Dma, DmaBus, DmaChannel, DmaTransfer};
 pub use dsp::Dsp;
 pub use gsu::Gsu;
 pub use io::CpuIo;
+pub use necdsp::{DspError, DspFlags, DspRegisters, DspWindow, NecDsp};
 pub use ppu::Ppu;
 pub use rom::{
     region_for_country, rom_size_bytes, sram_size_bytes, BusTarget, Cartridge, Mapping, Region,

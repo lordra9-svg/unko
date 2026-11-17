@@ -232,6 +232,16 @@ Validation so far:
   verified against ares below. A release SuperFX image (e.g. Star Fox) is not
   present locally, so the end-to-end game path is not yet measured; Final
   Fantasy V was still in its boot sequence at the 20M-cycle sample.
+- The NEC DSP-1 (uPD7725) coprocessor is implemented (`necdsp.rs`): the full
+  24-bit-word interpreter (OP/RT/JP/LD with every ALU and branch mode), the
+  2K program ROM / 1K data ROM / 256-word data RAM, the DR/SR byte-pair
+  handshake (RQM/DRS/DRC) and the board window selected from the mapping and
+  ROM size. Firmware is installed at runtime from the user-supplied 8 KiB
+  `dsp1.rom`/`dsp1b.rom`; a lenient header fallback boots headerless demos.
+  Verified against ares on Super Mario Kart (USA) at the same frame:
+  **99.981%** (57,333/57,344; the 11 residuals are two left-edge sprite
+  columns), and on the DSP-1 Tech Demo at **95.714%** with the DSP-driven grid
+  exact and only the sprite-font text differing.
 
 The PPU is line-based rather than dot-scheduled. **Interlace is implemented**
 (448-line output, odd field on the odd output rows, sprite and hires BG vertical

@@ -671,6 +671,50 @@ Known limitations:
 - Only the GSU-1/GSU-2 (same-clock) boards are modelled; the Mario Chip 1
   clock-select differences are treated as the same master clock.
 
+## NEC DSP-1 (uPD7725)
+
+`crates/unko-snes/src/necdsp.rs` ports the ares `uPD96050` engine for the
+uPD7725 revision (DSP-1/1A/1B, DSP-2/3/4):
+
+- the full 24-bit-word interpreter: OP (all ALU operations, P-select,
+  DPL/DPHM, RP decrement, move source/destination), RT, JP (every branch
+  condition, `jmpl`/`hjmp`, calls/returns) and LD (all destinations including
+  the DR/SR/SO/K/L/DP/TRB forms);
+- 2K x 24-bit program ROM, 1K x 16-bit data ROM and 256 x 16-bit data RAM;
+- the host interface: the DR data register (two-byte handshake in 16-bit mode,
+  direct byte in 8-bit mode), the SR status image (RQM, DRS masked by DRC,
+  USF0/1, P0/1), the DSP-1 STOP IRQ and its `$3031`-style acknowledge;
+- free-running timing: the 7.6 MHz oscillator is ticked from the S-CPU master
+  clock with a rational credit; host reads/writes exchange the current DR/SR
+  instead of catching the DSP up synchronously (the model that avoids stopping
+  on the first RQM of the firmware's wait loop);
+- board window selection from the mapping and ROM size, matching ares'
+  `NEC-HIROM` (`$00-$1F,$80-$9F:$6000-$7FFF`, SR in the upper page),
+  `NEC-LOROM` (`$30-$3F,$B0-$BF:$8000-$FFFF`) and `NEC-LOROM-RAM`
+  (`$60-$6F,$E0-$EF:$0000-$7FFF`) boards;
+- firmware installed at runtime from the user-supplied 8 KiB
+  `dsp1.rom`/`dsp1b.rom` (`Snes::set_dsp1_firmware`); the firmware is
+  copyrighted chip data and is never embedded in this crate;
+- save-state coverage: the whole `NecDsp` (ROMs, RAM, registers, flags and
+  window) is part of `SnesState`;
+- `Cartridge::from_bytes_lenient` recovers a LoROM/HiROM header from the reset
+  vector when the header table is empty, so headerless demos can boot.
+
+Verification:
+
+- **Super Mario Kart (USA)** (HiROM, header type `$05`, ares `NEC-HIROM-RAM`,
+  `dsp1b.rom`): at frame 600 vs ares 600 the frame is **99.981%** exact
+  (57,333/57,344, mean |d| 0.086). The 11 remaining pixels are two left-edge
+  sprite columns at x=0-1, y=175-182 (a pre-existing sprite-edge detail, not
+  DSP arithmetic). The entire Mode 7 track/title is DSP-driven and matches.
+- **DSP1 Tech Demo (World)** (headerless 128 KiB LoROM, `dsp1.rom`): the demo
+  uses the `$BF:$8000` DR / `$BF:$C000` SR window. With a local ares database
+  entry forcing the `NEC-LOROM` board, the frame at 302 is **95.714%** exact.
+  The DSP-driven grid is pixel-exact; only the demo's sprite-font glyphs
+  differ (its custom bitplane/VRAM decompressor, not the DSP core).
+- `snes-info` accepts `DSP1_ROM=<path>`; the firmware and the commercial ROMs
+  are not committed.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

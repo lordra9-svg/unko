@@ -11,13 +11,14 @@ use crate::cpu::{Cpu, CpuBus};
 use crate::dma::{Dma, DmaBus};
 use crate::gsu::Gsu;
 use crate::io::CpuIo;
+use crate::necdsp::{DspError, DspWindow, NecDsp};
 use crate::ppu::Ppu;
 use crate::rom::{Cartridge, Region};
 
 /// Magic number at the start of a serialized save state (`"SNES"`).
 pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
 /// Save-state format version. Bump whenever the serialized shape changes.
-pub const SAVE_STATE_VERSION: u32 = 2;
+pub const SAVE_STATE_VERSION: u32 = 3;
 
 /// A complete `unko-snes` snapshot.
 ///
@@ -42,6 +43,10 @@ pub struct SnesState {
     pub gsu: Option<Gsu>,
     /// Carried GSU master-clock credit.
     pub gsu_credit: i64,
+    /// NEC DSP-1 coprocessor, when firmware is installed.
+    pub dsp1: Option<NecDsp>,
+    /// Carried DSP-1 clock credit.
+    pub dsp_credit: i64,
     /// DMA/HDMA channels.
     pub dma: Dma,
     /// Controller ports and CPU I/O registers.
@@ -151,6 +156,10 @@ pub struct Snes {
     pub gsu: Option<Gsu>,
     /// Carried GSU master-clock credit.
     gsu_credit: i64,
+    /// NEC DSP-1 coprocessor, when firmware is installed.
+    pub dsp1: Option<NecDsp>,
+    /// Carried DSP-1 clock credit.
+    dsp_credit: i64,
     /// General-purpose DMA channels.
     pub dma: Dma,
     /// Controller ports, auto-poll and the multiply/divide unit.
@@ -202,6 +211,8 @@ impl Snes {
             region,
             gsu: if has_superfx { Some(Gsu::new()) } else { None },
             gsu_credit: 0,
+            dsp1: None,
+            dsp_credit: 0,
             dma: Dma::new(),
             io: CpuIo::new(),
             wram: vec![0; WRAM_SIZE],
@@ -233,6 +244,21 @@ impl Snes {
         self.region
     }
 
+    /// Install the DSP-1 firmware and attach the coprocessor.
+    ///
+    /// The firmware is the 8 KiB `dsp1.rom`/`dsp1b.rom` dump (2K x 3-byte
+    /// program ROM followed by 1K x 2-byte data ROM). The board window is
+    /// selected from the cartridge mapping and ROM size; passing a different
+    /// length is rejected. Firmware is copyrighted chip data, so it is supplied
+    /// by the host rather than embedded in this crate.
+    pub fn set_dsp1_firmware(&mut self, firmware: &[u8]) -> Result<(), DspError> {
+        let window = DspWindow::select(self.cart.header().mapping, self.cart.rom().len());
+        let dsp = NecDsp::from_firmware(firmware, window)?;
+        self.dsp1 = Some(dsp);
+        self.dsp_credit = 0;
+        Ok(())
+    }
+
     /// Take a typed snapshot of the full mutable state.
     ///
     /// The ROM and the derived region are not included: a snapshot is meant to
@@ -246,6 +272,8 @@ impl Snes {
             ppu: self.ppu.clone(),
             gsu: self.gsu.clone(),
             gsu_credit: self.gsu_credit,
+            dsp1: self.dsp1.clone(),
+            dsp_credit: self.dsp_credit,
             dma: self.dma.clone(),
             io: self.io.clone(),
             wram: self.wram.clone(),
@@ -300,6 +328,8 @@ impl Snes {
         self.ppu = state.ppu.clone();
         self.gsu = state.gsu.clone();
         self.gsu_credit = state.gsu_credit;
+        self.dsp1 = state.dsp1.clone();
+        self.dsp_credit = state.dsp_credit;
         self.dma = state.dma.clone();
         self.io = state.io.clone();
         self.wram.copy_from_slice(&state.wram);
@@ -375,6 +405,10 @@ impl Snes {
             gsu.power();
         }
         self.gsu_credit = 0;
+        if let Some(dsp) = self.dsp1.as_mut() {
+            dsp.power();
+        }
+        self.dsp_credit = 0;
         self.dma.hdma_reset();
         self.io.reset();
         self.apu_credit = 0;
@@ -394,6 +428,7 @@ impl Snes {
             wram: &mut self.wram,
             cart: &mut self.cart,
             gsu: &mut self.gsu,
+            dsp1: &mut self.dsp1,
             apu: &mut self.apu,
             ppu: &mut self.ppu,
             dma: &mut self.dma,
@@ -431,6 +466,7 @@ impl Snes {
                         wram: &mut self.wram,
                         cart: &mut self.cart,
                         gsu: &mut self.gsu,
+                        dsp1: &mut self.dsp1,
                         apu: &mut self.apu,
                         ppu: &mut self.ppu,
                         dma: &mut self.dma,
@@ -530,6 +566,15 @@ impl Snes {
             while self.gsu_credit > 0 {
                 let cost = gsu.run_one(rom);
                 self.gsu_credit -= i64::from(cost.max(1));
+            }
+        }
+        // The DSP-1 free-runs at 7.6 MHz; tick it with a rational credit.
+        if let Some(dsp) = self.dsp1.as_mut() {
+            let den = self.region.master_clock() as i64;
+            self.dsp_credit += i64::from(clocks) * 7_600_000;
+            while self.dsp_credit >= den {
+                dsp.exec();
+                self.dsp_credit -= den;
             }
         }
         self.clock += u64::from(clocks);
@@ -638,6 +683,7 @@ impl Snes {
             wram: &mut self.wram,
             cart: &mut self.cart,
             gsu: &mut self.gsu,
+            dsp1: &mut self.dsp1,
             apu: &mut self.apu,
             ppu: &mut self.ppu,
             dma: &mut self.dma,
@@ -693,6 +739,7 @@ struct SnesBus<'a> {
     apu: &'a mut Apu,
     ppu: &'a mut Ppu,
     gsu: &'a mut Option<Gsu>,
+    dsp1: &'a mut Option<NecDsp>,
     dma: &'a mut Dma,
     io: &'a mut CpuIo,
     nmi_enable: &'a mut bool,
@@ -736,6 +783,11 @@ impl SnesBus<'_> {
 }
 
 impl SnesBus<'_> {
+    /// Map an S-CPU address onto the DSP-1 DR/SR ports, if the DSP is attached.
+    fn dsp1_port(&self, address: u32) -> Option<bool> {
+        self.dsp1.as_ref()?.window.classify(address)
+    }
+
     /// Map an S-CPU address onto the SuperFX coprocessor, if present.
     fn superfx_read(&mut self, address: u32, mdr: u8) -> Option<u8> {
         let gsu = self.gsu.as_mut()?;
@@ -819,6 +871,9 @@ impl CpuBus for SnesBus<'_> {
         if bank == 0x7E || bank == 0x7F {
             return self.wram[((bank as usize & 1) << 16) | offset];
         }
+        if let Some(status) = self.dsp1_port(address) {
+            return self.dsp1.as_mut().expect("DSP-1 present").read_port(status);
+        }
         if let Some(value) = self.superfx_read(address, mdr) {
             return value;
         }
@@ -887,6 +942,13 @@ impl CpuBus for SnesBus<'_> {
 
         if bank == 0x7E || bank == 0x7F {
             self.wram[((bank as usize & 1) << 16) | offset] = value;
+            return;
+        }
+        if let Some(status) = self.dsp1_port(address) {
+            self.dsp1
+                .as_mut()
+                .expect("DSP-1 present")
+                .write_port(status, value);
             return;
         }
         if self.superfx_write(address, value) {
@@ -1122,6 +1184,7 @@ mod tests {
             wram: &mut system.wram,
             cart: &mut system.cart,
             gsu: &mut system.gsu,
+            dsp1: &mut system.dsp1,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
             dma: &mut system.dma,
@@ -1148,6 +1211,7 @@ mod tests {
             wram: &mut system.wram,
             cart: &mut system.cart,
             gsu: &mut system.gsu,
+            dsp1: &mut system.dsp1,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
             dma: &mut system.dma,
@@ -1177,6 +1241,7 @@ mod tests {
             wram: &mut system.wram,
             cart: &mut system.cart,
             gsu: &mut system.gsu,
+            dsp1: &mut system.dsp1,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
             dma: &mut system.dma,
@@ -1362,6 +1427,37 @@ mod tests {
     }
 
     #[test]
+    fn dsp1_firmware_attaches_ports_and_round_trips() {
+        let mut rom = build_lorom(&[0x4C, 0x00, 0x80]);
+        let header = Mapping::LoRom.header_offset();
+        rom[header + 0x16] = 0x03; // ROM + coprocessor
+        let firmware = vec![0u8; 8192];
+
+        let cartridge = Cartridge::from_bytes(&rom).expect("valid LoROM");
+        let mut system = Snes::new(cartridge);
+        system.set_dsp1_firmware(&firmware).expect("DSP-1 firmware");
+        assert!(system.dsp1.is_some());
+        // LoROM <= 1 MiB: DR at $30-$3F:$8000-$BFFF, SR at $C000-$FFFF.
+        system.write(0x30_8000, 0x34);
+        system.write(0x30_8000, 0x12);
+        assert_eq!(system.dsp1.as_ref().unwrap().regs.dr, 0x1234);
+        // Reading SR must be routed to the status register, not ROM.
+        let status = system.read(0x30_C000, 0);
+        assert_eq!(status, 0x00);
+
+        system.run_cycles(20_000, 200_000);
+        let saved = system.save_state();
+
+        let mut restored = Snes::new(Cartridge::from_bytes(&rom).expect("valid LoROM"));
+        restored
+            .set_dsp1_firmware(&firmware)
+            .expect("DSP-1 firmware");
+        restored.reset();
+        restored.load_state(&saved).expect("load DSP-1 state");
+        assert_eq!(restored, system);
+    }
+
+    #[test]
     fn save_state_rejects_bad_input() {
         let mut system = Snes::new(cartridge(&[0xDB]));
 
@@ -1411,6 +1507,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
+                dsp1: &mut system.dsp1,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1486,6 +1583,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
+                dsp1: &mut system.dsp1,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1512,6 +1610,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
+                dsp1: &mut system.dsp1,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1538,6 +1637,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
+                dsp1: &mut system.dsp1,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1580,6 +1680,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
+                dsp1: &mut system.dsp1,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1632,6 +1733,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
+                dsp1: &mut system.dsp1,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1670,6 +1772,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
+                dsp1: &mut system.dsp1,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1699,6 +1802,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
+                dsp1: &mut system.dsp1,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1778,6 +1882,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
+                dsp1: &mut system.dsp1,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1805,6 +1910,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
+                dsp1: &mut system.dsp1,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,

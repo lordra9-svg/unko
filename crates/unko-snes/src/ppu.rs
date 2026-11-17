@@ -360,6 +360,20 @@ impl Ppu {
         self.bg_mode
     }
 
+    /// Debug: `(bg_mode, tm, ts, bg_sc, bg_nba, bg_h, bg_v)`.
+    #[allow(clippy::type_complexity)]
+    pub const fn debug_regs(&self) -> (u8, u8, u8, [u8; 4], [u8; 4], [u16; 4], [u16; 4]) {
+        (
+            self.bg_mode,
+            self.tm,
+            self.ts,
+            self.bg_sc,
+            self.bg_nba,
+            self.bg_h,
+            self.bg_v,
+        )
+    }
+
     /// Background screen base/mode register (debug).
     pub const fn bg_sc(&self, layer: usize) -> u8 {
         self.bg_sc[layer]

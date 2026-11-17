@@ -105,6 +105,31 @@ tools/snes-oracle/diff-audio.py /tmp/ours-cap/audio.f32 /tmp/ares-cap/audio.f32
 offset (the two DSP phases can differ by a sample), then reports the first
 sample above the tolerance, RMS and peak levels.
 
+## DSP-1 firmware
+
+`unko-snes` never embeds the copyrighted NEC uPD7725 firmware. Point
+`DSP1_ROM` at an 8 KiB `dsp1.rom`/`dsp1b.rom` dump when running a DSP-1 title
+(the local ares tree has both under `mia/Firmware/Super Famicom/`):
+
+```sh
+DSP1_ROM=.../dsp1b.rom tools/snes-oracle/ours-capture.sh \
+  "Super Mario Kart (USA).sfc" 600 /tmp/smk
+# ares picks the board from its game database; capture the same frame index
+# for animated titles (the 0/2-frame rule is only safe for static screens).
+ARES_REGION=NTSC tools/snes-oracle/ares-capture.sh \
+  "Super Mario Kart (USA).sfc" 600 /tmp/smk-ares
+tools/snes-oracle/diff-frame.py /tmp/smk/frame.raw /tmp/smk-ares/frame.raw
+```
+
+Super Mario Kart (USA) is **99.981%** exact at the same frame (the 11 residual
+pixels are two left-edge sprite columns).
+
+The bundled `DSP1 Tech Demo` has an empty header table, so ares cannot infer
+its board. The local ares database (`mia/Database/Super Famicom.bml`) carries a
+verification entry keyed by the ROM's SHA-256 that forces `NEC-LOROM`; with it,
+the demo's DSP-driven grid matches and the frame is **95.714%** (the remaining
+difference is the demo's own sprite-font decompressor, not DSP arithmetic).
+
 ## Regression baseline
 
 `baseline.py` runs every ROM under `test-roms/snes/` for a fixed frame count and
