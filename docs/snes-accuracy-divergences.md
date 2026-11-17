@@ -67,54 +67,31 @@ rendering difference:
   differing pixels.
 
 S-DSP output is now instrumented but not sample-identical:
-
-- blargg `spc_smp` reports `Failed 02` (CPU Instructions/Full BRK) and
-  `spc_dsp6` reports `Failed 02` (Echo/esa_changes). For `spc_smp` the
-  suppressed readings CRC is `40E4B4BE` where the ROM expects `654FF73E`.
-  The test's BRK matches ares instruction-for-instruction (stack `02,01,P`,
-  `I=0`, `B=1`), so the failure is later.
-  - The framework's CRC-input stream (`$0613` called with A) was logged in
-    both emulators. The first divergence is at character 510: for one
-    stack-fingerprint entry we emit `D0 R1 W0 W1` and RustySNES emits
-    `D0 W0 R1 W1`. Same checks, different order, so a data-dependent branch
-    in the test's check routine takes the other path; the CRC difference is
-    the consequence, not a broken CRC.
-  - An instruction-level trace (PC, SP, A, X, Y, PSW and stack
-    `$01E0-$01EF`) was captured in both emulators from the test entry. The
-    flow is **identical for 198,411 instructions**, including the `$89AB` BRK
-    and the whole `$072D` handler, so the BRK/stack execution is not the
-    cause; the differing `D0 R1 W0 W1` marker values must come from RAM data
-    the print routine reads, not from the CPU registers.
-  - The first *flow* difference is later, in a timer2 poll (`$06D0` is
-    `E4 FF F0 FC`, `lda $FF; beq`): we exit with A=1 while RustySNES still
-    reads 0, i.e. a timer2 read phase difference. Forcing the `$F1`
-    timer2-reset behaviour to RustySNES' variant (rising edge only) leaves the
-    failure CRC unchanged, so it is not that quirk.
-  - **The failure originates before test 2.** Full-ARAM comparison at frame
-    300 (best-aligned RS frame) differs by only five bytes: the cumulative
-    `$DC-$DF` CRC state and `$0745` (`0x34` ours vs `0x35` RS). The test-2
-    compare checks the CRC accumulated over *all* earlier output, so a
-    divergence in test 1 (CPU Instructions/Edge arith) fails test 2 even
-    though its BRK/handler trace is identical. `$0745` is written through
-    indexed addressing (no absolute reference in the ROM), so it is framework
-    scratch rather than a directly named variable.
-  - `$0745` turned out to be memory-test scratch: the writer at PC `$0768`
-    fills it with `$FF` down to `$00` over 256 iterations, so the frame-300
-    difference there was a mid-loop phase, not a wrong value. The first real
-    divergence remains the cumulative CRC (and therefore test-1 output).
-  - Found and fixed a real ordering divergence in `INCW`/`DECW`
-    (`direct_modify_word`): ares loads the low byte, **stores** it, then loads
-    and stores the high byte; we loaded both before storing either. The bus
-    interleaving now matches ares. This changes the `spc_smp` failure readings
-    (CRC `40E4B4BE` -> `8625AFBD`) but not yet the outcome.
-  - Next step: capture the test-1 check-table entry that first differs
-    (character ~510) with a RAM write trace at the same instruction step, and
-    decode the marker table's `D`/`W`/`R` columns. Both failures predate the
-  current scheduling work (the framebuffers are byte-identical to the previous
-  build) and are the concrete audio/SPC items to fix next. `spc_dsp6` used to
-  panic in a debug build on a 16-bit BRR/echo address overflow; those sums now
-  wrap like ares' `n16` arithmetic.
-
+- blargg **`spc_smp` now reports `PASSED TESTS`** (all 19 sub-tests). The
+  path there is worth recording:
+  - `Failed 02` (CPU Instructions/Full BRK) was a red herring: the `BRK`
+    instruction, the pushed `PC`/`P`, `I=0`, `B=1` and the whole `$072D`
+    handler matched RustySNES instruction-for-instruction for 198,411
+    instructions. The ROM compares a *cumulative* CRC, so an earlier test's
+    output decides a later test's verdict.
+  - Diffing the framework's CRC-input stream (`$0613` called with A) against
+    RustySNES found the first real divergence at character 510: the check
+    table entry for `DECW dp` printed `D0 R1 W0 W1` instead of
+    `D0 W0 R1 W1`. ares `instructionDirectModifyWord` loads the low byte,
+    **stores** it, then loads and stores the high byte; we loaded both bytes
+    before storing either. `INCW`/`DECW` now follow the ares bus order, with
+    word flags from the full 16-bit result.
+  - The next divergence was test 9 (`smp reg read-write behavior`). ares keeps
+    **two independent four-byte latches**: `io.apu0..3` is written by the
+    S-CPU and read by the S-SMP at `$F4-$F7`; `io.cpu0..3` is written by the
+    S-SMP and read by the S-CPU at `$2140-$2143`. A temporary experiment that
+    resolved `$F4-$F7` from the S-CPU write history made an S-SMP read of
+    `$F6` return a stale CPU-side value (`0x30`) instead of the real latch
+    (`0x00`) - exactly what test 9 checks. Reading the latch directly fixed
+    it; `smp_port_reads_see_only_the_cpu_latches` pins both directions.
+- blargg `spc_dsp6` reports `Failed 02` (Echo/esa_changes). It used to panic in
+  a debug build on a 16-bit BRR/echo address overflow; those sums now wrap like
+  ares' `n16` arithmetic. This is the concrete audio item to fix next.
 - At 600 frames, 36 of the 128 DSP registers differ from the RustySNES oracle;
   voices 6 and 7 match exactly and voices 0-4 are at different song positions.
 - The queued audio is non-silent (RMS about 0.012 vs ares 0.023) and the best

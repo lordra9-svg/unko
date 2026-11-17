@@ -164,21 +164,21 @@ Validation so far:
   since the boot takes a different number of frames). Two blocking bugs were
   fixed: the `$2180-$2183` WRAM data port and `$4210` bit 7 latching at
   vblank even when NMI is disabled.
-- blargg **`spc_timer` reports `PASSED TESTS`**; `spc_smp` reports
-  `Failed 02` (test 02 is CPU Instructions/Full BRK) and `spc_dsp6` reports
-  `Failed 02` (Echo/esa_changes), both reproduced with the previous build and
-  recorded in the divergence ledger. The `spc_smp` failure dump was captured
-  from VRAM: the suppressed readings CRC is `40E4B4BE` against the ROM's
-  expected `654FF73E`, and the table lists direct-page `E7-FB` stack/IO
-  entries. The test's BRK instruction itself matches ares (pushed `PC`/`P`,
-  `I←0`, `B←1`, stack bytes `02,01,P`), so the divergence is in a later part
-  of the test's stack fingerprint.
-- blargg **`spc_timer` now reports `PASSED TESTS`**. The ROM prints a CRC of
-  ten timer readings and compares it with `D06CD0A9`; ours printed
-  `1111111111` (`B358FA31`) until `RET`/`RETI`/`SLEEP`/`STP` were given their
-  ares cycle counts and the timer stage counters were stepped by the ares
-  `timerWaitStates` table (2/4/8/16 clocks) instead of the glitchy
-  CPU table (2/4/10/20).
+- blargg **`spc_timer` and `spc_smp` both report `PASSED TESTS`**;
+  `spc_dsp6` reports `Failed 02` (Echo/esa_changes), recorded in the
+  divergence ledger. `spc_smp` needed two real fixes found by diffing the
+  framework's CRC-input stream against RustySNES character by character:
+  `INCW`/`DECW` now load, store, then load and store the other byte (ares'
+  bus order), and an S-SMP read of `$F4-$F7` returns the CPU-to-SMP latch
+  instead of a value resolved from the S-CPU write history. The latter had
+  been an experiment; its test is now
+  `smp_port_reads_see_only_the_cpu_latches`, which pins both directions of the
+  two independent four-byte latches.
+  - `spc_timer` compares a CRC of ten timer readings with `D06CD0A9`; ours
+    printed `1111111111` (`B358FA31`) until `RET`/`RETI`/`SLEEP`/`STP` were
+    given their ares cycle counts and the timer stage counters were stepped by
+    the ares `timerWaitStates` table (2/4/8/16 clocks) instead of the glitchy
+    CPU table (2/4/10/20).
 - Super Mario World with the local 64-byte IPL ROM, measured against RustySNES
   frame dumps (cross-checked against ares `--dump-frame`; the ares dump's
   content index runs two frames behind its `--frames` label):
