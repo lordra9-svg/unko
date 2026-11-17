@@ -157,6 +157,21 @@ S-DSP output is now instrumented but not sample-identical:
     (`$F008`: ours `07F8`, reference `0800`). So the first divergence is a
     **voice-to-echo value stepped one sample early**, not the CRC, not the
     S-SMP and not the echo addressing.
+  - **DSP-register write timing tested and rejected.** The natural counterpart
+    to the read work is to commit `$F2`/`$F3` stores at their own access clock
+    (ares commits a store at the *end* of its access, `step(wait)` then `write`,
+    while a load samples mid-access). Three variants were tried on
+    `spc-resume`: (a) deferring every `$00F0-$00FF` store hangs the boot
+    entirely; (b) narrowing to `$F2`/`$F3` with the write at the access start
+    and (c) with it at the access end both keep `spc_timer` green but regress
+    `spc_smp` from `PASSED TESTS` to `Failed`, and `spc_dsp6` then reports
+    `Failed 03` (test 1 `Echo/basics`, which passes today). So our current
+    commit-at-execution write timing is closer to ares than the deferred one,
+    and this is not the one-sample echo offset either.
+  - **`clock.counter` phase is ruled out structurally.** `Dsp::reset` is called
+    exactly once (`Apu::reset` from `Snes::reset`), so `clock.counter` starts at
+    zero exactly as in the reference (ares does not reset `clock` at all, and it
+    is zero-initialised), and `counterTick` runs once per sample in `misc30`.
   - Two intermediate variants (over-counting one access unit per deferred read,
     so the S-SMP ran slower than real time) *did* move the Super Mario World
     content offset from two frames to one (`ours 599 == RS 600` at 100.000%).
