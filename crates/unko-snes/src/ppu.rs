@@ -14,11 +14,15 @@ pub const SCREEN_HEIGHT: usize = 224;
 /// emits two columns per pixel clock. `SCREEN_WIDTH` stays the compositing
 /// width, matching the reference PPU model.
 pub const MAX_SCREEN_WIDTH: usize = 512;
+/// Output height in interlace mode: two fields of [`SCREEN_HEIGHT`] lines,
+/// written on alternate output rows (ares `DAC::scanline`: `yScale = 2`, plus
+/// one row for the odd field).
+pub const MAX_SCREEN_HEIGHT: usize = SCREEN_HEIGHT * 2;
 /// RGBA8888 frame size at the normal (256-wide) resolution.
 pub const FRAME_SIZE: usize = SCREEN_WIDTH * SCREEN_HEIGHT * 4;
-/// Backing storage is always hi-res capacity so a mode change mid-frame never
+/// Backing storage is always maximum capacity so a mode change mid-frame never
 /// reallocates; [`Ppu::frame_buffer`] returns a resolution-sized slice of it.
-const MAX_FRAME_SIZE: usize = MAX_SCREEN_WIDTH * SCREEN_HEIGHT * 4;
+const MAX_FRAME_SIZE: usize = MAX_SCREEN_WIDTH * MAX_SCREEN_HEIGHT * 4;
 
 const DOTS_PER_LINE: u16 = 341;
 const LINES_PER_FRAME: u16 = 262;
@@ -33,6 +37,11 @@ pub struct Ppu {
     framebuffer: Box<[u8; MAX_FRAME_SIZE]>,
     /// Whether the presented frame is hi-res (latched at frame start).
     frame_hires: bool,
+    /// Whether the presented frame is interlaced (latched at frame start).
+    frame_interlace: bool,
+    /// Number of scanlines in the frame being rendered: 262 normally, 263 on
+    /// an interlaced even field (ares `PPUcounter::tickScanline`).
+    frame_lines: u16,
     line: u16,
     dot: u16,
     field: bool,
@@ -125,6 +134,8 @@ impl Ppu {
             oam: [0; 0x220],
             framebuffer: Box::new([0; MAX_FRAME_SIZE]),
             frame_hires: false,
+            frame_interlace: false,
+            frame_lines: LINES_PER_FRAME,
             line: 0,
             dot: 0,
             field: false,
@@ -344,9 +355,24 @@ impl Ppu {
         self.frame_hires
     }
 
+    /// Output height of the frame currently being composited: `SCREEN_HEIGHT`
+    /// normally and `MAX_SCREEN_HEIGHT` when interlaced.
+    pub const fn frame_height(&self) -> usize {
+        if self.frame_interlace {
+            MAX_SCREEN_HEIGHT
+        } else {
+            SCREEN_HEIGHT
+        }
+    }
+
+    /// Whether the current frame is interlaced (448-line output).
+    pub const fn frame_interlace(&self) -> bool {
+        self.frame_interlace
+    }
+
     /// The RGBA8888 frame buffer for the current frame's geometry.
     pub fn frame_buffer(&self) -> &[u8] {
-        &self.framebuffer[..self.frame_width() * SCREEN_HEIGHT * 4]
+        &self.framebuffer[..self.frame_width() * self.frame_height() * 4]
     }
 
     /// Mark the current frame as presented.
@@ -363,11 +389,19 @@ impl Ppu {
         self.dot = 0;
         self.line += 1;
         self.line_event = true;
-        if self.line >= LINES_PER_FRAME {
+        if self.line >= self.frame_lines {
             self.line = 0;
             self.field = !self.field;
             // ares `hires = pseudoHires || bgMode == 5 || bgMode == 6`.
             self.frame_hires = self.setini & 0x08 != 0 || matches!(self.bg_mode & 0x07, 5 | 6);
+            // ares `PPUcounter::tickScanline`: a 525-line NTSC frame is one
+            // 263-line even field and one 262-line odd field.
+            self.frame_interlace = self.setini & 0x01 != 0;
+            self.frame_lines = if self.frame_interlace && !self.field {
+                LINES_PER_FRAME + 1
+            } else {
+                LINES_PER_FRAME
+            };
         }
         match self.line {
             0 => self.vblank = false,
@@ -397,7 +431,16 @@ impl Ppu {
     /// line number itself, not the framebuffer row.
     pub fn render_current_line(&mut self) {
         if (1..=SCREEN_HEIGHT as u16).contains(&self.line) {
-            self.render_line(usize::from(self.line), usize::from(self.line - 1));
+            // ares `DAC::scanline`: `line = vcounter * yScale`, and the odd
+            // field is offset by one output row, so the two fields interleave
+            // into 448 rows. Only this field's rows are written; the other
+            // field's rows keep the previous field's content, as on hardware.
+            let row = if self.frame_interlace {
+                (usize::from(self.line) - 1) * 2 + usize::from(self.field)
+            } else {
+                usize::from(self.line - 1)
+            };
+            self.render_line(usize::from(self.line), row);
         }
     }
 
@@ -869,6 +912,14 @@ impl Ppu {
         } else {
             y as u32
         };
+        // ares `Background::fetchNameTable`: inside its `hires()` branch (modes
+        // 5 and 6 only) an interlaced frame doubles the vertical fetch so each
+        // field reads alternate source lines.
+        let vbase = if matches!(mode, 5 | 6) && self.frame_interlace {
+            (mosaic_y << 1) | u32::from(self.field)
+        } else {
+            mosaic_y
+        };
         for x in 0..SCREEN_WIDTH {
             let mosaic_x = if mosaic {
                 (x as u32) - (x as u32 % mosaic_size)
@@ -876,7 +927,7 @@ impl Ppu {
                 x as u32
             };
             let mut h = (mosaic_x + hscroll) & (hsize - 1);
-            let mut v = (mosaic_y + vscroll) & (vsize - 1);
+            let mut v = (vbase + vscroll) & (vsize - 1);
             // Offset per tile (ares `Background::fetchNameTable`): modes 2, 4
             // and 6 take their per-column offsets from BG3's tilemap. The
             // valid bit is 13 + layer; mode 4 packs both directions into one
@@ -1082,6 +1133,17 @@ impl Ppu {
         let tiledata = u32::from(self.obsel & 0x07) << 13;
         let main_enable = self.layer_mask.unwrap_or(self.tm) & 0x10 != 0;
         let sub_enable = self.ts & 0x10 != 0 && self.layer_mask.is_none();
+        // Sprites use their own `SETINI` bit (bit 1), not the frame's bit 0.
+        let obj_interlace = self.setini & 0x02 != 0;
+        // ares `OAM::Object::height`: with object interlace and a base size of
+        // 6 or 7, the small size is 16 lines (hardware quirk).
+        let sprite_height = |size: u8| -> u16 {
+            if size == 0 && obj_interlace && base_size >= 6 {
+                16
+            } else {
+                sprite_size(base_size, size, true)
+            }
+        };
 
         // ares `Object::evaluate`: sprites are scanned from `firstSprite`
         // (the `$2103` priority rotation) and the first 32 on-line sprites are
@@ -1094,7 +1156,9 @@ impl Ppu {
             let high = self.oam[0x200 + usize::from(sprite) / 4];
             let high_bit = (usize::from(sprite) & 3) * 2;
             let size = (high >> (high_bit + 1)) & 1;
-            let height = sprite_size(base_size, size, true);
+            // ares `Object::onScanline`: `height >> interlace` scanlines carry
+            // the sprite, each drawing one field's row.
+            let height = sprite_height(size) >> u16::from(obj_interlace);
             // Hardware quirk: a sprite's first visible line is OAM Y + 1.
             let first = usize::from(self.oam[base + 1]) + 1;
             if y < first || y >= first + usize::from(height) {
@@ -1120,14 +1184,28 @@ impl Ppu {
             let high_bit = (sprite & 3) * 2;
             let size = (high >> (high_bit + 1)) & 1;
             let width = sprite_size(base_size, size, false);
-            let height = sprite_size(base_size, size, true);
+            let height = sprite_height(size);
             let x = u16::from(self.oam[base]) | (u16::from((high >> high_bit) & 1) << 8);
             let first = u16::from(self.oam[base + 1]) + 1;
-            let row = if attr & 0x80 != 0 {
-                height - 1 - (y as u16 - first)
+            // ares `Object::fetch`: `y = t.y - sprite.y; if(interlace) y <<= 1`,
+            // then the vertical flip, then the odd field takes the odd row.
+            let mut row = (y as u16).wrapping_sub(first) & 0xFF;
+            if obj_interlace {
+                row = row.wrapping_shl(1);
+            }
+            row = if attr & 0x80 != 0 {
+                (height - 1).wrapping_sub(row)
             } else {
-                y as u16 - first
+                row
             };
+            if obj_interlace {
+                row = if attr & 0x80 != 0 {
+                    row.wrapping_sub(u16::from(self.field))
+                } else {
+                    row.wrapping_add(u16::from(self.field))
+                };
+            }
+            row &= 0xFF;
             let character = self.oam[base + 2];
             let tile_width = width / 8;
             let layer_priority = priority[usize::from((attr >> 4) & 0x03)];
@@ -1528,6 +1606,118 @@ mod tests {
         // Backing storage is hi-res capacity so a future mode change cannot
         // need a reallocation.
         const { assert!(MAX_FRAME_SIZE >= MAX_SCREEN_WIDTH * SCREEN_HEIGHT * 4) };
+    }
+
+    #[test]
+    fn interlace_latches_from_setini_and_doubles_the_output_height() {
+        // ares `PPU::main`: `state.interlace = io.interlace` at frame start, and
+        // the DAC then uses `yScale = 2`, so an interlaced frame is 448 lines.
+        let mut ppu = Ppu::new();
+        ppu.write(0x2133, 0x01); // SETINI: interlace
+        for _ in 0..2 * (LINES_PER_FRAME as u32 + 2) * DOTS_PER_LINE as u32 {
+            ppu.tick();
+        }
+        assert!(ppu.frame_interlace());
+        assert_eq!(ppu.frame_height(), MAX_SCREEN_HEIGHT);
+        assert_eq!(
+            ppu.frame_buffer().len(),
+            SCREEN_WIDTH * MAX_SCREEN_HEIGHT * 4
+        );
+
+        ppu.write(0x2133, 0x00);
+        for _ in 0..2 * (LINES_PER_FRAME as u32 + 2) * DOTS_PER_LINE as u32 {
+            ppu.tick();
+        }
+        assert!(!ppu.frame_interlace());
+        assert_eq!(ppu.frame_height(), SCREEN_HEIGHT);
+    }
+
+    #[test]
+    fn interlace_writes_both_field_rows() {
+        // ares `DAC::scanline`: the odd field is offset by one output row, so
+        // the two fields interleave into 448 lines. Each field writes only its
+        // own rows; the other field's rows keep the previous field's content.
+        let mut ppu = Ppu::new();
+        ppu.write(0x2100, 0x0F); // full brightness
+        ppu.write(0x2105, 0x01); // mode 1
+        ppu.write(0x2107, 0x04); // BG1 map at $0400
+        ppu.write(0x2121, 0x01);
+        ppu.write(0x2122, 0x1F); // colour 1: red
+        ppu.write(0x2122, 0x00);
+        ppu.write(0x212C, 0x01); // BG1 on the main screen
+        for row in 0..8 {
+            ppu.vram[row] = 0x0080; // tile 0, pixel 0 of every row: colour 1
+        }
+        ppu.frame_interlace = true;
+        ppu.frame_hires = false;
+        ppu.line = 1;
+        let stride = SCREEN_WIDTH * 4;
+
+        ppu.field = false;
+        ppu.render_current_line();
+        assert_eq!(
+            &ppu.framebuffer[0..4],
+            &[255, 0, 0, 255],
+            "even field row 0"
+        );
+        // The other field's row has not been rendered yet (the framebuffer is
+        // untouched until a field writes it).
+        assert_eq!(&ppu.framebuffer[stride..stride + 4], &[0, 0, 0, 0]);
+
+        ppu.field = true;
+        ppu.render_current_line();
+        assert_eq!(
+            &ppu.framebuffer[0..4],
+            &[255, 0, 0, 255],
+            "the even field's row is retained"
+        );
+        assert_eq!(
+            &ppu.framebuffer[stride..stride + 4],
+            &[255, 0, 0, 255],
+            "odd field row 1"
+        );
+    }
+
+    #[test]
+    fn hires_interlace_doubles_the_vertical_fetch() {
+        // ares `Background::fetchNameTable`: inside the hires branch an
+        // interlaced frame fetches `vpixel << 1 | field`, so each field takes
+        // alternate source lines.
+        let mut ppu = Ppu::new();
+        ppu.write(0x2100, 0x0F); // full brightness
+        ppu.bg_mode = 0x05; // mode 5 (hires)
+        ppu.frame_hires = true;
+        ppu.frame_interlace = true;
+        ppu.tm = 0x01;
+        ppu.write(0x2107, 0x04); // BG1 map at $0400, 32x32
+        ppu.write(0x210B, 0x00); // BG1 characters at $0000
+        ppu.write(0x2121, 0x01);
+        ppu.write(0x2122, 0x1F); // colour 1: red
+        ppu.write(0x2122, 0x00);
+        // 4bpp tile 0: source rows 2 and 3 put colour 1 in pixel 0.
+        ppu.vram[2] = 0x0080;
+        ppu.vram[3] = 0x0080;
+        ppu.line = 1;
+
+        // Field 0 fetches source row 2, field 1 fetches row 3. Both land at
+        // output row 2 of their own field but in different output rows.
+        ppu.field = false;
+        ppu.render_current_line();
+        // In hires the DAC writes Below at the even column and Above at the
+        // odd one; column 0 is the backdrop, so check the Above column.
+        let even = 4;
+        assert_eq!(&ppu.framebuffer[even..even + 4], &[255, 0, 0, 255]);
+
+        // Clear row 2: field 0 now falls on an empty row, field 1 still hits 3.
+        ppu.vram[2] = 0;
+        ppu.field = false;
+        ppu.render_current_line();
+        let even = 4;
+        assert_eq!(&ppu.framebuffer[even..even + 4], &[0, 0, 0, 255]);
+        ppu.field = true;
+        ppu.render_current_line();
+        let odd = (MAX_SCREEN_WIDTH + 1) * 4;
+        assert_eq!(&ppu.framebuffer[odd..odd + 4], &[255, 0, 0, 255]);
     }
 
     #[test]

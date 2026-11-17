@@ -287,53 +287,43 @@ with ares. The implementation follows ares, which is the primary source.
   row: ares' pipeline is one dot deep, so at the first dot of a scanline no tile
   has been fetched and the Below screen (which owns the even column) shows the
   backdrop. Both reference oracles produce a backdrop column 0, and emitting it
-  makes the frame bit-identical.
-- Interlace is not implemented. The framebuffer geometry is
-  now prepared for hires: `SCREEN_WIDTH` (256) stays the *compositing* width,
-  `MAX_SCREEN_WIDTH` (512) is the DAC output width, the backing array is always
-  hi-res capacity so a mode change cannot reallocate, and `frame_width()`/
-  `frame_hires()`/`frame_buffer()` mirror the reference PPU model
-  (`frame_buffer()` returns a resolution-sized slice). Hi-res *fetching*
-  (`Background::fetchCharacter(index, half)`, two output columns per pixel
-  clock) and the 448-line interlace field output are still to be written.
-  A first attempt implemented only the **DAC doubling** (output column 2x =
-  Above screen, 2x+1 = Below screen, each with its own colour math) and latched
-  `frame_hires` from `SETINI` bit 3 / modes 5/6. Measured against RustySNES on
-  `PeterLemon-PPU/HiColor/PseudoHiRes.sfc` at 512 wide it matched **5.767%** of
-  pixels (mean channel difference 51.98), i.e. wrong, and was reverted. The
-  conclusion is that the DAC-only model is insufficient: hi-res needs ares'
-  `Background::fetchCharacter(index, half)` fetch path (two output columns per
-  pixel clock, `half` selecting between the two halves of the fetched bitplane
-  pair, `pixelCounter` running at 512 per line) before the output stage can be
-  validated. The ROM and its SHA-256 are recorded in
-  `test-roms/snes/PeterLemon-PPU/README.md`, and the RustySNES harness now
-  reports `FBGEOM <frame_hires> <visible_width>` (`true 512` for this ROM) so a
-  hi-res dump can be strided on the next attempt.
-  A follow-up measurement shows *why* the DAC-only model failed and what the
-  oracle actually contains: our **current 256-wide non-hires** render of the
-  same ROM matches RustySNES' hires frame at only **5.882%** (even columns) and
-  **6.570%** (odd columns), i.e. the demo stores genuine 512-wide detail, so a
-  256-wide render of it is aliased no matter how the output stage is written.
-  The visual comparison confirms it: the image is present in both but ours is
-  decimated. This makes the ROM a valid hires oracle but *only* at 512 wide, and
-  it shows that the earlier 5.767% was the aliasing, not the DAC interleave.
-  The next attempt must therefore render the Above and Below screens as the two
-  interleaved halves (Above at even output columns, Below at odd) **and** verify
-  that `sub` (Below) actually carries the alternate detail for a pseudo-hires
-  ROM, i.e. check `TS`/sub-layer rendering at 256 wide first.
-  That check is now done. `Ppu::debug_line_layers` shows the ROM is **mode 1
-  with `SETINI = $08`** (pseudo-hires), `TM = $01`, `TS = $02`: the main screen
-  draws BG1 and the sub screen draws BG2, both fully opaque (256/256 pixels),
-  and the two screens **differ on 129-149 of 256 pixels** per line. So the
-  Below screen does carry its own content and the Above/Below interleave is the
-  right model.
-  Re-applying the interleave on that basis still measures **5.767%** against
-  RustySNES - and our *non-hires 256-wide* render of the same frame measures
-  **5.882%** against RustySNES' even columns (6.570% against odd). The two
-  numbers being equal is the important result: **the mismatch is in the base
-  rendering of this ROM, not in the hi-res path**. This ROM cannot validate
-  hires until our 256-wide render of it matches, which points at its HDMA
-  colour/palette effect rather than at pixel plumbing.
+  makes the frame bit-identical **against RustySNES** - see the hires-sampling
+  item below, which shows RustySNES shares our 256-column compositing model and
+  is therefore not a hires oracle.
+- **Interlace is implemented** on the hires geometry above. `frame_interlace`
+  is latched at frame start from `SETINI` bit 0, `frame_height()` returns 448
+  for those frames, and each field writes only its own output rows
+  (`row = 2 * (line - 1) + field`, i.e. ares `DAC::scanline`'s `yScale = 2`
+  plus `line += 564` for the odd field), leaving the other field's rows from the
+  previous field exactly as hardware does. The frame length follows ares
+  `PPUcounter::tickScanline`: 263 scanlines on an interlaced even field, 262
+  otherwise. Sprites use their own `SETINI` bit 1 (`height >> interlace`,
+  `y <<= 1`, then `+- field`) including the `baseSize >= 6` height quirk, and the
+  hires BG fetch doubles vertically (`vpixel << 1 | field`).
+  - Measured against ares `--dump-frame` (564x484 for an interlaced NTSC frame;
+    the visible 512x448 area is the crop at (26, 18)) on
+    `PeterLemon-PPU/Interlace/InterlaceMoogle.sfc` (mode 5, `SETINI = $01`):
+    **94.849%** of pixels exact, mean channel difference 5.69. A non-interlaced
+    render of the same ROM scores 83% against the same dump, so the field
+    geometry is right; the residual is the item below.
+- **Open: hires is sampled per screen in ares, not one duplicated column.**
+  ares fetches each screen at its own column - `Background::fetchNameTable` does
+  `hpixel = x << hires()` with `hscroll <<= 1`, `Background::run` advances `x`
+  for `Screen::Above`, and `fetchCharacter(index, half)` selects the other half
+  of the bitplane pair - so in hires the Below screen shows BG column `2d` and
+  the Above screen column `2d + 1`. We sample once per dot and write the same
+  pixel to both DAC columns.
+  - Evidence: our output duplicates **99.6%** of horizontal column pairs where
+    ares duplicates 97.4%, and box-filtering our frame by 2 does not improve the
+    match (94.08%), so the error is a sampling phase rather than smoothing.
+  - This corrects an earlier record: the `MosaicMode5.sfc` result of
+    **100.000%** was measured against RustySNES, which shares our
+    "composite at 256 then interleave" simplification. That ROM is also a
+    mode-5 + interlace demo (`SETINI = $01`), so ares dumps it as 512x448;
+    against ares our output is **95.126%** exact (mean 5.39). RustySNES is not
+    a hires or interlace oracle.
+  - Next: render the two screens at their own hires columns (backgrounds and
+    objects), which should take both ROMs to pixel-exact against ares.
 - Offset per tile **is** implemented for modes 2, 4 and 6, transcribed from
   ares `Background::fetchNameTable`/`fetchOffset`: the per-column horizontal and
   vertical words are read from BG3's tilemap (horizontal at `voffset + 0`,
