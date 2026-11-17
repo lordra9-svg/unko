@@ -20,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **850 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **851 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -114,7 +114,7 @@ Implemented so far:
 
 Validation so far:
 
-- **850 workspace tests**, 0 failed
+- **851 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -210,13 +210,13 @@ Validation so far:
 
 The PPU is line-based rather than dot-scheduled. **Interlace is implemented**
 (448-line output, odd field on the odd output rows, sprite and hires BG vertical
-doubling, 263-line even fields). **Hires is now pixel-exact against ares** on
-`Interlace/InterlaceMoogle.sfc` (100.000% at 512x448) and 98.746% on
-`HiColor/MosaicMode5.sfc`: hires map entries cover 16 columns with
+doubling, 263-line even fields) and **hires is pixel-exact against ares**:
+`Interlace/InterlaceMoogle.sfc` and `HiColor/MosaicMode5.sfc` are both
+100.000% identical at 512x448. Hires map entries cover 16 columns with
 `character`/`character + 1`, the Below screen samples BG column `2d` and the
-Above screen `2d + 1`, and mosaic drops the interlace field bit. The remaining
-1.25% on the mosaic demo is confined to the Above screen's mosaic latch.
-Offset per tile is implemented for modes 2/4/6.
+Above screen `2d + 1`, mosaic drops the interlace field bit, and with mosaic on
+the Above screen reads the Below call's pixel latch. Offset per tile is
+implemented for modes 2/4/6.
 
 Performance: `unko bench --synthetic 3000 --min-fps 300` measures **791.6 fps**
 (13.17x real time, 1.263 ms/frame); release save states are 417,090 bytes at

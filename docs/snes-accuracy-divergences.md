@@ -306,38 +306,38 @@ with ares. The implementation follows ares, which is the primary source.
     **94.849%** of pixels exact, mean channel difference 5.69. A non-interlaced
     render of the same ROM scores 83% against the same dump, so the field
     geometry is right; the residual is the item below.
-- **Hires is now pixel-exact against ares on a full-screen interlace demo**:
-  `Interlace/InterlaceMoogle.sfc` (mode 5, `SETINI = $01`) scores **100.000%**
-  exact (mean channel difference 0.000) at 512x448 against the ares dump crop
-  (26, 18). `HiColor/MosaicMode5.sfc` scores **98.746%** (mean 0.97).
+- **Hires is pixel-exact against ares.** Both hires/interlace demos are
+  **100.000%** identical to the ares dump (mean channel difference 0.000) at
+  512x448 against the crop at (26, 18):
+  `Interlace/InterlaceMoogle.sfc` (mode 5, `SETINI = $01`) and
+  `HiColor/MosaicMode5.sfc`.
   - The model, all transcribed from ares `Background::fetchNameTable`/`run`:
     - `width = 256 << hires()`, so in hires the fetch space is 512 columns and
       `hsize` (and the map's horizontal extent) doubles.
     - **`htiles = 4` in hires**: a map entry covers 16 columns and supplies two
       consecutive characters - `character` for the first 8 columns and
       `character + 1` for the next 8, selected by `hoffset & 8` against the
-      entry's horizontal-mirror bit (`htiles == 4 && (hoffset & 8) != hmirror`).
+      entry's horizontal-mirror bit.
     - `Background::run` is called once per screen and consumes one background
       pixel per call, so the **Below** screen shows BG column `2d` and the
       **Above** screen column `2d + 1`; the DAC interleaves below at the even
       output column and above at the odd one.
     - With mosaic enabled the interlace vertical doubling **drops the field
-      bit**: `vpixel = vpixel << 1 | (field() && !mosaic.enable)`, so both
-      fields fetch the same even source line. This was worth 0.65 points on the
-      mosaic demo on its own.
-  - The earlier per-screen attempt that measured 68.1% / 55.9% was wrong because
-    it kept the non-hires 8-column entry geometry (`htiles = 3`) with a doubled
-    `hsize`, which wraps a 32-tile map after 256 columns and renders the picture
-    twice. With `htiles = 4` there is no wrap and the frame is bit-identical.
-    The earlier "falsified" note is superseded; the falsification applied to
+      bit**: `vpixel = vpixel << 1 | (field() && !mosaic.enable)`.
+    - With mosaic enabled the Above screen reads the mosaic latch instead of
+      its own fetched column: `mosaic.pixel` is refreshed only on the Below call
+      (`x == 0 && (!hires() || screen == Below)`, or when the counter expires)
+      and the Above call takes `else if(mosaic.enable) pixel = mosaic.pixel`, so
+      both screens show the block-start *Below* column. This was the last
+      1.25% on the mosaic demo.
+  - Two earlier attempts failed because they kept the non-hires 8-column entry
+    geometry (`htiles = 3`) with a doubled `hsize`, which wraps a 32-tile map
+    after 256 columns and renders the picture twice (68.1% / 55.9%). The
+    "per-screen fetching is falsified" note above is superseded: it applied to
     that geometry, not to per-screen sampling.
-  - Residual on `MosaicMode5.sfc` (1.25% of pixels) is confined to the **Above
-    screen** (odd output columns): `x % 4` is 1 or 3 for essentially every
-    differing pixel. Both screens show the same layer with the same scroll, so
-    this points at ares' mosaic pixel latch, which in hires is only updated on
-    the `Below` call (`x == 0 && (!hires() || screen == Below)`), i.e. the Above
-    screen reads the latch rather than the fresh pixel. Reproducing that
-    one-call ordering is the next step.
+  - `hires_map_entries_cover_sixteen_columns` and
+    `hires_mosaic_above_screen_reads_the_below_latch` pin the two rules that
+    account for almost all of the gap.
 - Offset per tile **is** implemented for modes 2, 4 and 6, transcribed from
   ares `Background::fetchNameTable`/`fetchOffset`: the per-column horizontal and
   vertical words are read from BG3's tilemap (horizontal at `voffset + 0`,

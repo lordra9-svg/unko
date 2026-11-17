@@ -1030,7 +1030,12 @@ impl Ppu {
             // interleaves below at the even output column and above at the odd.
             let (h_below, h_above) = if hires {
                 let base = (mosaic_x << 1).wrapping_add(hscroll << 1);
-                (base, base.wrapping_add(1))
+                // ares `Background::run`: `mosaic.pixel` is only refreshed on the
+                // Below call (`x == 0 && (!hires() || screen == Below)`), and the
+                // Above call takes the `else if(mosaic.enable) pixel =
+                // mosaic.pixel` branch, so with mosaic on both screens show the
+                // block-start Below column.
+                (base, if mosaic { base } else { base.wrapping_add(1) })
             } else {
                 let h = (mosaic_x + hscroll) & (hsize - 1);
                 (h, h)
@@ -1694,6 +1699,57 @@ mod tests {
         assert_eq!(&ppu.framebuffer[4..8], &[255, 0, 0, 255]);
         // Row 1 belongs to the other field and is untouched.
         assert_eq!(&ppu.framebuffer[stride..stride + 4], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn hires_mosaic_above_screen_reads_the_below_latch() {
+        // ares `Background::run`: in hires `mosaic.pixel` is only refreshed on
+        // the Below call (`x == 0 && (!hires() || screen == Below)`, or when the
+        // counter expires), and the Above call takes the
+        // `else if(mosaic.enable) pixel = mosaic.pixel` branch. With mosaic on,
+        // both screens therefore show the block-start *Below* column.
+        let mut ppu = Ppu::new();
+        ppu.write(0x2100, 0x0F); // full brightness
+        ppu.bg_mode = 0x05; // mode 5 (hires)
+        ppu.frame_hires = true;
+        ppu.tm = 0x01;
+        ppu.ts = 0x01;
+        ppu.write(0x2107, 0x04); // BG1 map at $0400
+        ppu.write(0x210B, 0x00); // BG1 characters at $0000
+        ppu.write(0x2106, 0x11); // mosaic size 2, BG1 mosaic enabled
+        ppu.write(0x2121, 0x01);
+        ppu.write(0x2122, 0x1F); // colour 1: red
+        ppu.write(0x2122, 0x00);
+        ppu.write(0x2121, 0x02);
+        ppu.write(0x2122, 0xE0); // colour 2: green
+        ppu.write(0x2122, 0x03);
+        // Tile 0 row 1: colour 1 in BG column 0, colour 2 in column 4 (one hires
+        // dot covers two background columns); the columns between are
+        // transparent.
+        ppu.vram[1] = 0x0880;
+        ppu.line = 1;
+        ppu.render_current_line();
+
+        // Mosaic block 1 (dots 0-1) shows BG column 0 on both screens; block 2
+        // (dots 2-3) shows column 4 on both. Without the latch the Above
+        // columns would sample columns 1 and 5, which are transparent.
+        assert_eq!(&ppu.framebuffer[0..4], &[255, 0, 0, 255], "below column 0");
+        assert_eq!(&ppu.framebuffer[4..8], &[255, 0, 0, 255], "above, latch");
+        assert_eq!(
+            &ppu.framebuffer[2 * 4..2 * 4 + 4],
+            &[255, 0, 0, 255],
+            "second dot of block 1"
+        );
+        assert_eq!(
+            &ppu.framebuffer[4 * 4..4 * 4 + 4],
+            &[0, 255, 0, 255],
+            "below column 4"
+        );
+        assert_eq!(
+            &ppu.framebuffer[5 * 4..5 * 4 + 4],
+            &[0, 255, 0, 255],
+            "above, latch (block 2)"
+        );
     }
 
     #[test]
