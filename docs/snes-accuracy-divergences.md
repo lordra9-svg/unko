@@ -108,9 +108,24 @@ S-DSP output is now instrumented but not sample-identical:
     32-step sample at once. That makes the echo buffer's partial state visible
     at the exact moment an S-SMP read lands. The readings are unchanged, so
     this particular test observes the buffer only at sample boundaries.
-  - Next probe: compare the echo buffer contents sample by sample against a
-    reference run (ares `--dump-audio` plus an ARAM dump at a known sample
-    index), rather than at a whole frame.
+  - **Both oracles pass it**, so the target is well defined: the local ares
+    build runs the ROM to completion, and RustySNES prints `PASSED TESTS`
+    (at 12000 frames; it needs far longer than us only because we abort at
+    test 2).
+  - Every arithmetic path the echo test depends on was verified bit-exact
+    against ares source: `echo.cpp` (history/address/FIR/clamp/feedback and
+    the `echoWrite` ordering), `timer` step/synchronise semantics, the 512-entry
+    gaussian table generated from `gaussian.cpp` (0/512 entries differ), the
+    `counter.cpp` rate/offset tables (exact) and `brr.cpp` decode with all four
+    IIR filters (exact).
+  - The DSP *tick placement* is not the cause: moving the tick from the
+    plan-drain path to the S-SMP access path (ares synchronises the DSP inside
+    `SMP::step`) leaves the readings byte-identical.
+  - Next probe: the test polls `$F3` for `$48`/`$4C` (`VxENVX`, `ENDX`) inside
+    its timing loop, and those registers are only refreshed at DSP sample
+    boundaries, so a one-sample phase difference shows up as these near-miss
+    values. Compare the DSP step index at the moment of a `$F3` read against
+    ares, i.e. instrument `Apu`'s DSP step counter at the read.
 - At 600 frames, 36 of the 128 DSP registers differ from the RustySNES oracle;
   voices 6 and 7 match exactly and voices 0-4 are at different song positions.
 - The queued audio is non-silent (RMS about 0.012 vs ares 0.023) and the best

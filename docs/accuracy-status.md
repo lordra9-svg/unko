@@ -190,6 +190,12 @@ Validation so far:
     **CGRAM: 0 of 256 entries differ**; **OAM: identical**
   - title logo, sky gradient, cloud sprites, border, "© 1990, 1991 Nintendo"
     text and the scrolling BG1 landscape all match
+  - **open:** the game's own frame counter (WRAM `$13`) is identical to
+    RustySNES at frames 140-190 (`0x39`, then `0x41` through the logo hold)
+    and one ahead from frame 195 (`0x46` vs `0x45`), while the *vectored*
+    NMI counts match exactly across that window (106 at 190, 111 at 195 in
+    both). So the two-frame content lead is **not** an extra NMI; it is one
+    extra game-loop iteration between frames 190 and 195.
   - **open:** `unko-snes` reaches the same title-screen content two frames
     before RustySNES/ares, so same-index comparisons show 92.4% (600) and
     91.5% (900). Both emulators turn the display on at frame 86. Port-latch
