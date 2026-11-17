@@ -79,6 +79,8 @@ fn main() -> ExitCode {
         .split(',')
         .filter_map(|v| u16::from_str_radix(v.trim().trim_start_matches("0x"), 16).ok())
         .collect();
+    let mut audio_out = std::env::var_os("AUDIO_OUT")
+        .map(|path| std::fs::File::create(path).expect("create AUDIO_OUT"));
     let target_frames: u32 = std::env::var("FRAMES")
         .ok()
         .and_then(|value| value.parse().ok())
@@ -128,6 +130,15 @@ fn main() -> ExitCode {
             }
             cycles += u64::from(system.step());
             instructions += 1;
+            if let Some(file) = audio_out.as_mut() {
+                use std::io::Write;
+                let mut bytes = Vec::new();
+                for (left, right) in system.apu.drain_samples() {
+                    bytes.extend_from_slice(&(f32::from(left) / 32768.0).to_le_bytes());
+                    bytes.extend_from_slice(&(f32::from(right) / 32768.0).to_le_bytes());
+                }
+                let _ = file.write_all(&bytes);
+            }
             if system.cpu.stp && std::env::var_os("STP_LOG").is_some() {
                 eprintln!(
                     "STP at {:02X}:{:04X} frame={frames} master={} line={}",
@@ -288,14 +299,6 @@ fn main() -> ExitCode {
         let mut bytes = Vec::with_capacity(0x80);
         for address in 0..0x80u8 {
             bytes.push(dsp.read(address));
-        }
-        let _ = std::fs::write(path, bytes);
-    }
-    if let Some(path) = std::env::var_os("AUDIO_OUT") {
-        let mut bytes = Vec::new();
-        for (left, right) in system.apu.samples() {
-            bytes.extend_from_slice(&(f32::from(*left) / 32_768.0).to_le_bytes());
-            bytes.extend_from_slice(&(f32::from(*right) / 32_768.0).to_le_bytes());
         }
         let _ = std::fs::write(path, bytes);
     }

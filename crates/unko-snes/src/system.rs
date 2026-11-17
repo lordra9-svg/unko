@@ -359,8 +359,8 @@ impl Snes {
 }
 
 impl CpuBus for Snes {
-    fn read(&mut self, address: u32) -> u8 {
-        let value = self.bus().read(address);
+    fn read(&mut self, address: u32, mdr: u8) -> u8 {
+        let value = self.bus().read(address, mdr);
         if address & 0x40_FF00 == 0x2100 && (0x2140..=0x2143).contains(&(address & 0xFFFF)) {
             let port = ((address & 0xFFFF) - 0x2140) as usize;
             self.apu.debug.record_cpu_read(self.clock, port, value);
@@ -441,7 +441,7 @@ impl SnesBus<'_> {
 }
 
 impl CpuBus for SnesBus<'_> {
-    fn read(&mut self, address: u32) -> u8 {
+    fn read(&mut self, address: u32, mdr: u8) -> u8 {
         let bank = (address >> 16) as u8;
         let offset = (address & 0xFFFF) as usize;
 
@@ -463,13 +463,25 @@ impl CpuBus for SnesBus<'_> {
                     return self.read_wram_port(offset);
                 }
                 if offset == 0x4210 {
-                    let value = if *self.nmi_flag { 0x80 } else { 0 };
+                    // ares `CPU::readCPU`: `data.bit(0,3) = io.version` and
+                    // `data.bit(7) = rdnmi()`, leaving bits 4-6 from the open
+                    // bus (the MDR).
+                    let nmi = if *self.nmi_flag { 0x80 } else { 0 };
                     *self.nmi_flag = false;
-                    return value | 0x02;
+                    return (mdr & 0x70) | 0x02 | nmi;
+                }
+                if offset == 0x4211 {
+                    // ares sets only bit 7; bits 0-6 are open bus.
+                    let value = self.io.read(0x4211).unwrap_or(0);
+                    return (mdr & 0x7F) | (value & 0x80);
                 }
                 if offset == 0x4212 {
+                    // ares sets bits 0, 6 and 7; bits 1-5 are open bus.
                     let busy = u8::from(self.io.auto_poll_busy());
-                    return u8::from(self.vblank) << 7 | (u8::from(self.hblank) << 6) | busy;
+                    return (mdr & 0x3E)
+                        | (u8::from(self.vblank) << 7)
+                        | (u8::from(self.hblank) << 6)
+                        | busy;
                 }
                 if offset == 0x4016 || offset == 0x4017 {
                     return self.io.read(offset as u16).unwrap_or(0);
@@ -483,10 +495,10 @@ impl CpuBus for SnesBus<'_> {
                 if (0x4300..=0x437F).contains(&offset) {
                     return self.dma.read(offset as u16);
                 }
-                return 0;
+                return mdr;
             }
             if offset < 0x8000 {
-                return 0;
+                return mdr;
             }
         }
         self.cart.read(address).unwrap_or(0)
@@ -643,7 +655,9 @@ impl DmaBus for SnesBus<'_> {
         if !valid_dma_a(address) {
             return 0;
         }
-        self.read(address)
+        // ares' DMA reads pass the CPU's MDR; we do not model that here, so an
+        // unmapped DMA source reads 0.
+        self.read(address, 0)
     }
 
     fn write_a(&mut self, address: u32, value: u8) {
@@ -653,7 +667,7 @@ impl DmaBus for SnesBus<'_> {
     }
 
     fn read_b(&mut self, address: u8) -> u8 {
-        self.read(0x2100 | u32::from(address))
+        self.read(0x2100 | u32::from(address), 0)
     }
 
     fn write_b(&mut self, address: u8, value: u8) {
@@ -734,10 +748,65 @@ mod tests {
             vblank: false,
             hblank: false,
         };
-        assert_eq!(bus.read(0x001234), 0x5A);
-        assert_eq!(bus.read(0x801234), 0x5A);
-        assert_eq!(bus.read(0x7E1234), 0x5A);
-        assert_eq!(bus.read(0x7F1234), 0x00);
+        assert_eq!(bus.read(0x001234, 0), 0x5A);
+        assert_eq!(bus.read(0x801234, 0), 0x5A);
+        assert_eq!(bus.read(0x7E1234, 0), 0x5A);
+        assert_eq!(bus.read(0x7F1234, 0), 0x00);
+    }
+
+    #[test]
+    fn unmapped_reads_return_the_open_bus_mdr() {
+        // ares maps unmapped addresses to `[](n24, n8 data) { return data; }`,
+        // where `data` is the CPU's memory data register.
+        let mut system = Snes::new(cartridge(&[0xDB]));
+        let mut bus = SnesBus {
+            wram: &mut system.wram,
+            cart: &mut system.cart,
+            apu: &mut system.apu,
+            ppu: &mut system.ppu,
+            dma: &mut system.dma,
+            io: &mut system.io,
+            nmi_enable: &mut system.nmi_enable,
+            nmi_flag: &mut system.nmi_flag,
+            fast_rom: &mut system.fast_rom,
+            wram_port: &mut system.wram_port,
+            vblank: false,
+            hblank: false,
+        };
+        // $00:4000-$43FF is unmapped for reads ($4200 is write-only), as is
+        // $00:5000 and the unused part of the I/O page.
+        assert_eq!(bus.read(0x004000, 0x5A), 0x5A);
+        assert_eq!(bus.read(0x004200, 0xA5), 0xA5);
+        assert_eq!(bus.read(0x005000, 0x3C), 0x3C);
+        // Mapped reads still return their own value and do not leak the MDR.
+        assert_eq!(bus.read(0x001234, 0x5A), 0x00);
+    }
+
+    #[test]
+    fn io_status_reads_keep_open_bus_bits() {
+        // ares `CPU::readCPU` writes only the defined bits of $4210/$4211/$4212
+        // and leaves the rest from the MDR (open bus).
+        let mut system = Snes::new(cartridge(&[0xDB]));
+        let mut bus = SnesBus {
+            wram: &mut system.wram,
+            cart: &mut system.cart,
+            apu: &mut system.apu,
+            ppu: &mut system.ppu,
+            dma: &mut system.dma,
+            io: &mut system.io,
+            nmi_enable: &mut system.nmi_enable,
+            nmi_flag: &mut system.nmi_flag,
+            fast_rom: &mut system.fast_rom,
+            wram_port: &mut system.wram_port,
+            vblank: false,
+            hblank: false,
+        };
+        // $4210: bits 4-6 open bus, bits 0-3 = version 2, bit 7 = NMI flag.
+        assert_eq!(bus.read(0x004210, 0x70), 0x72);
+        // $4211: bits 0-6 open bus, bit 7 = TIMEUP.
+        assert_eq!(bus.read(0x004211, 0x7F), 0x7F);
+        // $4212: bits 1-5 open bus; vblank/hblank/busy are all false here.
+        assert_eq!(bus.read(0x004212, 0x3E), 0x3E);
     }
 
     #[test]
@@ -772,11 +841,11 @@ mod tests {
                 vblank: false,
                 hblank: false,
             };
-            assert_eq!(bus.read(0x008000), 0x11);
-            assert_eq!(bus.read(0x018000), 0x00);
-            assert_eq!(bus.read(0x808000), 0x11);
+            assert_eq!(bus.read(0x008000, 0), 0x11);
+            assert_eq!(bus.read(0x018000, 0), 0x00);
+            assert_eq!(bus.read(0x808000, 0), 0x11);
             assert!(bus.cart.write(0x700000, 0x5A));
-            assert_eq!(bus.read(0x700000), 0x5A);
+            assert_eq!(bus.read(0x700000, 0), 0x5A);
         }
     }
 
@@ -849,7 +918,7 @@ mod tests {
             bus.write(0x4016, 0x01);
             bus.write(0x4016, 0x00);
             // B is the first bit shifted out.
-            assert_eq!(bus.read(0x4016) & 1, 1);
+            assert_eq!(bus.read(0x4016, 0) & 1, 1);
             bus.write(0x4202, 0x03);
             bus.write(0x4203, 0x05);
         }
@@ -871,9 +940,9 @@ mod tests {
                 vblank: false,
                 hblank: false,
             };
-            assert_eq!(bus.read(0x4216), 0x0F);
-            assert_eq!(bus.read(0x4217), 0x00);
-            assert_eq!(bus.read(0x4210) & 0x0F, 0x02);
+            assert_eq!(bus.read(0x4216, 0), 0x0F);
+            assert_eq!(bus.read(0x4217, 0), 0x00);
+            assert_eq!(bus.read(0x4210, 0) & 0x0F, 0x02);
         }
     }
 
@@ -904,7 +973,7 @@ mod tests {
             // Rewind and read both bytes back through the port.
             bus.write(0x2181, 0x34);
             bus.write(0x2182, 0x12);
-            (bus.read(0x2180), bus.read(0x2180))
+            (bus.read(0x2180, 0), bus.read(0x2180, 0))
         };
         assert_eq!(system.wram[0x1234], 0x5A);
         assert_eq!(system.wram[0x1235], 0xA5);
@@ -937,7 +1006,7 @@ mod tests {
                 vblank,
                 hblank,
             };
-            (bus.read(0x4210), bus.read(0x4210))
+            (bus.read(0x4210, 0), bus.read(0x4210, 0))
         };
         assert!(!system.nmi_enabled());
         assert_eq!(first & 0x80, 0x80);

@@ -447,8 +447,9 @@ with ares. The implementation follows ares, which is the primary source.
 
 - The S-CPU bus models WRAM, cartridge ROM/SRAM, `$2100-$213F`, `$2140-$2143`,
   `$4016/$4017`, `$4200-$420D`, `$4210-$421F`, `$2180-$2183` and
-  `$4300-$437F`. Unmapped I/O reads return `0`; open bus and the joypad
-  auto-poll's exact 128-clock sequencing window are not modelled.
+  `$4300-$437F`. Unmapped reads return the S-CPU's memory data register (the
+  open bus), including the unused bits of `$4210/$4211/$4212`; the joypad
+  auto-poll's exact 128-clock sequencing window is still approximated.
 - The auto-poll sequence is driven at 128-clock granularity from the line-225
   event rather than ares' exact hcounter window, so `$4218-$421F` can settle a
   few hundred clocks early. Games that read them at the end of NMI are
@@ -570,6 +571,26 @@ with ares. The implementation follows ares, which is the primary source.
 - `WAI`/`STP` retire two internal cycles after the opcode; the real devices
   idle indefinitely, which the system model represents by not advancing the
   CPU until an interrupt or reset.
+
+## Oracle toolkit
+
+`tools/snes-oracle/` holds the capture and diff harness (see its README):
+
+- `ares-capture.sh` runs the locally patched ares headless build and writes the
+  last RGBA8 frame, the **whole** stereo `f32` PCM stream at the S-DSP's native
+  32 kHz (`ARES_AUDIO_RATE`), and a per-frame hash trace.
+- `ours-capture.sh` produces the matching frame and PCM stream.
+- `diff-frame.py` compares frames; ares' 564x242 NTSC output contains our
+  256x224 frame at crop (26, 9) with horizontal scale 2. A static screen
+  (`spc_timer` at 600 frames vs ares at 602) is **100.000% exact**.
+- `diff-audio.py` aligns a small sample offset and reports the first sample
+  above 1/32768, RMS and peak levels. Current audio baseline:
+  `blargg_near_cd_quality.smc` at 600 frames has matching peak levels
+  (0.465454 vs 0.465749) but is **not yet sample-exact** (first divergence
+  after alignment: sample 16080, RMS difference 8.6e-2). That is the next audio
+  target.
+- `baseline.py` records a per-ROM manifest (ROM/frame/audio hashes) for
+  regression comparison.
 
 ## Validation
 

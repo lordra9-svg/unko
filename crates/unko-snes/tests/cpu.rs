@@ -17,7 +17,7 @@ impl Ram {
 }
 
 impl CpuBus for Ram {
-    fn read(&mut self, address: u32) -> u8 {
+    fn read(&mut self, address: u32, _mdr: u8) -> u8 {
         self.data[(address & 0x00FF_FFFF) as usize]
     }
 

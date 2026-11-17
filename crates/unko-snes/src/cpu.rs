@@ -14,7 +14,10 @@ use std::fmt;
 /// A 24-bit system bus driven by the CPU.
 pub trait CpuBus {
     /// Read one byte. The CPU accounts the clocks, not the bus.
-    fn read(&mut self, address: u32) -> u8;
+    ///
+    /// `mdr` is the last value on the data bus; unmapped addresses return it
+    /// (ares `Bus` maps them to `[](n24, n8 data) { return data; }`).
+    fn read(&mut self, address: u32, mdr: u8) -> u8;
     /// Write one byte. The CPU accounts the clocks, not the bus.
     fn write(&mut self, address: u32, value: u8);
     /// Master clocks required by a memory access. The S-CPU runs one base bus
@@ -117,6 +120,9 @@ pub struct Cpu {
     pub nmi_services: u64,
     /// Number of IRQ edges serviced (debug).
     pub irq_services: u64,
+    /// Memory data register: the value the open bus presents for unmapped
+    /// reads (ares `r.mdr`).
+    pub mdr: u8,
 }
 
 impl Default for Cpu {
@@ -155,6 +161,7 @@ impl Cpu {
             cycles: 0,
             nmi_services: 0,
             irq_services: 0,
+            mdr: 0,
         }
     }
 
@@ -208,6 +215,7 @@ impl Cpu {
         self.stp = false;
         self.irq_line = false;
         self.nmi_pending = false;
+        self.mdr = 0;
         let start = self.cycles;
         // ares `CPU::main`: `status.resetPending` → `step(132)`.
         self.cycles += 132;
@@ -294,8 +302,12 @@ impl Cpu {
         // before the data is sampled, then four more clocks after it, so a port
         // read observes the S-SMP exactly `wait - 4` clocks into the access.
         self.cycles += u64::from(bus.advance(clocks.saturating_sub(4)));
-        let value = bus.read(address);
+        let value = bus.read(address, self.mdr);
         self.cycles += u64::from(bus.advance(4));
+        // ares `CPU::read`: reads of $4000-$43FF do not update the MDR.
+        if address & 0x40_FC00 != 0x4000 {
+            self.mdr = value;
+        }
         value
     }
 
@@ -307,6 +319,7 @@ impl Cpu {
         // before the write commits.
         self.cycles += u64::from(bus.advance(clocks));
         bus.write(address, value);
+        self.mdr = value;
     }
 
     fn idle(&mut self, bus: &mut impl CpuBus) {
