@@ -122,9 +122,11 @@ Validation so far:
 - **3 DSP unit tests** cover register mirroring, KON/ENDX, non-silent BRR
   playback and global mute; the APU integration test confirms SPC execution
   drives sample generation.
-- **7 PPU tests** cover vblank/NMI timing, CGRAM/OAM access (word-address
-  base, pair latch and high-table mirroring), sprite object-grid addressing
-  an object-grid/Y-offset sprite row and a rendered mode-1 tile pixel; **2 DMA tests** verify mode-1 VRAM and CGRAM transfers;
+- **9 PPU tests** cover vblank/NMI timing, CGRAM/OAM access (word-address
+  base, pair latch and high-table mirroring), sprite object-grid addressing,
+  the Y offset, the OAM-index overlap order, window masks/combine logic, the
+  colour-window gate, mosaic and a rendered mode-1 tile pixel; **2 DMA tests**
+  verify mode-1 VRAM and CGRAM transfers;
   **1 HDMA test** verifies direct table transfers; the APU timer test exercises
   target/output latching
 - **2 timing tests** pin the S-CPU wait-state table (slow/fast ROM, WRAM, PPU
