@@ -139,6 +139,52 @@ fn main() -> ExitCode {
             }
         }
     }
+    if std::env::var_os("AUDIO_DEBUG").is_some() {
+        let dsp = system.apu.dsp();
+        eprintln!(
+            "dsp: mvoll={:02X} mvolr={:02X} evoll={:02X} evolr={:02X} kon={:02X} koff={:02X} flg={:02X} endx={:02X}",
+            dsp.read(0x0C),
+            dsp.read(0x1C),
+            dsp.read(0x2C),
+            dsp.read(0x3C),
+            dsp.read(0x4C),
+            dsp.read(0x5C),
+            dsp.read(0x6C),
+            dsp.read(0x7C)
+        );
+        for voice in 0..8u8 {
+            let base = voice << 4;
+            eprintln!(
+                "v{voice}: volL={:02X} volR={:02X} pitch={:02X}{:02X} src={:02X} adsr0={:02X} adsr1={:02X} gain={:02X} envx={:02X} outx={:02X}",
+                dsp.read(base),
+                dsp.read(base + 1),
+                dsp.read(base + 3),
+                dsp.read(base + 2),
+                dsp.read(base + 4),
+                dsp.read(base + 5),
+                dsp.read(base + 6),
+                dsp.read(base + 7),
+                dsp.read(base + 8),
+                dsp.read(base + 9)
+            );
+        }
+    }
+    if let Some(path) = std::env::var_os("DSP_OUT") {
+        let dsp = system.apu.dsp();
+        let mut bytes = Vec::with_capacity(0x80);
+        for address in 0..0x80u8 {
+            bytes.push(dsp.read(address));
+        }
+        let _ = std::fs::write(path, bytes);
+    }
+    if let Some(path) = std::env::var_os("AUDIO_OUT") {
+        let mut bytes = Vec::new();
+        for (left, right) in system.apu.samples() {
+            bytes.extend_from_slice(&(f32::from(*left) / 32_768.0).to_le_bytes());
+            bytes.extend_from_slice(&(f32::from(*right) / 32_768.0).to_le_bytes());
+        }
+        let _ = std::fs::write(path, bytes);
+    }
     if let Some(path) = std::env::var_os("FRAME_OUT") {
         let _ = std::fs::write(path, system.ppu.frame_buffer());
     }

@@ -244,6 +244,11 @@ impl Apu {
         self.samples.drain(..)
     }
 
+    /// Queued DSP samples without draining them.
+    pub fn samples(&self) -> &VecDeque<Sample> {
+        &self.samples
+    }
+
     fn timers_step(&mut self, cycles: u32) {
         for (index, timer) in self.timers.iter_mut().enumerate() {
             let frequency = if index == 2 { 16 } else { 128 };

@@ -26,7 +26,21 @@ The remaining known video divergence is **dot-level sprite evaluation**:
   uses OAM-order tie-breaking. The backlog only shows up when sprites of equal
   priority overlap.
 
-S-DSP output is not yet sample-compared against ares.
+S-DSP output is now instrumented but not sample-identical:
+
+- At 600 frames, 36 of the 128 DSP registers differ from the RustySNES oracle;
+  voices 6 and 7 match exactly and voices 0-4 are at different song positions.
+- The queued audio is non-silent (RMS about 0.012 vs ares 0.023) and the best
+  cross-correlation against ares's dumped 395-sample window is about 0.43 at a
+  232-sample lag; the remaining difference is a different point in the song.
+- Our S-SMP timer stage counters advance once per opcode cycle. ares steps them
+  by two 2.048 MHz clocks per access on paper; doubling our rate advances the
+  Super Mario World boot/attract by two frames and loses the video parity, so
+  the current rate is retained. The blargg `spc_timer` ROM is the right oracle
+  to settle this and is already in `test-roms/snes/blargg-spc-6`.
+- ares' DRAM refresh (5 x 6+2 clocks per scanline) is not modelled. Adding it
+  shifts the SWM boot by three frames; the exact interaction with the SPC
+  handshake still needs a timer/refresh-specific test.
 
 ## Oracle disagreements (resolved)
 
