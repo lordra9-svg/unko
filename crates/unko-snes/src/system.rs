@@ -151,6 +151,7 @@ impl Snes {
         self.cpu = cpu;
         self.apply_interrupts();
         let mut cycles = cpu_cycles;
+        let mut dma_clocks = 0u32;
         while let Some(mut transfer) = self.dma.begin_transfer() {
             while transfer.busy() {
                 let clocks = {
@@ -174,8 +175,13 @@ impl Snes {
                 };
                 cycles += clocks;
                 self.advance_peripherals(clocks);
+                // DMA time is master time: keep the CPU's cumulative clock
+                // equal to the system clock, otherwise any timing analysis
+                // based on `cpu.cycles` is short by the DMA/stall time.
+                dma_clocks += clocks;
             }
         }
+        self.cpu.cycles += u64::from(dma_clocks);
         self.apply_interrupts();
         cycles
     }

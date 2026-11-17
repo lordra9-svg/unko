@@ -93,6 +93,23 @@ rendering difference:
     fix - but it does **not** touch the frame-191 window: SMW transfers **0 HDMA
     bytes** at frames 100 and 191 (only 146,288 by frame 600), so HDMA is not the
     stall source there.
+  - **Matched-interval measurement: our CPU reaches the wait ~512 clocks sooner.**
+    Logging NMI entry and the next `$806B` arrival in the same NMI interval, on
+    the same clock base, gives:
+    ```
+    frame/NMI spacing      ours 357,352-357,376   RS 357,352-357,376   (identical)
+    NMI -> first $806B     ours 15,952-15,974     RS 16,464-16,486     (-512 clocks)
+    ```
+    Our frame length matches, so the skew is **CPU work after the NMI**: we
+    complete the post-NMI path ~512 master clocks (≈85 bus accesses) faster than
+    the reference and therefore reach the `lda $10` spin earlier, which is what
+    lengthens the spin. That is the quantity to chase next (a specific routine's
+    timing, or stall accounting), and it is a ~512-clock target rather than an
+    open-ended search.
+  - Debug-accounting fix: `Snes::step` now adds DMA stall time to `cpu.cycles`,
+    so the CPU's cumulative clock equals system master time. Before this, any
+    analysis based on `cpu.cycles` was short by the DMA time (it made the NMI
+    interval look 5,600 clocks too short).
   - Also note the cumulative totals: our `$806B` sits at 472,528 by frame 190
     against the reference's 454,144 (+4%), and `$809A` at 266,693 against
     253,713 (+5%), so the CPU spends slightly more iterations spinning in both
