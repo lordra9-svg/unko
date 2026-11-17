@@ -280,8 +280,14 @@ with ares. The implementation follows ares, which is the primary source.
 - Display brightness follows ares' DAC luma `(1 + l) / 16 * (l ? 1 : 0.25)`
   with integer rounding. Measured frames match ares at `INIDISP = $0F` and at
   `$0B`; sub-1/255 rounding differences are possible at other levels.
-- Hires output and interlace are not implemented (both need a wider/taller
-  framebuffer than the 256x224 line renderer produces).
+- Hires output and interlace are not implemented. The framebuffer geometry is
+  now prepared for hires: `SCREEN_WIDTH` (256) stays the *compositing* width,
+  `MAX_SCREEN_WIDTH` (512) is the DAC output width, the backing array is always
+  hi-res capacity so a mode change cannot reallocate, and `frame_width()`/
+  `frame_hires()`/`frame_buffer()` mirror the reference PPU model
+  (`frame_buffer()` returns a resolution-sized slice). Hi-res *fetching*
+  (`Background::fetchCharacter(index, half)`, two output columns per pixel
+  clock) and the 448-line interlace field output are still to be written.
 - Offset per tile **is** implemented for modes 2, 4 and 6, transcribed from
   ares `Background::fetchNameTable`/`fetchOffset`: the per-column horizontal and
   vertical words are read from BG3's tilemap (horizontal at `voffset + 0`,

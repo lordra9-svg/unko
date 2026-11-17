@@ -10,8 +10,15 @@
 pub const SCREEN_WIDTH: usize = 256;
 /// Visible frame height.
 pub const SCREEN_HEIGHT: usize = 224;
-/// RGBA8888 frame size.
+/// Output width in hi-res modes (5/6, or pseudo-hires `SETINI` bit 3): the DAC
+/// emits two columns per pixel clock. `SCREEN_WIDTH` stays the compositing
+/// width, matching the reference PPU model.
+pub const MAX_SCREEN_WIDTH: usize = 512;
+/// RGBA8888 frame size at the normal (256-wide) resolution.
 pub const FRAME_SIZE: usize = SCREEN_WIDTH * SCREEN_HEIGHT * 4;
+/// Backing storage is always hi-res capacity so a mode change mid-frame never
+/// reallocates; [`Ppu::frame_buffer`] returns a resolution-sized slice of it.
+const MAX_FRAME_SIZE: usize = MAX_SCREEN_WIDTH * SCREEN_HEIGHT * 4;
 
 const DOTS_PER_LINE: u16 = 341;
 const LINES_PER_FRAME: u16 = 262;
@@ -23,7 +30,7 @@ pub struct Ppu {
     vram: Box<[u16; 0x8000]>,
     cgram: [u16; 256],
     oam: [u8; 0x220],
-    framebuffer: Box<[u8; FRAME_SIZE]>,
+    framebuffer: Box<[u8; MAX_FRAME_SIZE]>,
     line: u16,
     dot: u16,
     field: bool,
@@ -114,7 +121,7 @@ impl Ppu {
             vram: Box::new([0; 0x8000]),
             cgram: [0; 256],
             oam: [0; 0x220],
-            framebuffer: Box::new([0; FRAME_SIZE]),
+            framebuffer: Box::new([0; MAX_FRAME_SIZE]),
             line: 0,
             dot: 0,
             field: false,
@@ -314,9 +321,25 @@ impl Ppu {
         self.frame_ready
     }
 
-    /// The RGBA8888 frame buffer.
+    /// Output width of the frame currently being composited.
+    ///
+    /// `SCREEN_WIDTH` normally and `MAX_SCREEN_WIDTH` in hi-res modes, matching
+    /// the reference model: the compositing stage always produces 256 above/
+    /// below pixel pairs per line and only the output stage doubles. Hi-res
+    /// rendering itself is not implemented yet, so this is always
+    /// `SCREEN_WIDTH` today.
+    pub const fn frame_width(&self) -> usize {
+        SCREEN_WIDTH
+    }
+
+    /// Whether the current frame is hi-res (512-wide).
+    pub const fn frame_hires(&self) -> bool {
+        false
+    }
+
+    /// The RGBA8888 frame buffer for the current frame's geometry.
     pub fn frame_buffer(&self) -> &[u8] {
-        &self.framebuffer[..]
+        &self.framebuffer[..self.frame_width() * SCREEN_HEIGHT * 4]
     }
 
     /// Mark the current frame as presented.
@@ -1428,6 +1451,17 @@ mod tests {
         ppu.write(0x2122, 0xE0); // colour 2: green
         ppu.write(0x2122, 0x03);
         ppu
+    }
+
+    #[test]
+    fn frame_geometry_matches_the_declared_width() {
+        let ppu = Ppu::new();
+        assert_eq!(ppu.frame_width(), SCREEN_WIDTH);
+        assert!(!ppu.frame_hires());
+        assert_eq!(ppu.frame_buffer().len(), FRAME_SIZE);
+        // Backing storage is hi-res capacity so a future mode change cannot
+        // need a reallocation.
+        const { assert!(MAX_FRAME_SIZE >= MAX_SCREEN_WIDTH * SCREEN_HEIGHT * 4) };
     }
 
     #[test]
