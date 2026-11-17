@@ -170,10 +170,28 @@ S-DSP output is now instrumented but not sample-identical:
     the test first touches `$F3`. The ~21-tick DSP difference is a consequence
     of that boot-path divergence, so per-access ordering cannot close it; the
     boot/loader instruction sequence is what differs.
-  - Consequence for the next attempt: diff the S-SMP instruction *sequence*
-    (PC stream) from reset through the loader up to the first `$F3` access. A
-    57-instruction difference there is small and localisable, and unlike every
-    DSP-side experiment so far it has a concrete, reproducible signature.
+  - **The PC stream localises it to the IPL upload loop.** Logging the S-SMP PC
+    per instruction from reset gives streams that are identical for **4,967
+    instructions** and then diverge inside the IPL ROM:
+    ```
+    idx 4965  ours $FFDA   RS $FFDA     ; CMP Y,$F4
+    idx 4966  ours $FFDC   RS $FFDC     ; BNE $FFE9
+    idx 4967  ours $FFE9   RS $FFDE     ; ours branches, RS falls through
+    ```
+    At `$FFDC` (`BNE $FFE9`, taken when `CMP Y,$F4` at `$FFDA` finds the CPU
+    port latch *changed*) we take the branch and RustySNES does not: our S-CPU
+    wrote `$2140-$2143` between the IPL's two `$F4` reads where RustySNES' did
+    not. The upload therefore splits into different block boundaries and the
+    run is ~57 instructions ahead by the first `$F3` access, which is the
+    cumulative offset seen in the DSP step index.
+    So the `spc_dsp6` failure bottoms out in the **S-CPU/S-SMP port handshake
+    timing during the IPL upload**, precisely at the `$FFDA`/`$FFDC` compare -
+    the same bidirectional-synchronisation item, but now with an exact first
+    divergence point (instruction 4,967) instead of a frame-level symptom.
+  - Consequence for the next attempt: diff the *latch values* (not just PCs)
+    at `$FFDA` in both emulators to see which write lands early, i.e. compare
+    the master-clock of each S-CPU `$2140` write with the IPL loop's `$F4`
+    reads. That is a small, bounded measurement on a deterministic loop.
   - Consequence for the next attempt: the remaining question is the
     *instruction-level* ordering of the write and the following read inside
     `$04F3`-`$050A` (which instruction's access the value is sampled on), not
