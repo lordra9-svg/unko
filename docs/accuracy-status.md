@@ -85,7 +85,9 @@ Implemented so far:
 - PPU mosaic: per-BG `$2106` enable, 1-16 pixel size, horizontal pixel repeats
   and vertical row reuse aligned like ares
 - S-SMP at the ares `apuFrequency = 32040 * 768 = 24,606,720 Hz` (2,050,560 Hz
-  S-SMP clock), with time accounted in access units at that rate
+  S-SMP clock), with time accounted in access units at that rate, and ares'
+  dummy `read(PC)` cycles (a real access with the external wait selector)
+  replacing internal idles for implied instructions
 - S-SMP timers 0-2 with targets, enable/reset bits, `$FD-$FF` output latching,
   the ares `$F0` internal/external wait dividers (`cycleWaitStates`
   2/4/10/20 for the CPU, `timerWaitStates` 2/4/8/16 for the timers), timer-line
@@ -165,7 +167,12 @@ Validation so far:
 - blargg **`spc_timer` reports `PASSED TESTS`**; `spc_smp` reports
   `Failed 02` (test 02 is CPU Instructions/Full BRK) and `spc_dsp6` reports
   `Failed 02` (Echo/esa_changes), both reproduced with the previous build and
-  recorded in the divergence ledger.
+  recorded in the divergence ledger. The `spc_smp` failure dump was captured
+  from VRAM: the suppressed readings CRC is `40E4B4BE` against the ROM's
+  expected `654FF73E`, and the table lists direct-page `E7-FB` stack/IO
+  entries. The test's BRK instruction itself matches ares (pushed `PC`/`P`,
+  `I←0`, `B←1`, stack bytes `02,01,P`), so the divergence is in a later part
+  of the test's stack fingerprint.
 - blargg **`spc_timer` now reports `PASSED TESTS`**. The ROM prints a CRC of
   ten timer readings and compares it with `D06CD0A9`; ours printed
   `1111111111` (`B358FA31`) until `RET`/`RETI`/`SLEEP`/`STP` were given their

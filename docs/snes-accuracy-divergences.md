@@ -69,7 +69,10 @@ rendering difference:
 S-DSP output is now instrumented but not sample-identical:
 
 - blargg `spc_smp` reports `Failed 02` (CPU Instructions/Full BRK) and
-  `spc_dsp6` reports `Failed 02` (Echo/esa_changes). Both failures predate the
+  `spc_dsp6` reports `Failed 02` (Echo/esa_changes). For `spc_smp` the
+  suppressed readings CRC is `40E4B4BE` where the ROM expects `654FF73E`;
+  the test's BRK matches ares instruction-for-instruction, so the failing
+  reading comes from the later stack-fingerprint checks (`E7-FB` table). Both failures predate the
   current scheduling work (the framebuffers are byte-identical to the previous
   build) and are the concrete audio/SPC items to fix next. `spc_dsp6` used to
   panic in a debug build on a 16-bit BRR/echo address overflow; those sums now

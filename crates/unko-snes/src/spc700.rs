@@ -213,6 +213,13 @@ impl Spc700 {
         bus.idle();
     }
 
+    /// The dummy `read(PC)` cycle ares uses for implied instructions: it is a
+    /// real access (external wait-state selector), not an internal idle.
+    fn dummy_read(&mut self, bus: &mut impl SpcBus) {
+        let address = self.pc;
+        self.read(bus, address);
+    }
+
     fn fetch(&mut self, bus: &mut impl SpcBus) -> u8 {
         let value = self.read(bus, self.pc);
         self.pc = self.pc.wrapping_add(1);
@@ -402,9 +409,7 @@ impl Spc700 {
 
     fn execute(&mut self, bus: &mut impl SpcBus, opcode: u8) {
         match opcode {
-            0x00 => {
-                self.idle(bus);
-            }
+            0x00 => self.dummy_read(bus),
             0x01 => self.call_table(bus, 0),
             0x02 => self.absolute_bit_set(bus, 0, true),
             0x03 => self.branch_bit(bus, 0, true),
@@ -833,7 +838,7 @@ impl Spc700 {
     }
 
     fn implied_modify(&mut self, bus: &mut impl SpcBus, opcode: u8, register: Register) {
-        self.idle(bus);
+        self.dummy_read(bus);
         let value = self.register(register);
         let result = self.apply_modify(opcode, value);
         self.set_register(register, result);
@@ -1085,7 +1090,7 @@ impl Spc700 {
 
     fn return_subroutine(&mut self, bus: &mut impl SpcBus) {
         // ares `instructionReturnSubroutine`: read(PC) then idle before the pulls.
-        self.idle(bus);
+        self.dummy_read(bus);
         self.idle(bus);
         let low = self.pull(bus);
         let high = self.pull(bus);
@@ -1094,7 +1099,7 @@ impl Spc700 {
 
     fn return_interrupt(&mut self, bus: &mut impl SpcBus) {
         // ares `instructionReturnInterrupt`: read(PC) then idle before the pulls.
-        self.idle(bus);
+        self.dummy_read(bus);
         self.idle(bus);
         let psw = self.pull(bus);
         self.set_psw(psw);
@@ -1104,7 +1109,7 @@ impl Spc700 {
     }
 
     fn break_interrupt(&mut self, bus: &mut impl SpcBus) {
-        self.idle(bus);
+        self.dummy_read(bus);
         self.push(bus, (self.pc >> 8) as u8);
         self.push(bus, self.pc as u8);
         self.push(bus, self.psw());
@@ -1117,14 +1122,14 @@ impl Spc700 {
     }
 
     fn push_reg(&mut self, bus: &mut impl SpcBus, register: Register) {
-        self.idle(bus);
+        self.dummy_read(bus);
         let value = self.register(register);
         self.push(bus, value);
         self.idle(bus);
     }
 
     fn pull_register(&mut self, bus: &mut impl SpcBus, register: Register) {
-        self.idle(bus);
+        self.dummy_read(bus);
         self.idle(bus);
         let value = self.pull(bus);
         match register {
@@ -1134,14 +1139,14 @@ impl Spc700 {
     }
 
     fn pull_p(&mut self, bus: &mut impl SpcBus) {
-        self.idle(bus);
+        self.dummy_read(bus);
         self.idle(bus);
         let psw = self.pull(bus);
         self.set_psw(psw);
     }
 
     fn flag_set(&mut self, bus: &mut impl SpcBus, flag: Flag, value: bool) {
-        self.idle(bus);
+        self.dummy_read(bus);
         if flag == Flag::InterruptDisable {
             self.idle(bus);
         }
@@ -1153,7 +1158,7 @@ impl Spc700 {
     }
 
     fn transfer(&mut self, bus: &mut impl SpcBus, from: Register, to: Register) {
-        self.idle(bus);
+        self.dummy_read(bus);
         let value = self.register(from);
         if to == Register::SP {
             self.sp = value;
@@ -1249,7 +1254,8 @@ impl Spc700 {
         self.wait = true;
         // ares `instructionSleep` loops `read(PC); idle()` until the thread
         // synchronizes; its measured cost is 7 accesses including the fetch.
-        for _ in 0..6 {
+        for _ in 0..3 {
+            self.dummy_read(bus);
             self.idle(bus);
         }
     }
@@ -1258,7 +1264,8 @@ impl Spc700 {
         self.stop = true;
         // ares `instructionStop` loops `read(PC); idle()` until the thread
         // synchronizes; its measured cost is 7 accesses including the fetch.
-        for _ in 0..6 {
+        for _ in 0..3 {
+            self.dummy_read(bus);
             self.idle(bus);
         }
     }
