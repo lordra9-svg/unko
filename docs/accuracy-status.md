@@ -224,8 +224,14 @@ Validation so far:
   tiles, and the per-line list is drawn backwards so the lowest OAM index wins
   every overlap regardless of the sprite priority bits. This removed the last
   33-58 differing pixels; with frames aligned the output is now bit-identical.
-- Star Fox remains black without the SuperFX coprocessor; Final Fantasy V was
-  still in its boot sequence at the 20M-cycle sample.
+- The SuperFX (GSU) coprocessor is implemented: the 16-register interpreter
+  with all 256 opcodes, the 512-byte instruction cache, the ROM/RAM bus and
+  the ROM/RAM buffer handshake, the plot/colour/rpix pixel pipeline, and the
+  S-CPU `$3000-$34FF` register window plus the `$70-$71` and `$6000-$7FFF`
+  work-RAM windows. The public PeterLemon GSU suite (31 opcode tests) is
+  verified against ares below. A release SuperFX image (e.g. Star Fox) is not
+  present locally, so the end-to-end game path is not yet measured; Final
+  Fantasy V was still in its boot sequence at the 20M-cycle sample.
 
 The PPU is line-based rather than dot-scheduled. **Interlace is implemented**
 (448-line output, odd field on the odd output rows, sprite and hires BG vertical

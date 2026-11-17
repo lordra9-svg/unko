@@ -135,6 +135,14 @@ impl RomHeader {
         region_for_country(self.country_code)
     }
 
+    /// Whether the cartridge type declares a SuperFX (GSU) coprocessor.
+    ///
+    /// `$13` is SuperFX, `$14` is SuperFX + RAM + battery and `$15` is
+    /// SuperFX + RAM.
+    pub const fn has_superfx(&self) -> bool {
+        matches!(self.cartridge_type, 0x13..=0x15)
+    }
+
     /// Human-readable cartridge type.
     pub fn cartridge_type_name(&self) -> &'static str {
         cartridge_type_name(self.cartridge_type)

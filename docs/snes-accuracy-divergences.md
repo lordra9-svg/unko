@@ -621,6 +621,56 @@ with ares. The implementation follows ares, which is the primary source.
   idle indefinitely, which the system model represents by not advancing the
   CPU until an interrupt or reset.
 
+## SuperFX (GSU)
+
+`crates/unko-snes/src/gsu.rs` is a port of the ares `GSU` interpreter and the
+`SuperFX` bus wrapper. It implements:
+
+- all 256 opcodes (ALT1/ALT2/ALT3 modes, immediate forms, branches, `loop`,
+  `jmpl`, `getb`/`getc`, `iwt`/`lm`/`sm`, `lms`/`sms`, `from`/`with`/`to`),
+  with the 16-bit flag results (`SFR` Z/CY/S/OV, `b`, `alt`, `irq`);
+- the 512-byte instruction cache (32 valid lines, `cache`/`ljmp` flushing,
+  S-CPU writes to `$3100-$32FF`);
+- the ROM/RAM bus: `$00-3f` LoROM ROM, `$40-5f` linear ROM, `$70-71` work RAM,
+  the ROM/RAM buffer handshake (`romcl`/`ramcl`, `r14` updates, `getb`/`getc`
+  sync), and the S-CPU `$3000-$34FF` register window;
+- the plot pipeline: colour/CMODE, dither, the two-stage pixel cache, tile
+  character-number arithmetic for all four screen modes, and `rpix`;
+- the `CPUROM`/`CPURAM` S-CPU quirks (the 16-byte vector while the GSU runs
+  with ROM enabled; RAM reads returning open bus while RAN is set);
+- the S-CPU IRQ raised by `STOP` when `CFGR.IRQ` is clear, cleared by reading
+  `$3031`;
+- save-state coverage (the whole `Gsu` is part of `SnesState`).
+
+Timing: the GSU oscillator is the S-CPU master clock on the supported boards,
+and the S-CPU advances the GSU with a master-clock credit (whole instructions,
+like the APU/PPU credit model). The GSU's internal `step` costs match ares
+(cache line fetch 5/6 clocks, buffer access 5/6, fast-clock 1/2, multiply
+3/7 x clock select).
+
+Verification: the public **PeterLemon GSU suite** (31 test images under
+`test-roms/snes/PeterLemon/SNES-CHIP-GSU-GSUTest/`) is run against ares at the
+same frame. Every test's **result table is 100.000% pixel-identical** to ares
+(31/31), covering ADD/ADC/SUB/SBC/CMP/AND/BIC/OR/XOR/MULT/UMULT/FMULT/LMULT/
+ASR/DIV2/LSR/ROL/ROR/INC/DEC/SWAP/MERGE/SEX/LOB/HIB/NOT/IBT/IWT/MOVE/MOVES/
+CACHEINJECT.
+
+Known limitations:
+
+- The first 6 header text rows in some of those screens differ. The test ROM
+  draws its header into VRAM immediately after a `$4210` poll; our S-CPU reaches
+  that poll in active display (so our VRAM-write gate drops the header), while
+  ares reaches it in vblank. This is a pre-existing S-CPU/PPU startup phase
+  difference exposed by the ROM's vblank race, not GSU behaviour; the result
+  tables themselves are exact.
+- HDMA A-bus reads are not routed into GSU RAM (normal HDMA targets only the
+  PPU B-bus, and no measured ROM needs it).
+- A release SuperFX game (Star Fox, Doom, Yoshi's Island) is not present in
+  the local test set, so the full game path (IRQ handshake, multiple GSU
+  programs, DMA of work RAM to VRAM) is not yet measured end to end.
+- Only the GSU-1/GSU-2 (same-clock) boards are modelled; the Mario Chip 1
+  clock-select differences are treated as the same master clock.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

@@ -24,6 +24,7 @@ pub mod apu;
 pub mod cpu;
 pub mod dma;
 pub mod dsp;
+pub mod gsu;
 pub mod io;
 pub mod ppu;
 pub mod rom;
@@ -34,6 +35,7 @@ pub use apu::{Apu, PortEvent, PortEventKind};
 pub use cpu::{Cpu, CpuBus, Flags};
 pub use dma::{Dma, DmaBus, DmaChannel, DmaTransfer};
 pub use dsp::Dsp;
+pub use gsu::Gsu;
 pub use io::CpuIo;
 pub use ppu::Ppu;
 pub use rom::{

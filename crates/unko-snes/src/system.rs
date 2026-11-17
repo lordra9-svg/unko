@@ -9,6 +9,7 @@
 use crate::apu::Apu;
 use crate::cpu::{Cpu, CpuBus};
 use crate::dma::{Dma, DmaBus};
+use crate::gsu::Gsu;
 use crate::io::CpuIo;
 use crate::ppu::Ppu;
 use crate::rom::{Cartridge, Region};
@@ -16,7 +17,7 @@ use crate::rom::{Cartridge, Region};
 /// Magic number at the start of a serialized save state (`"SNES"`).
 pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
 /// Save-state format version. Bump whenever the serialized shape changes.
-pub const SAVE_STATE_VERSION: u32 = 1;
+pub const SAVE_STATE_VERSION: u32 = 2;
 
 /// A complete `unko-snes` snapshot.
 ///
@@ -37,6 +38,10 @@ pub struct SnesState {
     pub apu: Apu,
     /// S-PPU pair.
     pub ppu: Ppu,
+    /// SuperFX coprocessor, when present.
+    pub gsu: Option<Gsu>,
+    /// Carried GSU master-clock credit.
+    pub gsu_credit: i64,
     /// DMA/HDMA channels.
     pub dma: Dma,
     /// Controller ports and CPU I/O registers.
@@ -142,6 +147,10 @@ pub struct Snes {
     pub ppu: Ppu,
     /// Console video region, taken from the cartridge header.
     region: Region,
+    /// SuperFX coprocessor, when the cartridge has one.
+    pub gsu: Option<Gsu>,
+    /// Carried GSU master-clock credit.
+    gsu_credit: i64,
     /// General-purpose DMA channels.
     pub dma: Dma,
     /// Controller ports, auto-poll and the multiply/divide unit.
@@ -182,6 +191,7 @@ impl Snes {
     /// Create a system around a parsed cartridge.
     pub fn new(cart: Cartridge) -> Self {
         let region = cart.header().region();
+        let has_superfx = cart.header().has_superfx();
         let mut ppu = Ppu::new();
         ppu.set_region(region);
         Self {
@@ -190,6 +200,8 @@ impl Snes {
             apu: Apu::new(),
             ppu,
             region,
+            gsu: if has_superfx { Some(Gsu::new()) } else { None },
+            gsu_credit: 0,
             dma: Dma::new(),
             io: CpuIo::new(),
             wram: vec![0; WRAM_SIZE],
@@ -232,6 +244,8 @@ impl Snes {
             cpu: self.cpu.clone(),
             apu: self.apu.clone(),
             ppu: self.ppu.clone(),
+            gsu: self.gsu.clone(),
+            gsu_credit: self.gsu_credit,
             dma: self.dma.clone(),
             io: self.io.clone(),
             wram: self.wram.clone(),
@@ -284,6 +298,8 @@ impl Snes {
         self.cpu = state.cpu.clone();
         self.apu = state.apu.clone();
         self.ppu = state.ppu.clone();
+        self.gsu = state.gsu.clone();
+        self.gsu_credit = state.gsu_credit;
         self.dma = state.dma.clone();
         self.io = state.io.clone();
         self.wram.copy_from_slice(&state.wram);
@@ -355,6 +371,10 @@ impl Snes {
         // `Ppu::reset` preserves the region, but re-assert it in case the field
         // order changes; the master clock ratio also depends on it.
         self.ppu.set_region(self.region);
+        if let Some(gsu) = self.gsu.as_mut() {
+            gsu.power();
+        }
+        self.gsu_credit = 0;
         self.dma.hdma_reset();
         self.io.reset();
         self.apu_credit = 0;
@@ -373,6 +393,7 @@ impl Snes {
         let mut bus = SnesBus {
             wram: &mut self.wram,
             cart: &mut self.cart,
+            gsu: &mut self.gsu,
             apu: &mut self.apu,
             ppu: &mut self.ppu,
             dma: &mut self.dma,
@@ -409,6 +430,7 @@ impl Snes {
                     let mut bus = SnesBus {
                         wram: &mut self.wram,
                         cart: &mut self.cart,
+                        gsu: &mut self.gsu,
                         apu: &mut self.apu,
                         ppu: &mut self.ppu,
                         dma: &mut self.dma,
@@ -437,7 +459,8 @@ impl Snes {
 
     /// Feed the latched IRQ/NMI edges to the CPU at an instruction boundary.
     fn apply_interrupts(&mut self) {
-        self.cpu.set_irq(self.irq_line);
+        let gsu_irq = self.gsu.as_ref().is_some_and(|gsu| gsu.irq_line);
+        self.cpu.set_irq(self.irq_line || gsu_irq);
         if self.nmi_line {
             self.nmi_line = false;
             self.cpu.trigger_nmi();
@@ -497,6 +520,16 @@ impl Snes {
             while self.apu_credit >= apu_unit_den {
                 self.apu.tick();
                 self.apu_credit -= apu_unit_den;
+            }
+        }
+        // The SuperFX oscillator runs at the S-CPU master clock on the boards
+        // this core supports; run whole instructions against a clock credit.
+        if let Some(gsu) = self.gsu.as_mut() {
+            let rom = self.cart.rom();
+            self.gsu_credit += i64::from(clocks);
+            while self.gsu_credit > 0 {
+                let cost = gsu.run_one(rom);
+                self.gsu_credit -= i64::from(cost.max(1));
             }
         }
         self.clock += u64::from(clocks);
@@ -604,6 +637,7 @@ impl Snes {
         SnesBus {
             wram: &mut self.wram,
             cart: &mut self.cart,
+            gsu: &mut self.gsu,
             apu: &mut self.apu,
             ppu: &mut self.ppu,
             dma: &mut self.dma,
@@ -658,6 +692,7 @@ struct SnesBus<'a> {
     cart: &'a mut Cartridge,
     apu: &'a mut Apu,
     ppu: &'a mut Ppu,
+    gsu: &'a mut Option<Gsu>,
     dma: &'a mut Dma,
     io: &'a mut CpuIo,
     nmi_enable: &'a mut bool,
@@ -700,6 +735,82 @@ impl SnesBus<'_> {
     }
 }
 
+impl SnesBus<'_> {
+    /// Map an S-CPU address onto the SuperFX coprocessor, if present.
+    fn superfx_read(&mut self, address: u32, mdr: u8) -> Option<u8> {
+        let gsu = self.gsu.as_mut()?;
+        let bank = (address >> 16) as u8;
+        let offset = (address & 0xFFFF) as usize;
+        let bank7 = bank & 0x7F;
+        let rom = self.cart.rom();
+
+        if bank <= 0x3F || (0x80..=0xBF).contains(&bank) {
+            if (0x3000..=0x34FF).contains(&offset) {
+                gsu.synchronize(rom);
+                return Some(gsu.read_io(address));
+            }
+            if (0x6000..=0x7FFF).contains(&offset) {
+                gsu.synchronize(rom);
+                if gsu.running() && gsu.ram_enabled() {
+                    return Some(mdr);
+                }
+                return Some(gsu.read_ram((offset - 0x6000) as u32));
+            }
+        }
+        if (0x60..=0x7D).contains(&bank7) && (offset < 0x8000 || (0x70..=0x71).contains(&bank7)) {
+            gsu.synchronize(rom);
+            if gsu.running() && gsu.ram_enabled() {
+                return Some(mdr);
+            }
+            return Some(gsu.read_ram(offset as u32));
+        }
+
+        // ares `SuperFX::CPUROM::read`: while the GSU runs with ROM enabled the
+        // S-CPU sees a fixed 16-byte vector in ROM space.
+        let rom_area = ((bank <= 0x3F || (0x80..=0xBF).contains(&bank)) && offset >= 0x8000)
+            || (0x40..=0x5F).contains(&bank)
+            || (0xC0..=0xDF).contains(&bank);
+        if rom_area && gsu.running() && gsu.rom_enabled() {
+            const VECTOR: [u8; 16] = [
+                0x00, 0x01, 0x00, 0x01, 0x04, 0x01, 0x00, 0x01, 0x00, 0x01, 0x08, 0x01, 0x00, 0x01,
+                0x0C, 0x01,
+            ];
+            return Some(VECTOR[address as usize & 15]);
+        }
+        None
+    }
+
+    /// Map an S-CPU write onto the SuperFX coprocessor, if present.
+    fn superfx_write(&mut self, address: u32, value: u8) -> bool {
+        let Some(gsu) = self.gsu.as_mut() else {
+            return false;
+        };
+        let bank = (address >> 16) as u8;
+        let offset = (address & 0xFFFF) as usize;
+        let bank7 = bank & 0x7F;
+        let rom = self.cart.rom();
+
+        if bank <= 0x3F || (0x80..=0xBF).contains(&bank) {
+            if (0x3000..=0x34FF).contains(&offset) {
+                gsu.synchronize(rom);
+                gsu.write_io(address, value);
+                return true;
+            }
+            if (0x6000..=0x7FFF).contains(&offset) {
+                gsu.synchronize(rom);
+                gsu.write_ram((offset - 0x6000) as u32, value);
+                return true;
+            }
+        }
+        if (0x60..=0x7D).contains(&bank7) && (offset < 0x8000 || (0x70..=0x71).contains(&bank7)) {
+            gsu.synchronize(rom);
+            gsu.write_ram(offset as u32, value);
+            return true;
+        }
+        false
+    }
+}
+
 impl CpuBus for SnesBus<'_> {
     fn read(&mut self, address: u32, mdr: u8) -> u8 {
         let bank = (address >> 16) as u8;
@@ -707,6 +818,9 @@ impl CpuBus for SnesBus<'_> {
 
         if bank == 0x7E || bank == 0x7F {
             return self.wram[((bank as usize & 1) << 16) | offset];
+        }
+        if let Some(value) = self.superfx_read(address, mdr) {
+            return value;
         }
         if bank <= 0x3F || (0x80..=0xBF).contains(&bank) {
             if offset < 0x2000 {
@@ -773,6 +887,9 @@ impl CpuBus for SnesBus<'_> {
 
         if bank == 0x7E || bank == 0x7F {
             self.wram[((bank as usize & 1) << 16) | offset] = value;
+            return;
+        }
+        if self.superfx_write(address, value) {
             return;
         }
         if bank <= 0x3F || (0x80..=0xBF).contains(&bank) {
@@ -1004,6 +1121,7 @@ mod tests {
         let mut bus = SnesBus {
             wram: &mut system.wram,
             cart: &mut system.cart,
+            gsu: &mut system.gsu,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
             dma: &mut system.dma,
@@ -1029,6 +1147,7 @@ mod tests {
         let mut bus = SnesBus {
             wram: &mut system.wram,
             cart: &mut system.cart,
+            gsu: &mut system.gsu,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
             dma: &mut system.dma,
@@ -1057,6 +1176,7 @@ mod tests {
         let mut bus = SnesBus {
             wram: &mut system.wram,
             cart: &mut system.cart,
+            gsu: &mut system.gsu,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
             dma: &mut system.dma,
@@ -1170,6 +1290,77 @@ mod tests {
         assert_eq!(restored.snapshot(), system.snapshot());
     }
 
+    fn superfx_cartridge(code: &[u8]) -> Cartridge {
+        let mut rom = build_lorom(code);
+        let header = Mapping::LoRom.header_offset();
+        rom[header + 0x16] = 0x14; // SuperFX + RAM + battery
+        Cartridge::from_bytes(&rom).expect("valid SuperFX LoROM")
+    }
+
+    #[test]
+    fn superfx_cartridges_expose_io_and_work_ram() {
+        let mut system = Snes::new(superfx_cartridge(&[0x4C, 0x00, 0x80]));
+        assert!(system.gsu.is_some());
+        // The 32 KiB work RAM is visible at $70-$71 and at $6000-$7FFF.
+        system.write(0x70_0000, 0xA5);
+        assert_eq!(system.read(0x70_0000, 0), 0xA5);
+        assert_eq!(system.read(0x00_6000, 0), 0xA5);
+        // Registers are visible at $3000-$301F.
+        system.write(0x00_3002, 0x34);
+        system.write(0x00_3003, 0x12);
+        assert_eq!(system.read(0x00_3002, 0), 0x34);
+        assert_eq!(system.read(0x00_3003, 0), 0x12);
+        // The G flag is clear before the CPU starts it.
+        assert_eq!(system.read(0x00_3030, 0) & 0x20, 0);
+    }
+
+    #[test]
+    fn save_state_round_trips_a_superfx_machine() {
+        let mut system = Snes::new(superfx_cartridge(&[0x4C, 0x00, 0x80]));
+        system.reset();
+        system.write(0x70_0000, 0x5A);
+        system.write(0x00_3002, 0x34);
+        system.write(0x00_3003, 0x12);
+        system.run_cycles(50_000, 200_000);
+        let saved = system.save_state();
+
+        let mut restored = Snes::new(superfx_cartridge(&[0x4C, 0x00, 0x80]));
+        restored.reset();
+        restored.load_state(&saved).expect("load SuperFX state");
+        assert_eq!(restored, system);
+    }
+
+    #[test]
+    fn save_state_continues_a_running_superfx_identically() {
+        // S-CPU: JMP $8000. GSU program at $8100: many INC r0, then STOP.
+        let mut code = vec![0x4C, 0x00, 0x80];
+        code.resize(0x100, 0xEA);
+        code.extend(std::iter::repeat_n(0xD0u8, 4000)); // INC r0
+        code.push(0x00); // STOP
+        let mut system = Snes::new(superfx_cartridge(&code));
+        system.reset();
+        {
+            let gsu = system.gsu.as_mut().expect("SuperFX");
+            gsu.write_io(0x3034, 0x00); // PBR
+            gsu.write_io(0x303A, 0x18); // RON | RAN
+            gsu.write_io(0x3039, 0x01); // fast clock
+            gsu.write_io(0x301E, 0x00);
+            gsu.write_io(0x301F, 0x81); // PC = $8100, G = 1
+        }
+        system.run_cycles(20_000, 200_000);
+        let saved = system.save_state();
+
+        let mut restored = Snes::new(superfx_cartridge(&code));
+        restored.reset();
+        restored.load_state(&saved).expect("load SuperFX state");
+        assert_eq!(restored, system);
+
+        // Both machines must continue the GSU program identically.
+        system.run_cycles(80_000, 400_000);
+        restored.run_cycles(80_000, 400_000);
+        assert_eq!(restored.snapshot(), system.snapshot());
+    }
+
     #[test]
     fn save_state_rejects_bad_input() {
         let mut system = Snes::new(cartridge(&[0xDB]));
@@ -1219,6 +1410,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                gsu: &mut system.gsu,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1293,6 +1485,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                gsu: &mut system.gsu,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1318,6 +1511,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                gsu: &mut system.gsu,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1343,6 +1537,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                gsu: &mut system.gsu,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1384,6 +1579,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                gsu: &mut system.gsu,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1435,6 +1631,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                gsu: &mut system.gsu,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1472,6 +1669,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                gsu: &mut system.gsu,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1500,6 +1698,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                gsu: &mut system.gsu,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1578,6 +1777,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                gsu: &mut system.gsu,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1604,6 +1804,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                gsu: &mut system.gsu,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
