@@ -1135,10 +1135,27 @@ frames of gameplay HUD rendering.
   and the ROM table at `$C3:C299` decodes as two `count=$F0, ptr=$7E:5000`
   blocks followed by a terminator.
 
-  **So the defect is in the HDMA runtime**, not the data: our channel 5 was
-  observed dereferencing `$7E:C00F` where that table prescribes `$7E:5000`.
-  That is the next thing to chase (the per-frame `hdmaSetup` position, or the
-  game reprogramming `$43x2-$43x4` after our setup has run).
+  **The defect is confined to channel 5's block cursor.** Comparing the two
+  engines at the same `$2100` write (ours via `Dma::hdma_cursor` in the
+  `PPU_LOG` line, ares via `oracleDumpChannels`):
+
+  | at `$2100 = $02` | table cursor | indirect ptr | line counter |
+  |---|---|---|---|
+  | ch7 ares | `$400C` | `$4046` | `$14` |
+  | ch7 ours | `$400C` | `$4046` | `$14` |
+  | ch5 ares | `$C2A2` | `$00A2` | `$00` |
+  | ch5 ours | `$C2A2` | `$2045` | `$C7` |
+
+  Channel 7 (CGDATA, mode 2) matches **exactly** - so the per-frame `hdmaSetup`
+  timing is *not* the problem (this refutes the "setup runs too early"
+  hypothesis). The table cursor for channel 5 also matches, but its **indirect
+  pointer and line counter do not**: ares has exhausted the block and hit the
+  terminator (`lc = 0`, `ptr = $00A2`, i.e. the terminator's bytes) while we
+  still have 199 lines left (`lc = $C7`) and a different pointer. Channel 5 is
+  the **mode-0** indirect channel (`ctrl = $40`, 1 byte per line) where channel
+  7 is mode 2, so the bug is in the mode-0 indirect path of
+  `Dma::hdma_line`/`hdma_reload` - most likely the block/terminator handling
+  rather than the address arithmetic.
 
   Off-by-one: we also issue two extra `$2100` writes ares does not (`$01` at
   frame 24 and `$AC` at frame 418), both invisible because both cores are

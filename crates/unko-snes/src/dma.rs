@@ -66,6 +66,18 @@ impl Dma {
         self.channels[index]
     }
 
+    /// One channel's HDMA table cursor: `(address, indirect_address,
+    /// line_counter, completed)` (debug).
+    pub const fn hdma_cursor(&self, index: usize) -> (u16, u16, u8, bool) {
+        let state = &self.hdma[index];
+        (
+            state.address,
+            state.indirect_address,
+            state.line_counter,
+            state.completed,
+        )
+    }
+
     /// Create eight idle channels.
     pub fn new() -> Self {
         Self::default()
