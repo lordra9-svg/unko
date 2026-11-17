@@ -157,6 +157,23 @@ S-DSP output is now instrumented but not sample-identical:
     follows a much longer DSP-access path in ours. This needs one confirmation
     run (the two logging paths differ), but it is the first *macroscopic*
     difference found in this test.
+  - **Per-access write ordering implemented, measured, insufficient.** ares
+    `SMP::write` is `wait()` then `writeIO`, so a DSP register write lands after
+    the access's own clocks. Doing exactly that for `$F3` writes (advance the
+    DSP `clocks / 2` micro-steps before the store, skip the drain-time tick for
+    that access) moves our write from step 1 to step 2 - correct, but the next
+    read still returns `00`, because the step-4 `registers[$x8]` refresh is
+    still ahead of it. One access is not the gap.
+  - **The offset is cumulative, from the boot.** Instrumenting the very first
+    `$F3` access gives *35,649* S-SMP instructions executed in ours against
+    *35,706* in RustySNES - the two SPCs are already 57 instructions apart when
+    the test first touches `$F3`. The ~21-tick DSP difference is a consequence
+    of that boot-path divergence, so per-access ordering cannot close it; the
+    boot/loader instruction sequence is what differs.
+  - Consequence for the next attempt: diff the S-SMP instruction *sequence*
+    (PC stream) from reset through the loader up to the first `$F3` access. A
+    57-instruction difference there is small and localisable, and unlike every
+    DSP-side experiment so far it has a concrete, reproducible signature.
   - Consequence for the next attempt: the remaining question is the
     *instruction-level* ordering of the write and the following read inside
     `$04F3`-`$050A` (which instruction's access the value is sampled on), not
