@@ -160,6 +160,15 @@ rendering difference:
     restarts on the `$10` set but does not stop on the clear; that harness bug
     has to be fixed before the per-instruction diff can be produced. No fix was
     landed for the phase itself this turn.
+    Root cause of the block: the RustySNES debug hook's own start/stop
+    bookkeeping never observes the clear transition (its state-machine
+    replacement also failed to apply cleanly against the file's formatting), so
+    the snapshot never closes. The fix is a *ring-buffer* trace on that side -
+    push `(pc, clocks)` for every instruction and snapshot the last ~2048 entries
+    when a store of zero to `$10` is seen - which has no start/stop state at all.
+    That is a contained change to the oracle harness only (no emulator code) and
+    is the first thing to do next; the per-instruction diff is then one command
+    against our captured 390-instruction/15,860-clock window.
   - Also note the cumulative totals: our `$806B` sits at 472,528 by frame 190
     against the reference's 454,144 (+4%), and `$809A` at 266,693 against
     253,713 (+5%), so the CPU spends slightly more iterations spinning in both
