@@ -188,6 +188,24 @@ S-DSP output is now instrumented but not sample-identical:
     timing during the IPL upload**, precisely at the `$FFDA`/`$FFDC` compare -
     the same bidirectional-synchronisation item, but now with an exact first
     divergence point (instruction 4,967) instead of a frame-level symptom.
+  - **Port-event log narrows it to one extra `$F4` poll.** Logging the S-CPU
+    `$2140-$2143` writes and the S-SMP `$F4-$F7` reads as one interleaved event
+    stream gives streams that agree for **2,145 events** and then differ by
+    exactly one extra S-SMP poll:
+    ```
+    idx 2144  ours W1=2F          RS W1=2F
+    idx 2145  ours R0=04   <--    RS W0=05
+    idx 2146  ours W0=05          RS R0=05
+    idx 2147  ours R0=05          RS R1=2F
+    ```
+    i.e. between the CPU's writes of block counters `$04` and `$05` our S-SMP
+    gets one more `$F4` read than RustySNES', which is the same extra IPL
+    iteration the PC stream shows. The APU clock ratios are *not* the cause:
+    RustySNES uses `SPC_NUM 68_352 / SPC_DEN_NTSC 715_909` (one S-SMP clock per
+    10.4737 master clocks) and ours is `1_025_280 / 21_477_272` per two-clock
+    access unit, which is the same ratio exactly.
+    So the difference is a discrete event during the upload (one extra
+    instruction or one CPU write landing slightly differently), not drift.
   - Consequence for the next attempt: diff the *latch values* (not just PCs)
     at `$FFDA` in both emulators to see which write lands early, i.e. compare
     the master-clock of each S-CPU `$2140` write with the IPL loop's `$F4`
