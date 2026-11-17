@@ -239,6 +239,8 @@ pub struct DmaTransfer {
     channels: [DmaChannel; 8],
     mask: u8,
     channel: usize,
+    /// ares `CPU::dmaRun` charges one eight-clock cycle before any channel.
+    whole_charged: bool,
     setup: bool,
     transferred: u32,
     count: u32,
@@ -250,6 +252,7 @@ impl DmaTransfer {
             channels,
             mask,
             channel: 0,
+            whole_charged: false,
             setup: true,
             transferred: 0,
             count: 0,
@@ -268,6 +271,12 @@ impl DmaTransfer {
     pub fn step(&mut self, bus: &mut impl DmaBus) -> u32 {
         if self.mask == 0 {
             return 0;
+        }
+        if !self.whole_charged {
+            // ares `CPU::dmaRun`: `counter.dma += 8; step(8);` once per trigger,
+            // before the per-channel `Channel::dmaRun` setup cycle.
+            self.whole_charged = true;
+            return 8;
         }
         if self.setup {
             let index = self.mask.trailing_zeros() as usize;

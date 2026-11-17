@@ -13,210 +13,41 @@ None known in the implemented 65C816/SPC700 instruction semantics or in the
 documented S-CPU wait-state table. The 65C816 differential suite asserts exact
 master-clock totals (six per oracle bus cycle) across all 18 suites.
 
-The remaining known video divergence is a **two-frame content phase**, not a
-rendering difference:
+*Super Mario World* is **pixel-identical at the same frame index** - frames 600,
+900 and 1500 are 100.000% exact (mean absolute channel difference 0.000) - and
+VRAM (32,768 words), CGRAM (256 entries) and OAM are bit-identical at 600
+frames. This includes the previous 33-58 pixel sprite-overlap residual, which
+was the sprite evaluation model (see below).
 
-- With frames aligned, *Super Mario World* is **100.000%** pixel-identical to
-  the RustySNES oracle: `unko-snes` frame 598 vs RustySNES 600 (mean absolute
-  channel difference 0.000), 898 vs 900, and 1500 vs 1500. This includes the
-  previous 33-58 pixel sprite-overlap residual, which was the sprite
-  evaluation model (see below).
-- **Open: title-screen content offset.** Both emulators turn the display on at
-  frame 86 and match exactly at 1500, but our title screen reaches the
-  reference content two frames earlier, so same-index comparisons at 600/900
-  show 92.4%/91.5%.
-  - Measured and rejected as causes: port-write placement (committing S-SMP
-    latches at their exact clocks left the frames **bit-identical**), port
-    *read* timing (timestamping every S-CPU `$2140-$2143` write and resolving
-    S-SMP `$F4-$F7` reads at the read access also left the frames
-    bit-identical), the APU
-    clock (using ares' 24,606,720 Hz changed the S-SMP instruction count but
-    not the frames), timer rate (ticks match RustySNES 4,077 vs 4,078 by frame
-    600), and the ares `$4210`/`$4200` NMI hold/enable model (it moved the
-    *request* count to 441 with identical frames, and was reverted).
-  - **Localised to frame 191.** Per-frame `$13` (ours/RustySNES):
-    `190:41/41  191:42/41  192:43/42  193:44/43  194:45/44  195:46/45`, with
-    identical vectored NMI counts throughout (106 at 190, 111 at 195). The
-    reference performs **one fewer game-loop iteration in frame 191** - it is
-    not an extra interrupt. RustySNES' CPU counter agrees it does less work that
-    frame (per-frame deltas 45,759 then 44,812) while ours is flat (357,370 then
-    357,376 master clocks). Our per-PC histogram shows the S-CPU dominated by
-    the `$806B`/`$806D` wait loop (472,529 of 2,691,653 instructions at frame
-    190, +4,503 per frame); a matching RustySNES histogram needs the counter in
-    `run_frame`'s inner loop, because `step_instruction` is not the path it uses.
-  - **The two loops are now decoded, and the cause is a race, not the APU.**
-    Bank 00 maps LoROM `$8000-$FFFF` to ROM `$0000-$7FFF`, so ROM `$006B` is the
-    wait loop:
-    ```
-    $806B: A5 10     lda $10      ; direct-page $10, a game flag set by the NMI handler
-    $806D: F0 FC     beq $806B
-    ```
-    and ROM `$009A` is the APU handshake loop:
-    ```
-    $809A: CD 40 21  cmp $2140    ; APU port 0
-    $809D: D0 FB     bne $809A
-    ```
-    Instruction counts at the two frame samples (ours / RustySNES):
-    ```
-    PC      ours 190   ours 191   delta | RS 190    RS 191   delta
-    $806B    472,528    477,031  +4,503 | 454,144   454,144      0
-    $806D    472,529    477,032  +4,503 | 454,143   454,143      0
-    $809A    266,693    266,693       0 | 253,713   253,713      0
-    $B974      7,547      7,635     +88 |   7,193     7,507   +314
-    ```
-    **Correction after logging `$806B` with the master clock.** The "0 vs 4,503
-    in frame 191" is a sampling-boundary artefact, not a missing entry: the loop
-    spins continuously inside one NMI interval (largest measured spin: 4,496
-    consecutive hits spanning 206,770 master clocks), so an end-of-frame sample
-    can fall entirely inside or entirely outside a spin. Logging
-    `(master_clock, DP $10, vectored NMIs)` at every `$806B` gives an iteration
-    period of **46.00 master clocks** and shows the real signal is a *systematic*
-    skew: per-frame spin iterations are **2,487 for us and 2,390 for RustySNES**
-    (cumulative at frame 190: 472,528 vs 454,144, +4%). The `$2140` APU loop is
-    not involved in this window for either emulator.
-    So the loop waits for the NMI handler to set DP `$10`, and we spend ~4% more
-    iterations waiting each frame - i.e. our NMI arrives later relative to the
-    point the main loop starts spinning (or our HDMA stalls shorten the loop
-    period). Measuring RustySNES' loop period over the same interval separates
-    the two.
-  - **Loop period measured on both sides: identical.** Logging
-    `(master_clock, DP $10)` at every `$806B` on the RustySNES side as well gives
-    a **46.00 master clock** iteration period in *both* emulators, so a
-    per-iteration cost difference is ruled out. (The earlier reading of "312
-    iterations at 86 clocks" on the reference side was an artefact of comparing
-    unmatched windows: RustySNES' 9,000 samples cover 1.3 frames because they are
-    one long spin, while ours span 44 frames.)
-  - **HDMA CPU stalls implemented.** While measuring this, the loop's measured
-    46-clock period against `lda`+`beq` = 11 clocks showed that stalls dominate
-    the loop. HDMA now charges the CPU ares' eight master clocks per transferred
-    byte (`Snes.hdma_stall`, paid on the next access), which is a real fidelity
-    fix - but it does **not** touch the frame-191 window: SMW transfers **0 HDMA
-    bytes** at frames 100 and 191 (only 146,288 by frame 600), so HDMA is not the
-    stall source there.
-  - **Matched-interval measurement: our CPU reaches the wait ~512 clocks sooner.**
-    Logging NMI entry and the next `$806B` arrival in the same NMI interval, on
-    the same clock base, gives:
-    ```
-    frame/NMI spacing      ours 357,352-357,376   RS 357,352-357,376   (identical)
-    NMI -> first $806B     ours 15,952-15,974     RS 16,464-16,486     (-512 clocks)
-    ```
-    Our frame length matches, so the skew is **CPU work after the NMI**: we
-    complete the post-NMI path ~512 master clocks (≈85 bus accesses) faster than
-    the reference and therefore reach the `lda $10` spin earlier, which is what
-    lengthens the spin. That is the quantity to chase next (a specific routine's
-    timing, or stall accounting), and it is a ~512-clock target rather than an
-    open-ended search.
-  - Debug-accounting fix: `Snes::step` now adds DMA stall time to `cpu.cycles`,
-    so the CPU's cumulative clock equals system master time. Before this, any
-    analysis based on `cpu.cycles` was short by the DMA time (it made the NMI
-    interval look 5,600 clocks too short).
-  - **Root cause found: DP `$10` differs at `$81DC`.** A per-instruction trace of
-    one NMI interval, aligned on the common PC sequence, is identical for **48
-    instructions** and then diverges at the branch:
-    ```
-    $81DA: A5 10     lda $10
-    $81DC: F0 09     beq $81E7      ; ours: taken (22 clocks) -> $81E7: E6 10 (inc $10)
-                                     ; reference: not taken (16 clocks) -> $81DE
-    $81DE: AD 9B 0D  lda $0D9B ...
-    ```
-    So DP `$10` - the very flag the `$806B` loop polls - is **zero in ours and
-    non-zero in the reference** at that point, so we take a branch the reference
-    does not, and from there the control flow (and the frame's work) diverges.
-    That is the 512-clock gap and the extra game-loop iteration: a single byte of
-    game state out of phase, not a timing/stall mechanism.
-    Before the branch, only two per-instruction costs differ ($81DC itself and
-    $81DC's predecessor $81DC/$81DC: `$818C` `stz $1DFB` costs 32 in ours vs 72
-    in the reference, and `$81DC` 22 vs 16) - i.e. the trace is cycle-consistent
-    until the branch flips.
-    Next: find who leaves `$10` in the other state. The 48 identical instructions
-    do not write it, so the difference is established before the NMI - trace the
-    writes to DP `$10` across a whole frame in both emulators and diff the value
-    at the NMI entry.
-  - **Write trace: the flag window is 490 clocks short, and only that.** Logging
-    every store to DP `$10` as `(master clock, value)` in both emulators gives
-    the same value sequence (1/0 twice per frame) at clocks that align to within
-    +/-256; the decisive quantity is the width of the `$10 == 1` window:
-    ```
-    ours  52126650 -> 52142084  = 15,434 clocks
-    RS    52126394 -> 52142318  = 15,924 clocks        (+490)
-    ```
-    `$10` is set by the NMI and cleared by the main loop once its post-NMI work
-    is done, so this independently confirms the ~512-clock NMI-to-`$806B` gap:
-    the work between those two points is ~490 clocks faster in ours, and that
-    window *is* the SMW phase difference.
-  - **Measurement caveat.** RustySNES' master clock reaches only 52,841,124 by
-    its `run_frame` 191 where ours reaches 68,224,066 - a 43-frame discrepancy in
-    clock accounting (its NMI spacing is correct at 357,354). Cross-emulator
-    clock comparisons beyond ~148 frames are therefore unusable as-is, and the
-    harness's frame/clock correspondence must be fixed before extending the
-    trace further.
-  - **Window trace instrumented; reference side still blocked.** The
-    set->clear window trace is implemented on our side and captures the full
-    sequence: **390 instructions, 15,860 master clocks**, from `$81E9` (first
-    instruction after `inc $10`) to `$8075` (the instruction that clears the
-    flag) - consistent with the 15,434/15,924-clock flag windows. The matching
-    RustySNES-side window never closes (it records 526,628 instructions over
-    15.4M clocks instead of one ~390-instruction window), because its debug hook
-    restarts on the `$10` set but does not stop on the clear; that harness bug
-    has to be fixed before the per-instruction diff can be produced. No fix was
-    landed for the phase itself this turn.
-    Root cause of the block: the RustySNES debug hook's own start/stop
-    bookkeeping never observes the clear transition (its state-machine
-    replacement also failed to apply cleanly against the file's formatting), so
-    the snapshot never closes. The fix is a *ring-buffer* trace on that side -
-    push `(pc, clocks)` for every instruction and snapshot the last ~2048 entries
-    when a store of zero to `$10` is seen - which has no start/stop state at all.
-    That is a contained change to the oracle harness only (no emulator code) and
-    is the first thing to do next; the per-instruction diff is then one command
-    against our captured 390-instruction/15,860-clock window.
-    **The ring buffer worked and the diff is done.** RustySNES' snapshot now
-    closes at `$8075`, and aligning both windows on their first matching PC
-    (`$81E9`) compares 349 instructions. Ours totals 15,408 clocks against
-    15,924, and the whole gap decomposes into **12 instruction-level
-    differences totalling 472 clocks**:
-    ```
-    PC      ours  rs    delta        PC      ours  rs    delta
-    $AE47     16   56    +40         $A378     36   76    +40
-    $AE52     16   56    +40         $A383    550  558     +8
-    $A390     22   62    +40         $85E6     24   64    +40
-    $A347     36   76    +40         $8465   4390 4518   +128
-    $A34A    294  302     +8         $865C     32   72    +40
-    $A363    550  558     +8         $8256     30   70    +40
-    ```
-    Every delta is a **multiple of 8 master clocks**, and the dominant signature
-    is **+40 = 5 x 8**: eleven events where the reference charges five more
-    eight-clock units than we do at the instruction following a `JSR $8040`.
-    The `+128` at `$8465` is 16 units, and the three `+8` are one unit each.
-    That is the shape of **DMA/stall accounting**: ares charges eight master
-    clocks per DMA byte and we are short by a whole number of such units at
-    these points. So the ~490-clock window difference is not a control-flow or
-    instruction-timing difference at all - it is ~59 missing eight-clock stall
-    units per window.
-  - Also note the cumulative totals: our `$806B` sits at 472,528 by frame 190
-    against the reference's 454,144 (+4%), and `$809A` at 266,693 against
-    253,713 (+5%), so the CPU spends slightly more iterations spinning in both
-    loops overall - a systematic skew too, not only the single frame.
-  - The earlier "one extra NMI" was an accounting artefact: `nmi_count` counted
-    NMI *requests* while RustySNES counts *vectored* interrupts. Matching the
-    accounting (`cpu.nmi_services`) gives identical counts at frames 190-200
-    (106..116) and differences of +/-1 at other frames that move with the
-    capture point. The game's WRAM `$13` is likewise within one increment.
-  - What remains is a genuine phase difference in the boot handshake, and the
-    only exact model is ares' bidirectional cooperative threads: the S-CPU and
-    S-SMP can each suspend mid-instruction at a port access and run the other
-    forward to the same clock. Our single-threaded `Spc700::step` executes a
-    whole instruction at once, so an S-SMP poll of `$F4-$F7` observes the CPU
-    latch as of the instruction start. Two ways to remove it:
-    1. **Resumable SPC700** — rewrite the interpreter as an explicit
-       state machine (or a generator) that yields at every bus access; exact,
-       but it touches every instruction and addressing-mode helper.
-    2. **Coroutine S-CPU/S-SMP** — run the S-SMP interpreter on a second OS
-       thread and hand-shake at port accesses; exact and localized, but adds
-       threading, synchronization cost and unsafe/shared state.
-    This is an architecture decision, not a bug fix; the current model keeps
-    the port *writes* exact and the port *reads* one instruction early.
-- VRAM (32,768 words), CGRAM (256 entries) and OAM are bit-identical to the
-  RustySNES oracle at 600 frames.
+- **The former two-frame content phase was DRAM refresh.** The 5A22 refreshes
+  WRAM once per scanline; ares `CPU::step` models it as five 6+2-clock stalls at
+  hcounter 536 (dot 134), so the CPU loses **40 master clocks per line** while
+  the PPU and S-SMP keep running. We modelled no refresh at all, so the CPU
+  executed one extra eight-clock unit every ~341 dots - about 10,480 clocks
+  (~2.9%) of extra work per frame. The game loop therefore ran ahead of the
+  reference and the title screen reached the same content two frames early.
+  - How it was found: a per-instruction cost trace of one `$10` window (the
+    NMI-set / main-loop-cleared frame flag) compared 349 instructions against
+    RustySNES and isolated 12 differences totalling 472 clocks. Every one was a
+    multiple of 8, and the dominant signature was **+40 = 5 x 8**, i.e. exactly
+    ares' five 6+2 DRAM-refresh stalls. One 544-byte OAM DMA showed `+128`
+    (three line refreshes plus ares' whole-transfer cycle) and three DMA
+    triggers showed `+8` (that whole-transfer cycle).
+  - Fixing it removed the phase outright: WRAM `$13` at frame 191 is now `0x41`,
+    matching RustySNES (it was `0x42`), and same-index 600/900/1500 are
+    bit-identical instead of 92.4%/91.5% with a two-frame shift.
+  - The same trace also found ares' `CPU::dmaRun` whole-transfer cycle (8 clocks
+    per DMA trigger, before the per-channel `Channel::dmaRun` setup), which is
+    now charged too.
+  - `dram_refresh_stalls_the_cpu_once_per_scanline` pins the cadence (40 clocks
+    per 341-dot line, three lines in a row).
+  - Previously eliminated along the way, for the record: port-write placement,
+    `$2140-$2143` read timing, the ares APU clock, the timer rate, the
+    `$4210`/`$4200` NMI hold model, NMI accounting (requests vs vectored), the
+    `$806B` loop period (46.00 master clocks in both emulators), HDMA stalls
+    (SMW has HDMA disabled at that point: 216 `$420C` writes, all zero, in both
+    emulators), and access-granular S-SMP reads (branch `spc-resume`, which
+    left the frames byte-identical).
 - **Frame-index caveat:** the local ares build's `--frames N --dump-frame`
   dumps the content of frame `N - 2` (its internal frame counter starts two
   vblanks later than RustySNES' and ours). Compare ares dumps with `ours N-2`

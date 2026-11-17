@@ -20,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **845 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **846 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -114,7 +114,7 @@ Implemented so far:
 
 Validation so far:
 
-- **845 workspace tests**, 0 failed
+- **846 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -182,29 +182,24 @@ Validation so far:
 - Super Mario World with the local 64-byte IPL ROM, measured against RustySNES
   frame dumps (cross-checked against ares `--dump-frame`; the ares dump's
   content index runs two frames behind its `--frames` label):
-  - **aligned 600** (`unko-snes` frame 598 vs RustySNES 600): **100.000%**
-    of pixels bit-identical, mean absolute channel difference 0.000
-  - **aligned 900** (898 vs 900): **100.000%** bit-identical
+  - **600**: **100.000%** bit-identical **at the same frame index**, mean
+    absolute channel difference 0.000
+  - **900**: **100.000%** bit-identical at the same frame index
   - **1500**: **100.000%** bit-identical at the same frame index
   - **VRAM: 0 of 32,768 words differ** from RustySNES at 600 frames;
     **CGRAM: 0 of 256 entries differ**; **OAM: identical**
   - title logo, sky gradient, cloud sprites, border, "© 1990, 1991 Nintendo"
     text and the scrolling BG1 landscape all match
-  - **open:** the game's own frame counter (WRAM `$13`) is identical to
-    RustySNES at frames 140-190 (`0x39`, then `0x41` through the logo hold)
-    and one ahead from frame 195 (`0x46` vs `0x45`), while the *vectored*
-    NMI counts match exactly across that window (106 at 190, 111 at 195 in
-    both). So the two-frame content lead is **not** an extra NMI; it is one
-    extra game-loop iteration between frames 190 and 195.
-  - **open:** `unko-snes` reaches the same title-screen content two frames
-    before RustySNES/ares, so same-index comparisons show 92.4% (600) and
-    91.5% (900). Both emulators turn the display on at frame 86. Port-latch
-    timing, the APU clock, the timer rate and the ares NMI hold/enable model
-    were each changed independently and either left the frames
-    bit-identical or made the NMI accounting worse, so the residual is a boot
-    handshake phase difference that needs exact bidirectional S-CPU/S-SMP
-    synchronization (a resumable SPC700 interpreter or coroutine scheduling).
-    See the divergence ledger.
+  - **fixed: the former two-frame title-screen content phase** was missing
+    **DRAM refresh**. The 5A22 stalls the CPU 40 master clocks once per
+    scanline (ares `CPU::step`: five 6+2-clock stalls at hcounter 536 / dot
+    134), which we did not model, so the CPU did ~2.9% more work per frame and
+    the game loop ran ahead: same-index 600/900 were 92.4%/91.5%, and WRAM
+    `$13` was one ahead from frame 191. With the refresh implemented, `$13` at
+    frame 191 matches RustySNES (`0x41`) and 600/900/1500 are bit-identical.
+    The trace that found it (a 349-instruction `$10`-window diff whose 12
+    differences were all multiples of 8, dominant `+40 = 5 x 8`) is recorded in
+    the divergence ledger.
 - Sprite rendering follows ares exactly: OAM is scanned from `firstSprite`,
   the first 32 on-line sprites are kept, the line draws at most 34 object
   tiles, and the per-line list is drawn backwards so the lowest OAM index wins

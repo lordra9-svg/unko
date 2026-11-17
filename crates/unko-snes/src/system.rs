@@ -15,6 +15,12 @@ use crate::rom::Cartridge;
 /// Size of the SNES work RAM.
 pub const WRAM_SIZE: usize = 0x2_0000;
 
+/// Master clocks the 5A22 spends refreshing WRAM on every scanline
+/// (ares `CPU::step`: five stalls of 6 + 2 clocks).
+const DRAM_REFRESH_CLOCKS: u32 = 40;
+/// Dot (ares hcounter 536 / 4) at which that refresh completes.
+const DRAM_REFRESH_DOT: u16 = 134;
+
 /// A SNES system with a CPU and cartridge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Snes {
@@ -38,8 +44,11 @@ pub struct Snes {
     fast_rom: bool,
     /// `$2180-$2183` WRAM data-port address (17 bits).
     wram_port: u32,
-    /// Master clocks the CPU still owes for HDMA bytes already transferred.
-    hdma_stall: u32,
+    /// Master clocks the CPU still owes the peripherals (HDMA bytes already
+    /// transferred and the current scanline's DRAM refresh).
+    cpu_stall: u32,
+    /// Whether the current scanline's DRAM refresh has been applied.
+    refresh_done: bool,
     /// IRQ line state latched by the H/V comparator, applied at the next
     /// instruction boundary.
     irq_line: bool,
@@ -67,7 +76,8 @@ impl Snes {
             nmi_flag: false,
             fast_rom: false,
             wram_port: 0,
-            hdma_stall: 0,
+            cpu_stall: 0,
+            refresh_done: false,
             irq_line: false,
             nmi_line: false,
             nmi_count: 0,
@@ -215,10 +225,23 @@ impl Snes {
         // The PPU dot clock is the master clock divided by four on NTSC.
         self.ppu_credit += i64::from(clocks);
         while self.ppu_credit >= 4 {
+            let pre_dot = self.ppu.dot();
             self.ppu.tick();
             self.ppu_credit -= 4;
+            // ares `CPU::step`: "DRAM refresh occurs once every scanline" as five
+            // 6+2 master-clock stalls at hcounter 536 (dot 134). The CPU loses
+            // those 40 clocks; the rest of the machine keeps running.
+            if pre_dot == DRAM_REFRESH_DOT - 1 && !self.refresh_done {
+                // The CPU loses these clocks; they are charged to its next access,
+                // which then advances the peripherals by the same amount, so no
+                // extra `advance_peripherals` call belongs here (that would count
+                // the 40 clocks twice).
+                self.refresh_done = true;
+                self.cpu_stall += DRAM_REFRESH_CLOCKS;
+            }
             self.irq_line = self.io.poll_irq(self.ppu.line(), self.ppu.dot());
             if let Some(line) = self.ppu.take_line_event() {
+                self.refresh_done = false;
                 if line == 0 {
                     self.dma.hdma_reset();
                 }
@@ -230,7 +253,7 @@ impl Snes {
                 };
                 let bytes = self.dma.hdma_line(&mut bus);
                 // ares: an HDMA byte costs the CPU eight master clocks.
-                self.hdma_stall += bytes * 8;
+                self.cpu_stall += bytes * 8;
                 if line == 225 {
                     self.io.begin_auto_poll();
                 }
@@ -296,9 +319,10 @@ impl CpuBus for Snes {
 
     fn access_cycles(&mut self, address: u32) -> u32 {
         let base = self.bus().access_cycles(address);
-        // HDMA transfers inside hblank steal eight master clocks per byte from
-        // the CPU (ares); the debt is paid on the next access.
-        base + std::mem::take(&mut self.hdma_stall)
+        // HDMA bytes transferred inside hblank and the scanline's DRAM refresh
+        // both steal master clocks from the CPU (ares); the debt is paid on the
+        // next access, which also advances the peripherals by the same amount.
+        base + std::mem::take(&mut self.cpu_stall)
     }
 
     fn idle(&mut self) {
@@ -979,6 +1003,23 @@ mod tests {
     }
 
     #[test]
+    fn dram_refresh_stalls_the_cpu_once_per_scanline() {
+        // ares `CPU::step` refreshes WRAM once per scanline at hcounter 536 (dot
+        // 134) as five 6+2 master-clock stalls, so the CPU loses 40 clocks per
+        // line while the rest of the machine keeps running. Without it the CPU
+        // executes ~2.9% more work per frame than the reference and the game
+        // loop drifts (Super Mario World's title screen ran two frames ahead).
+        let mut system = Snes::new(cartridge(&[0xDB]));
+        // 341 dots x 4 master clocks = one NTSC scanline.
+        system.advance_peripherals(1364);
+        assert_eq!(system.cpu_stall, DRAM_REFRESH_CLOCKS);
+        system.advance_peripherals(1364);
+        assert_eq!(system.cpu_stall, 2 * DRAM_REFRESH_CLOCKS);
+        system.advance_peripherals(1364);
+        assert_eq!(system.cpu_stall, 3 * DRAM_REFRESH_CLOCKS);
+    }
+
+    #[test]
     fn dma_stalls_match_the_byte_rate() {
         struct CountBus {
             bytes: usize,
@@ -1008,8 +1049,9 @@ mod tests {
         let mut bus = CountBus { bytes: 0 };
         let cycles = crate::dma::run(&channels, mask, &mut bus);
         assert_eq!(bus.bytes, 4);
-        // Eight master clocks per byte plus one eight-clock setup block.
-        assert_eq!(cycles, 40);
+        // ares: one eight-clock cycle per trigger, one per channel setup, then
+        // eight master clocks per byte.
+        assert_eq!(cycles, 48);
     }
 
     #[test]
