@@ -335,6 +335,9 @@ pub struct Sa1 {
     /// Address of the instruction currently executing (debug).
     #[serde(skip)]
     pub live_pc: u32,
+    /// Address of the S-CPU instruction currently executing (debug).
+    #[serde(skip)]
+    pub snes_live_pc: u32,
     /// Normal DMA transfers executed (debug).
     pub dma_count: u64,
 }
@@ -358,6 +361,7 @@ impl Sa1 {
             snes_refresh: false,
             ticks: 0,
             live_pc: 0,
+            snes_live_pc: 0,
             dma_count: 0,
         };
         sa1.power(region);
@@ -699,6 +703,23 @@ impl Sa1 {
     /// The ares bus map mirrors the address to `$0000-$07FF` before the write
     /// hook runs, so only `SIWP` bit 0 is consulted (ares quirk).
     pub fn write_cpu_iram(&mut self, address: u32, data: u8) {
+        if std::env::var_os("SA1_LOG").is_some() {
+            let index = (address as usize) & 0x7FF;
+            if (0x200..=0x2FF).contains(&index) || (0x6D0..=0x700).contains(&index) {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/opencode/sa1.log")
+                {
+                    let _ = writeln!(
+                        f,
+                        "CI {:04X} <- {:02X} spc={:06X}",
+                        index, data, self.snes_live_pc
+                    );
+                }
+            }
+        }
         if self.io.siwp & 1 != 0 {
             self.iram_write(address, data);
         }

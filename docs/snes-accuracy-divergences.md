@@ -898,9 +898,17 @@ frames of gameplay HUD rendering.
   (`STA $DE` with `DP = $3600`), which copies its pointer from
   `LDA $0222,X` using the index in `$36D2/$36D3`. The table it copies from
   (`I-RAM $0222+`) is uploaded by the S-CPU and, at frame 106, still holds
-  zeros; by frame 120 it holds a repeating `00 05 05 60` pattern. So the
-  remaining bug is in the S-CPU -> I-RAM upload / index (`$36D2`, `$36D3`) that
-  feeds that copy, not in the super-MMC or the handshake.
+  zeros. Logging the S-CPU's I-RAM writes with its live PC shows that before
+  the crash it **never writes** `I-RAM $0200-$02FF` (or `$36D0-$3700`): its
+  only I-RAM traffic is the direct page at `$3600-$36FF` (index `$600-$6FF`,
+  ~140k writes per 100 frames). The repeating `00 05 05 60` pattern is written
+  *after* the derail, by the S-CPU executing at `$00:6003` in BWRAM
+  (`spc=006003`), so it is a symptom, not the cause. The SA-1's boot `MVN`
+  (`$00:82C3`, `MVN $00,$00` with `X=$3000 Y=$3001 A=$07FE`) deliberately
+  clears I-RAM, and the table it later reads at `$0222` is never repopulated.
+  So the missing piece is the **S-CPU -> I-RAM upload of the SA-1 data table**
+  (or the ordering of that upload against the SA-1's release), not the
+  super-MMC, the BWRAM banking or the `$72A4` handshake.
 - The SA-1's `$40-$4F` BWRAM window is the only extra S-CPU mapping modelled;
   the boot ROM / BS-X slot and the `$50-$6F` open-bus windows are not.
 

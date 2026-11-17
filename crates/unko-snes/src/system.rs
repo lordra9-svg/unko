@@ -539,6 +539,9 @@ impl Snes {
     /// for the duration of the call so the system bus can borrow the rest of
     /// the machine.
     pub fn step(&mut self) -> u32 {
+        if let Some(sa1) = self.sa1.as_mut() {
+            sa1.snes_live_pc = self.cpu.pc_address();
+        }
         let mut cpu = std::mem::take(&mut self.cpu);
         let cpu_cycles = cpu.step(self);
         self.cpu = cpu;
