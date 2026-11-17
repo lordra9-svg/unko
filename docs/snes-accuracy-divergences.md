@@ -132,6 +132,24 @@ rendering difference:
     do not write it, so the difference is established before the NMI - trace the
     writes to DP `$10` across a whole frame in both emulators and diff the value
     at the NMI entry.
+  - **Write trace: the flag window is 490 clocks short, and only that.** Logging
+    every store to DP `$10` as `(master clock, value)` in both emulators gives
+    the same value sequence (1/0 twice per frame) at clocks that align to within
+    +/-256; the decisive quantity is the width of the `$10 == 1` window:
+    ```
+    ours  52126650 -> 52142084  = 15,434 clocks
+    RS    52126394 -> 52142318  = 15,924 clocks        (+490)
+    ```
+    `$10` is set by the NMI and cleared by the main loop once its post-NMI work
+    is done, so this independently confirms the ~512-clock NMI-to-`$806B` gap:
+    the work between those two points is ~490 clocks faster in ours, and that
+    window *is* the SMW phase difference.
+  - **Measurement caveat.** RustySNES' master clock reaches only 52,841,124 by
+    its `run_frame` 191 where ours reaches 68,224,066 - a 43-frame discrepancy in
+    clock accounting (its NMI spacing is correct at 357,354). Cross-emulator
+    clock comparisons beyond ~148 frames are therefore unusable as-is, and the
+    harness's frame/clock correspondence must be fixed before extending the
+    trace further.
   - Also note the cumulative totals: our `$806B` sits at 472,528 by frame 190
     against the reference's 454,144 (+4%), and `$809A` at 266,693 against
     253,713 (+5%), so the CPU spends slightly more iterations spinning in both
