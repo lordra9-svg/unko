@@ -313,6 +313,19 @@ with ares. The implementation follows ares, which is the primary source.
   interleaved halves (Above at even output columns, Below at odd) **and** verify
   that `sub` (Below) actually carries the alternate detail for a pseudo-hires
   ROM, i.e. check `TS`/sub-layer rendering at 256 wide first.
+  That check is now done. `Ppu::debug_line_layers` shows the ROM is **mode 1
+  with `SETINI = $08`** (pseudo-hires), `TM = $01`, `TS = $02`: the main screen
+  draws BG1 and the sub screen draws BG2, both fully opaque (256/256 pixels),
+  and the two screens **differ on 129-149 of 256 pixels** per line. So the
+  Below screen does carry its own content and the Above/Below interleave is the
+  right model.
+  Re-applying the interleave on that basis still measures **5.767%** against
+  RustySNES - and our *non-hires 256-wide* render of the same frame measures
+  **5.882%** against RustySNES' even columns (6.570% against odd). The two
+  numbers being equal is the important result: **the mismatch is in the base
+  rendering of this ROM, not in the hi-res path**. This ROM cannot validate
+  hires until our 256-wide render of it matches, which points at its HDMA
+  colour/palette effect rather than at pixel plumbing.
 - Offset per tile **is** implemented for modes 2, 4 and 6, transcribed from
   ares `Background::fetchNameTable`/`fetchOffset`: the per-column horizontal and
   vertical words are read from BG3's tilemap (horizontal at `voffset + 0`,
