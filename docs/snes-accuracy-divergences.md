@@ -34,6 +34,16 @@ rendering difference:
     not the frames), timer rate (ticks match RustySNES 4,077 vs 4,078 by frame
     600), and the ares `$4210`/`$4200` NMI hold/enable model (it moved the
     *request* count to 441 with identical frames, and was reverted).
+  - **Localised to frame 191.** Per-frame `$13` (ours/RustySNES):
+    `190:41/41  191:42/41  192:43/42  193:44/43  194:45/44  195:46/45`, with
+    identical vectored NMI counts throughout (106 at 190, 111 at 195). The
+    reference performs **one fewer game-loop iteration in frame 191** - it is
+    not an extra interrupt. RustySNES' CPU counter agrees it does less work that
+    frame (per-frame deltas 45,759 then 44,812) while ours is flat (357,370 then
+    357,376 master clocks). Our per-PC histogram shows the S-CPU dominated by
+    the `$806B`/`$806D` wait loop (472,529 of 2,691,653 instructions at frame
+    190, +4,503 per frame); a matching RustySNES histogram needs the counter in
+    `run_frame`'s inner loop, because `step_instruction` is not the path it uses.
   - The earlier "one extra NMI" was an accounting artefact: `nmi_count` counted
     NMI *requests* while RustySNES counts *vectored* interrupts. Matching the
     accounting (`cpu.nmi_services`) gives identical counts at frames 190-200
