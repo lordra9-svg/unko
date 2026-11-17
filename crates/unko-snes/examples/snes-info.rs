@@ -307,6 +307,15 @@ fn main() -> ExitCode {
                 sa1.io.dtc,
                 sa1.io.dmaen
             );
+            let sram = system.cart.sram();
+            eprintln!(
+                "SA1 sram[12A4]={:02X} sram[72A4]={:02X} sram[7FF4..]={:02X?}",
+                sram.get(0x12A4).copied().unwrap_or(0xFF),
+                sram.get(0x72A4).copied().unwrap_or(0xFF),
+                sram.get(0x7FF4..0x7FF8)
+                    .map(|s| s.to_vec())
+                    .unwrap_or_default()
+            );
         } else {
             eprintln!("SA1 not attached");
         }
