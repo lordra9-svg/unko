@@ -83,6 +83,8 @@ pub struct SnesState {
     pub nmi_flag: bool,
     /// `$420D` MEMSEL.
     pub fast_rom: bool,
+    /// Address of the instruction that was executing at snapshot time (debug).
+    pub live_pc: u32,
     /// `$2180-$2183` data-port address.
     pub wram_port: u32,
     /// Master clocks still owed to the peripherals.
@@ -232,6 +234,9 @@ pub struct Snes {
     pub nmi_count: u64,
     /// Master clock elapsed since reset (debug).
     pub clock: u64,
+    /// Address of the instruction currently executing (debug; the CPU is taken
+    /// out of `Snes` during `step`, so `cpu.pc` reads as power-on there).
+    pub live_pc: u32,
 }
 
 impl Snes {
@@ -295,6 +300,7 @@ impl Snes {
             nmi_line: false,
             nmi_count: 0,
             clock: 0,
+            live_pc: 0,
         }
     }
 
@@ -370,6 +376,7 @@ impl Snes {
             nmi_enable: self.nmi_enable,
             nmi_flag: self.nmi_flag,
             fast_rom: self.fast_rom,
+            live_pc: self.live_pc,
             wram_port: self.wram_port,
             cpu_stall: self.cpu_stall,
             refresh_done: self.refresh_done,
@@ -440,6 +447,7 @@ impl Snes {
         self.nmi_enable = state.nmi_enable;
         self.nmi_flag = state.nmi_flag;
         self.fast_rom = state.fast_rom;
+        self.live_pc = state.live_pc;
         self.wram_port = state.wram_port;
         self.cpu_stall = state.cpu_stall;
         self.refresh_done = state.refresh_done;
@@ -578,6 +586,7 @@ impl Snes {
     /// for the duration of the call so the system bus can borrow the rest of
     /// the machine.
     pub fn step(&mut self) -> u32 {
+        self.live_pc = self.cpu.pc_address();
         // ares `CPU::step` clears `irqLock` as each bus access starts; the one
         // case that matters is a `$4200` write, which is its instruction's last
         // access, so clearing once per instruction is equivalent.
@@ -896,6 +905,25 @@ impl CpuBus for Snes {
     }
 
     fn write(&mut self, address: u32, value: u8) {
+        if std::env::var_os("WRAM_WATCH").is_some() {
+            use std::io::Write;
+            let bank = (address >> 16) as u8;
+            let offset = address & 0xFFFF;
+            if (bank == 0x7E || bank == 0x7F) && matches!(offset, 0x4000..=0x403F | 0xC000..=0xC03F)
+            {
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/opencode/wram.log")
+                {
+                    let _ = writeln!(
+                        f,
+                        "{} {:06X} {:02X} pc={:06X}",
+                        self.clock, address, value, self.live_pc
+                    );
+                }
+            }
+        }
         self.bus().write(address, value);
         if address & 0x40_FF00 == 0x2100 && (0x2140..=0x2143).contains(&(address & 0xFFFF)) {
             let port = ((address & 0xFFFF) - 0x2140) as usize;

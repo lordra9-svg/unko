@@ -1071,6 +1071,35 @@ frames of gameplay HUD rendering.
   The remaining SMRPG defect is therefore **whatever generates the fade table
   at `$7E:4000`/`$7E:C000`**, not HDMA, the PPU or the palette logic.
 
+  `WRAM_WATCH` (plus a new `Snes::live_pc`, since the CPU is swapped out during
+  `step` and `cpu.pc` reads as power-on there) names the writers:
+
+  | writes | routine | what it is |
+  |---|---|---|
+  | 144 | `$C0:F7E2` | a generic run-length decompressor copy loop (`LDA [$20],Y` / `STA $0000,X`) that fills `$7E:C000` |
+  | 48 + 2/frame | `$C3:C1E0`, `$C3:BB26`/`$C3:BB2C` | the fade-table updater |
+
+  `$C3:BB13` is the per-frame updater:
+
+  ```
+  C3:BB1B: LDA $0A84        ; fade counter
+  C3:BB1E: EOR #$FF
+  C3:BB20: INC A            ; A = -$0A84
+  C3:BB21: LSR A
+  C3:BB22: CLC
+  C3:BB23: ADC #$28
+  C3:BB25: LSR A
+  C3:BB26: STA $7E4000      ; HDMA entry counts of the per-scanline gradient
+  C3:BB2A: ADC #$00
+  C3:BB2C: STA $7E4003
+  ```
+
+  So `$7E:4000` is a **mode-1 HDMA table with a 3-byte stride**
+  (`[count, lo, hi]`) for a per-scanline `COLDATA`/gradient, and the routine
+  only rewrites the line **counts** from the fade variable `$0A84`;
+  `$7E:C000` is filled by the decompressor. The next step is to compare
+  `$0A84` and the decompressor's source pointer between the cores.
+
   The historical analysis below still explains why the mismatch surfaced at
   frame 493 rather than earlier. Logging every
   `$2100` (INIDISP) write with a frame stamp in both cores (`PPU_LOG` /
