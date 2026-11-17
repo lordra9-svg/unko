@@ -30,7 +30,7 @@ pub mod rom;
 pub mod spc700;
 pub mod system;
 
-pub use apu::Apu;
+pub use apu::{Apu, PortEvent, PortEventKind};
 pub use cpu::{Cpu, CpuBus, Flags};
 pub use dma::{Dma, DmaBus, DmaChannel, DmaTransfer};
 pub use dsp::Dsp;

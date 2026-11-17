@@ -64,6 +64,9 @@ fn main() -> ExitCode {
         println!("ipl:         {ipl_path}");
     }
     system.reset();
+    if std::env::var_os("PORT_OUT").is_some() {
+        system.apu.set_port_logging(true);
+    }
     println!("cpu reset:   {}", system.cpu);
     println!("spc reset:   {}", system.apu.spc);
     let target_frames: u32 = std::env::var("FRAMES")
@@ -76,6 +79,27 @@ fn main() -> ExitCode {
         let mut frames = 0u32;
         let instruction_limit = target_frames.saturating_mul(20_000).max(20_000_000);
         while frames < target_frames && instructions < instruction_limit && !system.cpu.stp {
+            if let Some(path) = std::env::var_os("PC_TRACE") {
+                let from: u64 = std::env::var("PC_TRACE_FROM")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                let to: u64 = std::env::var("PC_TRACE_TO")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(u64::MAX);
+                if (from..=to).contains(&system.clock) {
+                    let line = format!(
+                        "{} {:02X}:{:04X}\n",
+                        system.clock, system.cpu.pbr, system.cpu.pc
+                    );
+                    let _ = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                        .and_then(|mut file| std::io::Write::write_all(&mut file, line.as_bytes()));
+                }
+            }
             cycles += u64::from(system.step());
             instructions += 1;
             if system.ppu.frame_ready() {
@@ -125,6 +149,32 @@ fn main() -> ExitCode {
         [0, 1, 2, 3].map(|port| system.apu.cpu_read(port)),
         [0, 1, 2, 3].map(|port| system.apu.apu_port(port)),
     );
+    if let Some(path) = std::env::var_os("PORT_OUT") {
+        let mut out = String::new();
+        for event in system.apu.debug.events() {
+            out.push_str(&format!(
+                "{} {} {} {:02X} {:04X} {}\n",
+                event.clock,
+                match event.kind {
+                    unko_snes::PortEventKind::CpuWrite => "W",
+                    unko_snes::PortEventKind::SmpRead => "R",
+                    unko_snes::PortEventKind::SmpWrite => "S",
+                },
+                event.port,
+                event.value,
+                event.spc_pc,
+                event.spc_instruction
+            ));
+        }
+        let _ = std::fs::write(path, out);
+    }
+    if let Some(path) = std::env::var_os("SPC_TRACE") {
+        let mut out = String::new();
+        for (index, (units, pc)) in system.apu.debug.trace().iter().enumerate() {
+            out.push_str(&format!("{index} {units} {pc:04X}\n"));
+        }
+        let _ = std::fs::write(path, out);
+    }
     if let Some(path) = std::env::var_os("DUMP_APU") {
         let _ = std::fs::write(path, system.apu.ram());
     }

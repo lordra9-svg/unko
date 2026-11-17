@@ -10,6 +10,106 @@ use std::collections::VecDeque;
 use crate::dsp::{Dsp, Sample};
 use crate::spc700::{Spc700, SpcBus};
 
+/// Which side produced a port event and in which direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortEventKind {
+    /// S-CPU write to `$2140-$2143`.
+    CpuWrite,
+    /// S-SMP read of `$F4-$F7`.
+    SmpRead,
+    /// S-SMP write to `$F4-$F7` (the echo the S-CPU polls).
+    SmpWrite,
+}
+
+/// One S-CPU <-> S-SMP port event, captured by [`PortDebug`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PortEvent {
+    /// Master clock of the access: the commit instant for an S-CPU write, the
+    /// instruction-record instant for an S-SMP read.
+    pub clock: u64,
+    /// Which access produced the event.
+    pub kind: PortEventKind,
+    /// Port index 0-3.
+    pub port: u8,
+    /// Value transferred.
+    pub value: u8,
+    /// S-SMP PC of the reading instruction (0 for S-CPU writes).
+    pub spc_pc: u16,
+    /// Retired S-SMP instruction index at the event.
+    pub spc_instruction: u64,
+}
+
+/// Debug state for the S-CPU/S-SMP port handshake log.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct PortDebug {
+    enabled: bool,
+    /// Master clock the APU has been advanced to.
+    clock: u64,
+    /// S-SMP instruction currently being recorded.
+    spc_instruction: u64,
+    events: Vec<PortEvent>,
+    /// `(retired units, pc)` per recorded instruction.
+    trace: Vec<(u64, u16)>,
+}
+
+impl PortDebug {
+    /// Start or stop capturing port events.
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+        if !enabled {
+            self.events.clear();
+        }
+    }
+
+    /// Captured events in commit order.
+    pub fn events(&self) -> &[PortEvent] {
+        &self.events
+    }
+
+    /// Captured `(retired units, pc)` instruction trace.
+    pub fn trace(&self) -> &[(u64, u16)] {
+        &self.trace
+    }
+
+    /// Update the master clock the APU is currently at.
+    pub fn set_clock(&mut self, clock: u64) {
+        self.clock = clock;
+    }
+
+    /// Record an S-CPU write to `$2140-$2143`.
+    pub(crate) fn record_cpu_write(&mut self, clock: u64, port: usize, value: u8) {
+        let spc_instruction = self.spc_instruction;
+        self.record(PortEvent {
+            clock,
+            kind: PortEventKind::CpuWrite,
+            port: u8::try_from(port).unwrap_or(0),
+            value,
+            spc_pc: 0,
+            spc_instruction,
+        });
+    }
+
+    /// Record an S-SMP write to `$F4-$F7` when its access completes.
+    pub(crate) fn record_smp_write(&mut self, clock: u64, port: u8, value: u8) {
+        let spc_instruction = self.spc_instruction;
+        self.record(PortEvent {
+            clock,
+            kind: PortEventKind::SmpWrite,
+            port,
+            value,
+            spc_pc: 0,
+            spc_instruction,
+        });
+    }
+
+    /// Record one event.
+    pub(crate) fn record(&mut self, event: PortEvent) {
+        if self.enabled && self.events.len() < 4_000_000 {
+            self.events.push(event);
+        }
+    }
+}
+
 /// Size of APU RAM.
 pub const APU_RAM_SIZE: usize = 0x1_0000;
 
@@ -110,6 +210,8 @@ pub struct Apu {
     plan_pos: usize,
     plan_sub: u32,
     samples: VecDeque<Sample>,
+    /// Debug: S-CPU/S-SMP port handshake trace.
+    pub debug: PortDebug,
 }
 
 impl Default for Apu {
@@ -148,6 +250,7 @@ impl Apu {
             plan_pos: 0,
             plan_sub: 0,
             samples: VecDeque::new(),
+            debug: PortDebug::default(),
         }
     }
 
@@ -230,6 +333,16 @@ impl Apu {
         self.apu_ports[port & 3] = value;
     }
 
+    /// Enable or disable the port handshake log and clear it.
+    pub fn set_port_logging(&mut self, enabled: bool) {
+        self.debug.set_enabled(enabled);
+    }
+
+    /// Whether the port handshake log is capturing.
+    pub fn port_logging_enabled(&self) -> bool {
+        self.debug.enabled
+    }
+
     /// Value currently visible to the SPC700 on `$F4-$F7`.
     pub fn apu_port(&self, port: usize) -> u8 {
         self.apu_ports[port & 3]
@@ -265,6 +378,11 @@ impl Apu {
         self.plan.clear();
         self.plan_pos = 0;
         self.plan_sub = 0;
+        self.debug.spc_instruction = self.instructions;
+        if self.debug.enabled {
+            let entry = (self.units, self.spc.pc);
+            self.debug.trace.push(entry);
+        }
         let page_flag = self.spc.flags.page;
         // The S-SMP's logical time is exactly its retired access units.
         let mut plan = std::mem::take(&mut self.plan);
@@ -289,6 +407,8 @@ impl Apu {
                 aux5: &mut self.aux5,
                 timer_targets: &mut self.timer_targets,
                 page_flag,
+                spc_pc: self.spc.pc,
+                debug: Some(&mut self.debug),
             };
             let mut recorder = RecordBus {
                 inner: &mut bus,
@@ -317,8 +437,11 @@ impl Apu {
         self.plan_sub += 2;
         if self.plan_sub >= u32::from(step.clocks) {
             if let Some((port, value)) = step.port_write {
-                // S-SMP -> S-CPU latch ($2140-$2143).
+                // S-SMP -> S-CPU latch ($2140-$2143), committed at the end of
+                // the access, which is when the S-CPU can observe it.
                 self.cpu_ports[usize::from(port)] = value;
+                let clock = self.debug.clock;
+                self.debug.record_smp_write(clock, port, value);
             }
             self.plan_pos += 1;
             self.plan_sub = 0;
@@ -401,6 +524,10 @@ struct ApuBus<'a> {
     aux5: &'a mut u8,
     timer_targets: &'a mut [u8; 3],
     page_flag: bool,
+    /// Debug: PC of the instruction being recorded.
+    spc_pc: u16,
+    /// Debug: port handshake log, absent in the unit-test buses.
+    debug: Option<&'a mut PortDebug>,
 }
 
 impl ApuBus<'_> {
@@ -459,7 +586,24 @@ impl SpcBus for ApuBus<'_> {
             0xF0 | 0xF1 | 0xFA | 0xFB | 0xFC => 0,
             0xF2 => *self.dsp_address,
             0xF3 => self.dsp.read(*self.dsp_address),
-            0xF4..=0xF7 => self.apu_ports[usize::from(address - 0xF4)],
+            0xF4..=0xF7 => {
+                let port = u8::try_from(address - 0xF4).unwrap_or(0);
+                let value = self.apu_ports[usize::from(port)];
+                if let Some(debug) = self.debug.as_deref_mut() {
+                    let clock = debug.clock;
+                    let spc_instruction = debug.spc_instruction;
+                    let spc_pc = self.spc_pc;
+                    debug.record(PortEvent {
+                        clock,
+                        kind: PortEventKind::SmpRead,
+                        port,
+                        value,
+                        spc_pc,
+                        spc_instruction,
+                    });
+                }
+                value
+            }
             0xF8 => *self.aux4,
             0xF9 => *self.aux5,
             0xFD..=0xFF => {
@@ -672,6 +816,8 @@ mod tests {
                 aux5: &mut apu.aux5,
                 timer_targets: &mut apu.timer_targets,
                 page_flag: false,
+                spc_pc: 0,
+                debug: None,
             };
             // The S-CPU has not written yet.
             assert_eq!(SpcBus::read(&mut bus, 0x00F6), 0);
@@ -716,6 +862,8 @@ mod tests {
                 aux5: &mut apu.aux5,
                 timer_targets: &mut apu.timer_targets,
                 page_flag: false,
+                spc_pc: 0,
+                debug: None,
             };
             SpcBus::write(&mut bus, 0x00F1, 0x10);
         }
@@ -741,6 +889,8 @@ mod tests {
                 aux5: &mut apu.aux5,
                 timer_targets: &mut apu.timer_targets,
                 page_flag: false,
+                spc_pc: 0,
+                debug: None,
             };
             SpcBus::write(&mut bus, 0x00F1, 0x20);
         }
@@ -776,6 +926,8 @@ mod tests {
             aux5: &mut apu.aux5,
             timer_targets: &mut apu.timer_targets,
             page_flag: false,
+            spc_pc: 0,
+            debug: None,
         };
         SpcBus::write(&mut bus, 0x00F2, 0x08); // DSPADDR = V0ENVX
         SpcBus::write(&mut bus, 0x00F3, 0x88); // DSPDATA = $88
@@ -809,6 +961,8 @@ mod tests {
             aux5: &mut apu.aux5,
             timer_targets: &mut apu.timer_targets,
             page_flag: false,
+            spc_pc: 0,
+            debug: None,
         };
         assert_eq!(bus.read(0xFFC0), 0x00);
         bus.write(0xF1, 0x00);
@@ -902,6 +1056,8 @@ mod wait_state_tests {
             aux5: &mut apu.aux5,
             timer_targets: &mut apu.timer_targets,
             page_flag: false,
+            spc_pc: 0,
+            debug: None,
         }
     }
 

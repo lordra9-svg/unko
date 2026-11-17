@@ -57,6 +57,8 @@ pub struct Snes {
     nmi_line: bool,
     /// Number of NMI edges delivered (debug).
     pub nmi_count: u64,
+    /// Master clock elapsed since reset (debug).
+    pub clock: u64,
 }
 
 impl Snes {
@@ -81,6 +83,7 @@ impl Snes {
             irq_line: false,
             nmi_line: false,
             nmi_count: 0,
+            clock: 0,
         }
     }
 
@@ -131,6 +134,8 @@ impl Snes {
         self.irq_line = false;
         self.nmi_line = false;
         self.nmi_count = 0;
+        self.clock = 0;
+        self.apu.debug.set_clock(0);
         let mut bus = SnesBus {
             wram: &mut self.wram,
             cart: &mut self.cart,
@@ -144,6 +149,7 @@ impl Snes {
             wram_port: &mut self.wram_port,
             vblank: false,
             hblank: false,
+            clock: 0,
         };
         self.cpu.reset(&mut bus)
     }
@@ -180,6 +186,7 @@ impl Snes {
                         wram_port: &mut self.wram_port,
                         vblank,
                         hblank,
+                        clock: self.clock,
                     };
                     transfer.step(&mut bus)
                 };
@@ -217,11 +224,37 @@ impl Snes {
         // lets the S-SMP commit a port write at its exact master cycle, and the
         // timestamped S-CPU port history lets an S-SMP read observe the latch
         // as of its own access.
-        self.apu_credit += i64::from(clocks) * 1_025_280;
-        while self.apu_credit >= 21_477_272 {
-            self.apu.tick();
-            self.apu_credit -= 21_477_272;
+        const APU_UNIT_NUM: i64 = 1_025_280;
+        const APU_UNIT_DEN: i64 = 21_477_272;
+        if self.apu.port_logging_enabled() {
+            // Resolve every access unit to the master clock it starts on, so the
+            // port handshake log can be compared event-for-event with a
+            // reference. The tick order is unchanged: the extra arithmetic only
+            // moves the recorded timestamp.
+            let mut credit = self.apu_credit;
+            let mut spent = 0u32;
+            loop {
+                // Clocks from `credit` to the next unit boundary (both positive).
+                let need = u32::try_from((APU_UNIT_DEN - credit + APU_UNIT_NUM - 1) / APU_UNIT_NUM)
+                    .unwrap_or(0);
+                if spent + need > clocks {
+                    break;
+                }
+                spent += need;
+                credit += i64::from(need) * APU_UNIT_NUM - APU_UNIT_DEN;
+                self.apu.debug.set_clock(self.clock + u64::from(spent));
+                self.apu.tick();
+            }
+            credit += i64::from(clocks - spent) * APU_UNIT_NUM;
+            self.apu_credit = credit;
+        } else {
+            self.apu_credit += i64::from(clocks) * APU_UNIT_NUM;
+            while self.apu_credit >= APU_UNIT_DEN {
+                self.apu.tick();
+                self.apu_credit -= APU_UNIT_DEN;
+            }
         }
+        self.clock += u64::from(clocks);
         // The PPU dot clock is the master clock divided by four on NTSC.
         self.ppu_credit += i64::from(clocks);
         while self.ppu_credit >= 4 {
@@ -304,6 +337,7 @@ impl Snes {
             wram_port: &mut self.wram_port,
             vblank,
             hblank,
+            clock: self.clock,
         }
     }
 }
@@ -347,9 +381,18 @@ struct SnesBus<'a> {
     wram_port: &'a mut u32,
     vblank: bool,
     hblank: bool,
+    /// Master clock at this access (debug).
+    clock: u64,
 }
 
 impl SnesBus<'_> {
+    /// Write one of the S-CPU's four APU ports and timestamp it for the
+    /// handshake log.
+    fn write_apu_port(&mut self, port: usize, value: u8) {
+        self.apu.cpu_write(port, value);
+        self.apu.debug.record_cpu_write(self.clock, port, value);
+    }
+
     fn read_wram_port(&mut self, offset: usize) -> u8 {
         match offset {
             0x2180 => {
@@ -450,9 +493,7 @@ impl CpuBus for SnesBus<'_> {
                 if (0x2100..=0x213F).contains(&offset) {
                     self.ppu.write(offset as u16, value);
                 } else if (0x2140..=0x2143).contains(&offset) {
-                    // Timestamped so an S-SMP poll resolves the latch as of its
-                    // own access clock (ares synchronizes the threads there).
-                    self.apu.cpu_write(offset - 0x2140, value);
+                    self.write_apu_port(offset - 0x2140, value);
                 } else if (0x2180..=0x2183).contains(&offset) {
                     self.write_wram_port(offset, value);
                 } else if offset == 0x4200 {
@@ -676,6 +717,7 @@ mod tests {
             wram_port: &mut system.wram_port,
             vblank: false,
             hblank: false,
+            clock: 0,
         };
         assert_eq!(bus.read(0x001234), 0x5A);
         assert_eq!(bus.read(0x801234), 0x5A);
@@ -714,6 +756,7 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
+                clock: 0,
             };
             assert_eq!(bus.read(0x008000), 0x11);
             assert_eq!(bus.read(0x018000), 0x00);
@@ -788,6 +831,7 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
+                clock: 0,
             };
             bus.write(0x4016, 0x01);
             bus.write(0x4016, 0x00);
@@ -813,6 +857,7 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
+                clock: 0,
             };
             assert_eq!(bus.read(0x4216), 0x0F);
             assert_eq!(bus.read(0x4217), 0x00);
@@ -838,6 +883,7 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
+                clock: 0,
             };
             bus.write(0x2181, 0x34);
             bus.write(0x2182, 0x12);
@@ -879,6 +925,7 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank,
                 hblank,
+                clock: 0,
             };
             (bus.read(0x4210), bus.read(0x4210))
         };
@@ -930,6 +977,7 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
+                clock: 0,
             };
             bus.write(0x4209, 10);
             bus.write(0x4200, 0x20);
@@ -967,6 +1015,7 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
+                clock: 0,
             };
             bus.write(0x2115, 0x80);
             bus.write(0x2116, 0x00);
@@ -995,6 +1044,7 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
+                clock: 0,
             };
             crate::dma::run(&channels, mask, &mut bus);
         }
@@ -1075,6 +1125,7 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
+                clock: 0,
             };
             bus.write(0x2121, 0x00);
             bus.write(0x4300, 0x00);
@@ -1101,6 +1152,7 @@ mod tests {
                 wram_port: &mut system.wram_port,
                 vblank: false,
                 hblank: false,
+                clock: 0,
             };
             crate::dma::run(&channels, mask, &mut bus);
         }
