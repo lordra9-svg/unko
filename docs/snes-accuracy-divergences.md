@@ -79,11 +79,18 @@ S-DSP output is now instrumented but not sample-identical:
     `D0 W0 R1 W1`. Same checks, different order, so a data-dependent branch
     in the test's check routine takes the other path; the CRC difference is
     the consequence, not a broken CRC.
-  - Next step: decode that check routine's `D`/`W`/`R` marker branches (the
-    markers are not `lda #imm` constants, so they come from a table) to see
-    which stack/DP value drives the branch, or single-step the `$072D`
-    handler in both emulators and diff `SP`/`P`/`PCL`/`PCH` after each stack
-    operation. Both failures predate the
+  - An instruction-level trace (PC, SP, A, X, Y, PSW and stack
+    `$01E0-$01EF`) was captured in both emulators from the test entry. The
+    flow is **identical for 198,411 instructions**, including the `$89AB` BRK
+    and the whole `$072D` handler, so the BRK/stack execution is not the
+    cause; the differing `D0 R1 W0 W1` marker values must come from RAM data
+    the print routine reads, not from the CPU registers.
+  - The first *flow* difference is later, in a timer2 poll (`$06D0` is
+    `E4 FF F0 FC`, `lda $FF; beq`): we exit with A=1 while RustySNES still
+    reads 0, i.e. a timer2 read phase difference.
+  - Next step: compare full ARAM dumps at the same *instruction step* (not
+    frame) to find the RAM word that feeds the swapped marker, and settle the
+    timer2 phase with the `Timers/random timer2` sub-test. Both failures predate the
   current scheduling work (the framebuffers are byte-identical to the previous
   build) and are the concrete audio/SPC items to fix next. `spc_dsp6` used to
   panic in a debug build on a 16-bit BRR/echo address overflow; those sums now
