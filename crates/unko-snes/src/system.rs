@@ -905,6 +905,20 @@ impl CpuBus for Snes {
     }
 
     fn write(&mut self, address: u32, value: u8) {
+        if std::env::var_os("PPU_LOG").is_some() && (address & 0xFFFF) == 0x2100 {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/opencode/fade.log")
+            {
+                let _ = writeln!(
+                    f,
+                    "{} {:02X} 0A84={:02X}",
+                    self.clock, value, self.wram[0x0A84]
+                );
+            }
+        }
         if std::env::var_os("WRAM_WATCH").is_some() {
             use std::io::Write;
             let bank = (address >> 16) as u8;

@@ -1097,8 +1097,27 @@ frames of gameplay HUD rendering.
   So `$7E:4000` is a **mode-1 HDMA table with a 3-byte stride**
   (`[count, lo, hi]`) for a per-scanline `COLDATA`/gradient, and the routine
   only rewrites the line **counts** from the fade variable `$0A84`;
-  `$7E:C000` is filled by the decompressor. The next step is to compare
-  `$0A84` and the decompressor's source pointer between the cores.
+  `$7E:C000` is filled by the decompressor.
+
+  **The fade counter matches.** Logging `$0A84` beside every `$2100` write in
+  both cores gives identical values at identical clocks:
+
+  | INIDISP write | ares clock / `$0A84` | ours clock / `$0A84` |
+  |---|---|---|
+  | `$02` | 175,782,060 / `$14` | 175,782,018 / `$14` |
+  | `$03` | 177,211,496 / `$18` | 177,211,488 / `$18` |
+  | `$04` | 178,640,962 / `$1c` | 178,640,952 / `$1c` |
+
+  and the earlier fade at frames 30-37 has `$0A84 = $00` in both. (Our clock
+  deltas against ares are now under 60 master clocks across the whole run, so
+  the timeline is effectively exact.)
+
+  So `$0A84` is ruled out, and with it the gradient *counts*. That leaves the
+  **`$7E:C000` / `$7E:4010` contents**, i.e. the output of the `$C0:F7xx`
+  decompressor - whose mode dispatch is `JMP ($FBCC,X)` - as the only
+  remaining candidate. Off-by-one: we also issue two extra `$2100` writes that
+  ares does not (`$01` at frame 24 and `$AC` at frame 418), both invisible
+  because both cores are force-blanked there.
 
   The historical analysis below still explains why the mismatch surfaced at
   frame 493 rather than earlier. Logging every
