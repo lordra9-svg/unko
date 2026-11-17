@@ -909,6 +909,27 @@ frames of gameplay HUD rendering.
   So the missing piece is the **S-CPU -> I-RAM upload of the SA-1 data table**
   (or the ordering of that upload against the SA-1's release), not the
   super-MMC, the BWRAM banking or the `$72A4` handshake.
+  A master-clock timeline of every `$2200` write and every I-RAM `$0220-$0226`
+  write (all sources) shows:
+
+  | Clock | Event |
+  |---|---|
+  | 14,278 | S-CPU sets `$2200 = $20` (RESB high) |
+  | 15,004 | S-CPU sets `$2200 = $00` -> SA-1 released, runs `CRV = $8294` |
+  | 24,572-24,680 | SA-1 boot `MVN` clears I-RAM `$0220-$0226` |
+  | 36,456,146 | S-CPU pulses RESB high again (`$2200 = $20`) |
+  | 36,456,872 | RESB low -> SA-1 restarts at `$8294` |
+  | 36,467,440-36,467,560 | SA-1 boot `MVN` clears I-RAM again |
+  | 36,5xx,xxx | S-CPU jumps through `$36DE` (= 0) to `$00:0000` and derails |
+
+  The S-CPU is running bank-1 code (`$01:AD70`-`$01:B246`) right up to the
+  second RESB pulse. The second clear zeroes the S-CPU's **direct page**
+  (DP = `$3600`, i.e. I-RAM `$600-$6FF`), which the game had been using, and
+  the crash follows immediately. The decisive open question is whether ares'
+  SA-1 really re-runs the `MVN` clear on this warm restart (ours does, because
+  `$2200` RESB falling restarts the CPU at `CRV`), or whether the S-CPU is
+  expected to re-upload `$0220-$02FF` between the release and its next use —
+  our S-CPU never writes those I-RAM pages at all.
 - The SA-1's `$40-$4F` BWRAM window is the only extra S-CPU mapping modelled;
   the boot ROM / BS-X slot and the `$50-$6F` open-bus windows are not.
 

@@ -338,6 +338,9 @@ pub struct Sa1 {
     /// Address of the S-CPU instruction currently executing (debug).
     #[serde(skip)]
     pub snes_live_pc: u32,
+    /// Master clock of the current S-CPU step (debug).
+    #[serde(skip)]
+    pub master_clock: u64,
     /// Normal DMA transfers executed (debug).
     pub dma_count: u64,
 }
@@ -362,6 +365,7 @@ impl Sa1 {
             ticks: 0,
             live_pc: 0,
             snes_live_pc: 0,
+            master_clock: 0,
             dma_count: 0,
         };
         sa1.power(region);
@@ -435,6 +439,20 @@ impl Sa1 {
             return;
         }
         let index = mirror(address, IRAM_SIZE as u32) as usize;
+        if std::env::var_os("SA1_LOG").is_some() && (0x220..=0x226).contains(&index) {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/opencode/sa1.log")
+            {
+                let _ = writeln!(
+                    f,
+                    "I222 clock={} idx={:03X} val={:02X}",
+                    self.master_clock, index, data
+                );
+            }
+        }
         self.iram[index] = data;
     }
 
@@ -1042,6 +1060,20 @@ impl Sa1 {
 
     /// ares `SA1::writeIOCPU`: the S-CPU side of `$2200-$23FF`.
     pub fn write_cpu_io(&mut self, address: u32, rom: &[u8], bwram: &mut [u8], data: u8) {
+        if std::env::var_os("SA1_LOG").is_some() && (address & 0x1FF) == 0x000 {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/opencode/sa1.log")
+            {
+                let _ = writeln!(
+                    f,
+                    "CCNT clock={} data={:02X} old_resb={} old_rdyb={}",
+                    self.master_clock, data, self.io.sa1_resb, self.io.sa1_rdyb
+                );
+            }
+        }
         match 0x2200 | (address & 0x01FF) {
             0x2200 => {
                 if self.io.sa1_resb && data & 0x20 == 0 {

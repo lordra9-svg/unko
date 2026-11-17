@@ -541,6 +541,7 @@ impl Snes {
     pub fn step(&mut self) -> u32 {
         if let Some(sa1) = self.sa1.as_mut() {
             sa1.snes_live_pc = self.cpu.pc_address();
+            sa1.master_clock = self.clock;
         }
         let mut cpu = std::mem::take(&mut self.cpu);
         let cpu_cycles = cpu.step(self);
@@ -694,6 +695,7 @@ impl Snes {
         if let Some(sa1) = self.sa1.as_mut() {
             sa1.snes_mar = self.snes_mar;
             sa1.snes_refresh = self.refresh_active;
+            sa1.master_clock = self.clock;
             self.sa1_credit += i64::from(clocks);
             while self.sa1_credit > 0 {
                 let (rom, sram) = self.cart.rom_and_sram_mut();
