@@ -276,6 +276,27 @@ fn main() -> ExitCode {
             eprintln!("CX4 not attached");
         }
     }
+    if std::env::var_os("SA1_STATE").is_some() {
+        if let Some(sa1) = &system.sa1 {
+            eprintln!(
+                "SA1 pc={:02X}:{:04X} s={:04X} p={:02X} e={} ticks={} resb={} rdyb={} pending={} hc={} vc={} mr={:010X}",
+                sa1.cpu.pbr,
+                sa1.cpu.pc,
+                sa1.cpu.s,
+                sa1.cpu.p(),
+                sa1.cpu.emulation,
+                sa1.ticks,
+                sa1.io.sa1_resb,
+                sa1.io.sa1_rdyb,
+                sa1.interrupt_pending,
+                sa1.hcounter,
+                sa1.vcounter,
+                sa1.io.mr
+            );
+        } else {
+            eprintln!("SA1 not attached");
+        }
+    }
     if std::env::var_os("SDD1_STATE").is_some() {
         if let Some(sdd1) = &system.sdd1 {
             eprintln!(

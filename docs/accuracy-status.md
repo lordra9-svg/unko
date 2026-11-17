@@ -232,6 +232,16 @@ Validation so far:
   verified against ares below. A release SuperFX image (e.g. Star Fox) is not
   present locally, so the end-to-end game path is not yet measured; Final
   Fantasy V was still in its boot sequence at the 20M-cycle sample.
+- The SA-1 (Super Accelerator 1) is implemented (`sa1.rs`): a second 65C816
+  backed by the super-MMC ROM banking, shared BWRAM (banking, bit-map formats
+  and write protection), 2 KiB I-RAM, the three DMA modes including both
+  character-conversion paths, the H/V and linear timers, the interrupt/message
+  registers and the arithmetic unit. One SA-1 cycle is two master clocks with
+  ares' bus-contention and refresh penalties. Verified **100.000%**
+  pixel-identical against ares for Super Mario RPG (USA) at frames 120, 180,
+  300 and 400 and Kirby Super Star (USA) at 120. Later SMRPG scenes and Kirby's
+  Dream Land 3 still diverge; the remaining work is in the character-conversion
+  / bit-map data path.
 - The S-DD1 decompression coprocessor is implemented (`sdd1.rs`): the
   `$4800-$480F` registers, the LoROM/MMC MCU windows, both save-RAM windows,
   the `$4300-$437F` DMA snoop and the full Golomb-Rice/context-model entropy

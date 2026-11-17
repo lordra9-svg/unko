@@ -135,6 +135,13 @@ impl RomHeader {
         region_for_country(self.country_code)
     }
 
+    /// Whether the cartridge declares an SA-1 (Super Accelerator) coprocessor.
+    ///
+    /// ares/mia select the `SA1-` board from map modes `$23`/`$33`.
+    pub const fn has_sa1(&self) -> bool {
+        matches!(self.map_mode, 0x23 | 0x33)
+    }
+
     /// Whether the cartridge declares an S-DD1 decompression coprocessor.
     ///
     /// ares/mia select the `SDD1-` board from map modes `$22`/`$32`, the
@@ -338,6 +345,15 @@ impl Cartridge {
     /// Battery-backed save RAM.
     pub fn sram(&self) -> &[u8] {
         &self.sram
+    }
+
+    /// ROM and mutable save RAM at once.
+    ///
+    /// Coprocessor buses (the SA-1) read ROM and write save RAM within a single
+    /// operation, so they need both halves of the cartridge without tripping
+    /// the borrow checker.
+    pub fn rom_and_sram_mut(&mut self) -> (&[u8], &mut [u8]) {
+        (&self.rom, &mut self.sram)
     }
 
     /// Mutable save RAM, for persistence and host save files.

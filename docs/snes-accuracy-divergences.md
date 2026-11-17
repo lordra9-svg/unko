@@ -835,6 +835,61 @@ Cartridges are detected as S-DD1 from map modes `$22`/`$32` (the ares/mia
 board layouts (no extra coprocessor RAM) are modelled; save-state coverage
 includes the register file, DMA shadows and decompressor state.
 
+## SA-1 (Super Accelerator 1)
+
+`crates/unko-snes/src/sa1.rs` ports the ares `SA1` component. The SA-1 is a
+second WDC 65C816 (our existing cycle-stepped core) plus:
+
+- the super-MMC ROM banking: `$00-$3F,$80-$BF:$8000-$FFFF` folds like LoROM with
+  the `$2220-$2223` C/D/E/F bank registers and their mode bits, and
+  `$C0-$FF:$0000-$FFFF` is banked; the `$7FEA/$7FEB` and `$7FEE/$7FEF` vector
+  overrides are applied to the S-CPU;
+- the shared save RAM ("BWRAM"): `$00-$3F,$80-$BF:$6000-$7FFF` (banked by
+  `$2224`), `$40-$4F:$0000-$FFFF`, the SA-1's 32x/128x projections, the 4bpp and
+  2bpp bit-map window formats and the `BWPA`/`SWEN`/`CWEN` write protection;
+- the 2 KiB internal RAM at `$3000-$37FF` with the `SIWP`/`CIWP` block
+  protection;
+- the three DMA modes: normal memory-to-memory, type-1 character conversion
+  (streamed from a BWRAM read) and type-2 character conversion (from the
+  `$2240-$224F` bit-map register file);
+- the H/V and linear timers with the `$2210` mode bits, the `$2212-$2215`
+  targets and timer IRQs;
+- the interrupt/message model: `$2200`/`$2201`/`$2202`/`$2209`/`$220a`/
+  `$220b`, the `$220c-$220f` S-CPU vectors, `$2300`/`$2301` flags, and the
+  S-CPU IRQ line;
+- the `$2250-$2254` arithmetic unit (signed multiply, unsigned divide, sigma);
+- save-state coverage of the register file, I-RAM, DMA state and CPU.
+
+Timing: one SA-1 cycle is **two master clocks** (ares `SA1::step`), with ares'
+bus-contention penalties reproduced from the S-CPU's current address
+(`ROM::conflict`, `BWRAM::conflict`, `IRAM::conflict`) and its DRAM-refresh
+window. The SA-1 runs from a whole-instruction master-clock credit, like the
+other coprocessors.
+
+Verification against ares at the same frame:
+
+| ROM | Frames | Result |
+|---|---|---|
+| Super Mario RPG (USA) | 120, 180, 300, 400 | **100.000%** exact (57,344/57,344 each) |
+| Kirby Super Star (USA) | 120 | **100.000%** exact |
+
+That covers the S-CPU boot, the SA-1 handoff and reset-vector setup, the
+super-MMC banking, the intro/logo/title screens and the first few hundred
+frames of gameplay HUD rendering.
+
+**Known gaps (not yet verified):**
+
+- Super Mario RPG diverges at about frame 500 (4.954% exact at 600): both
+  machines show the same scene but with a different palette/scroll, so a later
+  SA-1 data path (probably the character-conversion DMA or a BWRAM protection
+  case) is still wrong.
+- Kirby's Dream Land 3 never finishes booting: the SA-1 spins at `$00:A96D`
+  waiting for a BWRAM handshake flag the S-CPU never sets, and the S-CPU leaves
+  the main screen blank. KDL3 is the heaviest user of the bit-map/character
+  conversion path, which is where the remaining bug is presumed to be.
+- The SA-1's `$40-$4F` BWRAM window is the only extra S-CPU mapping modelled;
+  the boot ROM / BS-X slot and the `$50-$6F` open-bus windows are not.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

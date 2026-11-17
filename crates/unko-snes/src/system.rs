@@ -15,12 +15,13 @@ use crate::io::CpuIo;
 use crate::necdsp::{DspError, DspWindow, NecDsp};
 use crate::ppu::Ppu;
 use crate::rom::{Cartridge, Region};
+use crate::sa1::Sa1;
 use crate::sdd1::Sdd1;
 
 /// Magic number at the start of a serialized save state (`"SNES"`).
 pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
 /// Save-state format version. Bump whenever the serialized shape changes.
-pub const SAVE_STATE_VERSION: u32 = 5;
+pub const SAVE_STATE_VERSION: u32 = 6;
 
 /// A complete `unko-snes` snapshot.
 ///
@@ -55,6 +56,12 @@ pub struct SnesState {
     pub cx4_credit: i64,
     /// S-DD1 decompression coprocessor, when the cartridge has one.
     pub sdd1: Option<Sdd1>,
+    /// SA-1 coprocessor, when the cartridge has one.
+    pub sa1: Option<Sa1>,
+    /// Carried SA-1 instruction credit (master clocks).
+    pub sa1_credit: i64,
+    /// Last S-CPU bus address, for SA-1 bus-conflict penalties.
+    pub snes_mar: u32,
     /// DMA/HDMA channels.
     pub dma: Dma,
     /// Controller ports and CPU I/O registers.
@@ -174,6 +181,14 @@ pub struct Snes {
     cx4_credit: i64,
     /// S-DD1 decompression coprocessor, when the cartridge has one.
     pub sdd1: Option<Sdd1>,
+    /// SA-1 coprocessor, when the cartridge has one.
+    pub sa1: Option<Sa1>,
+    /// Carried SA-1 instruction credit (master clocks).
+    sa1_credit: i64,
+    /// Last S-CPU bus address, for SA-1 bus-conflict penalties.
+    snes_mar: u32,
+    /// The S-CPU's DRAM refresh is active.
+    refresh_active: bool,
     /// General-purpose DMA channels.
     pub dma: Dma,
     /// Controller ports, auto-poll and the multiply/divide unit.
@@ -216,6 +231,7 @@ impl Snes {
         let region = cart.header().region();
         let has_superfx = cart.header().has_superfx();
         let has_sdd1 = cart.header().has_sdd1();
+        let has_sa1 = cart.header().has_sa1();
         let mut ppu = Ppu::new();
         ppu.set_region(region);
         Self {
@@ -231,6 +247,14 @@ impl Snes {
             cx4: None,
             cx4_credit: 0,
             sdd1: if has_sdd1 { Some(Sdd1::new()) } else { None },
+            sa1: if has_sa1 {
+                Some(Sa1::new(region))
+            } else {
+                None
+            },
+            sa1_credit: 0,
+            snes_mar: 0,
+            refresh_active: false,
             dma: Dma::new(),
             io: CpuIo::new(),
             wram: vec![0; WRAM_SIZE],
@@ -311,6 +335,9 @@ impl Snes {
             cx4: self.cx4.clone(),
             cx4_credit: self.cx4_credit,
             sdd1: self.sdd1.clone(),
+            sa1: self.sa1.clone(),
+            sa1_credit: self.sa1_credit,
+            snes_mar: self.snes_mar,
             dma: self.dma.clone(),
             io: self.io.clone(),
             wram: self.wram.clone(),
@@ -370,6 +397,9 @@ impl Snes {
         self.cx4 = state.cx4.clone();
         self.cx4_credit = state.cx4_credit;
         self.sdd1 = state.sdd1.clone();
+        self.sa1 = state.sa1.clone();
+        self.sa1_credit = state.sa1_credit;
+        self.snes_mar = state.snes_mar;
         self.dma = state.dma.clone();
         self.io = state.io.clone();
         self.wram.copy_from_slice(&state.wram);
@@ -456,6 +486,12 @@ impl Snes {
         if let Some(sdd1) = self.sdd1.as_mut() {
             sdd1.power();
         }
+        if let Some(sa1) = self.sa1.as_mut() {
+            sa1.power(self.region);
+        }
+        self.sa1_credit = 0;
+        self.snes_mar = 0;
+        self.refresh_active = false;
         self.dma.hdma_reset();
         self.io.reset();
         self.apu_credit = 0;
@@ -478,6 +514,9 @@ impl Snes {
             dsp1: &mut self.dsp1,
             cx4: &mut self.cx4,
             sdd1: &mut self.sdd1,
+            sa1: &mut self.sa1,
+            snes_mar: &mut self.snes_mar,
+            snes_refresh: self.refresh_active,
             apu: &mut self.apu,
             ppu: &mut self.ppu,
             dma: &mut self.dma,
@@ -518,6 +557,9 @@ impl Snes {
                         dsp1: &mut self.dsp1,
                         cx4: &mut self.cx4,
                         sdd1: &mut self.sdd1,
+                        sa1: &mut self.sa1,
+                        snes_mar: &mut self.snes_mar,
+                        snes_refresh: self.refresh_active,
                         apu: &mut self.apu,
                         ppu: &mut self.ppu,
                         dma: &mut self.dma,
@@ -548,7 +590,9 @@ impl Snes {
     fn apply_interrupts(&mut self) {
         let gsu_irq = self.gsu.as_ref().is_some_and(|gsu| gsu.irq_line);
         let cx4_irq = self.cx4.as_ref().is_some_and(|cx4| cx4.irq_line());
-        self.cpu.set_irq(self.irq_line || gsu_irq || cx4_irq);
+        let sa1_irq = self.sa1.as_ref().is_some_and(|sa1| sa1.cpu_irq_line());
+        self.cpu
+            .set_irq(self.irq_line || gsu_irq || cx4_irq || sa1_irq);
         if self.nmi_line {
             self.nmi_line = false;
             self.cpu.trigger_nmi();
@@ -566,7 +610,9 @@ impl Snes {
         self.advance_peripherals_inner(clocks);
         if self.refresh_pending {
             self.refresh_pending = false;
+            self.refresh_active = true;
             self.advance_peripherals_inner(DRAM_REFRESH_CLOCKS);
+            self.refresh_active = false;
             DRAM_REFRESH_CLOCKS
         } else {
             0
@@ -638,6 +684,18 @@ impl Snes {
             while self.cx4_credit >= den {
                 let cost = cx4.run_one(rom, sram);
                 self.cx4_credit -= den * i64::from(cost.max(1));
+            }
+        }
+        // The SA-1 runs at half the master clock: one SA-1 cycle is two master
+        // clocks. Its DMA cost is charged through `dma_clocks` on the next run.
+        if let Some(sa1) = self.sa1.as_mut() {
+            sa1.snes_mar = self.snes_mar;
+            sa1.snes_refresh = self.refresh_active;
+            self.sa1_credit += i64::from(clocks);
+            while self.sa1_credit > 0 {
+                let (rom, sram) = self.cart.rom_and_sram_mut();
+                let cost = sa1.run_once(rom, sram);
+                self.sa1_credit -= i64::from(cost.max(2));
             }
         }
         self.clock += u64::from(clocks);
@@ -749,6 +807,9 @@ impl Snes {
             dsp1: &mut self.dsp1,
             cx4: &mut self.cx4,
             sdd1: &mut self.sdd1,
+            sa1: &mut self.sa1,
+            snes_mar: &mut self.snes_mar,
+            snes_refresh: self.refresh_active,
             apu: &mut self.apu,
             ppu: &mut self.ppu,
             dma: &mut self.dma,
@@ -807,6 +868,9 @@ struct SnesBus<'a> {
     dsp1: &'a mut Option<NecDsp>,
     cx4: &'a mut Option<Cx4>,
     sdd1: &'a mut Option<Sdd1>,
+    sa1: &'a mut Option<Sa1>,
+    snes_mar: &'a mut u32,
+    snes_refresh: bool,
     dma: &'a mut Dma,
     io: &'a mut CpuIo,
     nmi_enable: &'a mut bool,
@@ -850,6 +914,73 @@ impl SnesBus<'_> {
 }
 
 impl SnesBus<'_> {
+    /// Map an S-CPU address onto the SA-1, if the cartridge has one.
+    fn sa1_read(&mut self, address: u32, mdr: u8) -> Option<u8> {
+        self.sa1.as_ref()?;
+        if let Some(sa1) = self.sa1.as_mut() {
+            sa1.snes_mar = address;
+            sa1.snes_refresh = self.snes_refresh;
+        }
+        let bank = (address >> 16) as u8;
+        let offset = (address & 0xFFFF) as usize;
+        let low = bank <= 0x3F || (0x80..=0xBF).contains(&bank);
+
+        if low && (0x2200..=0x23FF).contains(&offset) {
+            let (rom, sram) = self.cart.rom_and_sram_mut();
+            let sa1 = self.sa1.as_mut().expect("SA-1 present");
+            return Some(sa1.read_cpu_io(address, rom, sram, mdr));
+        }
+        if low && (0x3000..=0x37FF).contains(&offset) {
+            let sa1 = self.sa1.as_mut().expect("SA-1 present");
+            return Some(sa1.read_cpu_iram(address, mdr));
+        }
+        if Sa1::in_bwram_window(address) {
+            let (_, sram) = self.cart.rom_and_sram_mut();
+            let sa1 = self.sa1.as_mut().expect("SA-1 present");
+            return Some(sa1.read_cpu_bwram(address, sram));
+        }
+        if Sa1::in_rom_window(address) {
+            let rom = self.cart.rom();
+            let sa1 = self.sa1.as_mut().expect("SA-1 present");
+            return Some(sa1.read_cpu_rom(address, rom));
+        }
+        None
+    }
+
+    /// Map an S-CPU write onto the SA-1, if the cartridge has one.
+    fn sa1_write(&mut self, address: u32, value: u8) -> bool {
+        if self.sa1.is_none() {
+            return false;
+        }
+        if let Some(sa1) = self.sa1.as_mut() {
+            sa1.snes_mar = address;
+            sa1.snes_refresh = self.snes_refresh;
+        }
+        let bank = (address >> 16) as u8;
+        let offset = (address & 0xFFFF) as usize;
+        let low = bank <= 0x3F || (0x80..=0xBF).contains(&bank);
+
+        if low && (0x2200..=0x23FF).contains(&offset) {
+            let (rom, sram) = self.cart.rom_and_sram_mut();
+            let sa1 = self.sa1.as_mut().expect("SA-1 present");
+            sa1.write_cpu_io(address, rom, sram, value);
+            return true;
+        }
+        if low && (0x3000..=0x37FF).contains(&offset) {
+            let sa1 = self.sa1.as_mut().expect("SA-1 present");
+            sa1.write_cpu_iram(address, value);
+            return true;
+        }
+        if Sa1::in_bwram_window(address) {
+            let (_, sram) = self.cart.rom_and_sram_mut();
+            let sa1 = self.sa1.as_mut().expect("SA-1 present");
+            sa1.write_cpu_bwram(address, sram, value);
+            return true;
+        }
+        // Writes to the SA-1 ROM window are ignored by the chip.
+        Sa1::in_rom_window(address)
+    }
+
     /// Map an S-CPU address onto the DSP-1 DR/SR ports, if the DSP is attached.
     fn dsp1_port(&self, address: u32) -> Option<bool> {
         self.dsp1.as_ref()?.window.classify(address)
@@ -937,6 +1068,10 @@ impl CpuBus for SnesBus<'_> {
 
         if bank == 0x7E || bank == 0x7F {
             return self.wram[((bank as usize & 1) << 16) | offset];
+        }
+        *self.snes_mar = address;
+        if let Some(value) = self.sa1_read(address, mdr) {
+            return value;
         }
         if let Some(sdd1) = self.sdd1.as_mut() {
             if Sdd1::in_io_window(address) {
@@ -1030,6 +1165,10 @@ impl CpuBus for SnesBus<'_> {
             self.wram[((bank as usize & 1) << 16) | offset] = value;
             return;
         }
+        *self.snes_mar = address;
+        if self.sa1_write(address, value) {
+            return;
+        }
         if self.sdd1.is_some() {
             if Sdd1::in_io_window(address) {
                 if let Some(sdd1) = self.sdd1.as_mut() {
@@ -1119,6 +1258,9 @@ impl CpuBus for SnesBus<'_> {
     }
 
     fn access_cycles(&mut self, address: u32) -> u32 {
+        // The SA-1's bus-contention model depends on the S-CPU's current
+        // address; ares tracks it in `r.mar` at the start of every access.
+        *self.snes_mar = address;
         // Mirrors ares CPU::wait(): six master clocks per base cycle, with
         // wait states for slow ROM, WRAM and the internal I/O window.
         if address & 0x40_8000 != 0 {
@@ -1308,6 +1450,9 @@ mod tests {
             dsp1: &mut system.dsp1,
             cx4: &mut system.cx4,
             sdd1: &mut system.sdd1,
+            sa1: &mut system.sa1,
+            snes_mar: &mut system.snes_mar,
+            snes_refresh: system.refresh_active,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
             dma: &mut system.dma,
@@ -1337,6 +1482,9 @@ mod tests {
             dsp1: &mut system.dsp1,
             cx4: &mut system.cx4,
             sdd1: &mut system.sdd1,
+            sa1: &mut system.sa1,
+            snes_mar: &mut system.snes_mar,
+            snes_refresh: system.refresh_active,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
             dma: &mut system.dma,
@@ -1369,6 +1517,9 @@ mod tests {
             dsp1: &mut system.dsp1,
             cx4: &mut system.cx4,
             sdd1: &mut system.sdd1,
+            sa1: &mut system.sa1,
+            snes_mar: &mut system.snes_mar,
+            snes_refresh: system.refresh_active,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
             dma: &mut system.dma,
@@ -1734,6 +1885,9 @@ mod tests {
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
+                sa1: &mut system.sa1,
+                snes_mar: &mut system.snes_mar,
+                snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1812,6 +1966,9 @@ mod tests {
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
+                sa1: &mut system.sa1,
+                snes_mar: &mut system.snes_mar,
+                snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1841,6 +1998,9 @@ mod tests {
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
+                sa1: &mut system.sa1,
+                snes_mar: &mut system.snes_mar,
+                snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1870,6 +2030,9 @@ mod tests {
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
+                sa1: &mut system.sa1,
+                snes_mar: &mut system.snes_mar,
+                snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1915,6 +2078,9 @@ mod tests {
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
+                sa1: &mut system.sa1,
+                snes_mar: &mut system.snes_mar,
+                snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1970,6 +2136,9 @@ mod tests {
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
+                sa1: &mut system.sa1,
+                snes_mar: &mut system.snes_mar,
+                snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -2011,6 +2180,9 @@ mod tests {
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
+                sa1: &mut system.sa1,
+                snes_mar: &mut system.snes_mar,
+                snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -2043,6 +2215,9 @@ mod tests {
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
+                sa1: &mut system.sa1,
+                snes_mar: &mut system.snes_mar,
+                snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -2125,6 +2300,9 @@ mod tests {
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
+                sa1: &mut system.sa1,
+                snes_mar: &mut system.snes_mar,
+                snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -2155,6 +2333,9 @@ mod tests {
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
                 sdd1: &mut system.sdd1,
+                sa1: &mut system.sa1,
+                snes_mar: &mut system.snes_mar,
+                snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,

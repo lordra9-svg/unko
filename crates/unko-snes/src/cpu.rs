@@ -27,6 +27,12 @@ pub trait CpuBus {
         6
     }
 
+    /// Master clocks one idle CPU cycle costs. The S-CPU spends six (one base
+    /// bus cycle); the SA-1 runs at half that rate, so its bus returns two.
+    fn idle_cycles(&self) -> u32 {
+        6
+    }
+
     /// Advance one idle CPU cycle.
     fn idle(&mut self) {}
 
@@ -268,6 +274,35 @@ impl Cpu {
         (self.cycles - start) as u32
     }
 
+    /// Service a hardware interrupt using an explicit vector instead of a
+    /// vector fetch.
+    ///
+    /// The SA-1 keeps its IRQ/NMI vectors in I/O registers, so it pushes the
+    /// interrupted state and jumps straight to that value (ares
+    /// `SA1::interrupt`, which overrides `WDC65816::interrupt`).
+    pub fn service_hardware_vector(&mut self, bus: &mut impl CpuBus, vector: u16) -> u32 {
+        let start = self.cycles;
+        let address = self.pc_address();
+        self.read(bus, address);
+        self.idle(bus);
+        if !self.emulation {
+            self.push(bus, self.pbr);
+        }
+        self.push(bus, (self.pc >> 8) as u8);
+        self.push(bus, self.pc as u8);
+        let p = if self.emulation {
+            self.p() & !0x10
+        } else {
+            self.p()
+        };
+        self.push(bus, p);
+        self.flags.irq_disable = true;
+        self.flags.decimal = false;
+        self.pc = vector;
+        self.pbr = 0;
+        (self.cycles - start) as u32
+    }
+
     /// Assert or release the IRQ input.
     pub fn set_irq(&mut self, asserted: bool) {
         self.irq_line = asserted;
@@ -323,8 +358,9 @@ impl Cpu {
     }
 
     fn idle(&mut self, bus: &mut impl CpuBus) {
-        self.cycles += 6;
-        self.cycles += u64::from(bus.advance(6));
+        let clocks = bus.idle_cycles();
+        self.cycles += u64::from(clocks);
+        self.cycles += u64::from(bus.advance(clocks));
         bus.idle();
     }
 
