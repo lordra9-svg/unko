@@ -1034,15 +1034,15 @@ impl Spc700 {
     }
 
     fn direct_modify_word(&mut self, bus: &mut impl SpcBus, adjust: i16) {
+        // ares `instructionDirectModifyWord`: load/store the low byte, then
+        // load/store the high byte. Word flags come from the full result.
         let address = self.fetch(bus);
-        let old_low = self.load(bus, address);
-        let old_high = self.load(bus, address.wrapping_add(1));
-        let value = u16::from_le_bytes([old_low, old_high]);
-        let result = value.wrapping_add(adjust as u16);
-        let [low, high] = result.to_le_bytes();
-        self.store(bus, address, low);
-        self.store(bus, address.wrapping_add(1), high);
-        self.set_zn16(result);
+        let mut data = u16::from(self.load(bus, address)).wrapping_add(adjust as u16);
+        self.store(bus, address, data as u8);
+        data = data.wrapping_add(u16::from(self.load(bus, address.wrapping_add(1))) << 8);
+        self.store(bus, address.wrapping_add(1), (data >> 8) as u8);
+        self.flags.zero = data == 0;
+        self.flags.negative = data & 0x8000 != 0;
     }
 
     fn jump_absolute(&mut self, bus: &mut impl SpcBus) {

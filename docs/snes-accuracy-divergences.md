@@ -98,9 +98,18 @@ S-DSP output is now instrumented but not sample-identical:
     though its BRK/handler trace is identical. `$0745` is written through
     indexed addressing (no absolute reference in the ROM), so it is framework
     scratch rather than a directly named variable.
-  - Next step: target test 1's ALU edge cases (its binary is ROM bank 1 and
-    maps to ARAM `$0400`), and decode the check routine's `D`/`W`/`R` marker
-    table to see which arithmetic result flips the order. Both failures predate the
+  - `$0745` turned out to be memory-test scratch: the writer at PC `$0768`
+    fills it with `$FF` down to `$00` over 256 iterations, so the frame-300
+    difference there was a mid-loop phase, not a wrong value. The first real
+    divergence remains the cumulative CRC (and therefore test-1 output).
+  - Found and fixed a real ordering divergence in `INCW`/`DECW`
+    (`direct_modify_word`): ares loads the low byte, **stores** it, then loads
+    and stores the high byte; we loaded both before storing either. The bus
+    interleaving now matches ares. This changes the `spc_smp` failure readings
+    (CRC `40E4B4BE` -> `8625AFBD`) but not yet the outcome.
+  - Next step: capture the test-1 check-table entry that first differs
+    (character ~510) with a RAM write trace at the same instruction step, and
+    decode the marker table's `D`/`W`/`R` columns. Both failures predate the
   current scheduling work (the framebuffers are byte-identical to the previous
   build) and are the concrete audio/SPC items to fix next. `spc_dsp6` used to
   panic in a debug build on a 16-bit BRR/echo address overflow; those sums now
