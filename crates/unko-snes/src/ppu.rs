@@ -887,10 +887,18 @@ impl Ppu {
         };
         let sc = self.bg_sc[layer];
         let tile_size = u32::from((self.bg_mode >> (4 + layer)) & 1);
-        let screen_h = 32u32 << ((sc as u32) & 1);
-        let screen_v = 32u32 << (((sc as u32) >> 1) & 1);
-        let hsize = (screen_h * 8) << tile_size;
-        let vsize = (screen_v * 8) << tile_size;
+        // ares `Background::hires()`: only modes 5 and 6 fetch at 512 columns.
+        let hires = matches!(mode, 5 | 6);
+        // ares `Background::fetchNameTable`: `width = 256 << hires()`, so the
+        // fetch space (and therefore the map's horizontal extent) doubles in
+        // hires. `htiles` becomes 4 there, i.e. a map entry covers 16 columns
+        // and supplies two consecutive characters (`character` and
+        // `character + 1`).
+        let width = if hires { 512 } else { 256 };
+        let hsize = (width << tile_size) << (u32::from(sc) & 1);
+        let vsize = (width << tile_size) << ((u32::from(sc) >> 1) & 1);
+        let htiles = if hires { 4 } else { 3 + tile_size };
+        let vtiles = 3 + tile_size;
         let hscroll = u32::from(self.bg_h[layer]);
         let vscroll = u32::from(self.bg_v[layer]);
         let screen_base = (u32::from(sc) & 0xFC) << 8;
@@ -900,6 +908,8 @@ impl Ppu {
         let tile_stride = 8u32 << bpp_shift;
         let main_enable = self.layer_mask.unwrap_or(self.tm) & (1 << layer) != 0;
         let sub_enable = self.ts & (1 << layer) != 0 && self.layer_mask.is_none();
+        let hscreen = if u32::from(sc) & 1 != 0 { 0x400 } else { 0 };
+        let vscreen = 0x400 + hscreen;
 
         let mosaic = self.layer_mosaic(layer);
         let mosaic_size = self.mosaic_size() as u32;
@@ -912,72 +922,74 @@ impl Ppu {
         } else {
             y as u32
         };
-        // ares `Background::fetchNameTable`: inside its `hires()` branch (modes
-        // 5 and 6 only) an interlaced frame doubles the vertical fetch so each
-        // field reads alternate source lines.
-        let vbase = if matches!(mode, 5 | 6) && self.frame_interlace {
-            (mosaic_y << 1) | u32::from(self.field)
+        // ares `Background::fetchNameTable`: inside its `hires()` branch an
+        // interlaced frame doubles the vertical fetch so each field reads
+        // alternate source lines.
+        let vbase = if hires && self.frame_interlace {
+            // ares `Background::fetchNameTable`:
+            // `vpixel = vpixel << 1 | (field() && !mosaic.enable)` - with
+            // mosaic on, both fields fetch the same (even) source line.
+            (mosaic_y << 1) | u32::from(self.field && !mosaic)
         } else {
             mosaic_y
         };
-        for x in 0..SCREEN_WIDTH {
-            let mosaic_x = if mosaic {
-                (x as u32) - (x as u32 % mosaic_size)
-            } else {
-                x as u32
-            };
-            let mut h = (mosaic_x + hscroll) & (hsize - 1);
-            let mut v = (vbase + vscroll) & (vsize - 1);
+
+        // One background pixel: ares `Background::fetchNameTable` +
+        // `fetchCharacter`, returning the palette entry and priority bit.
+        let fetch = |h: u32, v: u32| -> Option<(u8, u8)> {
+            let mut h = h;
+            let mut v = v;
             // Offset per tile (ares `Background::fetchNameTable`): modes 2, 4
             // and 6 take their per-column offsets from BG3's tilemap. The
             // valid bit is 13 + layer; mode 4 packs both directions into one
             // word, selected by bit 15.
             if matches!(mode, 2 | 4 | 6) {
-                let x_col = (x as u32) & !7;
-                let hlookup = self.opt_word(x_col, 0);
-                let vlookup = self.opt_word(x_col, 8);
+                let hlookup = self.opt_word(h, 0);
+                let vlookup = self.opt_word(h, 8);
                 let valid = 1u16 << (13 + layer as u16);
                 if mode == 4 {
                     if hlookup & valid != 0 {
                         if hlookup & 0x8000 == 0 {
-                            h = (x_col + (u32::from(hlookup) & !7) + (hscroll & 7)) & (hsize - 1);
+                            h = (h + (u32::from(hlookup) & !7) + (hscroll & 7)) & (hsize - 1);
                         } else {
                             v = (mosaic_y + u32::from(vlookup)) & (vsize - 1);
                         }
                     }
                 } else {
                     if hlookup & valid != 0 {
-                        h = (x_col + (u32::from(hlookup) & !7) + (hscroll & 7)) & (hsize - 1);
+                        h = (h + (u32::from(hlookup) & !7) + (hscroll & 7)) & (hsize - 1);
                     }
                     if vlookup & valid != 0 {
                         v = (mosaic_y + u32::from(vlookup)) & (vsize - 1);
                     }
                 }
             }
-            let htile = h >> (3 + tile_size);
-            let vtile = v >> (3 + tile_size);
+            h &= hsize - 1;
+            v &= vsize - 1;
+            let htile = h >> htiles;
+            let vtile = v >> vtiles;
             let mut offset = (htile & 0x1F) | ((vtile & 0x1F) << 5);
             if htile & 0x20 != 0 {
-                offset += 0x400;
+                offset += hscreen;
             }
             if vtile & 0x20 != 0 {
-                offset += if screen_h > 32 { 0x800 } else { 0x400 };
+                offset += vscreen;
             }
             let attributes = self.vram[((screen_base + offset) & 0x7FFF) as usize];
             let mut character = attributes & 0x03FF;
             let hflip = attributes & 0x4000 != 0;
             let vflip = attributes & 0x8000 != 0;
+            // ares: a 16-column (hires) or 16-pixel (`tileSize`) map entry
+            // supplies two characters; the low half selects the second one.
+            if (htiles == 4 || vtiles == 4) && ((h >> 3) & 1 != 0) != hflip {
+                character += 1;
+            }
+            if vtiles == 4 && ((v >> 3) & 1 != 0) != vflip {
+                character += 16;
+            }
             let mut row = v & 7;
             if vflip {
                 row = 7 - row;
-            }
-            if tile_size == 1 {
-                if ((h >> 3) & 1 != 0) != hflip {
-                    character += 1;
-                }
-                if ((v >> 3) & 1 != 0) != vflip {
-                    character += 16;
-                }
             }
             let address = char_base + u32::from(character) * tile_stride + row;
             let bit = if hflip { h & 7 } else { 7 - (h & 7) };
@@ -996,20 +1008,65 @@ impl Ppu {
                     | (((word3 >> (8 + bit)) & 1) << 7);
             }
             if color == 0 {
-                continue;
+                return None;
             }
             let palette_group = (attributes >> 10) & 0x07;
             let palette = palette_offset + (palette_group << palette_shift) + color;
-            let pixel = Pixel {
-                color: palette as u8,
-                priority: priority[usize::from(attributes & 0x2000 != 0)],
-                layer: layer as u8,
+            Some((
+                palette as u8,
+                priority[usize::from(attributes & 0x2000 != 0)],
+            ))
+        };
+
+        for x in 0..SCREEN_WIDTH {
+            let mosaic_x = if mosaic {
+                (x as u32) - (x as u32 % mosaic_size)
+            } else {
+                x as u32
             };
-            if main_enable && !(self.tmw & (1 << layer) != 0 && self.window_masks(layer, x)) {
-                plot(main, x, pixel);
+            // ares `Background::run` runs once per screen and consumes one
+            // background pixel per call, so in hires the Below screen shows BG
+            // column `2d` and the Above screen column `2d + 1`; the DAC then
+            // interleaves below at the even output column and above at the odd.
+            let (h_below, h_above) = if hires {
+                let base = (mosaic_x << 1).wrapping_add(hscroll << 1);
+                (base, base.wrapping_add(1))
+            } else {
+                let h = (mosaic_x + hscroll) & (hsize - 1);
+                (h, h)
+            };
+            let v = (vbase + vscroll) & (vsize - 1);
+            let (below, above) = if hires {
+                (fetch(h_below, v), fetch(h_above, v))
+            } else {
+                let pixel = fetch(h_below, v);
+                (pixel, pixel)
+            };
+            if let Some((color, layer_priority)) = above {
+                if main_enable && !(self.tmw & (1 << layer) != 0 && self.window_masks(layer, x)) {
+                    plot(
+                        main,
+                        x,
+                        Pixel {
+                            color,
+                            priority: layer_priority,
+                            layer: layer as u8,
+                        },
+                    );
+                }
             }
-            if sub_enable && !(self.tsw & (1 << layer) != 0 && self.window_masks(layer, x)) {
-                plot(sub, x, pixel);
+            if let Some((color, layer_priority)) = below {
+                if sub_enable && !(self.tsw & (1 << layer) != 0 && self.window_masks(layer, x)) {
+                    plot(
+                        sub,
+                        x,
+                        Pixel {
+                            color,
+                            priority: layer_priority,
+                            layer: layer as u8,
+                        },
+                    );
+                }
             }
         }
     }
@@ -1597,6 +1654,46 @@ mod tests {
         // Backing storage is hi-res capacity so a future mode change cannot
         // need a reallocation.
         const { assert!(MAX_FRAME_SIZE >= MAX_SCREEN_WIDTH * SCREEN_HEIGHT * 4) };
+    }
+
+    #[test]
+    fn hires_map_entries_cover_sixteen_columns() {
+        // ares `Background::fetchNameTable`: in hires `width = 256 << hires()`
+        // and `htiles = 4`, so one map entry covers 16 columns and supplies two
+        // consecutive characters (`character` and `character + 1`). The Below
+        // screen samples BG column `2d` and the Above screen column `2d + 1`.
+        let mut ppu = Ppu::new();
+        ppu.write(0x2100, 0x0F); // full brightness
+        ppu.bg_mode = 0x05; // mode 5 (hires)
+        ppu.frame_hires = true;
+        ppu.tm = 0x01;
+        ppu.ts = 0x01;
+        ppu.write(0x2107, 0x04); // BG1 map at $0400, 32x32
+        ppu.write(0x210B, 0x00); // BG1 characters at $0000
+        ppu.write(0x2121, 0x01);
+        ppu.write(0x2122, 0x1F); // colour 1: red
+        ppu.write(0x2122, 0x00);
+        ppu.write(0x2121, 0x02);
+        ppu.write(0x2122, 0xE0); // colour 2: green
+        ppu.write(0x2122, 0x03);
+        // Map entry 0: character 0, palette group 0, priority 0.
+        ppu.vram[0x400] = 0x0000;
+        // 4bpp tile 0 (colour 1 in pixels 0-1) and tile 1 (colour 2 in pixel
+        // 0), source row 1.
+        ppu.vram[1] = 0x00C0;
+        ppu.vram[16 + 1] = 0x8000;
+        ppu.line = 1;
+        ppu.render_current_line();
+
+        let stride = MAX_SCREEN_WIDTH * 4;
+        // Output column 0 = Below = BG column 0 = tile 0 (red).
+        assert_eq!(&ppu.framebuffer[0..4], &[255, 0, 0, 255]);
+        // Output column 8 = Below = BG column 8 = character + 1 = tile 1.
+        assert_eq!(&ppu.framebuffer[8 * 4..8 * 4 + 4], &[0, 255, 0, 255]);
+        // Output column 1 = Above = BG column 1 = still tile 0.
+        assert_eq!(&ppu.framebuffer[4..8], &[255, 0, 0, 255]);
+        // Row 1 belongs to the other field and is untouched.
+        assert_eq!(&ppu.framebuffer[stride..stride + 4], &[0, 0, 0, 0]);
     }
 
     #[test]

@@ -306,36 +306,38 @@ with ares. The implementation follows ares, which is the primary source.
     **94.849%** of pixels exact, mean channel difference 5.69. A non-interlaced
     render of the same ROM scores 83% against the same dump, so the field
     geometry is right; the residual is the item below.
-- **Open: hires output is ~95% exact against ares, cause not yet isolated.**
-  - Corrected measurement: `PeterLemon-PPU/HiColor/MosaicMode5.sfc` is itself a
-    mode-5 + interlace demo (`SETINI = $01`), so ares dumps it as 512x448 and
-    RustySNES (which has no interlace output) cannot be its oracle. Against
-    ares our interlaced output is **95.322%** exact (mean 5.09), and
-    `Interlace/InterlaceMoogle.sfc` is **95.045%** (mean 5.40). The earlier
-    "100.000%" was against RustySNES and shared its 256-column compositing
-    assumption.
-  - Removed a hack that this exposed: `present_line` forced output column 0 to
-    the backdrop for hires, copied from RustySNES' behaviour. ares shows the
-    fetched pixel there, and dropping the hack improved both ROMs
-    (94.849% -> 95.045%, 95.126% -> 95.322%).
-  - **Falsified: per-screen hires fetching.** Reading ares
-    `Background::fetchNameTable`/`run` (`hpixel = x << hires()`,
-    `hscroll <<= 1`, one background pixel consumed per screen call) suggests
-    Below should show BG column `2d` and Above `2d + 1`. Two implementations
-    were measured and both are far worse than the current per-dot sampling:
-    with the map wrapping at its 256-column width the output shows two
-    half-width copies of the image and scores **68.110%**; with the hires map
-    treated as 512 wide it scores **55.855%**. ares' dumped image contains a
-    single non-repeated picture whose bounding box matches the per-dot model,
-    so the fetch is *not* the explanation and is reverted.
-  - Residual characterisation: both row parities score identically (94.93% /
-    94.91%), so it is not the interlace fetch; in the detail columns the match
-    peaks at a 4-output-column shift (91.2% vs 86.7% at zero), which points at
-    a pixel-pipeline latency rather than a sampling error, but applying that
-    offset globally (2 BG columns) measures worse overall (**92.431%**), so it
-    is not a plain shift either. Next: instrument `Background::run`'s
-    `pixelCounter`/`renderingIndex` prefetch depth against the DAC's per-dot
-    output, i.e. reproduce ares' 8-dot tile pipeline exactly.
+- **Hires is now pixel-exact against ares on a full-screen interlace demo**:
+  `Interlace/InterlaceMoogle.sfc` (mode 5, `SETINI = $01`) scores **100.000%**
+  exact (mean channel difference 0.000) at 512x448 against the ares dump crop
+  (26, 18). `HiColor/MosaicMode5.sfc` scores **98.746%** (mean 0.97).
+  - The model, all transcribed from ares `Background::fetchNameTable`/`run`:
+    - `width = 256 << hires()`, so in hires the fetch space is 512 columns and
+      `hsize` (and the map's horizontal extent) doubles.
+    - **`htiles = 4` in hires**: a map entry covers 16 columns and supplies two
+      consecutive characters - `character` for the first 8 columns and
+      `character + 1` for the next 8, selected by `hoffset & 8` against the
+      entry's horizontal-mirror bit (`htiles == 4 && (hoffset & 8) != hmirror`).
+    - `Background::run` is called once per screen and consumes one background
+      pixel per call, so the **Below** screen shows BG column `2d` and the
+      **Above** screen column `2d + 1`; the DAC interleaves below at the even
+      output column and above at the odd one.
+    - With mosaic enabled the interlace vertical doubling **drops the field
+      bit**: `vpixel = vpixel << 1 | (field() && !mosaic.enable)`, so both
+      fields fetch the same even source line. This was worth 0.65 points on the
+      mosaic demo on its own.
+  - The earlier per-screen attempt that measured 68.1% / 55.9% was wrong because
+    it kept the non-hires 8-column entry geometry (`htiles = 3`) with a doubled
+    `hsize`, which wraps a 32-tile map after 256 columns and renders the picture
+    twice. With `htiles = 4` there is no wrap and the frame is bit-identical.
+    The earlier "falsified" note is superseded; the falsification applied to
+    that geometry, not to per-screen sampling.
+  - Residual on `MosaicMode5.sfc` (1.25% of pixels) is confined to the **Above
+    screen** (odd output columns): `x % 4` is 1 or 3 for essentially every
+    differing pixel. Both screens show the same layer with the same scroll, so
+    this points at ares' mosaic pixel latch, which in hires is only updated on
+    the `Below` call (`x == 0 && (!hires() || screen == Below)`), i.e. the Above
+    screen reads the latch rather than the fresh pixel. Reproducing that
+    one-call ordering is the next step.
 - Offset per tile **is** implemented for modes 2, 4 and 6, transcribed from
   ares `Background::fetchNameTable`/`fetchOffset`: the per-column horizontal and
   vertical words are read from BG3's tilemap (horizontal at `voffset + 0`,

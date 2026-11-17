@@ -20,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **849 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **850 workspace tests**, 0 failed, plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -114,7 +114,7 @@ Implemented so far:
 
 Validation so far:
 
-- **849 workspace tests**, 0 failed
+- **850 workspace tests**, 0 failed
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -208,18 +208,15 @@ Validation so far:
 - Star Fox remains black without the SuperFX coprocessor; Final Fantasy V was
   still in its boot sequence at the 20M-cycle sample.
 
-The PPU is line-based rather than dot-scheduled. **Interlace is implemented**:
-`SETINI` bit 0 is latched at frame start, interlaced frames are 448 lines with
-the odd field offset by one output row, sprite heights and positions double,
-the hires BG fetch doubles vertically and interlaced even fields are 263
-scanlines. Measured against ares it scores 95.0% exact on `Interlace/InterlaceMoogle.sfc`
-and 95.3% on `HiColor/MosaicMode5.sfc` (both mode 5 + interlace). The per-screen
-hires fetch reading of ares (`hpixel = x << hires()`, one background pixel per
-screen call) was implemented and **falsified**: the wrapping variant scores
-68.1% and the 512-wide variant 55.9%, so the per-dot sampling was restored. The
-earlier 100.000% hires result was against RustySNES, which shares the
-256-column compositing assumption and is not a hires or interlace oracle. Offset per tile is implemented for
-modes 2/4/6.
+The PPU is line-based rather than dot-scheduled. **Interlace is implemented**
+(448-line output, odd field on the odd output rows, sprite and hires BG vertical
+doubling, 263-line even fields). **Hires is now pixel-exact against ares** on
+`Interlace/InterlaceMoogle.sfc` (100.000% at 512x448) and 98.746% on
+`HiColor/MosaicMode5.sfc`: hires map entries cover 16 columns with
+`character`/`character + 1`, the Below screen samples BG column `2d` and the
+Above screen `2d + 1`, and mosaic drops the interlace field bit. The remaining
+1.25% on the mosaic demo is confined to the Above screen's mosaic latch.
+Offset per tile is implemented for modes 2/4/6.
 
 Performance: `unko bench --synthetic 3000 --min-fps 300` measures **791.6 fps**
 (13.17x real time, 1.263 ms/frame); release save states are 417,090 bytes at
