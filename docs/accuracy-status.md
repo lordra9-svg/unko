@@ -72,6 +72,10 @@ Implemented so far:
   clock, 262-line frames) and PAL (21,281,370 Hz, 312-line frames with the
   long V=311 line, and the `$213F` PAL flag), so the APU credit ratio follows
   the region's master clock
+- overscan (`SETINI` bit 2): `vdisp` moves from 225 to 240, so vblank/NMI,
+  active-display access gating and the OAM reset use a 240-line window, and the
+  output frame becomes 240 lines (480 interlaced) with the top border row;
+  verified 100.000% against ares on a first-party overscan fixture
 - versioned save states (`Snes::save_state`/`load_state`): a `bincode`
   serialization of the S-CPU, S-SMP/S-DSP, PPU (VRAM/CGRAM/OAM/framebuffer),
   DMA/HDMA, CPU I/O, WRAM and cartridge SRAM plus the scheduler credits. A

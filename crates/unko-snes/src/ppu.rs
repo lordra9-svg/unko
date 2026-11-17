@@ -10,16 +10,23 @@ use crate::rom::Region;
 
 /// Visible frame width.
 pub const SCREEN_WIDTH: usize = 256;
-/// Visible frame height.
+/// Visible frame height in non-overscan mode.
+///
+/// ares `PPU::updateVideoMode`: `vdisp = 225` without overscan, so active
+/// display is lines 1-224.
 pub const SCREEN_HEIGHT: usize = 224;
+/// Output height in overscan mode (`SETINI` bit 2, ares `vdisp = 240`).
+///
+/// The active lines are 1-239 and row 0 is the top border, matching the ares
+/// surface layout (`DAC::scanline` does not add the 8-row vertical offset).
+pub const OVERSCAN_HEIGHT: usize = 240;
 /// Output width in hi-res modes (5/6, or pseudo-hires `SETINI` bit 3): the DAC
 /// emits two columns per pixel clock. `SCREEN_WIDTH` stays the compositing
 /// width, matching the reference PPU model.
 pub const MAX_SCREEN_WIDTH: usize = 512;
-/// Output height in interlace mode: two fields of [`SCREEN_HEIGHT`] lines,
-/// written on alternate output rows (ares `DAC::scanline`: `yScale = 2`, plus
-/// one row for the odd field).
-pub const MAX_SCREEN_HEIGHT: usize = SCREEN_HEIGHT * 2;
+/// Output height in interlace mode: two fields of the active area written on
+/// alternate output rows, i.e. 448 lines normally and 480 in overscan.
+pub const MAX_SCREEN_HEIGHT: usize = OVERSCAN_HEIGHT * 2;
 /// RGBA8888 frame size at the normal (256-wide) resolution.
 pub const FRAME_SIZE: usize = SCREEN_WIDTH * SCREEN_HEIGHT * 4;
 /// Backing storage is always maximum capacity so a mode change mid-frame never
@@ -42,6 +49,12 @@ pub struct Ppu {
     frame_hires: bool,
     /// Whether the presented frame is interlaced (latched at frame start).
     frame_interlace: bool,
+    /// Whether the presented frame uses the 240-line overscan geometry (latched
+    /// at frame start from `SETINI` bit 2, ares `state.overscan`).
+    frame_overscan: bool,
+    /// Whether this frame's NMI edge has already fired (SETINI can move
+    /// `vdisp` mid-frame).
+    nmi_fired: bool,
     /// Number of scanlines in the frame being rendered: 262 normally, 263 on
     /// an interlaced even field (ares `PPUcounter::tickScanline`), and the
     /// PAL equivalents 312/313.
@@ -163,6 +176,8 @@ impl Ppu {
             framebuffer: vec![0; MAX_FRAME_SIZE].into_boxed_slice(),
             frame_hires: false,
             frame_interlace: false,
+            frame_overscan: false,
+            nmi_fired: false,
             frame_lines: LINES_PER_FRAME,
             line_dots: DOTS_PER_LINE,
             region: Region::Ntsc,
@@ -419,17 +434,48 @@ impl Ppu {
         self.frame_hires
     }
 
-    /// Output height of the frame currently being composited: `SCREEN_HEIGHT`
-    /// normally and `MAX_SCREEN_HEIGHT` when interlaced.
-    pub const fn frame_height(&self) -> usize {
-        if self.frame_interlace {
-            MAX_SCREEN_HEIGHT
+    /// Whether the current frame uses the 240-line overscan geometry.
+    pub const fn frame_overscan(&self) -> bool {
+        self.frame_overscan
+    }
+
+    /// Active-display cutoff line.
+    ///
+    /// ares `PPU::updateVideoMode`: `vdisp = !io.overscan ? 225 : 240`, so
+    /// without overscan the active lines are 1-224 and with it 1-239.
+    pub const fn vdisp(&self) -> u16 {
+        if self.setini & 0x04 != 0 {
+            OVERSCAN_HEIGHT as u16
         } else {
-            SCREEN_HEIGHT
+            VBLANK_LINE
         }
     }
 
-    /// Whether the current frame is interlaced (448-line output).
+    /// Last line the current frame's output geometry can draw (1-based).
+    pub const fn visible_last(&self) -> u16 {
+        if self.frame_overscan {
+            OVERSCAN_HEIGHT as u16 - 1
+        } else {
+            SCREEN_HEIGHT as u16
+        }
+    }
+
+    /// Output height of the frame currently being composited: 224 normally,
+    /// 240 in overscan, doubled when interlaced.
+    pub const fn frame_height(&self) -> usize {
+        let lines = if self.frame_overscan {
+            OVERSCAN_HEIGHT
+        } else {
+            SCREEN_HEIGHT
+        };
+        if self.frame_interlace {
+            lines * 2
+        } else {
+            lines
+        }
+    }
+
+    /// Whether the current frame is interlaced (448- or 480-line output).
     pub const fn frame_interlace(&self) -> bool {
         self.frame_interlace
     }
@@ -461,11 +507,26 @@ impl Ppu {
             // ares `PPUcounter::tickScanline`: the interlaced frame with
             // `field == 0` has one extra line (263 NTSC / 313 PAL).
             self.frame_interlace = self.setini & 0x01 != 0;
+            // ares `PPU::main`: `state.overscan = io.overscan` at vcounter 0.
+            self.frame_overscan = self.setini & 0x04 != 0;
+            self.nmi_fired = false;
             self.frame_lines = if self.frame_interlace && !self.field {
                 self.region.lines_per_frame() + 1
             } else {
                 self.region.lines_per_frame()
             };
+            // The overscan layout starts at output row 1 (progressive) or row 2
+            // (interlaced), so the rows above the first active line are the
+            // vertical border. Clear them once per frame in case the previous
+            // frame used the other geometry.
+            if self.frame_overscan {
+                let width = self.frame_width();
+                let rows = if self.frame_interlace { 2 } else { 1 };
+                for row in 0..rows {
+                    let start = row * width * 4;
+                    self.framebuffer[start..start + width * 4].fill(0);
+                }
+            }
         }
         // ares `PPUcounter::tickScanline`: NTSC has one short scanline and PAL
         // one long scanline so the average rate tracks the color burst.
@@ -477,20 +538,23 @@ impl Ppu {
         } else if !self.frame_interlace && self.field && self.line == 240 {
             self.line_dots = DOTS_PER_LINE - 1;
         }
-        match self.line {
-            0 => {
-                self.vblank = false;
-                // ares `Object::frame`: the overflow flags are cleared once per
-                // frame and latched by any line that overflows.
-                self.range_over = false;
-                self.time_over = false;
-            }
-            VBLANK_LINE => {
-                self.vblank = true;
-                self.nmi = true;
-            }
-            240 => self.frame_ready = true,
-            _ => {}
+        if self.line == 0 {
+            self.vblank = false;
+            // ares `Object::frame`: the overflow flags are cleared once per
+            // frame and latched by any line that overflows.
+            self.range_over = false;
+            self.time_over = false;
+        }
+        // ares `CPU::nmiPoll`: NMI asserts once `vcounter >= vdisp`, where
+        // `vdisp` is 225 normally and 240 with overscan (`SETINI` bit 2).
+        if self.line >= self.vdisp() && !self.nmi_fired {
+            self.nmi_fired = true;
+            self.vblank = true;
+            self.nmi = true;
+        }
+        // ares `PPU::main` presents the frame at vcounter 240 in both modes.
+        if self.line == 240 {
+            self.frame_ready = true;
         }
     }
 
@@ -506,17 +570,26 @@ impl Ppu {
 
     /// Render the current visible scanline after HDMA has run.
     ///
-    /// The PPU numbers visible NTSC lines 1-224; line 0 is part of vblank and
-    /// never produces pixels. Background and sprite fetches therefore use the
-    /// line number itself, not the framebuffer row.
+    /// Active display is lines 1-224 normally and 1-239 in overscan; line 0 is
+    /// always vblank. Background and sprite fetches therefore use the line
+    /// number itself, not the framebuffer row.
     pub fn render_current_line(&mut self) {
-        if (1..=SCREEN_HEIGHT as u16).contains(&self.line) {
-            // ares `DAC::scanline`: `line = vcounter * yScale`, and the odd
-            // field is offset by one output row, so the two fields interleave
-            // into 448 rows. Only this field's rows are written; the other
-            // field's rows keep the previous field's content, as on hardware.
+        if self.line >= 1 && self.line <= self.visible_last() {
+            // ares `DAC::scanline`: without overscan the row pointer is
+            // `vcounter + 8`, which our cropped output folds into row
+            // `vcounter - 1`; with overscan it is `vcounter` (row 0 is the top
+            // border). Interlace doubles the row and offsets the odd field by
+            // one. Only this field's rows are written; the other field's rows
+            // keep the previous field's content, as on hardware.
             let row = if self.frame_interlace {
-                (usize::from(self.line) - 1) * 2 + usize::from(self.field)
+                let line = if self.frame_overscan {
+                    usize::from(self.line)
+                } else {
+                    usize::from(self.line) - 1
+                };
+                line * 2 + usize::from(self.field)
+            } else if self.frame_overscan {
+                usize::from(self.line)
             } else {
                 usize::from(self.line - 1)
             };
@@ -626,7 +699,7 @@ impl Ppu {
             0x2100 => {
                 // ares: forcing blank at the start of vblank resets the OAM
                 // address to the base and re-latches `firstSprite`.
-                if self.display_disable && self.line == VBLANK_LINE {
+                if self.display_disable && self.line == self.vdisp() {
                     self.oam_address = self.oam_base << 1;
                     self.set_first_sprite();
                 }
@@ -800,7 +873,7 @@ impl Ppu {
         let address = self.vram_word_address() & 0x7FFF;
         // ares `PPU::writeVRAM`: writes during active display are dropped, but
         // the address still advances.
-        if self.display_disable || self.line >= VBLANK_LINE {
+        if self.display_disable || self.line >= self.vdisp() {
             let word = self.vram[usize::from(address)];
             self.vram[usize::from(address)] = if high {
                 (word & 0x00FF) | (u16::from(data) << 8)
@@ -908,7 +981,7 @@ impl Ppu {
 
     /// ares `PPU::readVRAM`: VRAM reads return 0 during active display.
     fn read_vram_word(&self) -> u16 {
-        if !self.display_disable && self.line < VBLANK_LINE {
+        if !self.display_disable && self.line < self.vdisp() {
             return 0;
         }
         self.vram[usize::from(self.vram_word_address() & 0x7FFF)]
@@ -919,7 +992,7 @@ impl Ppu {
     fn cgram_target(&self) -> usize {
         let visible = !self.display_disable
             && self.line > 0
-            && self.line < VBLANK_LINE
+            && self.line < self.vdisp()
             && self.dot >= 22
             && self.dot < 274;
         usize::from(if visible {
@@ -932,7 +1005,7 @@ impl Ppu {
     /// OAM address during active display: ares `PPU::readOAM`/`writeOAM`
     /// redirect the access to the sprite the renderer last evaluated.
     fn oam_access_index(&self, address: u16) -> usize {
-        if !self.display_disable && self.line < VBLANK_LINE {
+        if !self.display_disable && self.line < self.vdisp() {
             if address & 0x200 == 0 {
                 usize::from(self.latch_oam_address) * 4 + usize::from(address & 1)
             } else {
@@ -1951,10 +2024,10 @@ mod tests {
             ppu.tick();
         }
         assert!(ppu.frame_interlace());
-        assert_eq!(ppu.frame_height(), MAX_SCREEN_HEIGHT);
+        assert_eq!(ppu.frame_height(), SCREEN_HEIGHT * 2);
         assert_eq!(
             ppu.frame_buffer().len(),
-            SCREEN_WIDTH * MAX_SCREEN_HEIGHT * 4
+            SCREEN_WIDTH * SCREEN_HEIGHT * 2 * 4
         );
 
         ppu.write(0x2133, 0x00);
@@ -1963,6 +2036,59 @@ mod tests {
         }
         assert!(!ppu.frame_interlace());
         assert_eq!(ppu.frame_height(), SCREEN_HEIGHT);
+    }
+
+    #[test]
+    fn overscan_extends_the_visible_area_to_240_lines() {
+        // ares `PPU::updateVideoMode`: `vdisp = !io.overscan ? 225 : 240`, and
+        // `PPU::main` latches `state.overscan` at vcounter 0.
+        let mut ppu = Ppu::new();
+        assert_eq!(ppu.vdisp(), VBLANK_LINE);
+        assert_eq!(ppu.frame_height(), SCREEN_HEIGHT);
+
+        ppu.write(0x2133, 0x04); // SETINI: overscan
+        assert_eq!(ppu.vdisp(), OVERSCAN_HEIGHT as u16);
+        // Tick exactly one non-interlaced frame so the geometry latches.
+        for _ in 0..LINES_PER_FRAME as u32 * DOTS_PER_LINE as u32 {
+            ppu.tick();
+        }
+        assert_eq!(ppu.line(), 0);
+        assert!(ppu.frame_overscan());
+        assert_eq!(ppu.frame_height(), OVERSCAN_HEIGHT);
+        assert_eq!(ppu.visible_last(), OVERSCAN_HEIGHT as u16 - 1);
+
+        // Back to 224 lines with no overscan.
+        ppu.write(0x2133, 0x00);
+        for _ in 0..LINES_PER_FRAME as u32 * DOTS_PER_LINE as u32 {
+            ppu.tick();
+        }
+        assert!(!ppu.frame_overscan());
+        assert_eq!(ppu.frame_height(), SCREEN_HEIGHT);
+    }
+
+    #[test]
+    fn overscan_moves_vblank_and_nmi_to_line_240() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2133, 0x04); // SETINI: overscan
+                                 // Skip to line 224 (still active in overscan).
+        for _ in 0..224 * DOTS_PER_LINE as u32 {
+            ppu.tick();
+        }
+        assert_eq!(ppu.line(), 224);
+        assert!(!ppu.vblank);
+        // Beneath the old 225-line cutoff but still active.
+        for _ in 0..DOTS_PER_LINE as u32 {
+            ppu.tick();
+        }
+        assert_eq!(ppu.line(), 225);
+        assert!(!ppu.vblank);
+        // Reaching 240 latches vblank and the NMI edge.
+        for _ in 0..15 * DOTS_PER_LINE as u32 {
+            ppu.tick();
+        }
+        assert_eq!(ppu.line(), 240);
+        assert!(ppu.vblank);
+        assert!(ppu.take_nmi());
     }
 
     #[test]

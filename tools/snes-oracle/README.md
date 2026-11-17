@@ -56,6 +56,25 @@ IPL=.../ipl.rom tools/snes-oracle/ours-capture.sh ROM.sfc 600 /tmp/ours-cap
 ares' internal frame counter starts two vblanks later than ours, so capture
 ares at `N` and ours at `N - 2` (or compare a static screen).
 
+## Synthetic fixtures
+
+`gen-overscan-rom.py` assembles a minimal LoROM that enables PPU overscan
+(`SETINI` bit 2) and fills every active line with one colour, so the 240-line
+geometry can be diffed against ares. It is hand-assembled in the script (no
+external provenance):
+
+```sh
+tools/snes-oracle/gen-overscan-rom.py /tmp/overscan.sfc
+tools/snes-oracle/ares-capture.sh /tmp/overscan.sfc 122 /tmp/os-ares
+FRAMES=120 FRAME_OUT=/tmp/os-ours.raw \
+  target/release/examples/snes-info /tmp/overscan.sfc "$IPL"
+tools/snes-oracle/diff-frame.py /tmp/os-ours.raw /tmp/os-ares/frame.raw \
+  --ours-h 240 --x0 26 --y0 0
+```
+
+The overscan frame is **100.000%** exact at crop (26, 0) in the ares 564x242
+dump; the top row is the border ares leaves unwritten.
+
 Our core picks the region from the cartridge header country byte
 (`Region::Ntsc`/`Region::Pal`), which selects the master clock, the 262/312-line
 frame geometry and the `$213F` PAL bit. `unko-snes` reports it as `region:` in
@@ -103,7 +122,8 @@ The manifest is intentionally not committed; compare two CSVs instead.
 - Video geometry: `spc_timer` at 600 frames vs ares at 602 — **100.000% exact**
   (57,344 / 57,344 pixels, mean |d| 0.000). PAL (`HblankEmuTest.sfc` at 300 vs
   ares `ARES_REGION=PAL` 302) is also **100.000% exact** at crop (22, 29) in
-  ares' 564x288 dump.
+  ares' 564x288 dump, and the overscan fixture at 120 vs ares 122 is
+  **100.000% exact** (61,440 / 61,440) at crop (26, 0) in ares' 564x242 dump.
 - Audio: `blargg_near_cd_quality.smc` against ares' raw pre-resampler output is
   **bit-exact**: 0 differing samples over 639,700 stereo frames (1,200 frames)
   at a -1-frame alignment. (Before `$00F0-$00FF` reads were deferred to their

@@ -532,9 +532,22 @@ with ares. The implementation follows ares, which is the primary source.
   - The NTSC one-short-line rule is also implemented (ares
     `PPUcounter::tickScanline`: 340 dots at V=240 on a non-interlaced odd
     field).
-  - Overscan (`SETINI` bit 2) is still not modelled: ares switches `vdisp` to
-    240 and shows 240 lines, while we keep the 225-line non-overscan window and
-    a 224-row output. No measured ROM depends on it yet.
+- **Overscan (`SETINI` bit 2) is implemented.** ares `PPU::updateVideoMode`
+  sets `vdisp = !io.overscan ? 225 : 240`; our `Ppu::vdisp()` tracks it live,
+  so vblank/NMI, the active-display access gates and the OAM reset all move to
+  line 240. `PPU::main` latches `state.overscan` at line 0 for the output
+  geometry: `frame_height()` becomes 240 (480 interlaced) instead of 224 (448),
+  and the line-1..239 output is written to rows 1..239 with row 0 as the top
+  border (row 0/1 interlaced), i.e. ares `DAC::scanline`'s `vcounter` row
+  pointer with the 8-row vertical offset removed. VRAM, CGRAM and OAM accesses
+  use the 240-line window.
+  - Verified with a first-party fixture: `tools/snes-oracle/gen-overscan-rom.py`
+    assembles a LoROM that enables overscan and paints every active line with
+    colour 15. At frame 120 it is **100.000% exact** (61,440/61,440) against
+    the ares NTSC dump at crop (26, 0) with horizontal scale 2, i.e. all 240
+    rows including the top border.
+  - Unit tests pin the 240-line geometry, the `visible_last` bounds and
+    vblank/NMI moving from line 225 to line 240.
 - **Interlace is implemented** on the hires geometry above. `frame_interlace`
   is latched at frame start from `SETINI` bit 0, `frame_height()` returns 448
   for those frames, and each field writes only its own output rows

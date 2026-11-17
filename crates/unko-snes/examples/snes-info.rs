@@ -202,6 +202,18 @@ fn main() -> ExitCode {
             bytes.len()
         );
     }
+    if std::env::var_os("PPU_STATE").is_some() {
+        eprintln!(
+            "PPU overscan={} interlace={} hires={} height={} width={} vdisp={} last={}",
+            system.ppu.frame_overscan(),
+            system.ppu.frame_interlace(),
+            system.ppu.frame_hires(),
+            system.ppu.frame_height(),
+            system.ppu.frame_width(),
+            system.ppu.vdisp(),
+            system.ppu.visible_last(),
+        );
+    }
     println!(
         "cpu after:   {}  nmi_services={} irq_services={}",
         system.cpu, system.cpu.nmi_services, system.cpu.irq_services

@@ -564,10 +564,7 @@ impl Snes {
             // ares renders a line's visible pixels from dot 22 onward; render
             // after hblank so register writes on dots 0-21 (e.g. a DMA that
             // unblanks INIDISP at the line boundary) apply to this line.
-            if pre_dot == 21
-                && self.ppu.line() >= 1
-                && self.ppu.line() <= crate::ppu::SCREEN_HEIGHT as u16
-            {
+            if pre_dot == 21 && self.ppu.line() >= 1 && self.ppu.line() <= self.ppu.visible_last() {
                 self.ppu.render_current_line();
             }
         }
