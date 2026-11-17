@@ -567,6 +567,12 @@ impl Ppu {
     pub fn write(&mut self, address: u16, data: u8) {
         match address {
             0x2100 => {
+                // ares: forcing blank at the start of vblank resets the OAM
+                // address to the base and re-latches `firstSprite`.
+                if self.display_disable && self.line == VBLANK_LINE {
+                    self.oam_address = self.oam_base << 1;
+                    self.set_first_sprite();
+                }
                 self.display_brightness = data & 0x0F;
                 self.display_disable = data & 0x80 != 0;
             }
@@ -2193,6 +2199,26 @@ mod tests {
         ppu.write(0x212C, 0x01);
         ppu.render_line(0, 0);
         assert_eq!(&ppu.framebuffer[0..4], &[0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn forced_blank_at_vblank_resets_the_oam_address() {
+        let mut ppu = Ppu::new();
+        // ares only resets while force blank is *already* enabled.
+        ppu.write(0x2100, 0x80);
+        // OAM base = sprite 1 (byte address 4, word address 2).
+        ppu.write(0x2102, 2);
+        ppu.write(0x2103, 0);
+        ppu.write(0x2104, 0x11);
+        ppu.write(0x2104, 0x22);
+        ppu.write(0x2104, 0x33);
+        ppu.write(0x2104, 0x44);
+        // Move the address past the sprite and enter forced blank at vblank.
+        ppu.write(0x2104, 0x55);
+        ppu.line = VBLANK_LINE;
+        ppu.write(0x2100, 0x80);
+        // $2138 now reads the OAM byte at the reset base (sprite 1's X).
+        assert_eq!(ppu.read(0x2138, 0), 0x11);
     }
 
     #[test]
