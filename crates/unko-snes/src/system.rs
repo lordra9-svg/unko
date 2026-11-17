@@ -523,6 +523,7 @@ impl Snes {
             io: &mut self.io,
             nmi_enable: &mut self.nmi_enable,
             nmi_flag: &mut self.nmi_flag,
+            nmi_line: &mut self.nmi_line,
             fast_rom: &mut self.fast_rom,
             wram_port: &mut self.wram_port,
             vblank: false,
@@ -570,6 +571,7 @@ impl Snes {
                         io: &mut self.io,
                         nmi_enable: &mut self.nmi_enable,
                         nmi_flag: &mut self.nmi_flag,
+                        nmi_line: &mut self.nmi_line,
                         fast_rom: &mut self.fast_rom,
                         wram_port: &mut self.wram_port,
                         vblank,
@@ -821,6 +823,7 @@ impl Snes {
             io: &mut self.io,
             nmi_enable: &mut self.nmi_enable,
             nmi_flag: &mut self.nmi_flag,
+            nmi_line: &mut self.nmi_line,
             fast_rom: &mut self.fast_rom,
             wram_port: &mut self.wram_port,
             vblank,
@@ -880,6 +883,7 @@ struct SnesBus<'a> {
     io: &'a mut CpuIo,
     nmi_enable: &'a mut bool,
     nmi_flag: &'a mut bool,
+    nmi_line: &'a mut bool,
     fast_rom: &'a mut bool,
     wram_port: &'a mut u32,
     vblank: bool,
@@ -1142,7 +1146,11 @@ impl CpuBus for SnesBus<'_> {
                         | busy;
                 }
                 if offset == 0x4016 || offset == 0x4017 {
-                    return self.io.read(offset as u16).unwrap_or(0);
+                    // Only the driven low bits are replaced; the rest is
+                    // open bus (`$4016` bits 2-7, `$4017` bits 5-7).
+                    let value = self.io.read(offset as u16).unwrap_or(0);
+                    let mask = if offset == 0x4016 { 0x03 } else { 0x1F };
+                    return (mdr & !mask) | (value & mask);
                 }
                 if (0x4211..=0x4217).contains(&offset) {
                     return self.io.read(offset as u16).unwrap_or(0);
@@ -1232,7 +1240,15 @@ impl CpuBus for SnesBus<'_> {
                 } else if (0x2180..=0x2183).contains(&offset) {
                     self.write_wram_port(offset, value);
                 } else if offset == 0x4200 {
-                    *self.nmi_enable = value & 0x80 != 0;
+                    // ares `nmitimenUpdate`: raising the NMI enable while the
+                    // vblank flag is already latched delivers an NMI at once,
+                    // so a game that enables NMIs partway through vblank still
+                    // sees one that frame.
+                    let enable = value & 0x80 != 0;
+                    if !*self.nmi_enable && enable && *self.nmi_flag && self.vblank {
+                        *self.nmi_line = true;
+                    }
+                    *self.nmi_enable = enable;
                     self.io.write(0x4200, value);
                 } else if offset == 0x4201 {
                     // WRIO bit 7 enables $2137 counter latching; without it
@@ -1464,6 +1480,7 @@ mod tests {
             io: &mut system.io,
             nmi_enable: &mut system.nmi_enable,
             nmi_flag: &mut system.nmi_flag,
+            nmi_line: &mut system.nmi_line,
             fast_rom: &mut system.fast_rom,
             wram_port: &mut system.wram_port,
             vblank: false,
@@ -1496,6 +1513,7 @@ mod tests {
             io: &mut system.io,
             nmi_enable: &mut system.nmi_enable,
             nmi_flag: &mut system.nmi_flag,
+            nmi_line: &mut system.nmi_line,
             fast_rom: &mut system.fast_rom,
             wram_port: &mut system.wram_port,
             vblank: false,
@@ -1531,6 +1549,7 @@ mod tests {
             io: &mut system.io,
             nmi_enable: &mut system.nmi_enable,
             nmi_flag: &mut system.nmi_flag,
+            nmi_line: &mut system.nmi_line,
             fast_rom: &mut system.fast_rom,
             wram_port: &mut system.wram_port,
             vblank: false,
@@ -1838,6 +1857,66 @@ mod tests {
     }
 
     #[test]
+    fn serial_ports_report_ares_driven_bits() {
+        let mut system = Snes::new(cartridge(&[0x4C, 0x00, 0x80]));
+        // B is the first bit of a standard gamepad.
+        system.set_joypad(0, crate::io::button::B);
+        system.set_joypad(1, 0);
+        system.write(0x00_4016, 0x01);
+        system.write(0x00_4016, 0x00);
+
+        // JOYSER0: bit 0 is port 1 data, bit 1 is port 1's second data line
+        // (low for a standard gamepad). ares `CPU::readCPU`.
+        let pad1 = system.read(0x00_4016, 0);
+        assert_eq!(pad1 & 0x01, 0x01, "B should be the first serial bit");
+        assert_eq!(pad1 & 0x02, 0x00, "$4016.d1 is port 1 data2, low for a pad");
+
+        // JOYSER1: bits 2-4 are tied to ground and bit 1 is port 2 data2, so a
+        // standard gamepad always reads 0b0001_11x0 here. KDL3's multitap
+        // probe shifts bit 1; forcing it high made the game think a multitap
+        // was attached.
+        let pad2 = system.read(0x00_4017, 0);
+        assert_eq!(pad2 & 0x02, 0x00, "$4017.d1 is port 2 data2");
+        assert_eq!(pad2 & 0x1C, 0x1C, "$4017.d2-d4 are tied to ground");
+    }
+
+    #[test]
+    fn enabling_nmi_during_vblank_delivers_one_immediately() {
+        // ares `nmitimenUpdate`: `nmiEnable.raise()` while the vblank flag is
+        // latched sets `nmiTransition`, so a game that turns NMIs on partway
+        // through vblank still gets an NMI that frame (KDL3's first NMI).
+        let mut system = Snes::new(cartridge(&[0x4C, 0x00, 0x80]));
+        assert!(!system.nmi_enabled());
+        system.nmi_flag = true;
+        {
+            let mut bus = SnesBus {
+                wram: &mut system.wram,
+                cart: &mut system.cart,
+                apu: &mut system.apu,
+                ppu: &mut system.ppu,
+                gsu: &mut system.gsu,
+                dsp1: &mut system.dsp1,
+                cx4: &mut system.cx4,
+                sdd1: &mut system.sdd1,
+                sa1: &mut system.sa1,
+                snes_mar: &mut system.snes_mar,
+                snes_refresh: system.refresh_active,
+                dma: &mut system.dma,
+                io: &mut system.io,
+                nmi_enable: &mut system.nmi_enable,
+                nmi_flag: &mut system.nmi_flag,
+                nmi_line: &mut system.nmi_line,
+                fast_rom: &mut system.fast_rom,
+                wram_port: &mut system.wram_port,
+                vblank: true,
+                hblank: false,
+            };
+            bus.write(0x4200, 0x80);
+        }
+        assert!(system.nmi_line, "raising NMI enable mid-vblank must latch");
+    }
+
+    #[test]
     fn save_state_rejects_bad_input() {
         let mut system = Snes::new(cartridge(&[0xDB]));
 
@@ -1899,6 +1978,7 @@ mod tests {
                 io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                nmi_line: &mut system.nmi_line,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -1980,6 +2060,7 @@ mod tests {
                 io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                nmi_line: &mut system.nmi_line,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2012,6 +2093,7 @@ mod tests {
                 io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                nmi_line: &mut system.nmi_line,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2044,6 +2126,7 @@ mod tests {
                 io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                nmi_line: &mut system.nmi_line,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2092,6 +2175,7 @@ mod tests {
                 io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                nmi_line: &mut system.nmi_line,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank,
@@ -2150,6 +2234,7 @@ mod tests {
                 io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                nmi_line: &mut system.nmi_line,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2194,6 +2279,7 @@ mod tests {
                 io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                nmi_line: &mut system.nmi_line,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2229,6 +2315,7 @@ mod tests {
                 io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                nmi_line: &mut system.nmi_line,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2314,6 +2401,7 @@ mod tests {
                 io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                nmi_line: &mut system.nmi_line,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,
@@ -2347,6 +2435,7 @@ mod tests {
                 io: &mut system.io,
                 nmi_enable: &mut system.nmi_enable,
                 nmi_flag: &mut system.nmi_flag,
+                nmi_line: &mut system.nmi_line,
                 fast_rom: &mut system.fast_rom,
                 wram_port: &mut system.wram_port,
                 vblank: false,

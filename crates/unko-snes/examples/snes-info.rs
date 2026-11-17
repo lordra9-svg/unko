@@ -315,10 +315,17 @@ fn main() -> ExitCode {
             );
             let sram = system.cart.sram();
             eprintln!(
-                "SA1 sram[12A4]={:02X} sram[72A4]={:02X} sram[7FF4..]={:02X?}",
-                sram.get(0x12A4).copied().unwrap_or(0xFF),
-                sram.get(0x72A4).copied().unwrap_or(0xFF),
-                sram.get(0x7FF4..0x7FF8)
+                "SA1 bwram[0200..0240]={:02X?}",
+                sram.get(0x0200..0x0240)
+                    .map(|s| s.to_vec())
+                    .unwrap_or_default()
+            );
+            eprintln!(
+                "SA1 bwram[02A0..02C0]={:02X?} bwram[72A0..72B0]={:02X?}",
+                sram.get(0x02A0..0x02C0)
+                    .map(|s| s.to_vec())
+                    .unwrap_or_default(),
+                sram.get(0x72A0..0x72B0)
                     .map(|s| s.to_vec())
                     .unwrap_or_default()
             );

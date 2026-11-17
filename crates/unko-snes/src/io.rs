@@ -317,15 +317,25 @@ impl CpuIo {
     pub fn read(&mut self, address: u16) -> Option<u8> {
         let value = match address {
             0x4016 => {
-                let bits = u8::from(self.shift1 & 0x8000 != 0)
-                    | (u8::from(self.shift2 & 0x8000 != 0) << 1);
+                // JOYSER0: bit 0 is controller port 1's serial data line;
+                // bit 1 is port 1's *second* data line, which a standard
+                // gamepad leaves low (ares `ControllerPort1::data()`).
+                let bits = u8::from(self.shift1 & 0x8000 != 0);
                 if !self.latched {
                     self.shift1 = (self.shift1 << 1) | 1;
+                }
+                bits
+            }
+            0x4017 => {
+                // JOYSER1: bit 0 is controller port 2's serial data line,
+                // bit 1 its second data line, and bits 2-4 are tied to
+                // ground (ares `CPU::readCPU`).
+                let bits = 0b0001_1100 | u8::from(self.shift2 & 0x8000 != 0);
+                if !self.latched {
                     self.shift2 = (self.shift2 << 1) | 1;
                 }
                 bits
             }
-            0x4017 => u8::from(self.shift2 & 0x8000 != 0) | 0b0000_0110,
             0x4210 => 0x02,
             0x4211 => {
                 let value = if self.irq_flag { 0x80 } else { 0 };

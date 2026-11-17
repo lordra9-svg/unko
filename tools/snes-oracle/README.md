@@ -171,6 +171,22 @@ Street Fighter Alpha 2 (USA) is **100.000%** exact at frames 120/300/600 and
 Star Ocean (Japan) at 120/600. Star Ocean's ENIX logo fade starts a few frames
 earlier than ares (frame 90 is 94.046%) but converges by frame 120.
 
+## S-CPU trace diffing against ares
+
+The local ares build carries two more oracle hooks used to localise CPU bugs:
+
+- `ARES_PC_TRACE=<path>` writes the S-CPU program counter for every step, with
+  `ARES_PC_TRACE_SKIP` / `ARES_PC_TRACE_TAKE` bounding the window.
+- `ARES_SA1_PROBE=<path>` dumps the SA-1's I-RAM and BW-RAM plus the S-CPU
+  registers the first time the S-CPU reaches `$00EF34`, and appends a short
+  log of the interesting bytes.
+
+`PC_TRACE=<path>` in `snes-info` writes the equivalent trace for our core. The
+traces are comparable one-to-one after dropping ares' two power-on entries.
+Polling loops (`CMP $2140`/`BNE`-style) legitimately differ in iteration count,
+so canonicalise by removing every PC that participates in a repeated
+1-3 instruction cycle before diffing.
+
 ## Regression baseline
 
 `baseline.py` runs every ROM under `test-roms/snes/` for a fixed frame count and

@@ -835,6 +835,45 @@ Cartridges are detected as S-DD1 from map modes `$22`/`$32` (the ares/mia
 board layouts (no extra coprocessor RAM) are modelled; save-state coverage
 includes the register file, DMA shadows and decompressor state.
 
+## Resolved 2026-11-17 - joypad serial ports and the NMI-enable edge
+
+Found by diffing ares' and our S-CPU **instruction traces** from power-on
+(`ARES_PC_TRACE` in the patched ares build, `PC_TRACE` in `snes-info`). The two
+CPUs matched for 62,281 instructions and then diverged in the APU IPL upload
+loop (a benign poll-count difference), and the first *real* divergence was in
+the controller/multitap probe at `$01:8617`.
+
+### 1. `$4016`/`$4017` serial-port bits
+
+The probe reads `$4017`, shifts right twice and rotates the carry into a flag,
+so it observes **bit 1** of `$4017` eight times. ares (`CPU::readCPU`) drives:
+
+- `$4016`: bits 0-1 = controller port 1 `data()` = serial bit + **second data
+  line** (low for a standard gamepad),
+- `$4017`: bits 0-1 = port 2 `data()`, bits 2-4 tied to ground.
+
+We forced bits 1-2 high and put port 2's serial bit in `$4016.d1`, so KDL3's
+probe read all ones and concluded "no second controller / multitap absent".
+`io.rs` now matches ares: `$4016.d1` and `$4017.d1` are low for a standard
+gamepad, `$4017.d2-d4` are ground, and each read advances only its own port.
+
+### 2. Enabling NMI during vblank
+
+ares `CPU::nmitimenUpdate` does
+`if(io.nmiEnable.raise(bit7) && status.nmiLine) status.nmiTransition = 1`, so
+raising the NMI enable while the vblank flag is latched delivers an NMI
+immediately. We only latched NMIs at the vblank edge itself, so KDL3 - which
+turns NMIs on with `$4200 = $81` partway through vblank - received no NMI at
+all and never entered its `$82F6` handler. The `$4200` write now raises the NMI
+when the enable rises while `nmi_flag` is set **and the PPU is in vblank**
+(ares' `nmiLine` is only ever set while `nmiValid`; without the vblank test our
+flag could survive into the visible period and produce a spurious NMI, which
+shifted Super Mario Kart's DSP-1 frames).
+
+Verification: KDL3 now runs its NMI loop (19 NMIs by frame 120, previously the
+S-CPU crashed at `$00:5FFF` with a corrupted stack); all other results are
+unchanged (see the regression table at the end of this document).
+
 ## SA-1 (Super Accelerator 1)
 
 `crates/unko-snes/src/sa1.rs` ports the ares `SA1` component. The SA-1 is a
@@ -883,53 +922,15 @@ frames of gameplay HUD rendering.
   machines show the same scene but with a different palette/scroll, so a later
   SA-1 data path (probably the character-conversion DMA or a BWRAM protection
   case) is still wrong.
-- Kirby's Dream Land 3 never finishes booting. Instrumented run (PC trace plus
-  BWRAM/I-RAM write logs): the S-CPU boots normally through frame ~100, then at
-  `$00:82F3` executes `JMP [$72AC]` (BWRAM pointer -> `$00:EF31`), and
-  `$00:EF34`'s `JMP [$36DE]` reads I-RAM `$36DE`, which holds **0**, so it jumps
-  to `$00:0000` (empty WRAM), executes zero bytes and derails at `$00:5FFF`
-  with a corrupted stack. Neither CPU writes a non-zero value to `$36DE`
-  (the S-CPU clears `$7E:36DE`, the SA-1 writes 0 into I-RAM) and **no SA-1 DMA
-  runs at all** (`$2230` stays 0), so the dispatch pointer is never produced.
-  The BWRAM `$72A4` handshake itself *does* progress (`0 -> 1 -> 0x85`, seen
-  through both the `$00-$3F:$6000-$7FFF` and `$40-$4F` windows).
-  With the SA-1's live PC logged alongside its I-RAM writes, the `$36xx`
-  dispatch table is written by the shared ROM routine at `$00:EDD7`
-  (`STA $DE` with `DP = $3600`), which copies its pointer from
-  `LDA $0222,X` using the index in `$36D2/$36D3`. The table it copies from
-  (`I-RAM $0222+`) is uploaded by the S-CPU and, at frame 106, still holds
-  zeros. Logging the S-CPU's I-RAM writes with its live PC shows that before
-  the crash it **never writes** `I-RAM $0200-$02FF` (or `$36D0-$3700`): its
-  only I-RAM traffic is the direct page at `$3600-$36FF` (index `$600-$6FF`,
-  ~140k writes per 100 frames). The repeating `00 05 05 60` pattern is written
-  *after* the derail, by the S-CPU executing at `$00:6003` in BWRAM
-  (`spc=006003`), so it is a symptom, not the cause. The SA-1's boot `MVN`
-  (`$00:82C3`, `MVN $00,$00` with `X=$3000 Y=$3001 A=$07FE`) deliberately
-  clears I-RAM, and the table it later reads at `$0222` is never repopulated.
-  So the missing piece is the **S-CPU -> I-RAM upload of the SA-1 data table**
-  (or the ordering of that upload against the SA-1's release), not the
-  super-MMC, the BWRAM banking or the `$72A4` handshake.
-  A master-clock timeline of every `$2200` write and every I-RAM `$0220-$0226`
-  write (all sources) shows:
-
-  | Clock | Event |
-  |---|---|
-  | 14,278 | S-CPU sets `$2200 = $20` (RESB high) |
-  | 15,004 | S-CPU sets `$2200 = $00` -> SA-1 released, runs `CRV = $8294` |
-  | 24,572-24,680 | SA-1 boot `MVN` clears I-RAM `$0220-$0226` |
-  | 36,456,146 | S-CPU pulses RESB high again (`$2200 = $20`) |
-  | 36,456,872 | RESB low -> SA-1 restarts at `$8294` |
-  | 36,467,440-36,467,560 | SA-1 boot `MVN` clears I-RAM again |
-  | 36,5xx,xxx | S-CPU jumps through `$36DE` (= 0) to `$00:0000` and derails |
-
-  The S-CPU is running bank-1 code (`$01:AD70`-`$01:B246`) right up to the
-  second RESB pulse. The second clear zeroes the S-CPU's **direct page**
-  (DP = `$3600`, i.e. I-RAM `$600-$6FF`), which the game had been using, and
-  the crash follows immediately. The decisive open question is whether ares'
-  SA-1 really re-runs the `MVN` clear on this warm restart (ours does, because
-  `$2200` RESB falling restarts the CPU at `CRV`), or whether the S-CPU is
-  expected to re-upload `$0220-$02FF` between the release and its next use —
-  our S-CPU never writes those I-RAM pages at all.
+- Kirby's Dream Land 3 no longer derails. The null `$36DE` pointer turned out
+  to be a symptom of two unrelated CPU bugs (both fixed, see "Resolved
+  2026-11-17 - joypad serial ports and the NMI-enable edge" below): the game
+  took the wrong multitap-detection branch and then missed its first NMI, which
+  sent it through the SA-1 API dispatch into empty memory. With both fixes the
+  S-CPU runs its NMI-driven main loop (`nmi_services` climbs normally) instead
+  of crashing at `$00:5FFF`. The frame still does not match ares (both are
+  essentially black at frames 120-600; ares shows a few non-black pixels), so
+  something later in the boot is still off.
 - The SA-1's `$40-$4F` BWRAM window is the only extra S-CPU mapping modelled;
   the boot ROM / BS-X slot and the `$50-$6F` open-bus windows are not.
 
