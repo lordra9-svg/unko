@@ -189,6 +189,10 @@ struct PlanStep {
     clocks: u8,
     /// Latched `$F4-$F7` write, committed when the access finishes.
     port_write: Option<(u8, u8)>,
+    /// This step is the deferred I/O read of the current SPC700 instruction.
+    deferred: bool,
+    /// The deferred read is a `$F4-$F7` port read (wait split around the fetch).
+    split: bool,
 }
 
 /// The S-SMP + S-DSP APU.
@@ -437,10 +441,29 @@ impl Apu {
             };
             self.spc.step(&mut recorder);
         }
-        if plan.is_empty() {
+        let deferred =
+            if let Some(crate::spc700::Pending::DirectRead { address, .. }) = self.spc.pending {
+                let effective = (u16::from(self.spc.flags.page) << 8) | u16::from(address);
+                // ares `SMP::wait`: the I/O window uses the internal wait selector.
+                const CYCLE_WAIT: [u8; 4] = [1, 2, 5, 10];
+                let clocks = CYCLE_WAIT[usize::from(self.internal_wait.min(3))] * 2;
+                let split = effective & 0xFFFC == 0x00F4;
+                plan.push(PlanStep {
+                    clocks,
+                    port_write: None,
+                    deferred: true,
+                    split,
+                });
+                true
+            } else {
+                false
+            };
+        if plan.is_empty() && !deferred {
             plan.push(PlanStep {
                 clocks: 2,
                 port_write: None,
+                deferred: false,
+                split: false,
             });
         }
         if self.debug.enabled && self.debug.trace.len() < 6_000_000 {
@@ -448,6 +471,44 @@ impl Apu {
             self.debug.trace.push((self.debug.clock, entry_pc, clocks));
         }
         self.plan = plan;
+        if !deferred {
+            self.instructions += 1;
+        }
+    }
+
+    /// Perform the deferred I/O read at its own access clock, then apply the
+    /// instruction's ALU/transfer step.
+    fn resume_deferred_read(&mut self) {
+        if self.spc.pending.is_none() {
+            return;
+        }
+        let page_flag = self.spc.flags.page;
+        let mut bus = ApuBus {
+            ram: &mut self.ram[..],
+            ipl: &self.ipl,
+            ipl_loaded: self.ipl_loaded,
+            iplrom_enable: &mut self.iplrom_enable,
+            ram_writable: &mut self.ram_writable,
+            ram_disable: &mut self.ram_disable,
+            timers_enable: &mut self.timers_enable,
+            timers_disable: &mut self.timers_disable,
+            internal_wait: &mut self.internal_wait,
+            external_wait: &mut self.external_wait,
+            timers: &mut self.timers,
+            dsp_address: &mut self.dsp_address,
+            dsp: &mut self.dsp,
+            dsp_clock_credit: &mut self.dsp_clock_credit,
+            samples: &mut self.samples,
+            apu_ports: &mut self.apu_ports,
+            cpu_ports: &mut self.cpu_ports,
+            aux4: &mut self.aux4,
+            aux5: &mut self.aux5,
+            timer_targets: &mut self.timer_targets,
+            page_flag,
+            spc_pc: self.spc.pc,
+            debug: Some(&mut self.debug),
+        };
+        self.spc.step(&mut bus);
         self.instructions += 1;
     }
 
@@ -465,6 +526,13 @@ impl Apu {
         self.units += 1;
         let step = self.plan[self.plan_pos];
         self.plan_sub += 1;
+        if step.deferred {
+            let clocks = u32::from(step.clocks);
+            let resume_at = if step.split { clocks / 2 } else { clocks };
+            if self.plan_sub == resume_at {
+                self.resume_deferred_read();
+            }
+        }
         if self.plan_sub >= u32::from(step.clocks) {
             if let Some((port, value)) = step.port_write {
                 // S-SMP -> S-CPU latch ($2140-$2143), committed at the end of
@@ -622,6 +690,10 @@ impl SpcBus for ApuBus<'_> {
         address & 0xFFFC == 0x00F4
     }
 
+    fn defer_io_reads(&self) -> bool {
+        true
+    }
+
     fn read(&mut self, address: u16) -> u8 {
         match address {
             0xF0 | 0xF1 | 0xFA | 0xFB | 0xFC => 0,
@@ -754,6 +826,10 @@ impl SpcBus for RecordBus<'_, '_> {
         self.inner.split_port_read(address)
     }
 
+    fn defer_io_reads(&self) -> bool {
+        self.inner.defer_io_reads()
+    }
+
     fn advance(&mut self, clocks: u32) {
         self.inner.advance(clocks);
     }
@@ -771,6 +847,8 @@ impl SpcBus for RecordBus<'_, '_> {
         self.plan.push(PlanStep {
             clocks,
             port_write: None,
+            deferred: false,
+            split: false,
         });
         self.units += u64::from(clocks);
         value
@@ -786,12 +864,16 @@ impl SpcBus for RecordBus<'_, '_> {
             self.plan.push(PlanStep {
                 clocks,
                 port_write: Some(((address - 0xF4) as u8, value)),
+                deferred: false,
+                split: false,
             });
         } else {
             self.inner.write(address, value);
             self.plan.push(PlanStep {
                 clocks,
                 port_write: None,
+                deferred: false,
+                split: false,
             });
         }
     }
@@ -801,6 +883,8 @@ impl SpcBus for RecordBus<'_, '_> {
         self.plan.push(PlanStep {
             clocks,
             port_write: None,
+            deferred: false,
+            split: false,
         });
         self.units += u64::from(clocks);
     }

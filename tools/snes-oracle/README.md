@@ -80,12 +80,10 @@ The manifest is intentionally not committed; compare two CSVs instead.
 
 - Video geometry: `spc_timer` at 600 frames vs ares at 602 — **100.000% exact**
   (57,344 / 57,344 pixels, mean |d| 0.000).
-- Audio: `blargg_near_cd_quality.smc` at 600 frames against ares' raw
-  pre-resampler output — after a -25-frame alignment the two 16-bit streams
-  differ in **3 samples out of 319,805** (all in an envelope-release tail at
-  frame 8086, where ares holds one value one sample longer). RustySNES and
-  ours agree to ~1e-8 RMS. The residual is the known ~25-sample APU boot-phase
-  difference, not DSP arithmetic.
+- Audio: `blargg_near_cd_quality.smc` against ares' raw pre-resampler output is
+  **bit-exact**: 0 differing samples over 639,704 stereo frames (1,200 frames)
+  at a -1-frame alignment. (Before `$00F0-$00FF` reads were deferred to their
+  own access clock it differed in 3 samples out of 319,805.)
 - Regression manifest: all **212** ROMs under `test-roms/snes/` run to 180
   frames without an emulator error (`baseline.py --frames 180`).
 

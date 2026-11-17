@@ -57,11 +57,14 @@ lockstep with RustySNES for longer stretches:
   the refresh position** (`CpuBus::advance` returns the 40 extra clocks) rather
   than as a debt paid by the next bus access, matching ares `CPU::step`.
 
-The S-SMP instruction stream still shows occasional one-iteration slips in the
-IPL `$FFDA`/`$FFDC` echo poll - the residual sub-clock ordering race documented
-below. It no longer affects any DSP test result: the tests synchronise on their
-own DSP sample boundaries, and the DSP counter phase is derived from master
-time, not from the upload's poll count.
+S-SMP reads of `$00F0-$00FF` are now deferred to their own access clock
+(`Spc700::Pending`), so the S-SMP samples the S-CPU port latches, timers and
+DSP registers at the exact cycle of each access instead of at the start of the
+enclosing instruction. This removed the boot-phase drift: the PCM stream is
+**bit-exact against ares' pre-resampler output** (see the audio item below).
+A trace comparison against RustySNES still shows a one-iteration IPL
+`$FFDA`/`$FFDC` difference at instruction 4,966; the PCM oracle shows that our
+timing is the one matching ares, so that residual is RustySNES-side.
 
 
 ## Open failures
@@ -457,12 +460,10 @@ with ares. The implementation follows ares, which is the primary source.
 - The S-SMP timers advance by ares' `timerWaitStates` (2/4/8/16 clocks) per
   access, including the two half-steps around `$F4-$F7` reads. The S-SMP is now
   drained one clock at a time (2,050,560 Hz) on an exact master-clock credit.
-- S-SMP port writes are committed at the exact clock of the access (a recorded
-  micro-op plan). The instruction's **reads** still happen when the plan is
-  formed, so an S-SMP poll of `$F4-$F7` can observe a fresh CPU latch up to one
-  instruction early. ares' cooperative threads synchronize both directions at
-  the exact cycle. This is the remaining cause of the occasional one-iteration
-  IPL `$FFDA`/`$FFDC` slips; it no longer changes any DSP test verdict.
+- S-SMP port writes are committed at the exact clock of the access, and reads
+  of `$00F0-$00FF` are deferred to their own access clock (`Spc700::Pending`),
+  so an S-SMP read observes the S-CPU latches, timers and DSP at the exact
+  cycle of the access. The PCM stream is bit-exact against ares as a result.
 - The S-CPU advances the peripherals per access (ares `CPU::read/write`
   ordering), but the PPU renders one scanline at a time when the line event
   fires, so mid-scanline register writes are not yet dot-exact.
@@ -477,14 +478,14 @@ with ares. The implementation follows ares, which is the primary source.
   triggers a general-purpose DMA from an H-IRQ to land at a particular dot,
   still differs; that one needs dot-exact DMA/PPU scheduling.
 - S-DSP synthesis runs one micro-step per two S-SMP clocks inside the S-SMP
-  access path (ares `SMP::wait` → `synchronize(dsp)`). The PCM stream is now
+  access path (ares `SMP::wait` → `synchronize(dsp)`). The PCM stream is
   measured against ares' **pre-resampler** i16 output: for
-  `blargg_near_cd_quality.smc` the two 16-bit streams differ in **3 samples out
-  of 319,805** after a -25-frame alignment, all in an envelope-release tail.
-  RustySNES and ours agree to ~1e-8 RMS. The residual is the ~25-sample APU
-  boot-phase difference (the same sub-clock S-SMP/IPL race), not DSP
-  arithmetic. (Earlier "RMS 8.6e-2" numbers came from capturing ares at
-  32,000 Hz instead of its native 32,040, which left the host resampler on.)
+  `blargg_near_cd_quality.smc` over 1,200 frames (639,704 stereo samples) the
+  two 16-bit streams have **zero** differing samples at a -1-frame alignment.
+  The earlier 3-sample residual was the boot-phase drift, removed by deferring
+  `$00F0-$00FF` reads to their own access clocks. (Earlier "RMS 8.6e-2" numbers
+  came from capturing ares at 32,000 Hz instead of its native 32,040, which
+  left the host resampler on.)
 - S-CPU/APU/PPU scheduling uses an exact master-clock credit (21,477,272 Hz;
   four clocks per PPU dot, 2,050,560 Hz SPC700). Memory wait states follow the
   ares table, and the DRAM refresh is charged inside the crossing CPU step.

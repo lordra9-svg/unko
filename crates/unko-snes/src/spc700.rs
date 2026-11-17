@@ -45,6 +45,30 @@ pub trait SpcBus {
     fn split_port_read(&mut self, _address: u16) -> bool {
         false
     }
+
+    /// Whether I/O reads must be deferred so the scheduler can sample them at
+    /// the access's own clock (ares' cooperative threads). A bus that runs the
+    /// CPU to completion in one call (the unit-test RAM bus) leaves this false.
+    fn defer_io_reads(&self) -> bool {
+        false
+    }
+}
+
+/// A bus access the interpreter has reached but not yet performed.
+///
+/// The scheduler performs it at the access's own clock, so an I/O read observes
+/// the rest of the machine (S-CPU port latches, timers, DSP registers) at the
+/// exact cycle of the access instead of at the start of the enclosing
+/// instruction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pending {
+    /// A direct-page read whose operand has been fetched.
+    DirectRead {
+        /// Opcode whose ALU/transfer step is still pending.
+        opcode: u8,
+        /// Direct-page operand (the page is taken from the P flag).
+        address: u8,
+    },
 }
 
 /// SPC700 processor status flags.
@@ -117,6 +141,8 @@ pub struct Spc700 {
     pub stop: bool,
     /// Total S-SMP clocks retired.
     pub cycles: u64,
+    /// Bus access reached but deferred to its own clock (see [`Pending`]).
+    pub pending: Option<Pending>,
 }
 
 impl Default for Spc700 {
@@ -147,6 +173,7 @@ impl Spc700 {
             wait: false,
             stop: false,
             cycles: 0,
+            pending: None,
         }
     }
 
@@ -174,6 +201,11 @@ impl Spc700 {
     /// Execute one instruction. Returns the number of bus cycles retired.
     pub fn step(&mut self, bus: &mut impl SpcBus) -> u32 {
         let start = self.cycles;
+        if let Some(Pending::DirectRead { opcode, address }) = self.pending.take() {
+            let value = self.load(bus, address);
+            self.apply_read(bus, opcode, value);
+            return (self.cycles - start) as u32;
+        }
         if self.wait || self.stop {
             self.idle(bus);
             return (self.cycles - start) as u32;
@@ -681,6 +713,13 @@ impl Spc700 {
 
     fn direct_read(&mut self, bus: &mut impl SpcBus, opcode: u8) {
         let address = self.fetch(bus);
+        let effective = (u16::from(self.flags.page) << 8) | u16::from(address);
+        if bus.defer_io_reads() && effective & 0xFFF0 == 0x00F0 {
+            // The value must be sampled at this access's own clock, after the
+            // scheduler has advanced the machine to it.
+            self.pending = Some(Pending::DirectRead { opcode, address });
+            return;
+        }
         let value = self.load(bus, address);
         self.apply_read(bus, opcode, value);
     }
