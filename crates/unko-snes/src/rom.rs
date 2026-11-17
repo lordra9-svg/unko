@@ -135,6 +135,14 @@ impl RomHeader {
         region_for_country(self.country_code)
     }
 
+    /// Whether the cartridge type declares a CX4 (Hitachi HG51B) coprocessor.
+    ///
+    /// CX4 carts use LoROM map modes with cartridge type `$F3`.
+    pub const fn has_cx4(&self) -> bool {
+        matches!(self.cartridge_type, 0xF3)
+            && matches!(self.mapping, Mapping::LoRom | Mapping::ExLoRom)
+    }
+
     /// Whether the cartridge type declares a SuperFX (GSU) coprocessor.
     ///
     /// `$13` is SuperFX, `$14` is SuperFX + RAM + battery and `$15` is

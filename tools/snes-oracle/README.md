@@ -136,6 +136,25 @@ verification entry keyed by the ROM's SHA-256 that forces `NEC-LOROM`; with it,
 the demo's DSP-driven grid matches and the frame is **95.714%** (the remaining
 difference is the demo's own sprite-font decompressor, not DSP arithmetic).
 
+## CX4 firmware
+
+`unko-snes` never embeds the copyrighted Hitachi HG51B data ROM. Point
+`CX4_ROM` at a 3 KiB `cx4.rom` dump when running a CX4 title (the local ares
+tree has one under `mia/Firmware/Super Famicom/`):
+
+```sh
+CX4_ROM=.../cx4.rom tools/snes-oracle/ours-capture.sh \
+  "Mega Man X2 (USA).sfc" 600 /tmp/mmx2
+ARES_REGION=NTSC tools/snes-oracle/ares-capture.sh \
+  "Mega Man X2 (USA).sfc" 600 /tmp/mmx2-ares
+tools/snes-oracle/diff-frame.py /tmp/mmx2/frame.raw /tmp/mmx2-ares/frame.raw
+```
+
+Mega Man X2 (USA) is **100.000%** exact at frames 30/45/60/90/300/600 and Mega
+Man X3 (USA) at 300/600. Attach the firmware only to cartridges that declare a
+CX4 (type `$F3`, LoROM); otherwise it would map over that cart's `$6000-$7FFF`
+space.
+
 ## Regression baseline
 
 `baseline.py` runs every ROM under `test-roms/snes/` for a fixed frame count and

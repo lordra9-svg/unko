@@ -8,6 +8,7 @@
 
 use crate::apu::Apu;
 use crate::cpu::{Cpu, CpuBus};
+use crate::cx4::{Cx4, Cx4Error};
 use crate::dma::{Dma, DmaBus};
 use crate::gsu::Gsu;
 use crate::io::CpuIo;
@@ -18,7 +19,7 @@ use crate::rom::{Cartridge, Region};
 /// Magic number at the start of a serialized save state (`"SNES"`).
 pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
 /// Save-state format version. Bump whenever the serialized shape changes.
-pub const SAVE_STATE_VERSION: u32 = 3;
+pub const SAVE_STATE_VERSION: u32 = 4;
 
 /// A complete `unko-snes` snapshot.
 ///
@@ -47,6 +48,10 @@ pub struct SnesState {
     pub dsp1: Option<NecDsp>,
     /// Carried DSP-1 clock credit.
     pub dsp_credit: i64,
+    /// Capcom CX4 coprocessor, when firmware is installed.
+    pub cx4: Option<Cx4>,
+    /// Carried CX4 clock credit.
+    pub cx4_credit: i64,
     /// DMA/HDMA channels.
     pub dma: Dma,
     /// Controller ports and CPU I/O registers.
@@ -160,6 +165,10 @@ pub struct Snes {
     pub dsp1: Option<NecDsp>,
     /// Carried DSP-1 clock credit.
     dsp_credit: i64,
+    /// Capcom CX4 coprocessor, when firmware is installed.
+    pub cx4: Option<Cx4>,
+    /// Carried CX4 clock credit.
+    cx4_credit: i64,
     /// General-purpose DMA channels.
     pub dma: Dma,
     /// Controller ports, auto-poll and the multiply/divide unit.
@@ -213,6 +222,8 @@ impl Snes {
             gsu_credit: 0,
             dsp1: None,
             dsp_credit: 0,
+            cx4: None,
+            cx4_credit: 0,
             dma: Dma::new(),
             io: CpuIo::new(),
             wram: vec![0; WRAM_SIZE],
@@ -263,6 +274,18 @@ impl Snes {
         Ok(())
     }
 
+    /// Install the CX4 firmware and attach the coprocessor.
+    ///
+    /// The firmware is the 3 KiB `cx4.rom` dump (1K x 3-byte data ROM). The
+    /// program itself lives in the game ROM and is loaded through the HG51B
+    /// instruction cache. The firmware is copyrighted chip data supplied by the
+    /// host.
+    pub fn set_cx4_firmware(&mut self, firmware: &[u8]) -> Result<(), Cx4Error> {
+        self.cx4 = Some(Cx4::from_firmware(firmware)?);
+        self.cx4_credit = 0;
+        Ok(())
+    }
+
     /// Take a typed snapshot of the full mutable state.
     ///
     /// The ROM and the derived region are not included: a snapshot is meant to
@@ -278,6 +301,8 @@ impl Snes {
             gsu_credit: self.gsu_credit,
             dsp1: self.dsp1.clone(),
             dsp_credit: self.dsp_credit,
+            cx4: self.cx4.clone(),
+            cx4_credit: self.cx4_credit,
             dma: self.dma.clone(),
             io: self.io.clone(),
             wram: self.wram.clone(),
@@ -334,6 +359,8 @@ impl Snes {
         self.gsu_credit = state.gsu_credit;
         self.dsp1 = state.dsp1.clone();
         self.dsp_credit = state.dsp_credit;
+        self.cx4 = state.cx4.clone();
+        self.cx4_credit = state.cx4_credit;
         self.dma = state.dma.clone();
         self.io = state.io.clone();
         self.wram.copy_from_slice(&state.wram);
@@ -413,6 +440,10 @@ impl Snes {
             dsp.power();
         }
         self.dsp_credit = 0;
+        if let Some(cx4) = self.cx4.as_mut() {
+            cx4.power();
+        }
+        self.cx4_credit = 0;
         self.dma.hdma_reset();
         self.io.reset();
         self.apu_credit = 0;
@@ -433,6 +464,7 @@ impl Snes {
             cart: &mut self.cart,
             gsu: &mut self.gsu,
             dsp1: &mut self.dsp1,
+            cx4: &mut self.cx4,
             apu: &mut self.apu,
             ppu: &mut self.ppu,
             dma: &mut self.dma,
@@ -471,6 +503,7 @@ impl Snes {
                         cart: &mut self.cart,
                         gsu: &mut self.gsu,
                         dsp1: &mut self.dsp1,
+                        cx4: &mut self.cx4,
                         apu: &mut self.apu,
                         ppu: &mut self.ppu,
                         dma: &mut self.dma,
@@ -500,7 +533,8 @@ impl Snes {
     /// Feed the latched IRQ/NMI edges to the CPU at an instruction boundary.
     fn apply_interrupts(&mut self) {
         let gsu_irq = self.gsu.as_ref().is_some_and(|gsu| gsu.irq_line);
-        self.cpu.set_irq(self.irq_line || gsu_irq);
+        let cx4_irq = self.cx4.as_ref().is_some_and(|cx4| cx4.irq_line());
+        self.cpu.set_irq(self.irq_line || gsu_irq || cx4_irq);
         if self.nmi_line {
             self.nmi_line = false;
             self.cpu.trigger_nmi();
@@ -579,6 +613,17 @@ impl Snes {
             while self.dsp_credit >= den {
                 dsp.exec();
                 self.dsp_credit -= den;
+            }
+        }
+        // The CX4 (HG51B) runs at 20 MHz; tick it with a rational credit.
+        if let Some(cx4) = self.cx4.as_mut() {
+            let den = self.region.master_clock() as i64;
+            let rom = self.cart.rom();
+            let sram = self.cart.sram();
+            self.cx4_credit += i64::from(clocks) * 20_000_000;
+            while self.cx4_credit >= den {
+                let cost = cx4.run_one(rom, sram);
+                self.cx4_credit -= den * i64::from(cost.max(1));
             }
         }
         self.clock += u64::from(clocks);
@@ -688,6 +733,7 @@ impl Snes {
             cart: &mut self.cart,
             gsu: &mut self.gsu,
             dsp1: &mut self.dsp1,
+            cx4: &mut self.cx4,
             apu: &mut self.apu,
             ppu: &mut self.ppu,
             dma: &mut self.dma,
@@ -744,6 +790,7 @@ struct SnesBus<'a> {
     ppu: &'a mut Ppu,
     gsu: &'a mut Option<Gsu>,
     dsp1: &'a mut Option<NecDsp>,
+    cx4: &'a mut Option<Cx4>,
     dma: &'a mut Dma,
     io: &'a mut CpuIo,
     nmi_enable: &'a mut bool,
@@ -875,6 +922,14 @@ impl CpuBus for SnesBus<'_> {
         if bank == 0x7E || bank == 0x7F {
             return self.wram[((bank as usize & 1) << 16) | offset];
         }
+        if self.cx4.is_some() {
+            if let Some(offset) = Cx4::io_window(address) {
+                return self.cx4.as_mut().expect("CX4 present").read_io(offset);
+            }
+            if let Some(offset) = Cx4::dram_window(address) {
+                return self.cx4.as_ref().expect("CX4 present").read_dram(offset);
+            }
+        }
         if let Some(status) = self.dsp1_port(address) {
             return self.dsp1.as_mut().expect("DSP-1 present").read_port(status);
         }
@@ -947,6 +1002,22 @@ impl CpuBus for SnesBus<'_> {
         if bank == 0x7E || bank == 0x7F {
             self.wram[((bank as usize & 1) << 16) | offset] = value;
             return;
+        }
+        if self.cx4.is_some() {
+            if let Some(offset) = Cx4::io_window(address) {
+                self.cx4
+                    .as_mut()
+                    .expect("CX4 present")
+                    .write_io(offset, value);
+                return;
+            }
+            if let Some(offset) = Cx4::dram_window(address) {
+                self.cx4
+                    .as_mut()
+                    .expect("CX4 present")
+                    .write_dram(offset, value);
+                return;
+            }
         }
         if let Some(status) = self.dsp1_port(address) {
             self.dsp1
@@ -1189,6 +1260,7 @@ mod tests {
             cart: &mut system.cart,
             gsu: &mut system.gsu,
             dsp1: &mut system.dsp1,
+            cx4: &mut system.cx4,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
             dma: &mut system.dma,
@@ -1216,6 +1288,7 @@ mod tests {
             cart: &mut system.cart,
             gsu: &mut system.gsu,
             dsp1: &mut system.dsp1,
+            cx4: &mut system.cx4,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
             dma: &mut system.dma,
@@ -1246,6 +1319,7 @@ mod tests {
             cart: &mut system.cart,
             gsu: &mut system.gsu,
             dsp1: &mut system.dsp1,
+            cx4: &mut system.cx4,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
             dma: &mut system.dma,
@@ -1461,6 +1535,65 @@ mod tests {
         assert_eq!(restored, system);
     }
 
+    fn cx4_cartridge(code: &[u8]) -> Cartridge {
+        let mut rom = build_lorom(code);
+        let header = Mapping::LoRom.header_offset();
+        rom[header + 0x16] = 0xF3; // CX4 (Hitachi) coprocessor
+        Cartridge::from_bytes(&rom).expect("valid CX4 LoROM")
+    }
+
+    fn cx4_firmware() -> Vec<u8> {
+        let mut bytes = vec![0u8; 1024 * 3];
+        // Data-ROM word 0 = 0x123456.
+        bytes[0] = 0x56;
+        bytes[1] = 0x34;
+        bytes[2] = 0x12;
+        bytes
+    }
+
+    #[test]
+    fn cx4_header_and_windows_are_wired() {
+        let mut system = Snes::new(cx4_cartridge(&[0x4C, 0x00, 0x80]));
+        assert!(system.cart.header().has_cx4());
+        assert!(system.cx4.is_none());
+
+        system
+            .set_cx4_firmware(&cx4_firmware())
+            .expect("CX4 firmware");
+        assert!(system.cx4.is_some());
+
+        // GPR window: $7F80-$7F82 is register 0.
+        system.write(0x00_7F80, 0x12);
+        system.write(0x00_7F81, 0x34);
+        system.write(0x00_7F82, 0x56);
+        assert_eq!(system.read(0x00_7F80, 0), 0x12);
+        assert_eq!(system.read(0x00_7F82, 0), 0x56);
+        // Data RAM window.
+        system.write(0x00_6000, 0xA5);
+        assert_eq!(system.read(0x00_6000, 0), 0xA5);
+        // The CX4 powers up running (ares `io = {}`).
+        assert_eq!(system.read(0x00_7F5E, 0) & 0x40, 0x40);
+    }
+
+    #[test]
+    fn save_state_round_trips_a_cx4_machine() {
+        let firmware = cx4_firmware();
+        let code = [0x4C, 0x00, 0x80];
+        let mut system = Snes::new(cx4_cartridge(&code));
+        system.set_cx4_firmware(&firmware).expect("CX4 firmware");
+        system.reset();
+        system.write(0x00_7F80, 0xAB);
+        system.write(0x00_6000, 0xCD);
+        system.run_cycles(50_000, 200_000);
+        let saved = system.save_state();
+
+        let mut restored = Snes::new(cx4_cartridge(&code));
+        restored.set_cx4_firmware(&firmware).expect("CX4 firmware");
+        restored.reset();
+        restored.load_state(&saved).expect("load CX4 state");
+        assert_eq!(restored, system);
+    }
+
     #[test]
     fn save_state_rejects_bad_input() {
         let mut system = Snes::new(cartridge(&[0xDB]));
@@ -1512,6 +1645,7 @@ mod tests {
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
+                cx4: &mut system.cx4,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1588,6 +1722,7 @@ mod tests {
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
+                cx4: &mut system.cx4,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1615,6 +1750,7 @@ mod tests {
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
+                cx4: &mut system.cx4,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1642,6 +1778,7 @@ mod tests {
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
+                cx4: &mut system.cx4,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1685,6 +1822,7 @@ mod tests {
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
+                cx4: &mut system.cx4,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1738,6 +1876,7 @@ mod tests {
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
+                cx4: &mut system.cx4,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1777,6 +1916,7 @@ mod tests {
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
+                cx4: &mut system.cx4,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1807,6 +1947,7 @@ mod tests {
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
+                cx4: &mut system.cx4,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1887,6 +2028,7 @@ mod tests {
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
+                cx4: &mut system.cx4,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,
@@ -1915,6 +2057,7 @@ mod tests {
                 cart: &mut system.cart,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
+                cx4: &mut system.cx4,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 dma: &mut system.dma,

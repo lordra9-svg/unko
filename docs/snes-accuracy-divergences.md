@@ -729,6 +729,67 @@ Verification:
 - `snes-info` accepts `DSP1_ROM=<path>` and `JOYPAD0`/`JOYPAD0_FROM`; the
   firmware and the commercial ROMs are not committed.
 
+## Capcom CX4 (Hitachi HG51B S169)
+
+`crates/unko-snes/src/cx4.rs` ports the ares `HG51B` interpreter and the
+`HitachiDSP` bus wrapper:
+
+- the full 16-bit opcode decode: `NOP`, `JMP`/`JSR`/`RT` with every condition
+  (`EQ`/`GE`/`GT`/`LT`/`LE`/`NE`, carry/negative/overflow/zero), `HLT`, all
+  ALU forms (`ADD`/`ADC`/`SUB`/`SBC`/`CMP`/`AND`/`BIC`/`OR`/`XOR`/`XNOR`,
+  immediate variants), shifts (`ASR`/`LSR`/`LSL`/`ROL`/`ROR`/`ROR imm`),
+  `MUL`/`FMULT`, `SEX`/`SXB`/`SXW`, `INC`/`DEC`, `SWAP`, `LINK`, `SBK`,
+  `LD`/`ST` with every source/destination, `RDRAM`/`WRRAM` (register and
+  immediate forms), `LDROM`, `GETB`/`GETC`, `PUSH`/`PULL` and the exchange
+  class;
+- the two-page, 256-word instruction cache: line validity, `CACHE` reload,
+  lock bits, preload, and the page-crossing reload in `advance`;
+- the 3 KiB data RAM (S-CPU `$6000-$6BFF`/`$7000-$7BFF`) and the 1 KiB
+  data ROM loaded from the user-supplied `cx4.rom`;
+- the S-CPU register window (`$6C00-$6FFF`/`$7C00-$7FFF`): DMA, cache
+  base/pb/pc/locks, wait states, IRQ, vector bytes and the 24-bit GPRs;
+- the ROM/RAM buffer handshake for DMA, suspend/resume timings, the
+  `$7F51` IRQ and the `--` HLT handshake;
+- save-state coverage: the whole `Cx4` is part of `SnesState`, and the
+  cartridge SRAM is passed to the DMA engine.
+
+Timing: the HG51B oscillator is 20 MHz and is ticked from the S-CPU master
+clock with a whole-instruction credit, like the APU/PPU. The internal costs
+match ares (public RAM/ROM wait plus one clock per access, 5/6-clock cache
+fills, 3/7-clock multiplies, suspend durations).
+
+**Power-on state matters.** ares `HG51B::power` is `r = {}; io = {}`, which
+leaves `halt` clear, so the DSP executes from ROM address 0 until the S-CPU
+programs it. Mega Man X2's boot-time interface self-test reads the DSP
+registers before that point: with `halt` asserted at power our build showed the
+game's `INTERFACE REGISTER / REGISTER FILE / DATA RAM / IMMEDIATE ... ERROR!`
+screen, while ares went straight to the Capcom logo. Clearing `halt` at power
+(running from the reset state) fixed it.
+
+Verification (same-frame comparisons against ares):
+
+| ROM | Frames | Result |
+|---|---|---|
+| Mega Man X2 (USA) | 30, 45, 60, 90, 300, 600 | **100.000%** exact (57,344/57,344 each) |
+| Mega Man X3 (USA) | 300, 600 | **100.000%** exact |
+
+Firmware is copyrighted chip data and is never embedded: `CX4_ROM=<path>`
+installs it in `snes-info`, and `Snes::set_cx4_firmware` is the library entry
+point. The program itself lives in the game ROM and is fetched through the
+cache.
+
+Known limitations:
+
+- Only mapping 0 (LoROM `$00-$3F,$80-$BF:$8000-$FFFF` plus `$C0-$FF` linear) is
+  modelled, which is every CX4 board ares defines. A cartridge is detected as
+  CX4 by cartridge type `$F3` with LoROM/ExLoROM.
+- The firmware is attached explicitly by the host, so passing `CX4_ROM` to a
+  non-CX4 cartridge would map the CX4 windows over that cartridge's own
+  `$6000-$7FFF` space; only attach it when the cart declares a CX4.
+- Input-injection is not available in the ares capture harness, so the
+  in-game (post-title) path is not diffed frame-by-frame; the boot, logo and
+  title screens are.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

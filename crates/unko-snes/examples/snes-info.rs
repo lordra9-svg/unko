@@ -61,6 +61,20 @@ fn main() -> ExitCode {
         }
         println!("dsp1:        {}", path.to_string_lossy());
     }
+    if let Some(path) = std::env::var_os("CX4_ROM") {
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!("{}: {error}", path.to_string_lossy());
+                return ExitCode::FAILURE;
+            }
+        };
+        if let Err(error) = system.set_cx4_firmware(&bytes) {
+            eprintln!("{}: {error}", path.to_string_lossy());
+            return ExitCode::FAILURE;
+        }
+        println!("cx4:         {}", path.to_string_lossy());
+    }
     if let Some(ipl_path) = env::args().nth(2) {
         let bytes = match std::fs::read(&ipl_path) {
             Ok(bytes) => bytes,
@@ -231,6 +245,37 @@ fn main() -> ExitCode {
             bytes.len()
         );
     }
+    if std::env::var_os("CX4_STATE").is_some() {
+        if let Some(cx4) = &system.cx4 {
+            eprintln!(
+                "CX4 pc={:02X} pb={:04X} halt={} cache={} dma={} busy={} ticks={} a={:06X} mar={:06X} dpr={:06X} gpr={:06X?}",
+                cx4.regs.pc,
+                cx4.regs.pb,
+                cx4.io.halt,
+                cx4.io.cache.enable,
+                cx4.io.dma.enable,
+                cx4.busy(),
+                cx4.ticks,
+                cx4.regs.a,
+                cx4.regs.mar,
+                cx4.regs.dpr,
+                cx4.regs.gpr
+            );
+            eprintln!(
+                "CX4 cache base={:06X} pb={:04X} pc={:02X} page={} preload={} wait={:?} irq={} vec0={:02X?}",
+                cx4.io.cache.base,
+                cx4.io.cache.pb,
+                cx4.io.cache.pc,
+                cx4.io.cache.page,
+                cx4.io.cache.preload,
+                cx4.io.wait,
+                cx4.io.irq,
+                &cx4.io.vector[..8]
+            );
+        } else {
+            eprintln!("CX4 not attached");
+        }
+    }
     if std::env::var_os("DSP_STATE").is_some() {
         if let Some(dsp) = &system.dsp1 {
             eprintln!(
@@ -385,7 +430,9 @@ fn main() -> ExitCode {
         let _ = std::fs::write(path, system.wram());
     }
     if let Some(path) = std::env::var_os("FRAME_OUT") {
-        let _ = std::fs::write(path, system.ppu.frame_buffer());
+        if let Err(error) = std::fs::write(&path, system.ppu.frame_buffer()) {
+            eprintln!("{}: {error}", path.to_string_lossy());
+        }
     }
     if std::env::var_os("OAM_DUMP").is_some() {
         let oam = system.ppu.oam();

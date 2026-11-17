@@ -232,6 +232,17 @@ Validation so far:
   verified against ares below. A release SuperFX image (e.g. Star Fox) is not
   present locally, so the end-to-end game path is not yet measured; Final
   Fantasy V was still in its boot sequence at the 20M-cycle sample.
+- The Capcom CX4 (Hitachi HG51B S169) is implemented (`cx4.rs`): the full
+  16-bit opcode decode with every ALU/branch/load class, the two-page 256-word
+  instruction cache, the 3 KiB data RAM and 1 KiB `cx4.rom` data ROM, the
+  S-CPU register window (`$6C00`/`$7C00`) and data-RAM window
+  (`$6000`/`$7000`), DMA, suspend, the `$7F51` IRQ and save-state coverage.
+  The HG51B runs at 20 MHz from a whole-instruction master-clock credit. ares
+  powers the chip up *running* (`io = {}`), and Mega Man X2's boot self-test
+  depends on it. Verified **100.000%** pixel-identical against ares for Mega
+  Man X2 (USA) at frames 30, 45, 60, 90, 300 and 600 and Mega Man X3 (USA) at
+  300 and 600. Firmware is installed at runtime from the user-supplied 3 KiB
+  `cx4.rom`.
 - The NEC uPD7725 family (DSP-1/1A/1B and DSP-2/3/4) is implemented
   (`necdsp.rs`): the full 24-bit-word interpreter (OP/RT/JP/LD with every ALU
   and branch mode), the 2K program ROM / 1K data ROM / 256-word data RAM, the

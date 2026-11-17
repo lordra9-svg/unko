@@ -22,6 +22,7 @@
 
 pub mod apu;
 pub mod cpu;
+pub mod cx4;
 pub mod dma;
 pub mod dsp;
 pub mod gsu;
@@ -34,6 +35,7 @@ pub mod system;
 
 pub use apu::{Apu, PortEvent, PortEventKind};
 pub use cpu::{Cpu, CpuBus, Flags};
+pub use cx4::{Cx4, Cx4Error, Cx4Window};
 pub use dma::{Dma, DmaBus, DmaChannel, DmaTransfer};
 pub use dsp::Dsp;
 pub use gsu::Gsu;
