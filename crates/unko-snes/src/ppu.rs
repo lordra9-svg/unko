@@ -31,6 +31,8 @@ pub struct Ppu {
     cgram: [u16; 256],
     oam: [u8; 0x220],
     framebuffer: Box<[u8; MAX_FRAME_SIZE]>,
+    /// Whether the presented frame is hi-res (latched at frame start).
+    frame_hires: bool,
     line: u16,
     dot: u16,
     field: bool,
@@ -122,6 +124,7 @@ impl Ppu {
             cgram: [0; 256],
             oam: [0; 0x220],
             framebuffer: Box::new([0; MAX_FRAME_SIZE]),
+            frame_hires: false,
             line: 0,
             dot: 0,
             field: false,
@@ -329,12 +332,16 @@ impl Ppu {
     /// rendering itself is not implemented yet, so this is always
     /// `SCREEN_WIDTH` today.
     pub const fn frame_width(&self) -> usize {
-        SCREEN_WIDTH
+        if self.frame_hires {
+            MAX_SCREEN_WIDTH
+        } else {
+            SCREEN_WIDTH
+        }
     }
 
     /// Whether the current frame is hi-res (512-wide).
     pub const fn frame_hires(&self) -> bool {
-        false
+        self.frame_hires
     }
 
     /// The RGBA8888 frame buffer for the current frame's geometry.
@@ -359,6 +366,8 @@ impl Ppu {
         if self.line >= LINES_PER_FRAME {
             self.line = 0;
             self.field = !self.field;
+            // ares `hires = pseudoHires || bgMode == 5 || bgMode == 6`.
+            self.frame_hires = self.setini & 0x08 != 0 || matches!(self.bg_mode & 0x07, 5 | 6);
         }
         match self.line {
             0 => self.vblank = false,
@@ -1198,47 +1207,95 @@ impl Ppu {
             (u32::from(self.display_brightness) + 1, 16)
         };
         let fixed = self.fixed_color();
+        let luma = (num, den);
+        let width = self.frame_width();
+        let stride = width / SCREEN_WIDTH;
         for x in 0..SCREEN_WIDTH {
             let above = main[x];
             let below = sub[x];
-            let backdrop = above.priority == 0;
-            let layer = if backdrop { 5 } else { above.layer };
-            let mut color = if backdrop {
+            let above_backdrop = above.priority == 0;
+            let above_layer = if above_backdrop { 5 } else { above.layer };
+            let above_color = if above_backdrop {
                 self.cgram[0]
             } else {
                 self.cgram[usize::from(above.color)]
             };
-            let sub_transparent = below.priority == 0;
-            let sub_color = if sub_transparent {
+            let below_transparent = below.priority == 0;
+            let below_color = if below_transparent {
                 self.cgram[0]
             } else {
                 self.cgram[usize::from(below.color)]
             };
-            let (colour_above, colour_below) = self.colour_window(x);
-            let enable = (if backdrop {
-                self.cgadsub & 0x20 != 0
+            let below_layer = if below_transparent { 5 } else { below.layer };
+            // ares `Background::run`: the Above screen is advanced by one dot
+            // (`if(screen == Screen::Above) x++`), so in hi-res the Above
+            // screen occupies the ODD output column and Below the even one.
+            let above_px = self.dac_pixel(
+                x,
+                above_color,
+                above_layer,
+                above_backdrop,
+                below_color,
+                below_transparent,
+                luma,
+                fixed,
+            );
+            let below_px = self.dac_pixel(
+                x,
+                below_color,
+                below_layer,
+                below_transparent,
+                above_color,
+                above_backdrop,
+                luma,
+                fixed,
+            );
+            let base = y * width + x * stride;
+            if self.frame_hires {
+                self.framebuffer[base * 4..base * 4 + 4].copy_from_slice(&below_px);
+                let odd = base + 1;
+                self.framebuffer[odd * 4..odd * 4 + 4].copy_from_slice(&above_px);
             } else {
-                self.cgadsub & (1 << layer) != 0
-            }) && colour_above
-                && colour_below;
-            if enable {
-                let use_sub = self.cgwsel & 0x02 != 0 && !sub_transparent;
-                let operand = if use_sub { sub_color } else { fixed };
-                let halve = self.cgadsub & 0x40 != 0 && use_sub;
-                color = blend(color, operand, halve, self.cgadsub & 0x80 != 0);
+                self.framebuffer[base * 4..base * 4 + 4].copy_from_slice(&above_px);
             }
-            // 5-bit to 16-bit normalization (ares image::normalize), then the
-            // DAC luma and the high byte for the 8-bit frame buffer.
-            let scale = |value: u16| {
-                let value = u32::from(value & 0x1F) * 65_535 / 31;
-                ((value * num / den) >> 8) as u8
-            };
-            let index = (y * SCREEN_WIDTH + x) * 4;
-            self.framebuffer[index] = scale(color);
-            self.framebuffer[index + 1] = scale(color >> 5);
-            self.framebuffer[index + 2] = scale(color >> 10);
-            self.framebuffer[index + 3] = 0xFF;
         }
+    }
+
+    /// One DAC output column: colour math for `color` (the screen drawn to this
+    /// column) against `other` (the opposite screen), then the 5-bit to 16-bit
+    /// normalization, the DAC luma and the high byte.
+    #[allow(clippy::too_many_arguments)]
+    fn dac_pixel(
+        &self,
+        x: usize,
+        color: u16,
+        layer: u8,
+        backdrop: bool,
+        other: u16,
+        other_transparent: bool,
+        luma: (u32, u32),
+        fixed: u16,
+    ) -> [u8; 4] {
+        let (colour_above, colour_below) = self.colour_window(x);
+        let enable = (if backdrop {
+            self.cgadsub & 0x20 != 0
+        } else {
+            self.cgadsub & (1 << layer) != 0
+        }) && colour_above
+            && colour_below;
+        let mut color = color;
+        if enable {
+            let use_sub = self.cgwsel & 0x02 != 0 && !other_transparent;
+            let operand = if use_sub { other } else { fixed };
+            let halve = self.cgadsub & 0x40 != 0 && use_sub;
+            color = blend(color, operand, halve, self.cgadsub & 0x80 != 0);
+        }
+        let (num, den) = luma;
+        let scale = |value: u16| {
+            let value = u32::from(value & 0x1F) * 65_535 / 31;
+            ((value * num / den) >> 8) as u8
+        };
+        [scale(color), scale(color >> 5), scale(color >> 10), 0xFF]
     }
 
     fn fixed_color(&self) -> u16 {

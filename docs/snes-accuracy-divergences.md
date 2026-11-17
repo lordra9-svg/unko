@@ -280,7 +280,19 @@ with ares. The implementation follows ares, which is the primary source.
 - Display brightness follows ares' DAC luma `(1 + l) / 16 * (l ? 1 : 0.25)`
   with integer rounding. Measured frames match ares at `INIDISP = $0F` and at
   `$0B`; sub-1/255 rounding differences are possible at other levels.
-- Hires output and interlace are not implemented. The framebuffer geometry is
+- Hires output is **implemented and measured**: `frame_hires` is latched at
+  frame start from `SETINI` bit 3 / `BGMODE` 5-6, `frame_width()` returns 512
+  for those frames, and `present_line` emits two DAC columns per pixel clock -
+  the **Below** screen at the even column and the **Above** screen at the odd
+  one, matching ares `Background::run`'s `if(screen == Screen::Above) x++`, each
+  with its own colour math against the opposite screen. Verified against
+  RustySNES on `PeterLemon-PPU/HiColor/MosaicMode5.sfc` (mode 5, no HDMA colour):
+  our 256-wide render matches the hires frame's odd columns at **100.000%**
+  (oracle precondition), and the 512-wide output matches at **99.805%** exact
+  with mean channel difference 0.294. The residual is exactly output column 0 on
+  every row (224 pixels), i.e. the first Below column, which is the next thing
+  to chase.
+- Interlace is not implemented. The framebuffer geometry is
   now prepared for hires: `SCREEN_WIDTH` (256) stays the *compositing* width,
   `MAX_SCREEN_WIDTH` (512) is the DAC output width, the backing array is always
   hi-res capacity so a mode change cannot reallocate, and `frame_width()`/
