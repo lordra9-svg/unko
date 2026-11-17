@@ -212,12 +212,13 @@ The PPU is line-based rather than dot-scheduled. **Interlace is implemented**:
 `SETINI` bit 0 is latched at frame start, interlaced frames are 448 lines with
 the odd field offset by one output row, sprite heights and positions double,
 the hires BG fetch doubles vertically and interlaced even fields are 263
-scanlines. Measured against ares on `Interlace/InterlaceMoogle.sfc` (mode 5 +
-interlace) it scores 94.8% exact; the residual is a separate, newly identified
-divergence - ares samples each hires screen at its own column
-(`hpixel = x << hires()`, Above at `x + 1`) while we sample once and duplicate
-the column, which also means the earlier 100.000% hires result was against
-RustySNES, which shares that simplification. Offset per tile is implemented for
+scanlines. Measured against ares it scores 95.0% exact on `Interlace/InterlaceMoogle.sfc`
+and 95.3% on `HiColor/MosaicMode5.sfc` (both mode 5 + interlace). The per-screen
+hires fetch reading of ares (`hpixel = x << hires()`, one background pixel per
+screen call) was implemented and **falsified**: the wrapping variant scores
+68.1% and the 512-wide variant 55.9%, so the per-dot sampling was restored. The
+earlier 100.000% hires result was against RustySNES, which shares the
+256-column compositing assumption and is not a hires or interlace oracle. Offset per tile is implemented for
 modes 2/4/6.
 
 Performance: `unko bench --synthetic 3000 --min-fps 300` measures **791.6 fps**

@@ -306,24 +306,36 @@ with ares. The implementation follows ares, which is the primary source.
     **94.849%** of pixels exact, mean channel difference 5.69. A non-interlaced
     render of the same ROM scores 83% against the same dump, so the field
     geometry is right; the residual is the item below.
-- **Open: hires is sampled per screen in ares, not one duplicated column.**
-  ares fetches each screen at its own column - `Background::fetchNameTable` does
-  `hpixel = x << hires()` with `hscroll <<= 1`, `Background::run` advances `x`
-  for `Screen::Above`, and `fetchCharacter(index, half)` selects the other half
-  of the bitplane pair - so in hires the Below screen shows BG column `2d` and
-  the Above screen column `2d + 1`. We sample once per dot and write the same
-  pixel to both DAC columns.
-  - Evidence: our output duplicates **99.6%** of horizontal column pairs where
-    ares duplicates 97.4%, and box-filtering our frame by 2 does not improve the
-    match (94.08%), so the error is a sampling phase rather than smoothing.
-  - This corrects an earlier record: the `MosaicMode5.sfc` result of
-    **100.000%** was measured against RustySNES, which shares our
-    "composite at 256 then interleave" simplification. That ROM is also a
-    mode-5 + interlace demo (`SETINI = $01`), so ares dumps it as 512x448;
-    against ares our output is **95.126%** exact (mean 5.39). RustySNES is not
-    a hires or interlace oracle.
-  - Next: render the two screens at their own hires columns (backgrounds and
-    objects), which should take both ROMs to pixel-exact against ares.
+- **Open: hires output is ~95% exact against ares, cause not yet isolated.**
+  - Corrected measurement: `PeterLemon-PPU/HiColor/MosaicMode5.sfc` is itself a
+    mode-5 + interlace demo (`SETINI = $01`), so ares dumps it as 512x448 and
+    RustySNES (which has no interlace output) cannot be its oracle. Against
+    ares our interlaced output is **95.322%** exact (mean 5.09), and
+    `Interlace/InterlaceMoogle.sfc` is **95.045%** (mean 5.40). The earlier
+    "100.000%" was against RustySNES and shared its 256-column compositing
+    assumption.
+  - Removed a hack that this exposed: `present_line` forced output column 0 to
+    the backdrop for hires, copied from RustySNES' behaviour. ares shows the
+    fetched pixel there, and dropping the hack improved both ROMs
+    (94.849% -> 95.045%, 95.126% -> 95.322%).
+  - **Falsified: per-screen hires fetching.** Reading ares
+    `Background::fetchNameTable`/`run` (`hpixel = x << hires()`,
+    `hscroll <<= 1`, one background pixel consumed per screen call) suggests
+    Below should show BG column `2d` and Above `2d + 1`. Two implementations
+    were measured and both are far worse than the current per-dot sampling:
+    with the map wrapping at its 256-column width the output shows two
+    half-width copies of the image and scores **68.110%**; with the hires map
+    treated as 512 wide it scores **55.855%**. ares' dumped image contains a
+    single non-repeated picture whose bounding box matches the per-dot model,
+    so the fetch is *not* the explanation and is reverted.
+  - Residual characterisation: both row parities score identically (94.93% /
+    94.91%), so it is not the interlace fetch; in the detail columns the match
+    peaks at a 4-output-column shift (91.2% vs 86.7% at zero), which points at
+    a pixel-pipeline latency rather than a sampling error, but applying that
+    offset globally (2 BG columns) measures worse overall (**92.431%**), so it
+    is not a plain shift either. Next: instrument `Background::run`'s
+    `pixelCounter`/`renderingIndex` prefetch depth against the DAC's per-dot
+    output, i.e. reproduce ares' 8-dot tile pipeline exactly.
 - Offset per tile **is** implemented for modes 2, 4 and 6, transcribed from
   ares `Background::fetchNameTable`/`fetchOffset`: the per-column horizontal and
   vertical words are read from BG3's tilemap (horizontal at `voffset + 0`,

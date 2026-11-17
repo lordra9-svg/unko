@@ -1330,16 +1330,7 @@ impl Ppu {
             );
             let base = y * width + x * stride;
             if self.frame_hires {
-                // ares' pixel pipeline is one dot deep: at the first dot of a
-                // scanline no tile has been fetched yet, so the Below screen
-                // (which owns the even column) shows the backdrop there. Both
-                // reference oracles produce a backdrop column 0.
-                let first = if x == 0 {
-                    self.dac_pixel(0, self.cgram[0], 5, true, self.cgram[0], true, luma, fixed)
-                } else {
-                    below_px
-                };
-                self.framebuffer[base * 4..base * 4 + 4].copy_from_slice(&first);
+                self.framebuffer[base * 4..base * 4 + 4].copy_from_slice(&below_px);
                 let odd = base + 1;
                 self.framebuffer[odd * 4..odd * 4 + 4].copy_from_slice(&above_px);
             } else {
@@ -1694,9 +1685,9 @@ mod tests {
         ppu.write(0x2121, 0x01);
         ppu.write(0x2122, 0x1F); // colour 1: red
         ppu.write(0x2122, 0x00);
-        // 4bpp tile 0: source rows 2 and 3 put colour 1 in pixel 0.
-        ppu.vram[2] = 0x0080;
-        ppu.vram[3] = 0x0080;
+        // 4bpp tile 0: source rows 2 and 3 put colour 1 in pixels 0 and 1.
+        ppu.vram[2] = 0x00C0;
+        ppu.vram[3] = 0x00C0;
         ppu.line = 1;
 
         // Field 0 fetches source row 2, field 1 fetches row 3. Both land at
@@ -1704,7 +1695,7 @@ mod tests {
         ppu.field = false;
         ppu.render_current_line();
         // In hires the DAC writes Below at the even column and Above at the
-        // odd one; column 0 is the backdrop, so check the Above column.
+        // odd one; the test enables only the main screen, so check column 1.
         let even = 4;
         assert_eq!(&ppu.framebuffer[even..even + 4], &[255, 0, 0, 255]);
 
