@@ -64,12 +64,21 @@ rendering difference:
     $809A    266,693    266,693       0 | 253,713   253,713      0
     $B974      7,547      7,635     +88 |   7,193     7,507   +314
     ```
-    In frame 191 we enter the `$10` wait loop and spin 4,503 times; the reference
-    never enters it in that frame (its count is unchanged). The `$2140` loop is
-    untouched in that frame for both. So the extra iteration is decided by
-    **whether the main loop reaches `$806B` before or after the NMI handler sets
-    `\$10`** - a cycle-level race between the main loop and the NMI, with the APU
-    handshake not involved.
+    **Correction after logging `$806B` with the master clock.** The "0 vs 4,503
+    in frame 191" is a sampling-boundary artefact, not a missing entry: the loop
+    spins continuously inside one NMI interval (largest measured spin: 4,496
+    consecutive hits spanning 206,770 master clocks), so an end-of-frame sample
+    can fall entirely inside or entirely outside a spin. Logging
+    `(master_clock, DP $10, vectored NMIs)` at every `$806B` gives an iteration
+    period of **46.00 master clocks** and shows the real signal is a *systematic*
+    skew: per-frame spin iterations are **2,487 for us and 2,390 for RustySNES**
+    (cumulative at frame 190: 472,528 vs 454,144, +4%). The `$2140` APU loop is
+    not involved in this window for either emulator.
+    So the loop waits for the NMI handler to set DP `$10`, and we spend ~4% more
+    iterations waiting each frame - i.e. our NMI arrives later relative to the
+    point the main loop starts spinning (or our HDMA stalls shorten the loop
+    period). Measuring RustySNES' loop period over the same interval separates
+    the two.
   - Also note the cumulative totals: our `$806B` sits at 472,528 by frame 190
     against the reference's 454,144 (+4%), and `$809A` at 266,693 against
     253,713 (+5%), so the CPU spends slightly more iterations spinning in both
