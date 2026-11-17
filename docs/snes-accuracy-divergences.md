@@ -219,7 +219,16 @@ with ares. The implementation follows ares, which is the primary source.
   with integer rounding. Measured frames match ares at `INIDISP = $0F` and at
   `$0B`; sub-1/255 rounding differences are possible at other levels.
 - Hires output, interlace and offset-per-tile are not implemented.
-- Mode 7 `EXTBG` is partial.
+- Mode 7 is complete for the base console: the matrix/centre registers share
+  ares' `latch.mode7` byte (first write low, second high, shared with
+  `$210D/$210E`), `M7SEL` bits 6-7 follow ares `io.repeatMode7` (0/1 repeat,
+  2 transparent, 3 character 0), BG2/EXTBG is rendered with
+  `priority[palette.bit(7)]` and bit 7 cleared before the transparency test,
+  and BG horizontal/vertical mosaic is applied to the pre-flip coordinate
+  (BG2's vertical mosaic gated by BG1's enable). Verified against RustySNES on
+  Peter Lemon `Mode7/RotZoom`: **100.000%** of pixels identical at frames 100
+  and 200. The matrix-latch bug alone had collapsed every Mode 7 plane to a
+  single pixel.
 - `WAI`/`STP` retire two internal cycles after the opcode; the real devices
   idle indefinitely, which the system model represents by not advancing the
   CPU until an interrupt or reset.

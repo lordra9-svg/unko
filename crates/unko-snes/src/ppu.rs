@@ -505,12 +505,35 @@ impl Ppu {
             0x2118 => self.write_vram_byte(data, false),
             0x2119 => self.write_vram_byte(data, true),
             0x211A => self.m7sel = data,
-            0x211B => self.m7a = (self.m7a & 0x00FF) | (i16::from(data as i8) << 8),
-            0x211C => self.m7b = (self.m7b & 0x00FF) | (i16::from(data as i8) << 8),
-            0x211D => self.m7c = (self.m7c & 0x00FF) | (i16::from(data as i8) << 8),
-            0x211E => self.m7d = (self.m7d & 0x00FF) | (i16::from(data as i8) << 8),
-            0x211F => self.m7x = (self.m7x & 0x00FF) | (i16::from(data as i8) << 8),
-            0x2120 => self.m7y = (self.m7y & 0x00FF) | (i16::from(data as i8) << 8),
+            // ares `PPU::writeIO`: the Mode 7 matrix and centre registers share
+            // the single `latch.mode7` byte, so the first write supplies the
+            // low byte and the second the high byte. Treating them as a
+            // low/high pair left the low byte permanently zero, which collapsed
+            // the whole plane to one pixel.
+            0x211B => {
+                self.m7a = ((u16::from(data) << 8) | u16::from(self.latch_mode7)) as i16;
+                self.latch_mode7 = data;
+            }
+            0x211C => {
+                self.m7b = ((u16::from(data) << 8) | u16::from(self.latch_mode7)) as i16;
+                self.latch_mode7 = data;
+            }
+            0x211D => {
+                self.m7c = ((u16::from(data) << 8) | u16::from(self.latch_mode7)) as i16;
+                self.latch_mode7 = data;
+            }
+            0x211E => {
+                self.m7d = ((u16::from(data) << 8) | u16::from(self.latch_mode7)) as i16;
+                self.latch_mode7 = data;
+            }
+            0x211F => {
+                self.m7x = ((u16::from(data) << 8) | u16::from(self.latch_mode7)) as i16;
+                self.latch_mode7 = data;
+            }
+            0x2120 => {
+                self.m7y = ((u16::from(data) << 8) | u16::from(self.latch_mode7)) as i16;
+                self.latch_mode7 = data;
+            }
             0x2121 => {
                 self.cgram_address = data;
                 self.cgram_latch = false;
@@ -705,8 +728,8 @@ impl Ppu {
             if !enabled {
                 continue;
             }
-            if mode == 7 && layer == 0 {
-                self.render_mode7(&mut main, &mut sub, y, layer);
+            if mode == 7 && (layer == 0 || (layer == 1 && self.setini & 0x40 != 0)) {
+                self.render_mode7(&mut main, &mut sub, y, layer, priority);
             } else if mode <= 6 {
                 self.render_background(&mut main, &mut sub, y, layer, mode, priority);
             }
@@ -861,6 +884,7 @@ impl Ppu {
         sub: &mut [Pixel; SCREEN_WIDTH],
         y: usize,
         layer: usize,
+        priority: &[u8; 2],
     ) {
         let a = i32::from(self.m7a);
         let b = i32::from(self.m7b);
@@ -870,11 +894,30 @@ impl Ppu {
         let vcenter = sign13(self.m7y);
         let hoffset = sign13(self.m7_hofs as i16);
         let voffset = sign13(self.m7_vofs as i16);
+        // ares `Background::runMode7`: the mosaic offset is applied to the
+        // pre-flip coordinate, and BG2's *vertical* mosaic is gated by BG1's
+        // mosaic enable ("BG2 vertical mosaic uses BG1 mosaic enable").
+        let mosaic = self.layer_mosaic(layer);
+        let mosaic_size = self.mosaic_size() as u32;
+        let vertical_mosaic = if layer == 1 {
+            self.layer_mosaic(0)
+        } else {
+            mosaic
+        };
+        let base_y = y as u32;
+        let y = if vertical_mosaic {
+            base_y - (base_y.saturating_sub(1) % mosaic_size)
+        } else {
+            base_y
+        };
         let y = if self.m7sel & 0x02 != 0 {
             255 - y as i32
         } else {
             y as i32
         };
+        // ares `io.repeatMode7` (M7SEL bits 6-7): 0/1 repeat the map, 2 makes
+        // out-of-bounds pixels transparent and 3 fetches character 0.
+        let repeat_mode = (self.m7sel >> 6) & 0x03;
         let origin_x = ((a * clip13(hoffset - hcenter)) & !63)
             + ((b * clip13(voffset - vcenter)) & !63)
             + ((b * y) & !63)
@@ -885,39 +928,47 @@ impl Ppu {
             + (vcenter << 8);
         let main_enable = self.layer_mask.unwrap_or(self.tm) & (1 << layer) != 0;
         let sub_enable = self.ts & (1 << layer) != 0 && self.layer_mask.is_none();
-        let extbg = self.setini & 0x40 != 0;
         for x in 0..SCREEN_WIDTH {
-            let x = if self.m7sel & 0x01 != 0 {
-                255 - x as i32
+            let raw_x = x as u32;
+            let mosaic_x = if mosaic {
+                raw_x - (raw_x % mosaic_size)
             } else {
-                x as i32
+                raw_x
+            };
+            let x = if self.m7sel & 0x01 != 0 {
+                255 - mosaic_x as i32
+            } else {
+                mosaic_x as i32
             };
             let pixel_x = (origin_x + a * x) >> 8;
             let pixel_y = (origin_y + c * x) >> 8;
             let out_of_bounds = (pixel_x | pixel_y) & !1023 != 0;
-            if out_of_bounds && self.m7sel & 0x80 != 0 {
+            if out_of_bounds && repeat_mode == 2 {
                 continue;
             }
             let tile_x = (pixel_x >> 3) & 0x7F;
             let tile_y = (pixel_y >> 3) & 0x7F;
-            let tile = self.vram[((tile_y << 7 | tile_x) & 0x7FFF) as usize] as u8;
+            let tile = if out_of_bounds && repeat_mode == 3 {
+                0
+            } else {
+                self.vram[((tile_y << 7 | tile_x) & 0x7FFF) as usize] as u8
+            };
             let palette_address = ((pixel_y & 7) << 3 | (pixel_x & 7)) as usize;
             let index = usize::from((tile as u16) << 6 | palette_address as u16);
             let mut palette = (self.vram[index & 0x7FFF] >> 8) as u8;
-            if palette == 0 {
-                continue;
-            }
-            let priority = if layer == 0 || !extbg {
-                2
+            // ares `Background::runMode7`: BG1 uses `priority[0]`; BG2 selects
+            // on palette bit 7 and *then* clears it, and the transparency test
+            // happens after that (so `$80` is transparent on BG2).
+            let priority = if layer == 0 {
+                priority[0]
             } else {
                 let bit = palette >> 7;
                 palette &= 0x7F;
-                if bit != 0 {
-                    5
-                } else {
-                    1
-                }
+                priority[usize::from(bit)]
             };
+            if palette == 0 {
+                continue;
+            }
             let pixel = Pixel {
                 color: palette,
                 priority,
@@ -1293,6 +1344,116 @@ mod tests {
                                    // ares draws the per-line list backwards, so sprite 0 is drawn last and
                                    // wins even though sprite 1 has the higher priority bits.
         assert_eq!(ppu.debug_sprite_row(1), vec![(0, 129, 3)]);
+    }
+
+    /// Set up a Mode 7 plane whose row 0 of tile 0 is colour 2, with an
+    /// identity matrix and the centre and scroll offsets at zero.
+    fn mode7_plane() -> Ppu {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2100, 0x0F); // full brightness
+        ppu.bg_mode = 0x07;
+        ppu.tm = 0x01;
+        ppu.setini = 0x00;
+        ppu.m7sel = 0x00;
+        ppu.m7a = 0x0100;
+        ppu.m7b = 0x0000;
+        ppu.m7c = 0x0000;
+        ppu.m7d = 0x0100;
+        ppu.m7x = 0x0000;
+        ppu.m7y = 0x0000;
+        ppu.m7_hofs = 0x0000;
+        ppu.m7_vofs = 0x0000;
+        // Word 0 is both the tilemap entry for cell 0 (tile 0) and character
+        // pixel (0,0) of tile 0, whose palette index is the high byte.
+        for word in 0..8 {
+            ppu.vram[word] = 0x0200;
+        }
+        ppu.write(0x2121, 0x00);
+        ppu.write(0x2122, 0x00); // backdrop: black
+        ppu.write(0x2122, 0x00);
+        ppu.write(0x2121, 0x02);
+        ppu.write(0x2122, 0xE0); // colour 2: green
+        ppu.write(0x2122, 0x03);
+        ppu
+    }
+
+    #[test]
+    fn mode7_matrix_registers_use_the_shared_latch() {
+        // ares `PPU::writeIO` $211B-$2120: `io.m7a = data << 8 | latch.mode7`
+        // with `latch.mode7 = data`, i.e. the first write supplies the low byte
+        // and the second the high byte. The same latch is shared with $210D/$210E.
+        let mut ppu = Ppu::new();
+        ppu.write(0x211B, 0x34);
+        ppu.write(0x211B, 0x12);
+        assert_eq!(ppu.m7a, 0x1234);
+        ppu.write(0x211C, 0x78);
+        ppu.write(0x211C, 0x56);
+        assert_eq!(ppu.m7b, 0x5678);
+        ppu.write(0x211D, 0xBC);
+        ppu.write(0x211D, 0x9A);
+        assert_eq!(ppu.m7c, 0x9ABC_u16 as i16);
+        ppu.write(0x211E, 0xF0);
+        ppu.write(0x211E, 0xDE);
+        assert_eq!(ppu.m7d, 0xDEF0_u16 as i16);
+        ppu.write(0x211F, 0x00);
+        ppu.write(0x211F, 0x01);
+        assert_eq!(ppu.m7x, 0x0100);
+        ppu.write(0x2120, 0x00);
+        ppu.write(0x2120, 0x01);
+        assert_eq!(ppu.m7y, 0x0100);
+    }
+
+    #[test]
+    fn mode7_repeat_mode_2_is_transparent_and_3_uses_tile_zero() {
+        // `M7SEL` bits 6-7 (ares `io.repeatMode7`): 2 makes out-of-bounds
+        // pixels transparent, 3 fetches character 0 instead of repeating.
+        // M7A = 8.0 pushes x = 200 to pixel 1600, well outside the 1024x1024
+        // map.
+        let mut transparent = mode7_plane();
+        transparent.m7a = 0x0800;
+        transparent.m7sel = 0x80;
+        transparent.render_line(0, 0);
+        assert_eq!(
+            &transparent.framebuffer[200 * 4..200 * 4 + 4],
+            &[0, 0, 0, 255]
+        );
+
+        let mut tile_zero = mode7_plane();
+        tile_zero.m7a = 0x0800;
+        tile_zero.m7sel = 0xC0;
+        tile_zero.render_line(0, 0);
+        assert_eq!(
+            &tile_zero.framebuffer[200 * 4..200 * 4 + 4],
+            &[0, 255, 0, 255]
+        );
+    }
+
+    #[test]
+    fn mode7_extbg_moves_bit7_pixels_to_the_second_plane() {
+        // ares `runMode7`: BG2 selects its priority from palette bit 7 and then
+        // clears it, so a pixel with palette `$82` is drawn by BG1 at priority
+        // 3 with colour `$82`, then by BG2 at priority 5 with colour `$02`.
+        let mut plain = mode7_plane();
+        for word in 0..8 {
+            plain.vram[word] = 0x8200;
+        }
+        plain.write(0x2121, 0x82);
+        plain.write(0x2122, 0x1F); // colour $82: red
+        plain.write(0x2122, 0x00);
+        plain.render_line(0, 0);
+        assert_eq!(&plain.framebuffer[0..4], &[255, 0, 0, 255]);
+
+        let mut extbg = mode7_plane();
+        for word in 0..8 {
+            extbg.vram[word] = 0x8200;
+        }
+        extbg.write(0x2121, 0x82);
+        extbg.write(0x2122, 0x1F); // colour $82: red
+        extbg.write(0x2122, 0x00);
+        extbg.setini = 0x40; // EXTBG
+        extbg.tm = 0x03; // BG1 + BG2 on the main screen
+        extbg.render_line(0, 0);
+        assert_eq!(&extbg.framebuffer[0..4], &[0, 255, 0, 255]);
     }
 
     #[test]
