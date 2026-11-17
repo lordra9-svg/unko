@@ -169,6 +169,29 @@ rendering difference:
     That is a contained change to the oracle harness only (no emulator code) and
     is the first thing to do next; the per-instruction diff is then one command
     against our captured 390-instruction/15,860-clock window.
+    **The ring buffer worked and the diff is done.** RustySNES' snapshot now
+    closes at `$8075`, and aligning both windows on their first matching PC
+    (`$81E9`) compares 349 instructions. Ours totals 15,408 clocks against
+    15,924, and the whole gap decomposes into **12 instruction-level
+    differences totalling 472 clocks**:
+    ```
+    PC      ours  rs    delta        PC      ours  rs    delta
+    $AE47     16   56    +40         $A378     36   76    +40
+    $AE52     16   56    +40         $A383    550  558     +8
+    $A390     22   62    +40         $85E6     24   64    +40
+    $A347     36   76    +40         $8465   4390 4518   +128
+    $A34A    294  302     +8         $865C     32   72    +40
+    $A363    550  558     +8         $8256     30   70    +40
+    ```
+    Every delta is a **multiple of 8 master clocks**, and the dominant signature
+    is **+40 = 5 x 8**: eleven events where the reference charges five more
+    eight-clock units than we do at the instruction following a `JSR $8040`.
+    The `+128` at `$8465` is 16 units, and the three `+8` are one unit each.
+    That is the shape of **DMA/stall accounting**: ares charges eight master
+    clocks per DMA byte and we are short by a whole number of such units at
+    these points. So the ~490-clock window difference is not a control-flow or
+    instruction-timing difference at all - it is ~59 missing eight-clock stall
+    units per window.
   - Also note the cumulative totals: our `$806B` sits at 472,528 by frame 190
     against the reference's 454,144 (+4%), and `$809A` at 266,693 against
     253,713 (+5%), so the CPU spends slightly more iterations spinning in both
