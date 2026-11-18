@@ -234,10 +234,15 @@ Validation so far:
   first 900 frames**: hashing the same 256x224 pixel set in both harnesses
   shows every one of our frames 0..900 matches an ares frame byte-for-byte. The
   earlier 83-99% "divergences" (frames 307/320/600/900) were frame-number
-  offsets, not rendering errors. What does drift is the presentation count: ares
-  needs ~20 more frames than we do to reach the same picture by frame 890 (~2%
-  more frames presented), which is an open presentation-count item, not a
-  rendering one.
+  offsets, not rendering errors. The apparent "~2% presentation-count
+  difference" is a harness artefact, not emulation: ares' captures are
+  host-timed (presentations 285,202..427,056 clocks apart, 80-120% of an
+  emulated frame) while ours are locked to the PPU frame boundary (mean 9 clocks
+  deviation). Both emit 920 frames and reach frame 900 within 0.09 emulated
+  frames of each other, so the count matched all along - only the sampling phase
+  differed. Pixel comparisons against those captures are therefore only
+  trustworthy for static content; state comparisons (VRAM/GSU RAM/WRAM at a
+  known clock) are unaffected.
   The GSU's own `PLOT`/`RPIX` stream is **bit-identical** to ares over frames
   154-308 (51,476 events, zero differences), and per-frame dumps show VRAM
   byte-identical through frame 152 with the first difference at **frame 153**

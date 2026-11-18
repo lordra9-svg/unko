@@ -2012,6 +2012,46 @@ i.e. we present ~2% fewer frames than ares for the same content. Since the
 ares presents and we do not), not a rendering difference - the frame count is
 still an open item, but it cannot affect what the game sees.
 
+### ares' captures are NOT frame-locked (methodology correction)
+
+`PRESENT_HASH` now records the emulated clock with each frame. Over Star Fox to
+920 frames:
+
+| | frame-to-frame clocks | deviation from the emulated frame (357,368) |
+|---|---|---|
+| ares | 285,202 .. 427,056 | mean 18,334, max 72,166 |
+| ours | 357,308 .. 357,424 | mean 9, max 60 |
+
+So ares' presentation callbacks are **host-timed**: they fire anywhere from 80%
+to 120% of an emulated frame apart, i.e. the sampled phase within the emulated
+frame varies by roughly +-0.2 frame. Our presentations are locked to the PPU's
+frame boundary (within 60 clocks).
+
+Consequences:
+
+- ares' frame index N is *not* "the state after N emulated frames"; it is a
+  snapshot at an arbitrary point inside one. When the game updates its picture
+  near the frame boundary - which Star Fox does every few frames - the captured
+  frame can contain the content of emulated frame N or N+-1.
+- That is exactly what the "frame 307 / 320 diverge" readings were: our frame 306
+  matched ares' 307 byte-identically and our 320 matched ares' 322/323 (the
+  picture is static across those spans), while same-number comparisons caught
+  ares on the other side of the update.
+- It also dissolves the "~2% frame-presentation-count difference": both harnesses
+  emit 920 frames and reach frame 900 within **0.09 emulated frames** of each
+  other (ours 321,956,772 clocks, ares 321,990,512). The count matched all
+  along; only the *phase* of each sample differed, which made a hash-based
+  content alignment look like a growing index offset.
+
+So Star Fox is content-exact, and per-frame *pixel* comparisons against the
+host-timed ares captures are only trustworthy for static content. Two ways to
+make them trustworthy:
+
+1. compare **emulator state** (VRAM / GSU RAM / WRAM at a known clock) rather
+   than the presented frame - this is what the CX4 bisects already do; or
+2. add a frame-locked capture: emit the hash from the PPU's frame boundary
+   instead of the host video callback.
+
 ### Star Fox frame numbering drifts: compare by content, not by number
 
 The two capture harnesses do not stay frame-aligned for Star Fox, and the offset

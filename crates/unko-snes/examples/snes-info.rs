@@ -306,7 +306,7 @@ fn main() -> ExitCode {
                         .append(true)
                         .open(&path)
                     {
-                        let _ = writeln!(f, "frame {frames} {hash:016x}");
+                        let _ = writeln!(f, "frame {frames} {hash:016x} clock={}", system.clock);
                     }
                 }
                 if let Some(dir) = std::env::var_os("VRAM_DIR") {
