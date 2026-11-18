@@ -2327,6 +2327,22 @@ part 1 is not a tuning constant: ares' halted coprocessor simply does not track
 the CPU between jobs, while ours does (one coprocessor cycle per CPU clock), and
 the difference at the request is whatever the CPU ran in the meantime.
 
+### Tested: (halted lead + machine-time charge) together (overshoots)
+
+Implementing both parts at once - the CX4 no longer advancing while idle, and a
+burst's overshoot charged to the machine clock - makes the lead far too large:
+
+| | ares | with both parts |
+|---|---|---|
+| lead at `$7F48` | +375 .. +966 cycles | **+14,990 cycles** |
+| frame 3300 / 3400 / 3500 | 100.000 / 100.000 / 96.406% | 98.512 / 97.264 / 96.697% |
+
+So "the halted coprocessor does not track the CPU" is too strong: ares' CX4 does
+*track* the CPU between jobs (otherwise the lag would be the whole inter-job gap,
+~15,000 cycles, exactly what this experiment produced) and merely ends each job a
+few hundred cycles behind. The residual ~900-cycle lag therefore comes from the
+job's own tail, not from the inter-job period. Reverted.
+
 So the fix is the *conjunction* of the two things tried separately:
 
 1. a ~924-clock delay before the reload starts = the coprocessor catching up its
