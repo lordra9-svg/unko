@@ -1214,8 +1214,27 @@ frames of gameplay HUD rendering.
   So our per-frame fade step lands one frame earlier than ares'. Every *value*
   is right - palette, HDMA tables and pointers, `$0A84`, colour math,
   `INIDISP`, per-scanline gradient - so what remains is the ordering of the
-  per-frame CGRAM/`$2100` update against the frame boundary: a write ares
-  commits after the presented frame and we commit before it.
+  per-frame CGRAM/`$2100` update against the frame boundary.
+
+  Confirmed with more pairings, each **100.000% exact**:
+
+  | ours | ares | result |
+  |---|---|---|
+  | 493 | 494 | 57,344/57,344 |
+  | 499 | 500 | 57,344/57,344 |
+  | 500 | 501 | 57,344/57,344 |
+
+  and `ares 500` vs `ares 501` really does differ (mean |d| 62.4), so adjacent
+  frames are distinct and the offset is real rather than a static-screen
+  artefact. Note this is *not* a universal capture-index error: for Super Mario
+  Kart the aligned pairing is `ours 600` vs `ares 600` (99.981%), and `ours 599`
+  vs `ares 600` is worse (97.586%), so the harness indices agree there.
+
+  Which side is "one frame ahead" cannot be decided from a static screen, so no
+  change was made to `Ppu::tick`/the frame boundary - shifting it would risk
+  every currently-exact result. The discriminator needed is a ROM with a
+  per-frame visible counter (e.g. a blargg test that prints a frame number), so
+  the absolute frame index can be read off the screen rather than inferred.
 
   Kirby's Dream Land 3 is unchanged by the routing fix (0% exact at frames
   120/300/600; 1 colour versus ares' 10 at frame 600).
