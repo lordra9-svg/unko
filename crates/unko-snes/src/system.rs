@@ -205,6 +205,13 @@ pub struct Snes {
     refresh_active: bool,
     /// General-purpose DMA channels.
     pub dma: Dma,
+    /// A DMA transfer left in progress at a frame boundary.
+    ///
+    /// A large DMA can take longer than a whole frame. The S-CPU is stalled for
+    /// all of it, but the PPU keeps rendering and presenting frames, so a step
+    /// must not swallow a frame boundary: an unfinished transfer is parked here
+    /// and resumed by the next step.
+    dma_transfer: Option<crate::dma::DmaTransfer>,
     /// Controller ports, auto-poll and the multiply/divide unit.
     pub io: CpuIo,
     wram: Vec<u8>,
@@ -289,6 +296,7 @@ impl Snes {
             snes_mar: 0,
             refresh_active: false,
             dma: Dma::new(),
+            dma_transfer: None,
             io: CpuIo::new(),
             // ares fills S-CPU work RAM with its structured low-entropy
             // pattern at power-on (`Random::array`), not with zeros; games that
@@ -612,8 +620,21 @@ impl Snes {
         let mut cycles = cpu_cycles;
         let mut dma_clocks = 0u32;
         self.dma.debug_frame = self.ppu.debug_frame;
-        while let Some(mut transfer) = self.dma.begin_transfer() {
+        if self.dma_transfer.is_none() {
+            self.dma_transfer = self.dma.begin_transfer();
+        }
+        let frame_at_start = self.ppu.debug_frame;
+        while let Some(mut transfer) = self.dma_transfer.take() {
             while transfer.busy() {
+                // A DMA longer than a frame must not hide the frame boundary:
+                // the PPU presents frames while the CPU is stalled, so park the
+                // transfer and let the next step resume it.
+                if self.ppu.debug_frame != frame_at_start {
+                    self.dma_transfer = Some(transfer);
+                    self.cpu.cycles += u64::from(dma_clocks);
+                    self.apply_interrupts();
+                    return cycles + dma_clocks;
+                }
                 let clocks = {
                     let vblank = self.ppu.in_vblank();
                     let hblank = self.ppu.in_hblank();

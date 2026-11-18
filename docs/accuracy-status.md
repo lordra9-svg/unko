@@ -256,6 +256,11 @@ Validation so far:
   `32768 * 64` Hz. `Super Power League 4` (type `$F5`) and `Tengai Makyou Zero`
   (type `$F9`, with the RTC) are also **100.000%** exact against ares at
   frames 300 and 600.
+- A DMA longer than a frame no longer hides a frame boundary: an unfinished
+  transfer is parked in `Snes::dma_transfer` and resumed next step, so the PPU
+  presents every completed frame as it does on hardware. This fixed Super Mario
+  RPG's long-standing "one frame ahead" offset - it is now **100.000% exact** at
+  frames 493 and 500 as well as 400.
 - Lines are rendered 128 dots into the scanline (ares `renderingCycle` = 512
   master clocks), not at the end of hblank as before. A V-IRQ `$2100` write at
   scanline 100 now produces exactly ares' bright/dim boundary

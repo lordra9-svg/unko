@@ -1812,6 +1812,42 @@ Next step: log every `line == 240` event with its master clock in both cores and
 find the extra one in SMRPG (it will be a frame whose `frame_ready` is set but
 never consumed, or a duplicated boundary).
 
+## Resolved 2026-11-18 - a DMA longer than a frame hid a frame boundary
+
+The state fingerprints (`PRESENT_STATE`/`ARES_PRESENT_STATE`) showed SMRPG's
+presented state sequences identical but shifted one index, while the frame-index
+fixture matched at the same index. Our own counter explained it:
+
+```
+                 presentation index   Ppu::debug_frame
+fixture                   300               301   (+1)
+SMRPG                     500               502   (+2)
+```
+
+Scanning the whole run found exactly one skipped boundary, at presentation 382:
+
+```
+idx=381 pf=382
+idx=382 pf=384   <-- two frame boundaries, one presentation
+```
+
+**Cause.** `Snes::step` ran a whole DMA to completion. A 64 KiB transfer costs
+~0.5 M master clocks - more than a frame - and the PPU is advanced inside that
+loop, so two `line == 240` boundaries can pass with only one `frame_ready` flag
+set. The harness then presented one image for two frames and every later index
+showed a state one frame newer. On hardware (and in ares, where the PPU runs as
+its own thread) the frames are presented while the CPU is stalled.
+
+**Fix.** A step now stops at a frame boundary: the unfinished `DmaTransfer` is
+parked in `Snes::dma_transfer` and resumed by the next step, so exactly one frame
+is presented per completed frame.
+
+**Result** - no frame is skipped (`pf` increments by 1 for all 501 frames), the
+presented state sequences line up at the same index, and Super Mario RPG is now
+**100.000% exact at frames 493 and 500** against deterministic ares captures
+(previously 88.438% and 0.000%), with `ours500` vs `ares501` correctly *not*
+matching any more.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):
