@@ -1589,10 +1589,27 @@ Instrumentation added: `PPU_LINE_LOG` (per-rendered-line register snapshot),
 the ares equivalents `ARES_PPU_LINE_LOG`, `ARES_DUMP_BASE` `.vram`, and
 `ARES_VRAM_LOG`.
 
-Next step is the one remaining unknown: whether the extra 187 accepted writes
-(ours 126,976 vs ares 126,789 over frames 300-440) come from our `$2118`/`$2119`
-active-display gate admitting writes ares drops, which would shift the stream
-exactly this way.
+**The `$2118`/`$2119` acceptance gate is not the cause.** Logging the full write
+context - `$2115` mode, increment and the pre-increment word address - at every
+write shows the two cores agree on *all* of them at the first divergence:
+
+```
+      ares                                  ours
+81984 A=0080 b0 00 mode=1 inc=1 addr=0080 | A=0080 b0 00 mode=1 inc=1 addr=0080
+81986 A=0081 b0 01 mode=1 inc=1 addr=0081 | A=0081 b0 01 mode=1 inc=1 addr=0081
+81987 A=0081 b1 58 mode=1 inc=1 addr=0081 | A=0081 b1 00 mode=1 inc=1 addr=0081  <-- data only
+81988 A=0082 b0 02 mode=1 inc=1 addr=0082 | A=0082 b0 02 mode=1 inc=1 addr=0082
+```
+
+Address, byte index, `$2115` mode and increment are identical and only the
+*datum* differs, so this is neither an address mapping nor a write-acceptance
+rule: the byte our PPU is handed is wrong. (The earlier "187 extra writes" was
+a log-window artefact - both logs start at "frame >= 300", whose clock differs
+slightly between the two cores, so the totals are not comparable.)
+
+The next step is therefore upstream of the PPU: capture the DMA (or CPU store)
+that supplies `$2119` at that write and compare its A-bus source address and
+datum between the cores.
 
 ## Oracle toolkit
 

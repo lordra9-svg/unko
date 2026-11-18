@@ -947,10 +947,13 @@ impl Ppu {
                     {
                         let _ = writeln!(
                             f,
-                            "A={:04X} byte={} data={:02X}",
+                            "A={:04X} byte={} data={:02X} mode={} inc={} addr={:04X}",
                             address,
                             u8::from(high),
-                            data
+                            data,
+                            u8::from(self.vmain & 0x80 != 0),
+                            self.vram_increment(),
+                            self.vram_address
                         );
                     }
                 }
