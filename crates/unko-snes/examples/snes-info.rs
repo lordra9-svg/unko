@@ -291,6 +291,24 @@ fn main() -> ExitCode {
                         }
                     }
                 }
+                if let Some(path) = std::env::var_os("PRESENT_HASH") {
+                    use std::io::Write;
+                    // Same FNV-1a-64 over the same 256x224 RGBA pixel set that
+                    // the ares harness hashes, so frames align by content.
+                    let frame = system.ppu.frame_buffer();
+                    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+                    for byte in frame.iter().take(256 * 224 * 4) {
+                        hash ^= u64::from(*byte);
+                        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+                    }
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&path)
+                    {
+                        let _ = writeln!(f, "frame {frames} {hash:016x}");
+                    }
+                }
                 if let Some(dir) = std::env::var_os("VRAM_DIR") {
                     let mut bytes = Vec::with_capacity(0x1_0000);
                     for word in system.ppu.vram_words() {

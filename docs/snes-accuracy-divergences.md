@@ -1975,6 +1975,43 @@ S-CPU also uses), not from GSU rendering.
 local `x` to `(x & 7) ^ 7` before the read, so logging after that shows 7 where
 the caller passed 0.)
 
+### Star Fox is content-exact through 900 frames
+
+`PRESENT_HASH` / `ARES_PRESENT_HASH` make both harnesses emit an FNV-1a-64 hash
+of the *same* 256x224 RGBA pixel set (ares' canvas at crop (26,9), horizontal
+scale 2), so frames can be aligned by content instead of by number. Running Star
+Fox to 920 frames on both sides:
+
+```
+our frames matching an ares frame anywhere: 901/920
+first our frame with no ares match: 901   (the ares capture ends at 919)
+```
+
+**Every one of our frames 0..900 matches an ares frame byte-for-byte.** The 19
+unmatched frames are simply past the end of the ares capture, which the offset
+pushes out of range. So Star Fox's rendering is exact - there is no divergence at
+frames 307/320/600/900 at all; those were frame-number offsets.
+
+What *does* drift is how many frames each harness presents for the same game
+progress: ares needs progressively more frames to reach the same picture.
+
+| ours | matching ares frames | offset |
+|---|---|---|
+| 200 | 198..202 | 0 |
+| 290 | 289..291 | 0 |
+| 320 | 321..323 | +1 |
+| 400 | 404..406 | +4 |
+| 500 | 507..511 | +7 |
+| 600 | 606..611 | +6 |
+| 700 | 712..716 | +12 |
+| 800 | 814..818 | +14 |
+| 890 | 910..914 | +20 |
+
+i.e. we present ~2% fewer frames than ares for the same content. Since the
+*content* always matches, this is a presentation-count difference (a frame that
+ares presents and we do not), not a rendering difference - the frame count is
+still an open item, but it cannot affect what the game sees.
+
 ### Star Fox frame numbering drifts: compare by content, not by number
 
 The two capture harnesses do not stay frame-aligned for Star Fox, and the offset

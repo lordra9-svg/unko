@@ -379,6 +379,22 @@ a *different* ares frame matching 100.000%, while a real rendering difference
 matches nothing nearby. Static screens hide the offset, so a same-number match
 is not proof of alignment.
 
+### Aligning captures by content
+
+`PRESENT_HASH=<path>` (ours) and `ARES_PRESENT_HASH=<path>` (ares) write
+`frame <n> <fnv64>` per presented frame, hashed over the *same* 256x224 RGBA
+pixel set (ares' canvas at crop (26,9), horizontal scale 2). Matching our frame
+against a range of ares frames then proves alignment or divergence without
+depending on frame numbering:
+
+```sh
+ARES_PRESENT_HASH=a.txt ares-capture.sh rom 920 out
+FRAMES=920 PRESENT_HASH=o.txt target/release/examples/snes-info rom "$IPL"
+```
+
+Star Fox needs this: the two harnesses drift ~2% in presented frames, so
+same-number comparisons read 83-99% while the content is actually identical.
+
 ## Regression baseline
 
 `baseline.py` runs every ROM under `test-roms/snes/` for a fixed frame count and

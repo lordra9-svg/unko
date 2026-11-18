@@ -230,14 +230,14 @@ Validation so far:
   S-CPU `$3000-$34FF` register window plus the `$70-$71` and `$6000-$7FFF`
   work-RAM windows. The public PeterLemon GSU suite (31 opcode tests) is
   verified against ares below. A release SuperFX title is now verified too:
-  **Star Fox (USA)** boots and its GSU-driven intro is **100.000%** exact
-  against ares. Note that the two capture harnesses drift out of frame
-  alignment for this title (+1 frame by 307, +2 by 320), so comparisons must be
-  by content: our frame 305 matches ares 306, 306 matches 307, 307 matches 308,
-  and 320 matches 322/323, all byte-identical. Same-number comparisons
-  (83-99%) are the alignment offset, not rendering errors. By frame 900 no
-  nearby ares frame matches (best 98.9% at 915), so a real difference develops
-  between ~322 and ~900 and is not yet bisected.
+  **Star Fox (USA)** boots and its GSU-driven intro is **content-exact for the
+  first 900 frames**: hashing the same 256x224 pixel set in both harnesses
+  shows every one of our frames 0..900 matches an ares frame byte-for-byte. The
+  earlier 83-99% "divergences" (frames 307/320/600/900) were frame-number
+  offsets, not rendering errors. What does drift is the presentation count: ares
+  needs ~20 more frames than we do to reach the same picture by frame 890 (~2%
+  more frames presented), which is an open presentation-count item, not a
+  rendering one.
   The GSU's own `PLOT`/`RPIX` stream is **bit-identical** to ares over frames
   154-308 (51,476 events, zero differences), and per-frame dumps show VRAM
   byte-identical through frame 152 with the first difference at **frame 153**
