@@ -1869,6 +1869,37 @@ Super Mario Kart, frame 600: 57,344 / 57,344 exact (was 57,333)
 This was never a DSP-1 defect: the label "DSP-1 sprite-font residual" came from
 the pixels looking like a glyph. SMK is now 100.000%.
 
+## Resolved 2026-11-18 - EXSPC7110 expansion ROM (`$40-$4F`)
+
+mia splits a 7 MiB `EXSPC7110-` image as **1 MiB program + 5 MiB data + 1 MiB
+expansion** (`board[0] == "EXSPC7110" && size == 0x700000`, the Tengai Makyou
+Zero fan translation), and ares maps the expansion at `40-4f:0000-ffff`
+(`memory type=ROM content=Expansion`, loaded through `Cartridge::loadROM`).
+
+We treated every SPC7110 image as `program = first MiB`, `data = rest`, so the
+last MiB was served as data ROM and `$40-$4F` fell through to the plain
+cartridge mapping.
+
+Implemented in `spc7110.rs`:
+
+- `split_image()` returns `(program, data, expansion)` and recognises the
+  7 MiB layout, with `is_exspc7110()`;
+- `expansion` memory plus `expansion_read()`; the window is sixteen 64 KiB banks
+  covering the 1 MiB part, so the offset is **20 bits** (the first version used
+  16 and aliased every bank - caught by a unit test);
+- `SnesBus` and `HdmaBus` read the expansion window and treat it as read-only.
+
+Verified by tests that need no ROM image:
+
+| test | asserts |
+|---|---|
+| `splits_a_seven_mib_exspc7110_image` | 1/5/1 MiB split, boundary bytes, and that a plain SPC7110 keeps `data = rest` |
+| `expansion_rom_is_mapped_at_40_4f` | window classification, `$40:0000`, `$40:1234`, `$4F:FFFF`, empty on a plain board |
+| `exspc7110_expansion_rom_is_mapped_at_40_4f` | full system: `$00:8000` = program, `$40:0000`/`$4F:FFFF` = expansion, write is ignored, `$6000-$7FFF` save RAM still works |
+
+All 161 lib tests pass and the three local SPC7110 titles (MDH, SPL, TMZ) remain
+100.000% exact at frame 600.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

@@ -26,6 +26,16 @@ pub const PROM_SIZE: usize = 0x10_0000;
 /// Save RAM size for `SPC7110-RAM` boards.
 pub const RAM_SIZE: usize = 0x2000;
 
+/// Data ROM size on an `EXSPC7110-` board (the expansion ROM is separate).
+pub const EXSPC7110_DATA_SIZE: usize = 0x50_0000;
+
+/// Expansion ROM size on an `EXSPC7110-` board, mapped at `$40-$4F:$0000-$FFFF`.
+pub const EXSPC7110_EXPANSION_SIZE: usize = 0x10_0000;
+
+/// Total image size of an `EXSPC7110-` board: 1 MiB program + 5 MiB data +
+/// 1 MiB expansion (mia: `board[0] == "EXSPC7110" && size == 0x700000`).
+pub const EXSPC7110_IMAGE_SIZE: usize = PROM_SIZE + EXSPC7110_DATA_SIZE + EXSPC7110_EXPANSION_SIZE;
+
 /// One probability-model entry (ares `Decompressor::ModelState`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 struct ModelState {
@@ -355,6 +365,10 @@ pub struct Spc7110 {
     /// Data ROM (the rest of the image). Not serialized for the same reason.
     #[serde(skip)]
     pub drom: Vec<u8>,
+    /// Expansion ROM on `EXSPC7110-` boards (`$40-$4F:$0000-$FFFF`). Empty on
+    /// a plain `SPC7110-` board.
+    #[serde(skip)]
+    pub expansion: Vec<u8>,
     /// Save RAM.
     pub ram: Vec<u8>,
 
@@ -435,10 +449,11 @@ impl Spc7110 {
     /// ares/mia split a `SPC7110-` image into `program.rom` (the first MiB)
     /// and `data.rom` (everything after it).
     pub fn new(rom: &[u8], sram_size: usize, has_rtc: bool) -> Self {
-        let prom_len = PROM_SIZE.min(rom.len());
+        let (prom, drom, expansion) = Self::split_image(rom);
         let mut chip = Self {
-            prom: rom[..prom_len].to_vec(),
-            drom: rom[prom_len..].to_vec(),
+            prom,
+            drom,
+            expansion,
             ram: vec![0; sram_size.max(RAM_SIZE)],
             r4801: 0,
             r4802: 0,
@@ -500,11 +515,10 @@ impl Spc7110 {
 
     /// Re-attach the cartridge image after a save-state load.
     pub fn attach_rom(&mut self, rom: &[u8]) {
-        let prom_len = PROM_SIZE.min(rom.len());
-        self.prom.clear();
-        self.prom.extend_from_slice(&rom[..prom_len]);
-        self.drom.clear();
-        self.drom.extend_from_slice(&rom[prom_len..]);
+        let (prom, drom, expansion) = Self::split_image(rom);
+        self.prom = prom;
+        self.drom = drom;
+        self.expansion = expansion;
     }
 
     /// Reset the register file (ares `SPC7110::power`). ROM and RAM persist.
@@ -561,6 +575,50 @@ impl Spc7110 {
             rtc.power();
         }
         self.rtc_credit = 0;
+    }
+
+    /// Split a cartridge image into program, data and expansion ROM the way
+    /// mia does for SPC7110 boards.
+    ///
+    /// - `EXSPC7110-` (7 MiB): 1 MiB program at 0, 5 MiB data, then 1 MiB
+    ///   expansion at the end.
+    /// - `SPC7110-`: 1 MiB program, everything after it is data ROM.
+    pub fn split_image(rom: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+        if rom.len() == EXSPC7110_IMAGE_SIZE {
+            let prom = rom[..PROM_SIZE].to_vec();
+            let data_end = PROM_SIZE + EXSPC7110_DATA_SIZE;
+            let drom = rom[PROM_SIZE..data_end].to_vec();
+            let expansion = rom[data_end..].to_vec();
+            return (prom, drom, expansion);
+        }
+        let prom_len = PROM_SIZE.min(rom.len());
+        (
+            rom[..prom_len].to_vec(),
+            rom[prom_len..].to_vec(),
+            Vec::new(),
+        )
+    }
+
+    /// Whether this is a 7 MiB `EXSPC7110-` image.
+    pub const fn is_exspc7110(rom: &[u8]) -> bool {
+        rom.len() == EXSPC7110_IMAGE_SIZE
+    }
+
+    /// The expansion-ROM window `$40-$4F:$0000-$FFFF`.
+    pub const fn in_expansion_window(address: u32) -> bool {
+        let bank = (address >> 16) & 0xFF;
+        bank >= 0x40 && bank <= 0x4F
+    }
+
+    /// Read the expansion ROM (ares maps it at `40-4f:0000-ffff`).
+    pub fn expansion_read(&self, address: u32) -> u8 {
+        if self.expansion.is_empty() {
+            return 0;
+        }
+        // The window is `$40-$4F:$0000-$FFFF` - sixteen 64 KiB banks covering
+        // the whole 1 MiB expansion ROM - so the offset is 20 bits.
+        let offset = mirror(address & 0x000F_FFFF, self.expansion.len() as u32);
+        self.expansion[offset as usize]
     }
 
     // --- Bus windows ------------------------------------------------------
@@ -1346,6 +1404,61 @@ mod tests {
             chip.rtc.as_mut().expect("rtc").tick();
         }
         assert_eq!(chip.read(0x41, 0), 0x00); // secondlo
+    }
+
+    #[test]
+    fn splits_a_seven_mib_exspc7110_image() {
+        // mia: EXSPC7110 + 0x700000 => 1 MiB program, 5 MiB data,
+        // 1 MiB expansion (in that order).
+        let mut rom = vec![0u8; EXSPC7110_IMAGE_SIZE];
+        for (i, byte) in rom.iter_mut().enumerate() {
+            *byte = match i / PROM_SIZE {
+                0 => 0x11,     // program
+                1..=5 => 0x22, // data
+                _ => 0x33,     // expansion
+            };
+        }
+        let (prom, drom, expansion) = Spc7110::split_image(&rom);
+        assert_eq!(prom.len(), PROM_SIZE);
+        assert_eq!(drom.len(), EXSPC7110_DATA_SIZE);
+        assert_eq!(expansion.len(), EXSPC7110_EXPANSION_SIZE);
+        assert_eq!(prom[0], 0x11);
+        assert_eq!(prom[PROM_SIZE - 1], 0x11);
+        assert_eq!(drom[0], 0x22);
+        assert_eq!(drom[EXSPC7110_DATA_SIZE - 1], 0x22);
+        assert_eq!(expansion[0], 0x33);
+        assert_eq!(expansion[EXSPC7110_EXPANSION_SIZE - 1], 0x33);
+        assert!(Spc7110::is_exspc7110(&rom));
+
+        // A plain SPC7110 image keeps everything after the program as data.
+        let plain = vec![0u8; 0x30_0000];
+        let (p2, d2, e2) = Spc7110::split_image(&plain);
+        assert_eq!((p2.len(), d2.len(), e2.len()), (PROM_SIZE, 0x20_0000, 0));
+        assert!(!Spc7110::is_exspc7110(&plain));
+    }
+
+    #[test]
+    fn expansion_rom_is_mapped_at_40_4f() {
+        assert!(Spc7110::in_expansion_window(0x40_0000));
+        assert!(Spc7110::in_expansion_window(0x4F_FFFF));
+        assert!(!Spc7110::in_expansion_window(0x50_0000));
+        assert!(!Spc7110::in_expansion_window(0x3F_FFFF));
+        assert!(!Spc7110::in_expansion_window(0xC0_0000));
+
+        let mut rom = vec![0u8; EXSPC7110_IMAGE_SIZE];
+        rom[PROM_SIZE + EXSPC7110_DATA_SIZE] = 0xA5;
+        rom[PROM_SIZE + EXSPC7110_DATA_SIZE + 0x1234] = 0x3C;
+        rom[EXSPC7110_IMAGE_SIZE - 1] = 0x5A;
+        let chip = Spc7110::new(&rom, RAM_SIZE, true);
+        assert_eq!(chip.expansion_read(0x40_0000), 0xA5);
+        assert_eq!(chip.expansion_read(0x40_1234), 0x3C);
+        // Banks $40-$4F select successive 64 KiB slices of the 1 MiB part.
+        assert_eq!(chip.expansion_read(0x4F_FFFF), 0x5A);
+
+        // A plain SPC7110 board has no expansion ROM and reads zero.
+        let plain = Spc7110::new(&vec![0u8; 0x30_0000], RAM_SIZE, false);
+        assert!(plain.expansion.is_empty());
+        assert_eq!(plain.expansion_read(0x40_0000), 0x00);
     }
 
     #[test]

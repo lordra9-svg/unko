@@ -1391,6 +1391,12 @@ impl CpuBus for SnesBus<'_> {
                 let chip = self.spc7110.as_ref().expect("SPC7110 present");
                 return chip.ram_read(index, mdr);
             }
+            if Spc7110::in_expansion_window(address) {
+                // `EXSPC7110-` boards add a 1 MiB expansion ROM at
+                // `$40-$4F:$0000-$FFFF` (ares `memory content=Expansion`).
+                let chip = self.spc7110.as_ref().expect("SPC7110 present");
+                return chip.expansion_read(address);
+            }
             if Spc7110::in_rom_window(address) {
                 let reduced = Spc7110::reduce_rom(address);
                 let chip = self.spc7110.as_ref().expect("SPC7110 present");
@@ -1505,8 +1511,8 @@ impl CpuBus for SnesBus<'_> {
                 chip.ram_write(index, value);
                 return;
             }
-            if Spc7110::in_rom_window(address) {
-                return; // program/data ROM is read-only
+            if Spc7110::in_rom_window(address) || Spc7110::in_expansion_window(address) {
+                return; // program/data/expansion ROM is read-only
             }
         }
         if self.sa1_write(address, value) {
@@ -1668,6 +1674,9 @@ impl HdmaBus<'_> {
             }
         }
         if let Some(spc7110) = self.spc7110.as_ref() {
+            if Spc7110::in_expansion_window(address) {
+                return spc7110.expansion_read(address);
+            }
             if Spc7110::in_rom_window(address) {
                 return spc7110.mcurom_read(Spc7110::reduce_rom(address), 0);
             }
@@ -2306,6 +2315,69 @@ mod tests {
         rom[header + 0x15] = 0x3A; // SPC7110 HiROM map mode
         rom[header + 0x16] = 0xF5; // SPC7110
         Cartridge::from_bytes(&rom).expect("valid SPC7110 image")
+    }
+
+    /// A 7 MiB `EXSPC7110-` image: 1 MiB program, 5 MiB data, 1 MiB expansion.
+    fn exspc7110_cartridge() -> Cartridge {
+        use crate::spc7110::{
+            EXSPC7110_DATA_SIZE, EXSPC7110_EXPANSION_SIZE, EXSPC7110_IMAGE_SIZE, PROM_SIZE,
+        };
+        let mut rom = vec![0u8; EXSPC7110_IMAGE_SIZE];
+        let expansion_at = PROM_SIZE + EXSPC7110_DATA_SIZE;
+        for (i, byte) in rom.iter_mut().enumerate() {
+            *byte = if i < PROM_SIZE {
+                0x11
+            } else if i < expansion_at {
+                0x22
+            } else {
+                0x33
+            };
+        }
+        rom[expansion_at] = 0xA5;
+        rom[expansion_at + 0xFFFFF] = 0x5A;
+        // Reset vector inside the program ROM.
+        rom[0x7FFC] = 0x00;
+        rom[0x7FFD] = 0x80;
+        // HiROM header at $FFC0 with the SPC7110 map mode and type.
+        rom[0xFFC0..0xFFD5].fill(b' ');
+        rom[0xFFC0..0xFFCA].copy_from_slice(b"EXSPC TEST");
+        rom[0xFFD5] = 0x3A; // SPC7110 HiROM map mode
+        rom[0xFFD6] = 0xF5; // SPC7110
+        rom[0xFFD7] = 0x0D;
+        rom[0xFFD8] = 0x03;
+        rom[0xFFD9] = 0x01;
+        // Complement/checksum must XOR to $FFFF for the header to validate.
+        rom[0xFFDC..0xFFDE].copy_from_slice(&0x0000u16.to_le_bytes());
+        rom[0xFFDE..0xFFE0].copy_from_slice(&0xFFFFu16.to_le_bytes());
+        rom[0xFFFC..0xFFFE].copy_from_slice(&0x8000u16.to_le_bytes());
+        assert_eq!(
+            rom.len(),
+            EXSPC7110_EXPANSION_SIZE + EXSPC7110_DATA_SIZE + PROM_SIZE
+        );
+        Cartridge::from_bytes(&rom).expect("valid EXSPC7110 image")
+    }
+
+    #[test]
+    fn exspc7110_expansion_rom_is_mapped_at_40_4f() {
+        let mut system = Snes::new(exspc7110_cartridge());
+        assert!(system.cart.header().has_spc7110());
+        let chip = system.spc7110.as_ref().expect("SPC7110 present");
+        assert_eq!(chip.prom.len(), 0x10_0000);
+        assert_eq!(chip.drom.len(), 0x50_0000);
+        assert_eq!(chip.expansion.len(), 0x10_0000);
+
+        // Program ROM through the MCU window, expansion ROM at $40-$4F.
+        assert_eq!(system.read(0x00_8000, 0), 0x11);
+        assert_eq!(system.read(0x40_0000, 0), 0xA5);
+        assert_eq!(system.read(0x4F_FFFF, 0), 0x5A);
+        assert_eq!(system.read(0x41_0000, 0), 0x33);
+        // The expansion ROM is read-only.
+        system.write(0x40_0000, 0x00);
+        assert_eq!(system.read(0x40_0000, 0), 0xA5);
+        // Save RAM still lives at $6000-$7FFF.
+        system.write(0x00_4830, 0x80);
+        system.write(0x00_6000, 0x77);
+        assert_eq!(system.read(0x00_6000, 0), 0x77);
     }
 
     #[test]

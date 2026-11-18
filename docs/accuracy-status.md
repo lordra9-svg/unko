@@ -256,6 +256,10 @@ Validation so far:
   `32768 * 64` Hz. `Super Power League 4` (type `$F5`) and `Tengai Makyou Zero`
   (type `$F9`, with the RTC) are also **100.000%** exact against ares at
   frames 300 and 600.
+- The `EXSPC7110-` (7 MiB) layout is implemented: 1 MiB program + 5 MiB data +
+  1 MiB expansion, with the expansion ROM at `$40-$4F:$0000-$FFFF` (20-bit
+  offset across sixteen 64 KiB banks) on both the CPU and HDMA buses. Covered by
+  unit tests that construct the image in memory, so no 7 MiB ROM is needed.
 - Sprite OAM x is treated as a signed nine-bit position, so objects partially
   off the left edge (x >= 256) draw their visible columns like ares. This fixed
   the last 11 pixels of Super Mario Kart (frame 600 is now 100.000%).
