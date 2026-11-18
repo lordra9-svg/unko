@@ -2287,6 +2287,44 @@ This also explains why the earlier machine-time experiment overshot: it advanced
 the whole machine (including the PPU) by the reload instead of letting the CPU
 execute through it, so it shifted video timing as well.
 
+### The handshake, measured per access on both sides
+
+Logging every `$7F48`/`$7F4F` write and the reload's start/finish gives the
+complete sequence (clocks relative to the `$7F48` write):
+
+| event | ares | ours |
+|---|---|---|
+| `$7F48` write | 0 | 0 |
+| reload starts | **924** | **4** |
+| reload completes | **3,650** (2,726-clock load) | **4** (instant in CPU time) |
+| `$7F4F` write | **3,798** | **126** |
+| first firmware instruction | **5,014** | ~2,730 |
+
+Read as a decomposition, ares' `$7F4F` write is exactly
+
+```
+924 (coprocessor catches up while halted before the reload runs)
++ 2,726 (reload, during which the CPU keeps executing)
++ 148 (code between reload end and the write)
+= 3,798
+```
+
+and ours is `4 + 122 = 126`, because we do neither: the reload runs
+*immediately* (4 clocks) and its cost is charged to the coprocessor's clock
+rather than to the CPU's, so no machine time passes. The first instruction then
+lands at ~2,604 clocks after `$7F4F` in ours versus 1,240 in ares.
+
+So the fix is the *conjunction* of the two things tried separately:
+
+1. a ~924-clock delay before the reload starts = the coprocessor catching up its
+   outstanding lead while halted (ares' lead at `$7F48` is +375..+966 cycles);
+2. charging the reload's 2,726 clocks to the **CPU's** clock, so the CPU's clock
+   (and instruction stream) advances through it.
+
+The machine-time experiment implemented (2) alone, which put `$7F4F` ~950 clocks
+early and made parity worse - consistent with this decomposition. Neither part
+was ever tried together.
+
 ### Tested: dragging the S-CPU through the reload (no effect)
 
 Two more variants were implemented and measured on the shared clock:

@@ -348,6 +348,14 @@ impl Cx4 {
             0x7f48 => {
                 self.io.cache.page = data & 1 != 0;
                 if insn_logging() {
+                    let halt = u8::from(self.io.halt);
+                    self.log_event(
+                        "W48",
+                        u32::from(self.io.cache.pb),
+                        u32::from(data) | (u32::from(halt) << 8),
+                    );
+                }
+                if insn_logging() {
                     let lead = DEBUG_CPU_LEAD.load(std::sync::atomic::Ordering::Relaxed);
                     self.log_event("LEAD", lead as u32 & 0xffff, 0x48);
                 }
