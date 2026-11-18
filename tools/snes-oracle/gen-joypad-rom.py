@@ -62,7 +62,8 @@ def build() -> bytes:
     # when polling starts, so they are only valid after it completes.
     # Sample once per frame from the visible period, after the auto-poll has
     # finished: $4218 is cleared when polling starts and holds partial data
-    # until it completes.
+    # until it completes. Each branch is emitted after its body so the offset is
+    # computed from the branch's own address.
     wait_visible = label()
     emit(
         ("lda $4212", bytes([0xAD, 0x12, 0x42])),

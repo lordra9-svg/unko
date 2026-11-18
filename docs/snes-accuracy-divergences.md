@@ -1900,6 +1900,36 @@ Verified by tests that need no ROM image:
 All 161 lib tests pass and the three local SPC7110 titles (MDH, SPL, TMZ) remain
 100.000% exact at frame 600.
 
+## CX4 gameplay diffed (2026-11-18)
+
+Mega Man X2 reaches its in-game intro on its own (no input needed), so CX4
+gameplay can be diffed after all. Against deterministic ares captures:
+
+| frame | result |
+|---|---|
+| 1800 | **100.000%** (57,344/57,344) |
+| 2400 | **100.000%** |
+| 3000 | **100.000%** |
+| 3100 | **100.000%** |
+| 3200 | **100.000%** |
+| 3300 | 99.224% (445 pixels) |
+| 3400 | 97.811% |
+| 3700 | 97.583% |
+| 3900 | 86.679% |
+| 4000 | 84.321% |
+
+So ~3,000 frames of CX4-driven graphics are pixel-exact and the first
+divergence is a **445-pixel region at x=161..208, y=30..71** - a 48x42 window in
+which the game draws a character portrait through the CX4 bitmap/plot path. The
+diff map is an 8x8-celled grid pattern with partial glyph strokes, i.e. our
+`plot` output differs inside that window rather than the scene shifting.
+
+Controller scripting is now also a settled oracle: `gen-joypad-rom.py`
+(publishing `$4218`/`$4219` as CGRAM colour 0) gives identical colours in both
+cores for every realistic mask tested - `0x0000`, `0x0080` (A), `0x1000`
+(Start), `0x0010` (R), `0x0090` (A+R), `0x4800` (Select+Left). Only the
+artificial `0xFFFF` (contradictory D-pad) differs, which no game produces.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

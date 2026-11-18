@@ -253,9 +253,14 @@ register `$4218` reads `$1000` from frame 20 onwards (logged via
 `ARES_JOY_POLL_LOG`), so the game sees a held Start exactly as our core does.
 
 `gen-joypad-rom.py` builds a first-party ROM that publishes `$4218`/`$4219` as
-CGRAM colour 0, for checking the path end to end. Note that the registers are
-cleared while polling runs, so a valid sample must wait for `$4212` bit 0 to
-clear; the current fixture is a debugging aid rather than a settled oracle.
+CGRAM colour 0 (sampled once per frame after the auto-poll finishes, since the
+registers are cleared while polling runs). It is a settled parity check: both
+cores produce identical colours for every realistic mask - `0x0000`, `0x0080`
+(A), `0x1000` (Start), `0x0010` (R), `0x0090` (A+R), `0x4800`
+(Select+Left). Only a contradictory D-pad mask (`0xFFFF`) differs.
+
+Note that `snes-info`'s `JOYPAD0`/`JOYPAD0_SEGMENTS` masks are parsed as **hex**,
+matching ares' `strtoul(..., 0)` when written as `0x...`.
 
 ## Deterministic captures
 

@@ -108,6 +108,31 @@ fn main() -> ExitCode {
             system.set_joypad(0, value);
         }
     }
+    // `JOYPAD0_SEGMENTS="frame:mask,frame:mask"`: the last segment at or before
+    // the current frame applies. Same semantics as ares' ARES_JOYPAD_SEGMENTS.
+    let joypad0_segments: Vec<(u32, u16)> = std::env::var("JOYPAD0_SEGMENTS")
+        .ok()
+        .map(|spec| {
+            spec.split(',')
+                .filter_map(|item| {
+                    let (frame, mask) = item.split_once(':')?;
+                    Some((
+                        frame.trim().parse().ok()?,
+                        u16::from_str_radix(mask.trim().trim_start_matches("0x"), 16).ok()?,
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    fn joypad_segment_value(segments: &[(u32, u16)], frame: u32) -> u16 {
+        let mut value = 0u16;
+        for &(from, mask) in segments {
+            if frame >= from {
+                value = mask;
+            }
+        }
+        value
+    }
     if std::env::var_os("PORT_OUT").is_some() || std::env::var_os("SPC_TRACE").is_some() {
         system.apu.set_port_logging(true);
     }
@@ -140,7 +165,9 @@ fn main() -> ExitCode {
         let mut frames = 0u32;
         let instruction_limit = target_frames.saturating_mul(20_000).max(20_000_000);
         while frames < target_frames && instructions < instruction_limit && !system.cpu.stp {
-            if let Some(value) = joypad0 {
+            if !joypad0_segments.is_empty() {
+                system.set_joypad(0, joypad_segment_value(&joypad0_segments, frames));
+            } else if let Some(value) = joypad0 {
                 system.set_joypad(0, if frames >= joypad0_from { value } else { 0 });
             }
             if watched_pcs.contains(&system.cpu.pc) {

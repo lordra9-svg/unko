@@ -256,6 +256,9 @@ Validation so far:
   `32768 * 64` Hz. `Super Power League 4` (type `$F5`) and `Tengai Makyou Zero`
   (type `$F9`, with the RTC) are also **100.000%** exact against ares at
   frames 300 and 600.
+- CX4 gameplay is diffed: Mega Man X2's in-game intro is **100.000%** exact
+  against ares at frames 1800, 2400, 3000, 3100 and 3200; the first difference
+  is a 445-pixel CX4 bitmap/plot window at frame 3300.
 - The `EXSPC7110-` (7 MiB) layout is implemented: 1 MiB program + 5 MiB data +
   1 MiB expansion, with the expansion ROM at `$40-$4F:$0000-$FFFF` (20-bit
   offset across sixteen 64 KiB banks) on both the CPU and HDMA buses. Covered by
