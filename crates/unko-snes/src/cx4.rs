@@ -440,6 +440,18 @@ impl Cx4 {
     pub fn write_dram(&mut self, address: u32, data: u8) {
         let address = (address & 0xfff) as usize;
         if address < 0xc00 {
+            if std::env::var_os("CX4_WR_LOG").is_some()
+                && matches!(address, 0x71e | 0x71f | 0x7d0 | 0x7d1)
+            {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/opencode/cx4wr.log")
+                {
+                    let _ = writeln!(f, "CPU {:04X} = {:02X}", address, data);
+                }
+            }
             self.data_ram[address] = data;
         }
     }
@@ -1225,7 +1237,36 @@ impl Cx4 {
             address -= 0x400;
         }
         let value = (self.regs.ram >> (byte * 8)) as u8;
+        self.log_wrram(address, byte);
         self.data_ram[usize::from(address)] = value;
+    }
+
+    /// Debug: log writes to the CX4 bitmap cells that first diverge from ares.
+    fn log_wrram(&self, address: u16, byte: u32) {
+        if std::env::var_os("CX4_WR_LOG").is_none() {
+            return;
+        }
+        if !matches!(address, 0x71e | 0x71f | 0x7d0 | 0x7d1) {
+            return;
+        }
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/opencode/cx4wr.log")
+        {
+            let _ = writeln!(
+                f,
+                "W {:04X} byte={} ram={:06X} pb={:04X} pc={:02X} dpr={:04X} a={:06X}",
+                address,
+                byte,
+                self.regs.ram,
+                self.regs.pb,
+                self.regs.pc,
+                self.regs.dpr,
+                self.regs.a
+            );
+        }
     }
 
     fn wrram_imm(&mut self, byte: u32, imm: u8) {
@@ -1234,6 +1275,7 @@ impl Cx4 {
             address -= 0x400;
         }
         let value = (self.regs.ram >> (byte * 8)) as u8;
+        self.log_wrram(address, byte);
         self.data_ram[usize::from(address)] = value;
     }
 }

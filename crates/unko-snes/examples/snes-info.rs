@@ -235,6 +235,12 @@ fn main() -> ExitCode {
                 );
             }
             if system.ppu.frame_ready() {
+                if let Some(dir) = std::env::var_os("CX4_RAM_DIR") {
+                    if let Some(cx4) = &system.cx4 {
+                        let path = std::path::Path::new(&dir).join(format!("cx4-{frames}.ram"));
+                        let _ = std::fs::write(path, &cx4.data_ram);
+                    }
+                }
                 if let Some(path) = std::env::var_os("PRESENT_STATE") {
                     use std::io::Write;
                     fn fnv(bytes: impl Iterator<Item = u8>) -> u32 {
@@ -684,6 +690,13 @@ fn main() -> ExitCode {
             cgram.extend_from_slice(&system.ppu.cgram_word(address as u8).to_le_bytes());
         }
         let _ = std::fs::write(path, cgram);
+    }
+    if let Some(path) = std::env::var_os("CX4_RAM_OUT") {
+        if let Some(cx4) = &system.cx4 {
+            if let Err(error) = std::fs::write(&path, &cx4.data_ram) {
+                eprintln!("{}: {error}", path.to_string_lossy());
+            }
+        }
     }
     if let Some(path) = std::env::var_os("VRAM_OUT") {
         let mut vram = Vec::with_capacity(0x8000 * 2);

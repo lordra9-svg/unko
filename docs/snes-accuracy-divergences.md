@@ -1924,6 +1924,31 @@ which the game draws a character portrait through the CX4 bitmap/plot path. The
 diff map is an 8x8-celled grid pattern with partial glyph strokes, i.e. our
 `plot` output differs inside that window rather than the scene shifting.
 
+Bisected with per-frame CX4 data-RAM snapshots (`CX4_RAM_DIR` /
+`ARES_CX4RAM_DIR`). The RAM is byte-identical through frame 3229 and first
+differs at **frame 3230, by exactly four bytes**:
+
+```
+071E  ares=01 ours=03
+071F  ares=01 ours=03
+07D0  ares=01 ours=03
+07D1  ares=01 ours=03
+```
+
+i.e. one extra bitmap bit in each of two 16-byte rows. The difference then grows
+monotonically (8 bytes at 3233, 20 at 3242, 353 at 3299), which fits one extra
+plot iteration per frame rather than a wrong computation.
+
+The firmware's writes to those cells are **identical in both cores** - same
+values (`ram=000101`, `ram=000303`), same `pb=$000A`, same `pc=$7A/$7B`, same
+`dpr=$071E` (`CX4_WR_LOG` / `ARES_CX4_WR_LOG`). So the firmware is executing the
+same plot loop; what differs is **how many times**, i.e. the plot parameters or
+the iteration count handed to it, not the arithmetic.
+
+Next step: compare the S-CPU side of the handshake at frame 3230 - the data-RAM
+block header the game writes before triggering the CX4 (3200 and 3220 are
+byte-identical, so the difference appears in that window).
+
 Controller scripting is now also a settled oracle: `gen-joypad-rom.py`
 (publishing `$4218`/`$4219` as CGRAM colour 0) gives identical colours in both
 cores for every realistic mask tested - `0x0000`, `0x0080` (A), `0x1000`
