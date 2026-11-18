@@ -2159,10 +2159,16 @@ not stale.**
 Only the *number* of reloads differs: 2,920 vs 2,900. ares sees 2,725 `$7F48`
 writes (all while halted), so the remainder come from locked-page paths. Ours
 performs one more reload right at the split (a forced reload of `$29000`, which
-is already resident in `a1`) where ares starts executing instead. Since the
-S-CPU write stream is identical up to the split, that extra reload is a request
-our core honours and ares has already absorbed - i.e. a scheduling artefact, as
-the ledger suspected, not a bookkeeping error.
+is already resident in `a1`) where ares starts executing instead.
+
+**Correction (counting both cores over the same span):** the `$7F48` write
+streams are *identical* - 1,927 writes each up to frame 3000 - so ares cannot be
+absorbing writes we honour. The 20-load difference accumulates only over the
+last ~478 frames, i.e. *after* the divergence, so it is an effect, not the
+cause. Neither absorption nor extra loads is established; what is left is a pure
+**timing** difference: identical instruction stream, identical `$7F48` stream,
+identical reload parameters, but our firmware reaches the first instruction of
+the job one step earlier and reads a stale `gpr2`.
 
 ### Tested: a non-atomic (interruptible) reload (falsified)
 
