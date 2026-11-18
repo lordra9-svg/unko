@@ -1707,10 +1707,28 @@ writes. That is the right shape for the SMRPG symptom (its fade is written at
 scanline 231, in vblank, and the whole frame comes out one frame apart while
 every register, VRAM, CGRAM and WRAM value at the frame boundary is identical).
 
-`render_current_line` is currently triggered at `pre_dot == 21` (the first dot of
-hblank). The next experiment is to move that sample point and re-run this
-fixture plus the full oracle set: the fixture must read 99 like ares, and every
-currently-100.000% result must stay there.
+**Resolved: the render dot was 21, ares uses 128.** `PPU::main` runs
+`step(renderingCycle)` before rendering a line, and `renderingCycle` is 512
+master clocks (`PPUcounter::tick` counts master clocks) - 128 dots. So a
+register write in the first 128 dots of scanline L belongs to line L; sampling at
+dot 21 (end of hblank) was too early.
+
+`Snes::advance_peripherals_inner` now renders at `PPU_RENDER_DOT = 128`, and the
+fixture agrees with ares exactly:
+
+```
+        first dim row
+ours     99
+ares     99
+```
+
+Everything else stayed at parity: 212/212 baseline, `spc_timer`, `hvdma`,
+`hvdma_max`, PAL, overscan, KDL3 120/300/600, SMRPG 400, KSS 120, CX4, GSU and
+SPC7110 MDH/SPL/TMZ all 100.000%; DSP-1 99.981%.
+
+It does **not** change the SMRPG frame phase (still `ours493 == ares494`,
+`ours500 == ares501`, 100.000%, with `ours493` vs `ares493` at 88.438%), so that
+phase is not intra-line sampling.
 
 ## Oracle toolkit
 

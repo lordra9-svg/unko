@@ -159,6 +159,13 @@ const DRAM_REFRESH_CLOCKS: u32 = 40;
 /// Dot (ares hcounter 536 / 4) at which that refresh completes.
 const DRAM_REFRESH_DOT: u16 = 134;
 
+/// Dot within a scanline at which a line's pixels are rendered.
+///
+/// ares `PPU::main` advances `renderingCycle` (512 master clocks) into the line
+/// before rendering, i.e. dot 128. Register writes up to that dot apply to the
+/// line being rendered.
+pub const PPU_RENDER_DOT: u16 = 128;
+
 /// A SNES system with a CPU and cartridge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Snes {
@@ -858,10 +865,16 @@ impl Snes {
                     self.cpu_stall += self.dma.hdma_setup(&mut bus);
                 }
             }
-            // ares renders a line's visible pixels from dot 22 onward; render
-            // after hblank so register writes on dots 0-21 (e.g. a DMA that
-            // unblanks INIDISP at the line boundary) apply to this line.
-            if pre_dot == 21 && self.ppu.line() >= 1 && self.ppu.line() <= self.ppu.visible_last() {
+            // ares `PPU::main` runs `step(renderingCycle)` before rendering a
+            // line, and `renderingCycle` is 512 master clocks - 128 dots - so a
+            // register write in the first 128 dots of scanline L belongs to
+            // line L. Sampling at dot 21 (the end of hblank) was too early:
+            // the mid-frame-sampling fixture showed ares applying a V-IRQ
+            // `$2100` write one scanline before we did.
+            if pre_dot == PPU_RENDER_DOT
+                && self.ppu.line() >= 1
+                && self.ppu.line() <= self.ppu.visible_last()
+            {
                 self.ppu.render_current_line();
             }
         }

@@ -256,6 +256,10 @@ Validation so far:
   `32768 * 64` Hz. `Super Power League 4` (type `$F5`) and `Tengai Makyou Zero`
   (type `$F9`, with the RTC) are also **100.000%** exact against ares at
   frames 300 and 600.
+- Lines are rendered 128 dots into the scanline (ares `renderingCycle` = 512
+  master clocks), not at the end of hblank as before. A V-IRQ `$2100` write at
+  scanline 100 now produces exactly ares' bright/dim boundary
+  (`tools/snes-oracle/gen-midline-brightness-rom.py`).
 - Writing `$2116`/`$2117` reloads the VRAM read latch, as on ares and real
   hardware (we only updated the address). Super Mario RPG's read-modify-write
   tilemap uploads depend on it; with the fix its VRAM is **byte-identical** to
