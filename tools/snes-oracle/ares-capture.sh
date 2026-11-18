@@ -36,26 +36,44 @@ audio=$out/audio.f32
 rm -f "$trace" "$frame" "$audio"
 last=$((frames - 1))
 
+# `setsid` puts cage and ares in their own process group so the whole tree can
+# be signalled. The patched build exits by itself once the capture is written
+# (`captureFinish(); _Exit(0)`); this teardown is only for a stalled run.
 env WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
     LIBGL_ALWAYS_SOFTWARE=1 ARES_AUDIO_RATE="$rate" \
-    cage -- "$ares" --system "$system" --no-file-prompt --frames "$frames" \
+    setsid cage -- "$ares" --system "$system" --no-file-prompt --frames "$frames" \
       --dump-trace "$trace" --dump-frame "$frame" --dump-audio "$audio" \
       "$rom" >/dev/null 2>&1 &
 pid=$!
 
+# Give up (and clean up) rather than waiting forever on a stalled capture.
+deadline=$((SECONDS + ${ARES_TIMEOUT:-600}))
 prev=0
-for _ in $(seq 1 20000); do
+stalled=0
+while :; do
   if grep -q "^frame $last " "$trace" 2>/dev/null; then
     cur=$(stat -c %s "$frame" 2>/dev/null || echo 0)
     if [ "$cur" -gt 0 ] && [ "$cur" -eq "$prev" ]; then break; fi
     prev=$cur
   fi
   if ! kill -0 "$pid" 2>/dev/null; then break; fi
+  if [ "$SECONDS" -ge "$deadline" ]; then stalled=1; break; fi
   sleep 0.05
 done
-sleep 0.2
-kill -TERM "$pid" 2>/dev/null || true
+[ "$stalled" = 0 ] && sleep 0.2
+
+# Terminate the whole group, escalating to KILL if it does not go away.
+kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+for _ in $(seq 1 50); do
+  kill -0 "$pid" 2>/dev/null || break
+  sleep 0.1
+done
+kill -KILL -"$pid" 2>/dev/null || true
 wait "$pid" 2>/dev/null || true
+if [ "$stalled" = 1 ]; then
+  echo "ares: capture stalled after ${ARES_TIMEOUT:-600}s, killed" >&2
+  exit 1
+fi
 
 test -s "$frame" || { echo "ares: frame dump missing ($frame)" >&2; exit 1; }
 test -s "$trace" || { echo "ares: trace missing ($trace)" >&2; exit 1; }

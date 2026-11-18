@@ -262,6 +262,23 @@ cores produce identical colours for every realistic mask - `0x0000`, `0x0080`
 Note that `snes-info`'s `JOYPAD0`/`JOYPAD0_SEGMENTS` masks are parsed as **hex**,
 matching ares' `strtoul(..., 0)` when written as `0x...`.
 
+## Clean shutdown
+
+The patched ares build exits the process itself once a capture is written
+(`captureFinish(); std::_Exit(0)`). Without that, `quit()` only posts a GTK close
+request that never arrives under `cage`, so ares wrote its files and then
+lingered until something killed it, and a stalled capture could linger for the
+whole wait loop.
+
+`ares-capture.sh` also runs the job under `setsid`, signals the whole process
+group, escalates TERM to KILL, and gives up after `ARES_TIMEOUT` seconds
+(default 600) instead of waiting forever. After a capture there should be no
+`ares` or `cage` processes left:
+
+```sh
+tools/snes-oracle/ares-capture.sh game.sfc 120 /tmp/out; ps -eo comm | grep -E '^(ares|cage)$'
+```
+
 ## Deterministic captures
 
 ares seeds the power-on work-RAM pattern from the host clock, so two captures of
