@@ -655,6 +655,23 @@ impl Snes {
         if self.nmi_line && !self.nmi_lock {
             self.nmi_line = false;
             self.cpu.trigger_nmi();
+            if std::env::var_os("NMI_LOG").is_some() {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/opencode/nmi.log")
+                {
+                    let _ = writeln!(
+                        f,
+                        "{} line={} dot={} r4210={:02X}",
+                        self.clock,
+                        self.ppu.line(),
+                        self.ppu.dot(),
+                        u8::from(self.nmi_flag) << 7
+                    );
+                }
+            }
         }
     }
 

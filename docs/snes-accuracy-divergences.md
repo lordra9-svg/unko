@@ -1418,6 +1418,27 @@ write *within* a visible line cannot produce a mid-line change in ares either.
 Our whole-line model therefore matches the primary oracle; the item only
 remains open as a divergence from real hardware / Mesen, not from ares.
 
+## NMI delivery: ours fires, ares does not (SMRPG, measured 2026-11-17)
+
+Instrumenting the NMI acceptance point in both cores (`NMI_LOG` in
+`Snes::apply_interrupts`, `ARES_NMI_LOG` in `CPU::main`'s `status.nmiPending`
+branch) produced an asymmetry that no previous measurement had shown:
+
+| | deliveries over 500 frames | where |
+|---|---|---|
+| ours | **15** | every one at PPU `line = 225`, `dot = 1-3`, one per frame from ~frame 485 |
+| ares | **0** | `status.nmiPending` is never taken |
+
+So Super Mario RPG's frame loop is not driven by the `nmiPending` path in ares,
+yet we deliver a burst of NMIs at vblank start over the last ~15 frames of the
+run. Since the one-frame phase first appears at frame 493 - i.e. inside exactly
+that window - an NMI we accept that ares does not is a strong candidate for it.
+
+The next step is to compare the *enable* state around frames 483-500: `$4200`
+bit 7, `$4210` reads, and whether the NMI is being acknowledged/cleared on the
+same instruction in both cores. Our NMIs all show `r4210 = $80` at acceptance,
+so the flag is set at the moment we deliver.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):
