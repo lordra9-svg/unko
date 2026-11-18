@@ -1154,8 +1154,33 @@ frames of gameplay HUD rendering.
   still have 199 lines left (`lc = $C7`) and a different pointer. Channel 5 is
   the **mode-0** indirect channel (`ctrl = $40`, 1 byte per line) where channel
   7 is mode 2, so the bug is in the mode-0 indirect path of
-  `Dma::hdma_line`/`hdma_reload` - most likely the block/terminator handling
-  rather than the address arithmetic.
+  `Dma::hdma_line`/`hdma_reload`.
+
+  **Resolved: `HdmaBus` bypassed the coprocessors.** A per-scanline dump of
+  channel 5 in both engines showed the very first advance already differing in
+  exactly one field, with the table cursor and line counter identical:
+
+  ```
+  #0  ours table=C29C ind=C010 lc=EF   |   ares table=c29c ind=5001 lc=ef
+  ```
+
+  The ROM at `$C3:c299` is `F0 00 50` = `count=$F0, lo=$00, hi=$50`, i.e. the
+  pointer must be `$5000`; we loaded `$C00F`. The cause was that `HdmaBus::read`
+  fell back to `cart.read(address)` without consulting the SA-1, so an HDMA
+  A-bus read used the *linear* cartridge mapping instead of the super-MMC
+  mapping the S-CPU sees (ares' HDMA reads use the full CPU bus). `HdmaBus` now
+  carries the same `sa1`/`sdd1`/`spc7110` views as the CPU and DMA buses.
+
+  Effect on Super Mario RPG:
+
+  | frame | before | after |
+  |---|---|---|
+  | 493 (first mismatch) | 1.339% exact, mean |d| 48.7 | **88.438% exact, mean |d| 0.356** |
+  | 494 | 0.893% | **95.323%** |
+  | 500 | 0% exact, mean |d| 108.9 | 0% exact, mean |d| **23.3** |
+
+  A residual still remains at frame 500 (mean |d| 23.3), so this is a large fix
+  rather than the end of the story.
 
   Off-by-one: we also issue two extra `$2100` writes ares does not (`$01` at
   frame 24 and `$AC` at frame 418), both invisible because both cores are
