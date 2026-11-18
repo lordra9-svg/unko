@@ -280,6 +280,10 @@ Validation so far:
   race between the CX4 job start (`$7F4F`) and the parameter GPR writes that
   only the 2,728-clock cache reload covers, and our per-access credit model
   performs more reloads at the boundary than ares' cooperative threads do.
+  Charging the reload's duration to machine time (the `Thread::synchronize(cpu)`
+  reading) was implemented and measured: it drops frames 3300/3400 from
+  100.000% to 98.512%/95.754%, so the reload is not machine time and that
+  hypothesis is falsified.
 - The `EXSPC7110-` (7 MiB) layout is implemented: 1 MiB program + 5 MiB data +
   1 MiB expansion, with the expansion ROM at `$40-$4F:$0000-$FFFF` (20-bit
   offset across sixteen 64 KiB banks) on both the CPU and HDMA buses. It is now

@@ -2147,6 +2147,27 @@ CPU around the blocking reload and processes the queued `$7F48` requests later,
 by which time the game has moved on.
 
 The interleaving is therefore still not bit-identical around the blocking reload.
+
+### Tested: charging the reload to machine time (falsified)
+
+ares implements the blocking reload with cooperative threads: `HG51B::cache()`
+runs inside one `HitachiDSP::step`, and `Thread::synchronize(cpu)` runs the S-CPU
+forward. I implemented the equivalent - `advance_cx4()` returns the master
+clocks a blocking operation overshot, and `advance_peripherals` advances the
+machine by that much and reports it as extra CPU cycles, so the CPU clock moves
+with the reload instead of the coprocessor merely carrying debt.
+
+It makes parity **worse**, so this is not what ares does:
+
+| frame | before | with the reload charged to machine time |
+|---|---|---|
+| 3300 | **100.000%** | 98.512% |
+| 3400 | **100.000%** | 95.754% |
+| 3500 | 96.153% | 95.412% |
+
+Reverted. So the CX4's blocking time is *not* machine time - the PPU/APU must
+not advance with it - and the remaining difference is in the coprocessor's own
+scheduling relative to CPU accesses, not in the machine clock.
 Ares implements it with cooperative threads: `HG51B::cache()` is one blocking
 `main()` call, and `HitachiDSP::step` then runs `Thread::synchronize(cpu)` to
 pull the S-CPU forward by the reload's duration. Our per-bus-access credit model
