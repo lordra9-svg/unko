@@ -1196,7 +1196,26 @@ frames of gameplay HUD rendering.
 
   (our run logs 1344 advances against ares' 1338 - the run boundary, not a
   functional difference). So HDMA is no longer implicated in the SMRPG
-  residual; whatever remains at frame 500 (mean |d| 23.3) is elsewhere.
+  residual; whatever remains at frame 500 is elsewhere.
+
+  **The residual is a one-frame phase offset, not a value difference.**
+  Dumping CGRAM at frame 500 (`CGRAM_OUT` vs replaying ares' `$2121`/`$2122`
+  log) gives **0 of 256 entries differing**, and the frame-500 pixel difference
+  is a *uniform* multiplicative factor on every channel of every pixel
+  (79/63, 69/55, 74/59 are all 1.254 - the same `INIDISP` brightness relation).
+  Comparing one frame earlier settles it:
+
+  | comparison | result |
+  |---|---|
+  | ours 499 vs ares 500 | **100.000% exact** (57,344/57,344) |
+  | ours 500 vs ares 500 | 0% (mean |d| 23.3) |
+  | ours 501 vs ares 500 | 0% |
+
+  So our per-frame fade step lands one frame earlier than ares'. Every *value*
+  is right - palette, HDMA tables and pointers, `$0A84`, colour math,
+  `INIDISP`, per-scanline gradient - so what remains is the ordering of the
+  per-frame CGRAM/`$2100` update against the frame boundary: a write ares
+  commits after the presented frame and we commit before it.
 
   Kirby's Dream Land 3 is unchanged by the routing fix (0% exact at frames
   120/300/600; 1 colour versus ares' 10 at frame 600).
