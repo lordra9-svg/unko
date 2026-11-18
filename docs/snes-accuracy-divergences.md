@@ -2470,6 +2470,19 @@ ares - and the rendered frames are bit-identical to the per-access model. If the
 order of the `$7F4F` write relative to the reload mattered for the picture, that
 experiment would have changed frame 3500; it did not.
 
+Tracing the last write to `gpr2` before the divergence confirms the
+computation angle - the two cores write *different values at different
+instructions*:
+
+```
+ares: value 0000 (was 3DFE)  at 000a:39 605e  a=000000
+ours: value 0100 (was 4108)  at 000A:36 083B  a=000100
+```
+
+so the firmware is not merely being fed a different `gpr2`; it reaches a
+different instruction in the same region (`0a:36` vs `0a:39`), i.e. its control
+flow differs too.
+
 So the frame-3477 divergence must be a **computation** difference, not a
 scheduling one: the job reaches its first instruction with a GPR value that
 differs (`gpr2 = 0x200` where ares has 0), and no amount of reordering changes
