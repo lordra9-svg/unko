@@ -1553,6 +1553,47 @@ image now matches. The frame still differs there (`ours N == ares N+1`,
 100.000% for 493/494, 499/500 and 500/501), so the residual is a rendering-phase
 difference with identical memory, not a memory-content difference.
 
+## SMRPG frame 493+ - located: VRAM high-byte stream shifted by one write
+
+With the memory image proven identical (WRAM 0/131,072, BW-RAM 0/32,768 at frame
+500) the remaining difference had to be in data the renderer consumes. VRAM was
+never compared before, and it differs:
+
+| frame | VRAM bytes differing (of 65,536) |
+|---|---|
+| 60, 120, 300 | 0 |
+| 440, 470, 490, 498, 500 | **557** |
+
+Every differing byte is the **high byte** of a VRAM word, in words
+`$0042-$0E40`, and the whole high-byte stream is **one write late** in ours:
+
+```
+write  address byte  ares  ours
+81986  $0081    low   01    01
+81987  $0081    high  58    00   <-- first divergence
+81988  $0082    low   02    02
+81989  $0082    high  58    58
+82001  $0088    high  00    58   <-- shifted
+82003  $0089    high  55    00
+```
+
+The addresses are identical at every index and only high-byte *data* is shifted,
+so this is not an address-mapping bug (unlike the KDL3 `sbm` case): our write
+stream has the data of the previous write. The per-line register snapshot is
+*not* involved - logging `$2100`, `$212C`, `$2130-$2132` and CGRAM word 0 at the
+moment each line is rendered (frames 498-501, lines 50 and 150) gives identical
+values in both cores (`bright` 3 then 4, `tm=$17`, `cg0=$7C00`).
+
+Instrumentation added: `PPU_LINE_LOG` (per-rendered-line register snapshot),
+`VRAM_OUT` + `Ppu::vram_words`, `VRAM_WRITE_LOG` ($2118/$2119 write stream) and
+the ares equivalents `ARES_PPU_LINE_LOG`, `ARES_DUMP_BASE` `.vram`, and
+`ARES_VRAM_LOG`.
+
+Next step is the one remaining unknown: whether the extra 187 accepted writes
+(ours 126,976 vs ares 126,789 over frames 300-440) come from our `$2118`/`$2119`
+active-display gate admitting writes ares drops, which would shift the stream
+exactly this way.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

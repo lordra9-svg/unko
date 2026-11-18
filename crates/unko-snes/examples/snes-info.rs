@@ -306,6 +306,15 @@ fn main() -> ExitCode {
             );
         }
     }
+    if let Some(path) = std::env::var_os("VRAM_OUT") {
+        let mut bytes = Vec::with_capacity(0x1_0000);
+        for word in system.ppu.vram_words() {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        if let Err(error) = std::fs::write(&path, &bytes) {
+            eprintln!("{}: {error}", path.to_string_lossy());
+        }
+    }
     if let Some(path) = std::env::var_os("BWRAM_OUT") {
         if let Err(error) = std::fs::write(&path, system.cart.sram()) {
             eprintln!("{}: {error}", path.to_string_lossy());

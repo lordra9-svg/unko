@@ -353,6 +353,11 @@ impl Ppu {
         &self.oam
     }
 
+    /// All 32K VRAM words (debug).
+    pub fn vram_words(&self) -> &[u16] {
+        &self.vram
+    }
+
     /// Read a CGRAM word (debug/test helper).
     pub fn cgram_word(&self, address: u8) -> u16 {
         self.cgram[usize::from(address)]
@@ -592,6 +597,30 @@ impl Ppu {
     /// always vblank. Background and sprite fetches therefore use the line
     /// number itself, not the framebuffer row.
     pub fn render_current_line(&mut self) {
+        if let Some(path) = std::env::var_os("PPU_LINE_LOG") {
+            use std::io::Write;
+            if (498..=501).contains(&self.debug_frame) {
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                {
+                    let _ = writeln!(
+                        f,
+                        "frame={} line={} bright={} tm={:02X} ts={:02X} cgwsel={:02X} cgadsub={:02X} coldata={:02X} cg0={:04X}",
+                        self.debug_frame,
+                        self.line,
+                        self.display_brightness,
+                        self.tm,
+                        self.ts,
+                        self.cgwsel,
+                        self.cgadsub,
+                        self.coldata,
+                        self.cgram_word(0)
+                    );
+                }
+            }
+        }
         if self.line >= 1 && self.line <= self.visible_last() {
             // ares `DAC::scanline`: without overscan the row pointer is
             // `vcounter + 8`, which our cropped output folds into row
@@ -908,6 +937,24 @@ impl Ppu {
         // ares `PPU::writeVRAM`: writes during active display are dropped, but
         // the address still advances.
         if self.display_disable || self.line >= self.vdisp() {
+            if let Some(path) = std::env::var_os("VRAM_WRITE_LOG") {
+                use std::io::Write;
+                if self.debug_frame >= 300 {
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                    {
+                        let _ = writeln!(
+                            f,
+                            "A={:04X} byte={} data={:02X}",
+                            address,
+                            u8::from(high),
+                            data
+                        );
+                    }
+                }
+            }
             let word = self.vram[usize::from(address)];
             self.vram[usize::from(address)] = if high {
                 (word & 0x00FF) | (u16::from(data) << 8)
