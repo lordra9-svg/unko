@@ -1240,12 +1240,26 @@ frames of gameplay HUD rendering.
   off-by-one, and Super Mario RPG really is one frame ahead of ares through the
   fade.
 
-  Since CGRAM at frame 500 is identical (0/256) and the pixel difference is
-  purely the `INIDISP` brightness relation, our `$2100 = $04` is taking effect
-  for frame 499 where ares applies it to frame 500. The remaining question is
-  therefore which per-frame event (the NMI that performs the write, or the
-  line-240 frame boundary it is measured against) is positioned one frame
-  differently - not the values, which are all proven identical.
+  **The frame boundary is not the cause.** Logging the PPU line/dot at which
+  each `$2100` write commits shows the two engines agree exactly:
+
+  ```
+  ours 178640950 line=231 dot=57  $04    ares 178640962 line=231  $04
+  ours 177211492 line=231 dot=59  $03    ares 177211496 line=231  $03
+  ours 175782026 line=231 dot=58  $02    ares 175782060 line=231  $02
+  ours 136820830 line=225 dot=29  $8f    ares 136820832 line=225  $8f
+  ```
+
+  All the writes land on the same scanline (231, i.e. in vblank, so they affect
+  the following frame) within a few dots. So neither the values nor the commit
+  position differ, and no change to `Ppu::tick`/`frame_ready` is justified.
+
+  The one-frame offset therefore lives in something else that advances once per
+  frame while the fade runs. Everything measured so far - palette/CGRAM, HDMA
+  tables/pointers/per-scanline trace, `$0A84`, colour math, `INIDISP` values and
+  now their commit positions - is identical, so the next candidate is the
+  per-scanline gradient produced from `$7E:4000` (its counts are rewritten by
+  `$C3:bb13`) or a one-frame difference in which NMI performs the update.
 
   Kirby's Dream Land 3 is unchanged by the routing fix (0% exact at frames
   120/300/600; 1 colour versus ares' 10 at frame 600).

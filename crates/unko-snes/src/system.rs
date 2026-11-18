@@ -926,8 +926,19 @@ impl CpuBus for Snes {
                 let (addr7, ind7, lc7, _) = self.dma.hdma_cursor(7);
                 let _ = writeln!(
                     f,
-                    "{} {:02X} 0A84={:02X} ch5={:04X}/{:04X}/{:02X}/{} ch7={:04X}/{:04X}/{:02X}",
-                    self.clock, value, self.wram[0x0A84], addr5, ind5, lc5, done5, addr7, ind7, lc7
+                    "{} line={} dot={} {:02X} 0A84={:02X} ch5={:04X}/{:04X}/{:02X}/{} ch7={:04X}/{:04X}/{:02X}",
+                    self.clock,
+                    self.ppu.line(),
+                    self.ppu.dot(),
+                    value,
+                    self.wram[0x0A84],
+                    addr5,
+                    ind5,
+                    lc5,
+                    done5,
+                    addr7,
+                    ind7,
+                    lc7
                 );
             }
         }
