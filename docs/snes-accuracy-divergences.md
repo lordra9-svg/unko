@@ -1394,6 +1394,30 @@ first interactive screen.
 Known limitation: the `EXSPC7110` (7 MiB, with the extra 1 MiB expansion ROM at
 `$40-$4F`) layout is not handled.
 
+## Frame boundary and mid-line register writes (audited 2026-11-17)
+
+Two long-standing items were audited directly against the ares reference and
+are **not divergences from it**.
+
+**The frame boundary already matches.** ares' `PPU::main`
+(`ppu-performance/ppu.cpp`) renders lines `1 .. vdisp()-1`, then at
+`vcounter() == 240` calls `screen->frame()` and `scheduler.exit(Event::Frame)`.
+Our `Ppu::tick` latches `frame_ready` at `line == 240` for the same reason, and
+the harness dumps on that latch. The first-party frame-counter fixture
+(`gen-frame-counter-rom.py`) confirms the two harnesses select the same frame
+(`CGRAM` colour 0 = `0x12c`/`0x12d`/`0x12e` at frames 300/301/302, and the
+captured pixel is identical in both emulators at each frame number). So there is
+no boundary change to make, and the SMRPG one-frame phase is *not* the
+presentation point.
+
+**Whole-line register writes are ares behaviour.** `PPU::DAC::render()` writes a
+complete scanline into the output buffer per call (`for(u32 x : range(256))`),
+and `bg1.render()` .. `obj.render()` likewise run once per line from
+`PPU::main`; `io.displayBrightness` is sampled once per line. So a PPU register
+write *within* a visible line cannot produce a mid-line change in ares either.
+Our whole-line model therefore matches the primary oracle; the item only
+remains open as a divergence from real hardware / Mesen, not from ares.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):
