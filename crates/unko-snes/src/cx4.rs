@@ -177,6 +177,8 @@ pub struct Cx4 {
     pub io: Cx4Io,
     /// Two 256-word instruction-cache pages, stored contiguously.
     pub program: Vec<u16>,
+    /// Debug counter: instruction-cache reloads performed since power-on.
+    pub cache_loads: u64,
     /// 1K x 24-bit data ROM (the `cx4.rom` firmware).
     pub data_rom: Vec<u32>,
     /// 3 KiB data RAM.
@@ -219,6 +221,7 @@ impl Default for Cx4 {
             regs: Cx4Registers::default(),
             io: Cx4Io::default(),
             program: vec![0; 512],
+            cache_loads: 0,
             data_rom: Vec::new(),
             data_ram: vec![0; 0xC00],
             stack: [0; 8],
@@ -258,6 +261,7 @@ impl Cx4 {
         self.regs = Cx4Registers::default();
         self.io = Cx4Io::default();
         self.program.fill(0);
+        self.cache_loads = 0;
         self.data_ram.fill(0);
         self.stack = [0; 8];
         self.cost = 0;
@@ -598,6 +602,7 @@ impl Cx4 {
             self.program[page * 256 + offset] = u16::from_le_bytes([low, high]);
         }
         self.io.cache.enable = false;
+        self.cache_loads = self.cache_loads.wrapping_add(1);
         if debug_load {
             self.log_event("CACHE", u32::from(self.regs.pb), address);
         }

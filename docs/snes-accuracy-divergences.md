@@ -2164,6 +2164,41 @@ S-CPU write stream is identical up to the split, that extra reload is a request
 our core honours and ares has already absorbed - i.e. a scheduling artefact, as
 the ledger suspected, not a bookkeeping error.
 
+### Tested: a non-atomic (interruptible) reload (falsified)
+
+The diagnosis above suggested making the reload interruptible - one byte per
+coprocessor step - so the S-CPU runs during it and a `$7F48` written meanwhile is
+absorbed when the load completes, as ares' cooperative threads do. Implemented
+(as `cache_step()` plus a `cache_load` state) and measured against the same
+deterministic captures:
+
+| frame | atomic (kept) | interruptible reload |
+|---|---|---|
+| 3300 | **100.000%** | 98.512% |
+| 3400 | **100.000%** | 100.000% |
+| 3500 | 96.153% | 95.382% |
+| 3700 | 96.488% | 96.791% |
+| 3900 | 95.933% | 89.859% |
+| 4000 | 93.687% | 90.416% |
+
+First CX4 data-RAM divergence: **frame 3477** (atomic) vs **frame 3402**
+(interruptible), i.e. the interruptible model is much worse.
+
+The load counter explains why. Over a full 3478-frame run:
+
+| model | cache reloads |
+|---|---|
+| ares | 2,900 |
+| atomic (kept) | 2,920 |
+| interruptible | 2,849 |
+
+The atomic model performs 20 reloads too many (it honours every `$7F48`), the
+interruptible one 51 too few (it absorbs every request that lands during the
+load). ares sits *between* the two, so its absorption window is narrower than a
+fully interruptible load - consistent with `Thread::synchronize` running the CPU
+only at the load's own `step()` boundaries, not at arbitrary points. Reverted;
+`Cx4::cache_loads` keeps the counter so the number can be compared cheaply.
+
 ### Tested: charging the reload to machine time (falsified)
 
 ares implements the blocking reload with cooperative threads: `HG51B::cache()`

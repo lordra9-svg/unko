@@ -850,6 +850,11 @@ fn main() -> ExitCode {
         system.ppu.frame_ready(),
         nonzero,
     );
+    if std::env::var_os("CX4_STATS").is_some() {
+        if let Some(cx4) = &system.cx4 {
+            eprintln!("cx4 stats:   loads={}", cx4.cache_loads);
+        }
+    }
     println!("ran:         {instructions} instructions, {cycles} cycles");
     ExitCode::SUCCESS
 }
