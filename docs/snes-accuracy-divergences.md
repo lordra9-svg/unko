@@ -1254,12 +1254,24 @@ frames of gameplay HUD rendering.
   the following frame) within a few dots. So neither the values nor the commit
   position differ, and no change to `Ppu::tick`/`frame_ready` is justified.
 
-  The one-frame offset therefore lives in something else that advances once per
-  frame while the fade runs. Everything measured so far - palette/CGRAM, HDMA
-  tables/pointers/per-scanline trace, `$0A84`, colour math, `INIDISP` values and
-  now their commit positions - is identical, so the next candidate is the
-  per-scanline gradient produced from `$7E:4000` (its counts are rewritten by
-  `$C3:bb13`) or a one-frame difference in which NMI performs the update.
+  **The gradient tables match too.** Dumping `$7E:4000` and `$7E:4010` at the
+  frame-499 fade step gives byte-identical tables:
+
+  ```
+  ares 4000: 4d 10 40 4d 10 40 9b 10 40 3c 44 40 01 46 40 00 00 7c 21 7c 42 ...
+  ours 4000: 4D 10 40 4D 10 40 9B 10 40 3C 44 40 01 46 40 00 00 7C 21 7C 42 ...
+  ```
+
+  so `$C3:bb13`'s per-frame count update is not advancing early either.
+
+  At this point **every observable the cores expose is identical** - palette,
+  both gradient tables, the whole HDMA ch5 trace, `$0A84`, colour math,
+  `INIDISP` values and their commit line/dot - yet SMRPG's content is still
+  exactly one frame behind (`ours 493/499/500 == ares 494/500/501`). The
+  remaining difference is therefore not a *value* anywhere in the PPU, HDMA or
+  game state; it is the phase of frame *presentation* itself, which the
+  frame-counter fixture cannot expose because it measures NMI frames rather than
+  the SMRPG-specific update.
 
   Kirby's Dream Land 3 is unchanged by the routing fix (0% exact at frames
   120/300/600; 1 colour versus ares' 10 at frame 600).
@@ -1292,6 +1304,10 @@ frames of gameplay HUD rendering.
   frames costs us ~5 frames of game time. The next step is to find the clock of
   the first `$2100 = $01` in both cores and work backwards, or trace-diff
   SMRPG's S-CPU; the palette and `INIDISP` handling can be ruled out.
+- Kirby's Dream Land 3's first-NMI point re-checked with the current build and
+  unchanged: ares runs `$B8BD` and then enters the `$82f6` NMI handler, while at
+  the corresponding point ours is executing the frame rendezvous
+  (`$9498`/`$949b` -> `$949d`), i.e. we exit the `$602A` wait before ares does.
 - Kirby's Dream Land 3 improved again with the save-RAM fill fix: the S-CPU
   now reaches the frame rendezvous at `$00:9498`/`$00:949B` and waits there
   (NMIs climbing normally: 18/198/498 at frames 120/300/600) instead of
