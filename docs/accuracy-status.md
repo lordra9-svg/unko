@@ -231,9 +231,13 @@ Validation so far:
   work-RAM windows. The public PeterLemon GSU suite (31 opcode tests) is
   verified against ares below. A release SuperFX title is now verified too:
   **Star Fox (USA)** boots and its GSU-driven intro is **100.000%** exact
-  against ares at frames 120, 300 and 340; other sampled frames are 83-99%
-  (frame 320 has a large object region, the rest are scattered pixels). The
-  result is non-monotonic, so it is a per-frame difference rather than a drift.
+  against ares. Note that the two capture harnesses drift out of frame
+  alignment for this title (+1 frame by 307, +2 by 320), so comparisons must be
+  by content: our frame 305 matches ares 306, 306 matches 307, 307 matches 308,
+  and 320 matches 322/323, all byte-identical. Same-number comparisons
+  (83-99%) are the alignment offset, not rendering errors. By frame 900 no
+  nearby ares frame matches (best 98.9% at 915), so a real difference develops
+  between ~322 and ~900 and is not yet bisected.
   The GSU's own `PLOT`/`RPIX` stream is **bit-identical** to ares over frames
   154-308 (51,476 events, zero differences), and per-frame dumps show VRAM
   byte-identical through frame 152 with the first difference at **frame 153**

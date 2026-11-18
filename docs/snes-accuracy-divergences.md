@@ -1975,7 +1975,30 @@ S-CPU also uses), not from GSU rendering.
 local `x` to `(x & 7) ^ 7` before the read, so logging after that shows 7 where
 the caller passed 0.)
 
-### Bisected to the first differing frame: 153, in the S-CPU's VRAM upload
+### Star Fox frame numbering drifts: compare by content, not by number
+
+The two capture harnesses do not stay frame-aligned for Star Fox, and the offset
+grows. Comparing our frame N against a range of ares frames:
+
+| ours | 100.000% match at ares | same-number result |
+|---|---|---|
+| 305 | 306 | 100.000% (static) |
+| 306 | 307 | 100.000% |
+| 307 | 308 | 100.000% (arena: 99.072% at 307) |
+| 320 | **322** and 323 | 83.245% at 320/321 |
+| 900 | none of 900-915 (best 98.9% at 915) | 97.923% |
+
+So Star Fox is **content-exact at least through its frame ~322** - the earlier
+"frame 306/307/320 diverge" readings were the frame-number offset, not
+rendering errors. The offset is +1 at 307, +2 at 320, and at frame 900 no nearby
+ares frame matches, so a real difference does develop somewhere between ~322 and
+~900.
+
+Practical consequence: any Star Fox comparison must align by content. The
+`spc_timer`/SMRPG/KDL3 style "same frame number" comparisons are only valid where
+the two harnesses stay in step, which they do for those titles.
+
+### VRAM/CPU-state bisect (superseded by the alignment finding)
 
 `WRAM_DIR` / `ARES_WRAM_DIR` and `VRAM_DIR` / `ARES_VRAM_DIR` dump work RAM and
 VRAM per frame. Against ares:

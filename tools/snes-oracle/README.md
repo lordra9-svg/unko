@@ -369,6 +369,16 @@ Fox captures). Titles currently staged:
 - `Mega Man X2 (USA).sfc`, `Mega Man X3 (USA).sfc` - CX4 titles.
 - `exspc7110.sfc` - the generated 7 MiB EXSPC7110 fixture.
 
+## Frame alignment
+
+`ares-capture.sh ROM N` waits for ares' trace index `N-1`, which matches ours
+for most titles, but the two harnesses can drift out of step (Star Fox is +1
+frame by its frame 307 and +2 by 320). Always confirm a "divergence" by
+comparing our frame against a range of ares captures: a phase offset shows up as
+a *different* ares frame matching 100.000%, while a real rendering difference
+matches nothing nearby. Static screens hide the offset, so a same-number match
+is not proof of alignment.
+
 ## Regression baseline
 
 `baseline.py` runs every ROM under `test-roms/snes/` for a fixed frame count and
