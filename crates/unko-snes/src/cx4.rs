@@ -354,6 +354,8 @@ impl Cx4 {
                         u32::from(self.io.cache.pb),
                         u32::from(data) | (u32::from(halt) << 8),
                     );
+                    let lead = DEBUG_CPU_LEAD.load(std::sync::atomic::Ordering::Relaxed);
+                    self.log_event("L48", lead as u32 & 0xffff, 0);
                 }
                 if insn_logging() {
                     let lead = DEBUG_CPU_LEAD.load(std::sync::atomic::Ordering::Relaxed);

@@ -2314,6 +2314,19 @@ and ours is `4 + 122 = 126`, because we do neither: the reload runs
 rather than to the CPU's, so no machine time passes. The first instruction then
 lands at ~2,604 clocks after `$7F4F` in ours versus 1,240 in ares.
 
+The missing input for part 1 is now measured on both sides. Logging the lead at
+every `$7F48` write (`L48`):
+
+| lead at `$7F48` (CX4 cycles, + = coprocessor behind) | ares | ours |
+|---|---|---|
+| observed | **+375 .. +966** | **0 (all 2,741 writes)** |
+
+Ours is *exactly* in sync at every request, ares' is a few hundred cycles behind,
+and that lead is precisely the 924-clock catch-up that precedes the reload. So
+part 1 is not a tuning constant: ares' halted coprocessor simply does not track
+the CPU between jobs, while ours does (one coprocessor cycle per CPU clock), and
+the difference at the request is whatever the CPU ran in the meantime.
+
 So the fix is the *conjunction* of the two things tried separately:
 
 1. a ~924-clock delay before the reload starts = the coprocessor catching up its
