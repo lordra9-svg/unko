@@ -581,6 +581,13 @@ impl Cx4 {
         self.io.cache.preload = false;
         let page = usize::from(self.io.cache.page);
         self.io.cache.address[page] = address;
+        if insn_logging() {
+            self.log_event(
+                "PREP",
+                u32::from(self.regs.pb),
+                (self.io.cache.base & 0xff_ffff) | (u32::from(self.io.cache.page) << 24),
+            );
+        }
         let debug_load = insn_logging();
 
         for offset in 0..256 {

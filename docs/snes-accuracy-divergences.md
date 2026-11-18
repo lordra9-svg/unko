@@ -2137,6 +2137,15 @@ two-frame window - and so starts the job ~1.4k clocks later in CPU time. By the
 time the firmware reads its parameters, ares has already written `gpr2 = 0`
 while ours still sees the previous job's `0x200`.
 
+A `PREP` event (logged from `cache()` in both cores: program bank, cache base and
+page) shows the loads themselves are now identical - same base, same page, same
+order - up to the point where the streams split. At that point (log event 5792)
+ares *starts executing the firmware job* while our core is still working
+through a queued group of four more forced reloads (`pb` 8, a, 8, 2). So the
+difference is not the load parameters but that our coprocessor falls behind the
+CPU around the blocking reload and processes the queued `$7F48` requests later,
+by which time the game has moved on.
+
 The interleaving is therefore still not bit-identical around the blocking reload.
 Ares implements it with cooperative threads: `HG51B::cache()` is one blocking
 `main()` call, and `HitachiDSP::step` then runs `Thread::synchronize(cpu)` to
