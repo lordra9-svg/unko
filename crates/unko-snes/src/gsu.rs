@@ -11,6 +11,15 @@
 //! the GSU with a credit, mirroring our APU/PPU model instead of ares' OS
 //! threads.
 
+/// Debug: frame counter kept current by the harness for the plot log.
+pub static DEBUG_FRAME: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Whether the GSU plot/rpix log is enabled (cached once).
+fn plot_logging() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("GSU_PLOT_LOG").is_some())
+}
+
 /// GSU status-flag register bits (`SFR`).
 const SFR_Z: u16 = 1 << 1;
 const SFR_CY: u16 = 1 << 2;
@@ -587,6 +596,11 @@ impl Gsu {
         }
     }
 
+    /// Size of the Game Pak work RAM in bytes.
+    pub fn ram_len(&self) -> usize {
+        self.ram.len()
+    }
+
     /// Read or write the 32 KiB work RAM from the S-CPU.
     pub fn read_ram(&self, offset: u32) -> u8 {
         let offset = (offset & self.ram_mask()) as usize;
@@ -1136,6 +1150,19 @@ impl Gsu {
     }
 
     fn plot(&mut self, rom: &[u8], x: u8, y: u8) {
+        if plot_logging() {
+            if let Some(path) = std::env::var_os("GSU_PLOT_LOG") {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                {
+                    let frame = DEBUG_FRAME.load(std::sync::atomic::Ordering::Relaxed);
+                    let _ = writeln!(f, "{frame} P {x:3} {y:3} {c:02X}", c = self.regs.colr);
+                }
+            }
+        }
         if !self.por_transparent() {
             if self.scmr_md() == 3 {
                 if self.por_freeze_high() {
@@ -1177,6 +1204,7 @@ impl Gsu {
     }
 
     fn rpix(&mut self, rom: &[u8], x: u8, y: u8) -> u8 {
+        let debug_rpix = plot_logging();
         self.flush_pixel_cache(rom, 1);
         self.flush_pixel_cache(rom, 0);
 
@@ -1192,6 +1220,19 @@ impl Gsu {
             let byte = ((n >> 1) << 4) + (n & 1);
             self.step(rom, if self.regs.clsr { 5 } else { 6 });
             data |= ((self.read(rom, addr + byte) >> bit) & 1) << n;
+        }
+        if debug_rpix {
+            if let Some(path) = std::env::var_os("GSU_PLOT_LOG") {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                {
+                    let frame = DEBUG_FRAME.load(std::sync::atomic::Ordering::Relaxed);
+                    let _ = writeln!(f, "{frame} R {x:3} {y:3} {data:02X}");
+                }
+            }
         }
         data
     }

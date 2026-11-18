@@ -319,6 +319,16 @@ ARES_DETERMINISTIC=1 ARES_PPU_DUMP=/tmp/ex/cpu.txt ARES_PPU_DUMP_FRAME=9 \
 Both cores produce the same 13 bytes at `$7E:1000` and identical 128 KiB work
 RAM ("$40:0000 = $A5, $40:0001 = $A4, ..., $4F:FFFF = $5A").
 
+## GSU tracing
+
+- `GSU_PLOT_LOG=<path>` / `ARES_GSU_PLOT_LOG`: one line per `PLOT` (`P x y
+  colr`) and per `RPIX` (`R x y data`), prefixed with the frame. The two logs
+  line up event for event (ares' frame number is one ahead), which is how the
+  Star Fox divergence was shown to be outside the GSU.
+- `GSU_RAM_OUT=<path>` / `GSU_RAM_DIR=<dir>` / `ARES_GSURAM_DIR` +
+  `ARES_GSURAM_FROM`: dump the 32 KiB Game Pak work RAM (the GSU screen buffer
+  lives in it) once, or per frame.
+
 ## CX4 instruction tracing
 
 The CX4 has env-gated debug hooks used to localise divergence against ares:

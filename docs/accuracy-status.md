@@ -233,8 +233,11 @@ Validation so far:
   **Star Fox (USA)** boots and its GSU-driven intro is **100.000%** exact
   against ares at frames 120, 300 and 340; other sampled frames are 83-99%
   (frame 320 has a large object region, the rest are scattered pixels). The
-  result is non-monotonic, so it is a per-frame rendering difference rather than
-  a drift. Getting there needed two fixes: `$4201` PIO powers up with
+  result is non-monotonic, so it is a per-frame difference rather than a drift.
+  The GSU's own `PLOT`/`RPIX` stream is **bit-identical** to ares over frames
+  154-308 (51,476 events, zero differences), so GSU rendering is not the cause;
+  the remaining difference is on the S-CPU/PPU side or in GSU-RAM state the
+  S-CPU shares. Getting there needed two fixes: `$4201` PIO powers up with
   bit 7 set (ares `n8 pio = 0xff`), and the `$4201` high-to-low edge latches the
   `$213C`/`$213D` beam counters; without them the game spun in a scanline-wait
   loop at `$03:BD83` and never enabled the screen.

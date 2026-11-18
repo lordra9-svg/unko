@@ -253,6 +253,7 @@ fn main() -> ExitCode {
                     }
                 }
                 unko_snes::cx4::DEBUG_FRAME.store(frames, std::sync::atomic::Ordering::Relaxed);
+                unko_snes::gsu::DEBUG_FRAME.store(frames, std::sync::atomic::Ordering::Relaxed);
                 if let Some(path) = std::env::var_os("CX4_TRACE") {
                     use std::io::Write;
                     if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -288,6 +289,16 @@ fn main() -> ExitCode {
                                 cx4.regs.dpr
                             );
                         }
+                    }
+                }
+                if let Some(dir) = std::env::var_os("GSU_RAM_DIR") {
+                    if let Some(gsu) = &system.gsu {
+                        let mut bytes = Vec::with_capacity(gsu.ram_len());
+                        for offset in 0..gsu.ram_len() as u32 {
+                            bytes.push(gsu.read_ram(offset));
+                        }
+                        let path = std::path::Path::new(&dir).join(format!("gsu-{frames}.ram"));
+                        let _ = std::fs::write(path, &bytes);
                     }
                 }
                 if let Some(dir) = std::env::var_os("CX4_RAM_DIR") {
@@ -745,6 +756,17 @@ fn main() -> ExitCode {
             cgram.extend_from_slice(&system.ppu.cgram_word(address as u8).to_le_bytes());
         }
         let _ = std::fs::write(path, cgram);
+    }
+    if let Some(path) = std::env::var_os("GSU_RAM_OUT") {
+        if let Some(gsu) = &system.gsu {
+            let mut bytes = Vec::with_capacity(gsu.ram_len());
+            for offset in 0..gsu.ram_len() as u32 {
+                bytes.push(gsu.read_ram(offset));
+            }
+            if let Err(error) = std::fs::write(&path, &bytes) {
+                eprintln!("{}: {error}", path.to_string_lossy());
+            }
+        }
     }
     if let Some(path) = std::env::var_os("CX4_RAM_OUT") {
         if let Some(cx4) = &system.cx4 {

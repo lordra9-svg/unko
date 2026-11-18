@@ -1951,10 +1951,29 @@ read.
 So a release GSU title now boots, runs its GSU-driven intro and produces
 pixel-exact frames. The result is **not monotonic** - frame 340 is exact again
 after 310-330 differ - so this is not a cumulative drift but a per-frame
-difference in the GSU-rendered picture (frame 320 shows a large contiguous
-object region, the others are scattered single pixels, e.g. 940 of 1,005 at
-frame 600 have one side black). The next step is to compare the GSU screen
-buffer and `PLOT`/`RPIX` traffic for a diverging frame such as 320.
+difference (frame 320 shows a large contiguous object region, the others are
+scattered single pixels, e.g. 940 of 1,005 at frame 600 have one side black).
+
+### The GSU's own plot stream is bit-identical
+
+`GSU_PLOT_LOG` / `ARES_GSU_PLOT_LOG` record every `PLOT` and `RPIX` with its
+arguments (`plot` logs x, y and `COLR`; `rpix` logs x, y and the byte read).
+Running Star Fox to frame 308 in both cores produces:
+
+```
+ares 51476 events, ours 51476 events, first differing event: None
+```
+
+i.e. **every** plot coordinate and colour, and every `RPIX` address and result,
+matches for frames 154-308 - the window that contains the frame-307 divergence.
+So the GSU's 3D maths, its `PLOT`/`RPIX` decoding and the pixel-cache/`flush`
+pipeline all agree with ares; the residual per-frame differences come from the
+S-CPU/PPU side (what the game uploads to VRAM and when, or GSU-RAM state the
+S-CPU also uses), not from GSU rendering.
+
+(This needs the raw arguments logged on both sides: ares' `rpix()` rewrites its
+local `x` to `(x & 7) ^ 7` before the read, so logging after that shows 7 where
+the caller passed 0.)
 
 ## CX4 gameplay diffed (2026-11-18)
 
