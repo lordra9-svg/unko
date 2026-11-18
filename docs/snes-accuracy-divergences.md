@@ -2362,6 +2362,36 @@ accrues before the next request.
 That points the next attempt at the **job's tail** - the last `execute()` through
 `HALT` - where the coprocessor is already behind, rather than at the idle period.
 
+A per-instruction coprocessor clock (`cc=`, via a new `HG51B::debugClock()`
+virtual overridden by `HitachiDSP`) gives the answer. Tail of one job:
+
+```
+t=1242884854 ins=37413673 cc=…276246 cc 08:5d b4ff
+t=1242884854 ins=37413674 cc=…280857 cc 08:5e 2601
+t=1242884854 ins=37413675 cc=…290081 cc 08:60 fc00   <- HALT
+HALT          cc=…294692  pc=…405925
+```
+
+Two things stand out:
+
+1. every instruction in the tail advances the coprocessor's clock by **~100 CX4
+   cycles** (bus waits dominate), while the CPU's clock `t=` does **not move at
+   all** across the burst;
+2. the lead at `HALT` is `(pc - cc)/scalar = 184` cycles.
+
+So the "lead" is not work the coprocessor failed to do: it is the *pending
+catch-up* at the instant `halt()` runs, because ares runs the coprocessor in
+bursts (the CPU is not stepped while the coprocessor is ahead) and the CPU then
+catches up in its own burst. The lead at `HALT` is simply how far apart the two
+bursts are at that point (173 median), and it grows to 642 by the next `$7F48`
+for the same reason.
+
+That means there is nothing to "fix" in the tail: the quantity to reproduce is
+the *burst structure* - a burst must charge the CPU's clock (so the CPU catches
+up) and the next request must wait for the outstanding catch-up. Our model keeps
+the two clocks level at every access, so both halves of that structure are
+absent, which is exactly the -2,442 vs +90..+152 inversion measured at `$7F4F`.
+
 ### Frame-locked ares capture: started, not yet calibrated
 
 A hash at the PPU frame boundary (`ARES_FLHASH`, sampling the region `dac.cpp`
