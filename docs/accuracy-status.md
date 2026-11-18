@@ -256,6 +256,9 @@ Validation so far:
   `32768 * 64` Hz. `Super Power League 4` (type `$F5`) and `Tengai Makyou Zero`
   (type `$F9`, with the RTC) are also **100.000%** exact against ares at
   frames 300 and 600.
+- Sprite OAM x is treated as a signed nine-bit position, so objects partially
+  off the left edge (x >= 256) draw their visible columns like ares. This fixed
+  the last 11 pixels of Super Mario Kart (frame 600 is now 100.000%).
 - A DMA longer than a frame no longer hides a frame boundary: an unfinished
   transfer is parked in `Snes::dma_transfer` and resumed next step, so the PPU
   presents every completed frame as it does on hardware. This fixed Super Mario

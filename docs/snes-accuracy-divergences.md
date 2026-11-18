@@ -1848,6 +1848,27 @@ presented state sequences line up at the same index, and Super Mario RPG is now
 (previously 88.438% and 0.000%), with `ours500` vs `ares501` correctly *not*
 matching any more.
 
+## Resolved 2026-11-18 - OAM x is signed: sprites at the left edge
+
+The last Super Mario Kart pixel differences (11 of 57,344 at frame 600) were a
+two-pixel-wide, eight-pixel-tall sliver at `x = 0..1, y = 175..182` where ares
+draws a dark object and we drew background.
+
+OAM x is nine bits but the screen is 256 wide, so values `>= 256` are *negative*
+positions: x = 511 is one pixel off the left edge. ares clips objects against a
+signed window (`Object::fetch`'s `x1`, `within<-128,+383>(...)`) so the visible
+rightmost columns still draw. We treated x as unsigned, computed `sx = 511`,
+and dropped the tile with `sx >= 256`.
+
+Fix: sign-extend the nine-bit x and clip per pixel with a signed range.
+
+```
+Super Mario Kart, frame 600: 57,344 / 57,344 exact (was 57,333)
+```
+
+This was never a DSP-1 defect: the label "DSP-1 sprite-font residual" came from
+the pixels looking like a glyph. SMK is now 100.000%.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

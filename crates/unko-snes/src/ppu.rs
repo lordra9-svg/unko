@@ -1598,6 +1598,15 @@ impl Ppu {
             let width = sprite_size(base_size, size, false);
             let height = sprite_height(size);
             let x = u16::from(self.oam[base]) | (u16::from((high >> high_bit) & 1) << 8);
+            // OAM x is nine bits but the screen is 256 wide, so values >= 256
+            // are *negative* positions: an object at x = 511 sits one pixel off
+            // the left edge. ares clips these against a signed window
+            // (`Object::fetch`'s `x1`), so the rightmost columns still show.
+            let x = if x >= SCREEN_WIDTH as u16 {
+                i32::from(x) - 512
+            } else {
+                i32::from(x)
+            };
             let first = u16::from(self.oam[base + 1]) + 1;
             // ares `Object::fetch`: `y = t.y - sprite.y; if(interlace) y <<= 1`,
             // then the vertical flip, then the odd field takes the odd row.
@@ -1622,8 +1631,8 @@ impl Ppu {
             let tile_width = width / 8;
             let layer_priority = priority[usize::from((attr >> 4) & 0x03)];
             for tx in 0..tile_width {
-                let sx = x + tx * 8;
-                if sx >= SCREEN_WIDTH as u16 {
+                let sx = x + (tx as i32) * 8;
+                if sx >= SCREEN_WIDTH as i32 || sx + 8 <= 0 {
                     continue;
                 }
                 // ares `Object::fetch`: `if(t.tileCount++ >= 34) break;`, so
@@ -1649,10 +1658,11 @@ impl Ppu {
                     address += (u32::from(nameselect) + 1) << 12;
                 }
                 for px in 0..8 {
-                    let screen_x = usize::from(sx) + px;
-                    if screen_x >= SCREEN_WIDTH {
+                    let screen_x = sx + px;
+                    if !(0..SCREEN_WIDTH as i32).contains(&screen_x) {
                         continue;
                     }
+                    let screen_x = screen_x as usize;
                     // Horizontal flip reverses the tile order and reads each
                     // tile from bit 0 upward; it does not mirror the plane bits
                     // a second time.
