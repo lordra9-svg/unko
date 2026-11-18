@@ -924,6 +924,16 @@ impl Snes {
 impl CpuBus for Snes {
     fn read(&mut self, address: u32, mdr: u8) -> u8 {
         let value = self.bus().read(address, mdr);
+        if std::env::var_os("NMI_TRACE").is_some() && (address & 0xFFFF) == 0x4210 {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/opencode/nmitrace.log")
+            {
+                let _ = writeln!(f, "{} R4210->{:02X}", self.clock, value);
+            }
+        }
         if address & 0x40_FF00 == 0x2100 && (0x2140..=0x2143).contains(&(address & 0xFFFF)) {
             let port = ((address & 0xFFFF) - 0x2140) as usize;
             self.apu.debug.record_cpu_read(self.clock, port, value);
@@ -932,6 +942,16 @@ impl CpuBus for Snes {
     }
 
     fn write(&mut self, address: u32, value: u8) {
+        if std::env::var_os("NMI_TRACE").is_some() && (address & 0xFFFF) == 0x4200 {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/opencode/nmitrace.log")
+            {
+                let _ = writeln!(f, "{} W4200={:02X}", self.clock, value);
+            }
+        }
         if std::env::var_os("PPU_LOG").is_some() && (address & 0xFFFF) == 0x2100 {
             use std::io::Write;
             if let Ok(mut f) = std::fs::OpenOptions::new()

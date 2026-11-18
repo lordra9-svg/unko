@@ -1429,9 +1429,22 @@ branch) produced an asymmetry that no previous measurement had shown:
 | ours | **15** | every one at PPU `line = 225`, `dot = 1-3`, one per frame from ~frame 485 |
 | ares | **0** | `status.nmiPending` is never taken |
 
-So Super Mario RPG's frame loop is not driven by the `nmiPending` path in ares,
-yet we deliver a burst of NMIs at vblank start over the last ~15 frames of the
-run. Since the one-frame phase first appears at frame 493 - i.e. inside exactly
+**Correction: that asymmetry was a stdio buffering artefact.** ares' dump hooks
+use `std::fprintf` to a buffered `FILE*`; the NMI/`$4200`/`$4210` hooks fire too
+rarely to fill a 4 KiB buffer, so the file was created but never flushed and
+appeared empty. Adding `std::fflush` after each write shows ares delivers the
+**same 15 NMIs**, and they pair up almost exactly with ours:
+
+```
+ours 177917810  ares 177917824  delta 14
+ours 178275180  ares 178275184  delta  4
+ours 178632548  ares 178632552  delta  4
+ours 178989912  ares 178989914  delta  2
+```
+
+so NMI acceptance is **not** the difference either. Any ares dump hook that can
+fire rarely must `fflush` - otherwise an empty file reads as "the event never
+happened", which is exactly the wrong conclusion. Since the one-frame phase first appears at frame 493 - i.e. inside exactly
 that window - an NMI we accept that ares does not is a strong candidate for it.
 
 The next step is to compare the *enable* state around frames 483-500: `$4200`
