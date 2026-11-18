@@ -426,6 +426,22 @@ impl DmaTransfer {
                 0
             };
             if valid_target {
+                if let Some(path) = std::env::var_os("DMA_LOG") {
+                    use std::io::Write;
+                    if matches!(target, 0x18 | 0x19) {
+                        if let Ok(mut f) = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(path)
+                        {
+                            let _ = writeln!(
+                                f,
+                                "B={:02X} A={:06X} data={:02X} mode={} n={}",
+                                target, address, value, mode, index_in_transfer
+                            );
+                        }
+                    }
+                }
                 bus.write_b(target, value);
             }
         }
