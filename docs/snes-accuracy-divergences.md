@@ -2463,6 +2463,21 @@ instructions execute anyway; only their grouping changes. Variant 2 did not move
 the probe, so the reload is still serviced at the next access rather than at the
 end of the requesting instruction.
 
+**This rules out the handshake-ordering theory.** Variant 1 *does* reproduce
+ares' ordering - the S-CPU executes ~180 instructions per job through the
+reload, so `$7F4F` is written while the burst is in progress, exactly as in
+ares - and the rendered frames are bit-identical to the per-access model. If the
+order of the `$7F4F` write relative to the reload mattered for the picture, that
+experiment would have changed frame 3500; it did not.
+
+So the frame-3477 divergence must be a **computation** difference, not a
+scheduling one: the job reaches its first instruction with a GPR value that
+differs (`gpr2 = 0x200` where ares has 0), and no amount of reordering changes
+what that instruction *sees*. The handshake timing is a red herring that six
+experiments have now excluded; the next thing to compare is the **pre-job CX4
+register file** (all 16 GPRs plus P/DPR/ROM/RAM buffers) at the moment the job
+starts, in both cores.
+
 So the remaining gap is not "how many instructions the CPU runs" but the
 *ordering* between the CPU's instruction stream and the coprocessor's blocking
 work inside a single instruction - which our one-instruction-per-`step()` model
