@@ -1688,6 +1688,30 @@ colour 0 = `0x12c`/`0x12d`/`0x12e` at 300/301/302 in both), so this is not a
 capture artefact: it affects only content that changes per frame, and every
 piece of state we can compare matches at the same frame index.
 
+## SMRPG phase: ares samples a mid-line write one scanline earlier
+
+A new fixture (`tools/snes-oracle/gen-midline-brightness-rom.py`) dims `$2100`
+from a V-IRQ at scanline 100 and restores it in NMI, so the frame shows a
+bright/dim boundary whose row index is the scanline at which each renderer read
+the register. With a solid white backdrop the boundary is unambiguous:
+
+```
+        row 98   row 99   row 100
+ours    255      255      143
+ares    255      143      143
+```
+
+So ares applies a mid-line brightness change **one scanline earlier** than we do
+- i.e. our renderer samples the register one line earlier relative to the CPU's
+writes. That is the right shape for the SMRPG symptom (its fade is written at
+scanline 231, in vblank, and the whole frame comes out one frame apart while
+every register, VRAM, CGRAM and WRAM value at the frame boundary is identical).
+
+`render_current_line` is currently triggered at `pre_dot == 21` (the first dot of
+hblank). The next experiment is to move that sample point and re-run this
+fixture plus the full oracle set: the fixture must read 99 like ares, and every
+currently-100.000% result must stay there.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

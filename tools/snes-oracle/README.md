@@ -209,6 +209,25 @@ adds the Epson RTC at `$4840-$4842`) are both 100.000% identical to ares at
 frames 300 and 600 as well. Clear any `time.rtc` save under ares' `Saves`
 directory between runs so the RTC starts from the same state.
 
+## Mid-frame sampling fixture
+
+`gen-midline-brightness-rom.py` builds a LoROM that dims `$2100` from a V-IRQ at
+a chosen scanline (default 100) and restores full brightness in NMI. The screen
+is a solid white backdrop, so the frame shows a bright/dim boundary whose row
+index is exactly where the renderer sampled `$2100`.
+
+This answers a question no frame counter can: *when* within a line does each
+renderer read the registers?
+
+```sh
+tools/snes-oracle/gen-midline-brightness-rom.py /tmp/mid.sfc 100
+FRAMES=30 FRAME_OUT=/tmp/mid-o.raw ./target/release/examples/snes-info /tmp/mid.sfc ipl.rom
+ARES_REGION=NTSC tools/snes-oracle/ares-capture.sh /tmp/mid.sfc 30 /tmp/mid-a
+```
+
+Measured: our first dim row is 100, ares' is 99 - ares samples a mid-line write
+one scanline earlier than we do.
+
 ## Deterministic captures
 
 ares seeds the power-on work-RAM pattern from the host clock, so two captures of
