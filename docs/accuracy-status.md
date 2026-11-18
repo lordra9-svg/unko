@@ -256,9 +256,12 @@ Validation so far:
   registers and the arithmetic unit. One SA-1 cycle is two master clocks with
   ares' bus-contention and refresh penalties. Verified **100.000%**
   pixel-identical against ares for Super Mario RPG (USA) at frames 120, 180,
-  300 and 400 and Kirby Super Star (USA) at 120. Later SMRPG scenes and Kirby's
-  Dream Land 3 still diverge; the remaining work is in the character-conversion
-  / bit-map data path.
+  300, 400, 488, 490 and 492, Kirby Super Star (USA) at 120, and **Kirby's
+  Dream Land 3 (USA) at 120, 300 and 600**. (KDL3 was black for a long time
+  because the `$40-$4F` BW-RAM window was wrongly banked by `sbm`, which let its
+  `$E955` loop paint `$FF` over the PPU settings block at `$604C-$606B`.) Later
+  SMRPG scenes (frame 493 onwards) still diverge; the remaining work is in the
+  character-conversion / bit-map data path.
 - The S-DD1 decompression coprocessor is implemented (`sdd1.rs`): the
   `$4800-$480F` registers, the LoROM/MMC MCU windows, both save-RAM windows,
   the `$4300-$437F` DMA snoop and the full Golomb-Rice/context-model entropy

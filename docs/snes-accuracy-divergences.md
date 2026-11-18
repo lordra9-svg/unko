@@ -1478,6 +1478,41 @@ that moment. `$6002` bit 7 is written by the S-CPU itself at `$B8b0`
 (`LDA $6002; ORA #$81; STA $6002`), so the next step is to compare the `$6002`
 value and that write's timing between the cores.
 
+## Resolved 2026-11-17 - SA-1 BW-RAM `$40-$4F` is not banked by `sbm`
+
+KDL3's S-CPU keeps its PPU settings in BW-RAM: direct page is `$6000`, so
+`LDA $5F` at `$00:842C` reads BW-RAM `$605F`, and the routine at `$83F0` then
+copies `$604C`-`$606B` into `$2100`, `$2105`, `$2107`-`$2135`. When that block
+is wrong the game renders with `BGMODE=9`, `TM=TM=FF`, `overscan`, `interlace`
+and `hires` all set - a black screen.
+
+The block was wrong because of the BW-RAM window bank rules. ares gives the
+`$00-$3F,$80-$BF:$6000-$7FFF` window `size=0x2000` in its board map, so
+`SA1::BWRAM::readCPU`/`writeCPU` receive the 13-bit window offset and apply
+`sbm`; the `$40-$4F:$0000-$FFFF` window is mapped full width, so those handlers
+see the untranslated 24-bit address and **do not** apply `sbm`.
+
+We applied `sbm` whenever the mirrored offset happened to be below `$2000`,
+which wrongly caught the `$40` window as well: `$40:0022` landed at linear
+`$6022` instead of `$0022`. KDL3's `$E955` loop (`LDA #$FFFF; STA $0022,X;
+STA $00A2,X; STA $01A2,X; STZ $0122,X; ...`) then painted `$FF` over
+`$6022-$6041`, destroying the settings block that `$B8E3` had just written
+(`$6040 = $10`, the `TM` value). ares' copy of the same loop writes bank 0
+(`$0022`), leaving `$6040` intact.
+
+Measured with `SA1_BWLOG`/`ARES_BWLOW`, same instruction, same registers
+(`pc=$E958`, `d=$3600`, `dbr=$40`, `a=$FFFF`, `x` = 0, 2, ... 0x1E in both):
+
+| | target |
+|---|---|
+| ares | `$0022`, `$0023`, `$00A2` ... (bank 0) |
+| ours (before) | `$6022`, `$6023`, `$60A2` ... (bank 3) |
+
+After the fix the BW-RAM image matches ares (`$6000-$6070` from 49 differing
+bytes down to 2, both off-by-one counters), `$2100`/`$2121`/`$212C` finally
+receive the real values, and **KDL3 is 100.000% exact against ares at frames
+120, 300 and 600**.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

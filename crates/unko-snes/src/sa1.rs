@@ -699,29 +699,39 @@ impl Sa1 {
     /// Read `$00-$3F,$80-$BF:$6000-$7FFF` or `$40-$4F:$0000-$FFFF` from the
     /// S-CPU (ares `SA1::BWRAM::readCPU` after the bus map).
     pub fn read_cpu_bwram(&mut self, address: u32, bwram: &mut [u8]) -> u8 {
-        let mut offset = if address & 0x40_E000 == 0x00_6000 {
-            address & 0x1FFF
+        // Only the `$00-$3F,$80-$BF:$6000-$7FFF` window is banked by `sbm`:
+        // ares' board map gives that window `size=0x2000`, so the handler sees
+        // the window offset and applies `sbm`. The `$40-$4F:$0000-$FFFF`
+        // window is mapped full-width, so its handler sees the untranslated
+        // 24-bit address and skips the bank (KDL3 relies on this: its `$40`
+        // window writes land in BW-RAM bank 0, below `sbm * 0x2000`).
+        let offset = if address & 0x40_E000 == 0x00_6000 {
+            u32::from(self.io.sbm) * 0x2000 + (address & 0x1FFF)
         } else {
             mirror(address, bwram.len() as u32)
         };
-        if offset < 0x2000 {
-            offset = u32::from(self.io.sbm) * 0x2000 + (offset & 0x1FFF);
-        }
         if self.bwram_dma {
             return self.dma_cc1_read(offset, bwram);
         }
         let value = Self::bwram_read_raw(bwram, offset, 0);
-        if std::env::var_os("F602A_LOG").is_some() && offset == 0x602A {
+        if std::env::var_os("F602A_LOG").is_some() && matches!(offset, 0x6002 | 0x602A) {
             use std::io::Write;
             if let Ok(mut f) = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open("/tmp/opencode/602a.log")
+                .open("/tmp/opencode/6002.log")
             {
                 let _ = writeln!(
                     f,
-                    "{} R602A->{:02X} spc={:06X}",
-                    self.master_clock, value, self.snes_live_pc
+                    "{} R{:04X}->{:02X} spc={:06X} addr={:06X} swen={} cwen={} bwp={:X}",
+                    self.master_clock,
+                    offset,
+                    value,
+                    self.snes_live_pc,
+                    address,
+                    self.io.swen,
+                    self.io.cwen,
+                    self.io.bwp
                 );
             }
         }
@@ -731,34 +741,61 @@ impl Sa1 {
     /// Write `$00-$3F,$80-$BF:$6000-$7FFF` or `$40-$4F:$0000-$FFFF` from the
     /// S-CPU (ares `SA1::BWRAM::writeCPU`).
     pub fn write_cpu_bwram(&mut self, address: u32, bwram: &mut [u8], data: u8) {
-        let mut offset = if address & 0x40_E000 == 0x00_6000 {
-            address & 0x1FFF
+        // See `read_cpu_bwram`: `sbm` banks only the `$6000-$7FFF` window.
+        let offset = if address & 0x40_E000 == 0x00_6000 {
+            u32::from(self.io.sbm) * 0x2000 + (address & 0x1FFF)
         } else {
             mirror(address, bwram.len() as u32)
         };
-        if offset < 0x2000 {
-            offset = u32::from(self.io.sbm) * 0x2000 + (offset & 0x1FFF);
-        }
         // BW-RAM protection only applies when both write enables are off.
-        if !self.io.swen && !self.io.cwen && offset < (0x100u32 << self.io.bwp) {
-            return;
-        }
-        Self::log_bwram("CPU", offset, data, self.master_clock);
-        Self::bwram_write_raw(bwram, offset, data);
-        if std::env::var_os("F602A_LOG").is_some() && offset == 0x602A {
+        if std::env::var_os("F602A_LOG").is_some() && matches!(offset, 0x6002 | 0x602A) {
             use std::io::Write;
             if let Ok(mut f) = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open("/tmp/opencode/602a.log")
+                .open("/tmp/opencode/6002.log")
             {
+                let blocked = !self.io.swen && !self.io.cwen && offset < (0x100u32 << self.io.bwp);
                 let _ = writeln!(
                     f,
-                    "{} W602A={:02X} spc={:06X}",
-                    self.master_clock, data, self.snes_live_pc
+                    "{} W{:04X}={:02X} spc={:06X} addr={:06X} swen={} cwen={} bwp={:X} blocked={}",
+                    self.master_clock,
+                    offset,
+                    data,
+                    self.snes_live_pc,
+                    address,
+                    self.io.swen,
+                    self.io.cwen,
+                    self.io.bwp,
+                    blocked
                 );
             }
         }
+        if !self.io.swen && !self.io.cwen && offset < (0x100u32 << self.io.bwp) {
+            return;
+        }
+        Self::log_bwram("CPU", offset, data, self.master_clock);
+        if std::env::var_os("SA1_BWLOG").is_some() {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/opencode/bwpc.log")
+            {
+                let _ = writeln!(
+                    f,
+                    "{} CPU off={:06X} val={:02X} pc={:06X} in={:06X} sbm={} len={}",
+                    self.master_clock,
+                    offset,
+                    data,
+                    self.snes_live_pc,
+                    address,
+                    self.io.sbm,
+                    bwram.len()
+                );
+            }
+        }
+        Self::bwram_write_raw(bwram, offset, data);
     }
 
     /// Read `$00-$3F,$80-$BF:$3000-$37FF` from the S-CPU.
@@ -1544,6 +1581,40 @@ mod tests {
         // becomes the base instead of being dropped.
         assert_eq!(mirror(0x600000, 0x600000), 0x400000);
         assert_eq!(mirror(0x400000, 0x400000), 0x000000);
+    }
+
+    #[test]
+    fn only_the_6000_window_is_banked_by_sbm() {
+        // ares gives the `$00-$3F,$80-$BF:$6000-$7FFF` window `size=0x2000`, so
+        // its handler sees the window offset and applies `sbm`. The
+        // `$40-$4F:$0000-$FFFF` window is mapped full width, so its handler sees
+        // the untranslated address and does *not* apply the bank.
+        //
+        // KDL3 depends on this: its `$40:0022` writes must land in BW-RAM bank
+        // 0 (below `sbm * 0x2000`), where it keeps the PPU settings block that
+        // `$83FA` later copies into `$2100`-`$2132`.
+        let mut sa1 = Sa1::new(Region::Ntsc);
+        sa1.io.sbm = 3;
+        sa1.io.swen = true; // as KDL3 leaves it, so BW-RAM writes go through
+        let mut bwram = vec![0u8; 0x2_0000];
+
+        sa1.write_cpu_bwram(0x40_0022, &mut bwram, 0xAA);
+        assert_eq!(bwram[0x0022], 0xAA, "$40 window is not banked by sbm");
+        assert_eq!(bwram[0x6022], 0x00, "$40 window must not touch bank 3");
+
+        sa1.write_cpu_bwram(0x00_6040, &mut bwram, 0xBB);
+        assert_eq!(
+            bwram[0x6040], 0xBB,
+            "$00:6000-$7FFF is banked by sbm (sbm = 3 -> offset 0x6040)"
+        );
+        assert_eq!(bwram[0x0040], 0x00, "the 6000 window must not write bank 0");
+
+        sa1.io.sbm = 0;
+        sa1.write_cpu_bwram(0x00_6040, &mut bwram, 0xCC);
+        assert_eq!(
+            bwram[0x0040], 0xCC,
+            "sbm = 0 folds the 6000 window to bank 0"
+        );
     }
 
     #[test]

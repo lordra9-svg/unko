@@ -924,6 +924,22 @@ impl Snes {
 impl CpuBus for Snes {
     fn read(&mut self, address: u32, mdr: u8) -> u8 {
         let value = self.bus().read(address, mdr);
+        if std::env::var_os("READ_WATCH").is_some()
+            && matches!(self.live_pc & 0xFFFF, 0x842C | 0x843B)
+        {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/opencode/read.log")
+            {
+                let _ = writeln!(
+                    f,
+                    "{} R{:06X}->{:02X} pc={:06X}",
+                    self.clock, address, value, self.live_pc
+                );
+            }
+        }
         if std::env::var_os("NMI_TRACE").is_some() && (address & 0xFFFF) == 0x4210 {
             use std::io::Write;
             if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -942,6 +958,61 @@ impl CpuBus for Snes {
     }
 
     fn write(&mut self, address: u32, value: u8) {
+        if std::env::var_os("PPU_REG_LOG").is_some()
+            && matches!(address & 0xFFFF, 0x2100 | 0x2105 | 0x212C | 0x212D | 0x2133)
+        {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/opencode/ppureg.log")
+            {
+                let _ = writeln!(
+                    f,
+                    "{} W{:04X}={:02X} pc={:06X}",
+                    self.clock,
+                    address & 0xFFFF,
+                    value,
+                    self.live_pc
+                );
+            }
+        }
+        if std::env::var_os("SA1IO_LOG").is_some() {
+            use std::io::Write;
+            let bank = (address >> 16) as u8;
+            let offset = (address & 0xFFFF) as u16;
+            if matches!(bank, 0x00..=0x3F | 0x80..=0xBF) && (0x2200..=0x222F).contains(&offset) {
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/opencode/sa1io.log")
+                {
+                    let _ = writeln!(
+                        f,
+                        "{} W{:04X}={:02X} pc={:06X}",
+                        self.clock, offset, value, self.live_pc
+                    );
+                }
+            }
+        }
+        if std::env::var_os("DP_WATCH").is_some() {
+            use std::io::Write;
+            let bank = (address >> 16) as u8;
+            let offset = (address & 0xFFFF) as usize;
+            if (bank == 0x00 || bank == 0x7E) && (0x4C..=0x6B).contains(&offset) {
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/opencode/dp.log")
+                {
+                    let _ = writeln!(
+                        f,
+                        "{} W{:04X}={:02X} pc={:06X}",
+                        self.clock, offset, value, self.live_pc
+                    );
+                }
+            }
+        }
         if std::env::var_os("NMI_TRACE").is_some() && (address & 0xFFFF) == 0x4200 {
             use std::io::Write;
             if let Ok(mut f) = std::fs::OpenOptions::new()

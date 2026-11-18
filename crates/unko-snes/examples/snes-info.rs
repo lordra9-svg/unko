@@ -166,8 +166,15 @@ fn main() -> ExitCode {
                     .unwrap_or(u64::MAX);
                 if (from..=to).contains(&system.clock) {
                     let line = format!(
-                        "{} {:02X}:{:04X}\n",
-                        system.clock, system.cpu.pbr, system.cpu.pc
+                        "{} {:02X}:{:04X} d={:04X} b={:02X} a={:04X} x={:04X} y={:04X}\n",
+                        system.clock,
+                        system.cpu.pbr,
+                        system.cpu.pc,
+                        system.cpu.d,
+                        system.cpu.dbr,
+                        system.cpu.a,
+                        system.cpu.x,
+                        system.cpu.y
                     );
                     let _ = std::fs::OpenOptions::new()
                         .create(true)
@@ -293,6 +300,11 @@ fn main() -> ExitCode {
                 ch.target, ch.control, ch.bank, ch.source, ch.indirect_bank, ch.hdma_address,
                 ch.line_counter
             );
+        }
+    }
+    if let Some(path) = std::env::var_os("BWRAM_OUT") {
+        if let Err(error) = std::fs::write(&path, system.cart.sram()) {
+            eprintln!("{}: {error}", path.to_string_lossy());
         }
     }
     if std::env::var_os("SPC7110_STATE").is_some() {
