@@ -209,6 +209,21 @@ adds the Epson RTC at `$4840-$4842`) are both 100.000% identical to ares at
 frames 300 and 600 as well. Clear any `time.rtc` save under ares' `Saves`
 directory between runs so the RTC starts from the same state.
 
+## Deterministic captures
+
+ares seeds the power-on work-RAM pattern from the host clock, so two captures of
+a game that reads uninitialised WRAM differ. `ares-capture.sh` therefore always
+exports `ARES_DETERMINISTIC=1`, which makes the patched build use ares' own
+"Deterministic Entropy" seed. `crates/unko-snes/src/random.rs` reproduces that
+same generator, so our core starts from identical WRAM.
+
+Reproducibility check:
+
+```sh
+for i in 1 2; do ARES_REGION=NTSC tools/snes-oracle/ares-capture.sh game.sfc 120 /tmp/a$i; done
+cmp /tmp/a1/frame.raw /tmp/a2/frame.raw     # identical
+```
+
 ## Frame-index fixture
 
 `gen-frame-counter-rom.py` builds a 32 KiB first-party LoROM whose NMI handler

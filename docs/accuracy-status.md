@@ -232,6 +232,13 @@ Validation so far:
   verified against ares below. A release SuperFX image (e.g. Star Fox) is not
   present locally, so the end-to-end game path is not yet measured; Final
   Fantasy V was still in its boot sequence at the 20M-cycle sample.
+- Power-on work RAM matches ares (`random.rs`): ares fills S-CPU WRAM with a
+  structured low-entropy pseudo-random pattern (`Random::array`) instead of
+  zeros, seeded `(0, 0)` in its deterministic mode. Our core reproduces that
+  generator byte-for-byte, and the ares capture harness now always runs with
+  deterministic entropy, so oracle captures are reproducible. For Super Mario
+  RPG at frame 500 the whole memory image (WRAM 128 KiB + BW-RAM 32 KiB) is
+  now byte-identical to ares.
 - The SPC7110 is implemented (`spc7110.rs`): the memory control unit (HiROM
   windows folded with ares' masks, `$4830-$4834` banking and ROM-size select,
   1 MiB program ROM + data ROM, 8 KiB save RAM gated by `$4830`), the

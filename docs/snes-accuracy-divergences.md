@@ -1513,6 +1513,46 @@ bytes down to 2, both off-by-one counters), `$2100`/`$2121`/`$212C` finally
 receive the real values, and **KDL3 is 100.000% exact against ares at frames
 120, 300 and 600**.
 
+## Resolved 2026-11-17 - power-on work RAM is ares' pattern, not zeros
+
+ares does not zero S-CPU work RAM at power-on:
+
+```cpp
+// ares/sfc/cpu/cpu.cpp
+if(!reset) random.array({(u8*)wram, sizeof(wram)});   // CPU::power
+```
+
+`Random::array` with the low-entropy setting (which `System::power` selects for
+the SFC) fills the 128 KiB with a *structured* pattern: two byte values chosen
+by two address bits, with rare single-bit flips. The RNG is seeded from the host
+clock unless ares' "Deterministic Entropy" developer setting is on, so two ares
+runs of the same game can differ.
+
+We zero-filled WRAM. That is visible: **two ares runs of Super Mario RPG at
+frame 120 differ by 112,715 of 131,072 WRAM bytes and 4.1% of pixels**, because
+the game reads uninitialised buffers (its per-frame fade tables at
+`$7E:4200-$4FFF`, `$7E:6800-$9FFF` and friends are read before they are
+written). Any comparison against a nondeterministic oracle is therefore
+meaningless for such games.
+
+Fixes:
+
+- `crates/unko-snes/src/random.rs` ports ares' `Random` (PCG32 `step`,
+  `random`, `array(Low)`) and fills WRAM at power-on with the seed ares uses in
+  deterministic mode, `(0, 0)`. Verified byte-exact: ares' frame-1 WRAM and our
+  power-on image agree in **0 of 24,576** bytes across `$4200-$4FFF`,
+  `$6800-$9FFF` and `$E000-$F9FF` (the regions the game has not yet touched).
+- The oracle build honours `ARES_DETERMINISTIC` (same as ares' own deterministic
+  setting), and `tools/snes-oracle/ares-capture.sh` always exports it, so
+  captures are reproducible. Two deterministic ares runs are now byte-identical
+  (0/131,072 WRAM bytes).
+
+Effect on Super Mario RPG at frame 500: **WRAM 0/131,072 and BW-RAM 0/32,768
+bytes differ** from ares (previously 54,880 WRAM bytes), i.e. the entire memory
+image now matches. The frame still differs there (`ours N == ares N+1`,
+100.000% for 493/494, 499/500 and 500/501), so the residual is a rendering-phase
+difference with identical memory, not a memory-content difference.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

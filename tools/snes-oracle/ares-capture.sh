@@ -20,6 +20,14 @@ mkdir -p "$out"
 
 ares=${ARES:-/var/home/Lordra/ai/refs/ares/build_headless/desktop-ui/ares}
 system=${ARES_SYSTEM:-Super Famicom}
+
+# Reproducible power-on RAM. ares seeds its WRAM garbage pattern from the host
+# clock, so two runs of a game that reads uninitialised work RAM (Super Mario
+# RPG does) differ by several percent of pixels. ARES_DETERMINISTIC selects
+# ares' own "Deterministic Entropy" seed, which our core mirrors exactly
+# (crates/unko-snes/src/random.rs). Captures must be comparable to mean
+# anything, so this is always on.
+export ARES_DETERMINISTIC=${ARES_DETERMINISTIC:-1}
 rate=${ARES_AUDIO_RATE:-32040}
 
 trace=$out/trace.txt

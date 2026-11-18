@@ -30,6 +30,7 @@ pub mod gsu;
 pub mod io;
 pub mod necdsp;
 pub mod ppu;
+pub mod random;
 pub mod rom;
 pub mod sa1;
 pub mod sdd1;
@@ -47,6 +48,7 @@ pub use gsu::Gsu;
 pub use io::CpuIo;
 pub use necdsp::{DspError, DspFlags, DspRegisters, DspWindow, NecDsp};
 pub use ppu::Ppu;
+pub use random::Random;
 pub use rom::{
     region_for_country, rom_size_bytes, sram_size_bytes, BusTarget, Cartridge, Mapping, Region,
     RomError, RomHeader,

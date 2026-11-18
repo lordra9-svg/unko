@@ -7,6 +7,10 @@ use std::process::ExitCode;
 use unko_snes::{Cartridge, Snes};
 
 fn main() -> ExitCode {
+    if let Some(path) = std::env::var_os("POWERON_OUT") {
+        let _ = std::fs::write(&path, unko_snes::random::power_on_wram());
+        return ExitCode::SUCCESS;
+    }
     let Some(path) = env::args().nth(1) else {
         eprintln!("usage: snes-info <rom> [ipl.rom]");
         return ExitCode::FAILURE;

@@ -283,7 +283,10 @@ impl Snes {
             refresh_active: false,
             dma: Dma::new(),
             io: CpuIo::new(),
-            wram: vec![0; WRAM_SIZE],
+            // ares fills S-CPU work RAM with its structured low-entropy
+            // pattern at power-on (`Random::array`), not with zeros; games that
+            // read a buffer before initialising it see this data.
+            wram: crate::random::power_on_wram(),
             apu_credit: 0,
             ppu_credit: 0,
             nmi_enable: false,
@@ -1758,6 +1761,8 @@ mod tests {
         assert_eq!(system.cart.header().reset_vector, 0x8000);
         system.wram_mut()[0x1234] = 0x5A;
         assert_eq!(system.wram()[0x1234], 0x5A);
+        // Bank $7F is a different 64 KiB and keeps the power-on pattern.
+        let bank7f = system.wram()[0x1_1234];
 
         let mut bus = SnesBus {
             wram: &mut system.wram,
@@ -1786,7 +1791,7 @@ mod tests {
         assert_eq!(bus.read(0x001234, 0), 0x5A);
         assert_eq!(bus.read(0x801234, 0), 0x5A);
         assert_eq!(bus.read(0x7E1234, 0), 0x5A);
-        assert_eq!(bus.read(0x7F1234, 0), 0x00);
+        assert_eq!(bus.read(0x7F1234, 0), bank7f);
     }
 
     #[test]
@@ -1794,6 +1799,9 @@ mod tests {
         // ares maps unmapped addresses to `[](n24, n8 data) { return data; }`,
         // where `data` is the CPU's memory data register.
         let mut system = Snes::new(cartridge(&[0xDB]));
+        // Work RAM powers up with ares' structured pattern, so compare against
+        // the stored byte rather than assuming zero.
+        let wram_1234 = system.wram()[0x1234];
         let mut bus = SnesBus {
             wram: &mut system.wram,
             cart: &mut system.cart,
@@ -1824,7 +1832,7 @@ mod tests {
         assert_eq!(bus.read(0x004200, 0xA5), 0xA5);
         assert_eq!(bus.read(0x005000, 0x3C), 0x3C);
         // Mapped reads still return their own value and do not leak the MDR.
-        assert_eq!(bus.read(0x001234, 0x5A), 0x00);
+        assert_eq!(bus.read(0x001234, 0x5A), wram_1234);
     }
 
     #[test]
