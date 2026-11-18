@@ -264,6 +264,30 @@ fn main() -> ExitCode {
                         let _ = writeln!(f, "F {frames}");
                     }
                 }
+                if let Some(path) = std::env::var_os("CX4_REGS_LOG") {
+                    use std::io::Write;
+                    if let Some(cx4) = &system.cx4 {
+                        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+                        let mut mix = |b: u8| {
+                            hash ^= u64::from(b);
+                            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+                        };
+                        // Exactly the 48 GPR-window bytes (16 x 3), which is
+                        // what the ares-side hash reads.
+                        for g in cx4.regs.gpr.iter() {
+                            for b in g.to_le_bytes().iter().take(3) {
+                                mix(*b);
+                            }
+                        }
+                        if let Ok(mut f) = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&path)
+                        {
+                            let _ = writeln!(f, "{frames} {hash:016x}");
+                        }
+                    }
+                }
                 if let Some(path) = std::env::var_os("CX4_STATE_LOG") {
                     use std::io::Write;
                     if let Some(cx4) = &system.cx4 {

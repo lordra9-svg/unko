@@ -2470,6 +2470,25 @@ ares - and the rendered frames are bit-identical to the per-access model. If the
 order of the `$7F4F` write relative to the reload mattered for the picture, that
 experiment would have changed frame 3500; it did not.
 
+### The register divergence starts at frame 21, not 3477
+
+Hashing the CX4 GPR window (the 48 bytes the S-CPU sees, 16 x 3) once per frame
+in both cores (`CX4_REGS_LOG` / `ARES_CX4_REGS`) and comparing 3,500 frames:
+
+```
+frames compared 3500; differing GPR hashes: 76; first: 21
+frame 21: ares=4c1099f083a5d25f ours=dbb08402e9cafb1b
+```
+
+So the CX4 register file first differs at **frame 21**, 3,456 frames before the
+first *visible* difference (frame 3477) and before any data-RAM difference. The
+early difference is sporadic (76 of 3,500 frames differ) and only becomes visible
+when a later job's plot depends on the drifted register.
+
+That reframes the hunt: the bug is an HG51B computation that goes wrong on a
+specific input very early in the ROM's life, not anything to do with the job
+handshake (which six experiments have now excluded).
+
 Tracing the last write to `gpr2` before the divergence confirms the
 computation angle - the two cores write *different values at different
 instructions*:
