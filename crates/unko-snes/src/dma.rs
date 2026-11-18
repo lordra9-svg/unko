@@ -45,6 +45,8 @@ pub struct Dma {
     pending: u8,
     /// Channels enabled by a write to `$420C` (HDMA).
     pub hdma_enable: u8,
+    /// Completed-frame counter, mirrored from the PPU for debug logging.
+    pub debug_frame: u64,
     hdma: [HdmaState; 8],
 }
 
@@ -144,7 +146,7 @@ impl Dma {
     /// Take the latched `$420B` write as an in-progress transfer.
     pub fn begin_transfer(&mut self) -> Option<DmaTransfer> {
         self.take_pending()
-            .map(|(channels, mask)| DmaTransfer::new(channels, mask))
+            .map(|(channels, mask)| DmaTransfer::new(channels, mask, self.debug_frame))
     }
 
     /// Enable HDMA channels and reset their table cursors.
@@ -347,10 +349,12 @@ pub struct DmaTransfer {
     setup: bool,
     transferred: u32,
     count: u32,
+    /// Completed-frame counter, for debug logging.
+    debug_frame: u64,
 }
 
 impl DmaTransfer {
-    fn new(channels: [DmaChannel; 8], mask: u8) -> Self {
+    fn new(channels: [DmaChannel; 8], mask: u8, debug_frame: u64) -> Self {
         Self {
             channels,
             mask,
@@ -359,6 +363,7 @@ impl DmaTransfer {
             setup: true,
             transferred: 0,
             count: 0,
+            debug_frame,
         }
     }
 
@@ -428,7 +433,7 @@ impl DmaTransfer {
             if valid_target {
                 if let Some(path) = std::env::var_os("DMA_LOG") {
                     use std::io::Write;
-                    if matches!(target, 0x18 | 0x19) {
+                    if matches!(target, 0x18 | 0x19) && self.debug_frame >= 300 {
                         if let Ok(mut f) = std::fs::OpenOptions::new()
                             .create(true)
                             .append(true)
@@ -465,7 +470,7 @@ impl DmaTransfer {
 ///
 /// Returns the number of master clocks the CPU was stalled.
 pub fn run(channels: &[DmaChannel; 8], mask: u8, bus: &mut impl DmaBus) -> u32 {
-    let mut transfer = DmaTransfer::new(*channels, mask);
+    let mut transfer = DmaTransfer::new(*channels, mask, 0);
     let mut cycles = 0;
     while transfer.busy() {
         cycles += transfer.step(bus);

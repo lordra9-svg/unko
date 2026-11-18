@@ -1607,28 +1607,29 @@ rule: the byte our PPU is handed is wrong. (The earlier "187 extra writes" was
 a log-window artefact - both logs start at "frame >= 300", whose clock differs
 slightly between the two cores, so the totals are not comparable.)
 
-**Upstream: the DMA streams diverge.** Logging every DMA B-write to
-`$2118`/`$2119` with its A-bus source (`DMA_LOG` / `ARES_DMA_LOG`) and aligning
-the two tails gives a **77,706-transfer common prefix**, then:
+**DMA is not the cause - it is byte-identical.** Two log bugs had produced
+false leads here, and both are worth recording:
 
-```
-      ares                                ours
-77706 B=18 A=000070 d=00 m1 | B=18 A=7EA000 d=00 m1
-77707 B=19 A=000070 d=00 m1 | B=19 A=7EA001 d=00 m1
-77708 B=18 A=000070 d=00 m1 | B=18 A=7EA002 d=00 m1
-```
+1. The DMA-register hook (`DMAREG_LOG`) filtered on the *low 16 bits* of the bus
+   address, so decompressor stores to WRAM `$7F:4300-$7F:437F` were counted as
+   DMA-register writes and showed up as a 128-write "extra block" from
+   `$C0:FB80`. With the full 24-bit address logged, both cores write
+   `$4300-$437F` **663 times with identical values**.
+2. The DMA B-write hook compared a run gated at "frame >= 300" in ares against
+   one that was not gated in ours, so tail alignment produced a spurious
+   divergence (`$00:0070` fixed fill vs `$7E:A000`). With our side frame-gated
+   too (`Dma::debug_frame`, mirrored from the PPU), the two B-write streams to
+   `$2118`/`$2119` match **106,371 of 106,371 entries** over frames 300-440.
 
-ares is running a **fixed-source** fill (`A1T` fixed at `$00:0070`, data `$00`,
-`$43x0` bit 3 set), while ours increments through `$7E:A000` - i.e. our channel's
-control/source registers differ at that point in the run. Since our datum is
-`$00` there while ares' transfer is a zero fill, the two agree byte-wise for a
-while and then diverge the moment ares switches to a real upload, which is
-exactly the observed "one write late" VRAM stream.
+So the S-CPU programs the DMA channels identically *and* every DMA upload is
+identical. The first differing VRAM write is therefore a **CPU store** to
+`$2118`/`$2119` carrying a different byte (`$00` where ares has `$58`), which
+points at the value the S-CPU holds at that store (a decompressed scratch
+buffer or table) rather than at the PPU, HDMA, DMA or the (identical) frame-500
+memory image.
 
-So the residual is not in the PPU, HDMA, or the memory image: the S-CPU is
-programming (or triggering) a DMA differently by then. The next step is to find
-the first DMA-channel register write that differs - log `$4300-$437F` writes with
-their values and compare, which will name the routine and the frame.
+Next step: log `STA $2118/$2119` with the accumulator and PC in both cores and
+trace where the differing byte is loaded from.
 
 ## Oracle toolkit
 

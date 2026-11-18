@@ -604,6 +604,7 @@ impl Snes {
         self.apply_interrupts();
         let mut cycles = cpu_cycles;
         let mut dma_clocks = 0u32;
+        self.dma.debug_frame = self.ppu.debug_frame;
         while let Some(mut transfer) = self.dma.begin_transfer() {
             while transfer.busy() {
                 let clocks = {
@@ -978,6 +979,23 @@ impl CpuBus for Snes {
                     value,
                     self.live_pc
                 );
+            }
+        }
+        if std::env::var_os("DMAREG_LOG").is_some() {
+            use std::io::Write;
+            let offset = (address & 0xFFFF) as u16;
+            if (0x4300..=0x437F).contains(&offset) {
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/opencode/dmareg.log")
+                {
+                    let _ = writeln!(
+                        f,
+                        "{:04X}={:02X} pc={:06X} bus={:06X}",
+                        offset, value, self.live_pc, address
+                    );
+                }
             }
         }
         if std::env::var_os("SA1IO_LOG").is_some() {
