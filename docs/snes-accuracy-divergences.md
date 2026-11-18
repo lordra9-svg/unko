@@ -2189,7 +2189,30 @@ then wait 2,604. The phase is inverted and the whole handshake is ~1,374 clocks
 debt.
 
 That is why the machine-time experiment (which advanced the clock by the reload)
-looked close but made parity worse: it fixes the first row and not the second. The mechanism is now clear:
+looked close but made parity worse: it fixes the first row and not the second.
+
+A single isolated job in the ares log shows the four phases exactly (clocks
+relative to the `$7F48` write):
+
+```
+$7F48 write            0
+reload begins        924      <- 924 clocks pass before the load even starts
+reload completes   3,650      <- 2,726-clock reload
+$7F4F write        3,798      <- 148 clocks after the reload
+first instruction  5,014      <- 1,216 clocks later
+```
+
+Ours has the same reload duration and the same order, but the load begins
+immediately (~0 rather than 924) and the job starts 2,584 clocks after `$7F4F`
+rather than 1,216. So ares' coprocessor is *behind* the CPU when `$7F48` is
+written (it spends 924 clocks catching up on halted steps first), the reload then
+puts it *ahead*, and the CPU needs 1,216 clocks to catch up before the job's
+first instruction runs. We charge the reload to the credit (the right sign) but
+start it immediately and never reproduce either catch-up phase.
+
+Reproducing this needs the coprocessor to be stepped from the CPU's own clock
+budget (as `Thread::synchronize` does) rather than from a separate credit, so
+that both catch-up phases fall out of the same arithmetic. The mechanism is now clear:
 the forced reload costs ~2,560 coprocessor cycles (~2,749 CPU clocks), and in
 ares the S-CPU *executes during it* (`Thread::synchronize(cpu)`), so the `$7F4F`
 write lands about halfway through the reload (~145 clocks after `$7F48` in our
