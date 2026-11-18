@@ -805,6 +805,11 @@ impl Snes {
                     cart: &mut self.cart,
                     apu: &mut self.apu,
                     ppu: &mut self.ppu,
+                    sa1: &mut self.sa1,
+                    sdd1: &mut self.sdd1,
+                    spc7110: &mut self.spc7110,
+                    snes_mar: self.snes_mar,
+                    snes_refresh: self.refresh_active,
                 };
                 let cost = self.dma.hdma_line(&mut bus);
                 self.cpu_stall += cost;
@@ -823,6 +828,11 @@ impl Snes {
                         cart: &mut self.cart,
                         apu: &mut self.apu,
                         ppu: &mut self.ppu,
+                        sa1: &mut self.sa1,
+                        sdd1: &mut self.sdd1,
+                        spc7110: &mut self.spc7110,
+                        snes_mar: self.snes_mar,
+                        snes_refresh: self.refresh_active,
                     };
                     self.cpu_stall += self.dma.hdma_setup(&mut bus);
                 }
@@ -1436,6 +1446,13 @@ struct HdmaBus<'a> {
     cart: &'a mut Cartridge,
     apu: &'a mut Apu,
     ppu: &'a mut Ppu,
+    /// The SA-1 remaps the cartridge ROM, so HDMA A-bus reads have to go
+    /// through it too (ares' HDMA reads use the full CPU bus).
+    sa1: &'a mut Option<Sa1>,
+    sdd1: &'a mut Option<Sdd1>,
+    spc7110: &'a mut Option<Spc7110>,
+    snes_mar: u32,
+    snes_refresh: bool,
 }
 
 impl HdmaBus<'_> {
@@ -1457,6 +1474,35 @@ impl HdmaBus<'_> {
                     return self.apu.cpu_read(offset - 0x2140);
                 }
                 return 0;
+            }
+        }
+        if let Some(spc7110) = self.spc7110.as_ref() {
+            if Spc7110::in_rom_window(address) {
+                return spc7110.mcurom_read(Spc7110::reduce_rom(address), 0);
+            }
+            if let Some(index) = Spc7110::ram_index(address) {
+                return spc7110.ram_read(index, 0);
+            }
+        }
+        if let Some(sdd1) = self.sdd1.as_mut() {
+            if Sdd1::in_io_window(address) {
+                return sdd1.read_io(address, self.cart.rom());
+            }
+            if Sdd1::in_mcu_window(address) {
+                return sdd1.mcu_read(address, self.cart.rom());
+            }
+        }
+        if self.sa1.is_some() {
+            let sa1 = self.sa1.as_mut().expect("SA-1 present");
+            sa1.snes_mar = self.snes_mar;
+            sa1.snes_refresh = self.snes_refresh;
+            if Sa1::in_rom_window(address) {
+                let rom = self.cart.rom();
+                return sa1.read_cpu_rom(address, rom);
+            }
+            if Sa1::in_bwram_window(address) {
+                let (_, sram) = self.cart.rom_and_sram_mut();
+                return sa1.read_cpu_bwram(address, sram);
             }
         }
         self.cart.read(address).unwrap_or(0)
