@@ -366,6 +366,12 @@ impl Cx4 {
             0x7f4e => self.io.cache.pb = (self.io.cache.pb & 0x00ff) | (u16::from(data) << 8),
             0x7f4f => {
                 self.io.cache.pc = data;
+                if insn_logging() {
+                    let halt = u8::from(self.io.halt);
+                    let pb = self.io.cache.pb;
+                    let ticks = self.ticks as u32;
+                    self.log_event("T4F", u32::from(pb) | (u32::from(halt) << 24), ticks);
+                }
                 if self.io.halt {
                     self.io.halt = false;
                     self.regs.pb = self.io.cache.pb;
@@ -1355,8 +1361,9 @@ impl Cx4 {
             }
             let _ = writeln!(
                 f,
-                "t={} {:04X}:{:02X} {:03X} a={:06X} p={:04X} dpr={:04X} ram={:06X} mdr={:06X} h={:08X} g={gprs}",
+                "t={} ins={} {:04X}:{:02X} {:03X} a={:06X} p={:04X} dpr={:04X} ram={:06X} mdr={:06X} h={:08X} g={gprs}",
                 DEBUG_CLOCK.load(std::sync::atomic::Ordering::Relaxed),
+                self.ticks,
                 self.regs.pb, self.regs.pc, opcode, self.regs.a, self.regs.p, self.regs.dpr,
                 self.regs.ram, self.regs.mdr, hash
             );

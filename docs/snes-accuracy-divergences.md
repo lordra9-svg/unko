@@ -2161,6 +2161,28 @@ writes (all while halted), so the remainder come from locked-page paths. Ours
 performs one more reload right at the split (a forced reload of `$29000`, which
 is already resident in `a1`) where ares starts executing instead.
 
+**Handshake timing (measured):** `T4F` events log the master clock at the
+`$7F4F` write, and the instruction log carries `ins=` per instruction, so the
+delay from "start" to the firmware's first instruction is directly comparable
+over the two jobs in the captured window:
+
+| job | ares | ours |
+|---|---|---|
+| 0 | 1,240 clocks | 2,584 clocks |
+| 1 | 1,216 clocks | 2,624 clocks |
+
+Ours starts the firmware **~1,350 clocks later**. The mechanism is now clear:
+the forced reload costs ~2,560 coprocessor cycles (~2,749 CPU clocks), and in
+ares the S-CPU *executes during it* (`Thread::synchronize(cpu)`), so the `$7F4F`
+write lands about halfway through the reload (~145 clocks after `$7F48` in our
+timeline, ~1,373 in ares) and the job starts when the reload ends. Ours performs
+the reload atomically, so `$7F4F` happens ~145 clocks after `$7F48` and the whole
+~2,600-clock debt is paid afterwards.
+
+That is why "charge the reload to machine time" alone fails (it moves the clock
+without executing the CPU's instructions) and why the interruptible reload needs
+to be *exactly* ares' schedule, not merely "the CPU can run during it".
+
 **Correction (counting both cores over the same span):** the `$7F48` write
 streams are *identical* - 1,927 writes each up to frame 3000 - so ares cannot be
 absorbing writes we honour. The 20-load difference accumulates only over the
