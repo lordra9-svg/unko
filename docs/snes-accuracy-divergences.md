@@ -2392,6 +2392,30 @@ up) and the next request must wait for the outstanding catch-up. Our model keeps
 the two clocks level at every access, so both halves of that structure are
 absent, which is exactly the -2,442 vs +90..+152 inversion measured at `$7F4F`.
 
+### Tested: bursts at instruction boundaries + charge (closer, still worse)
+
+Implemented that structure: the CX4 is stepped only at instruction boundaries
+(after each S-CPU instruction, up to the CPU's clock) and a burst's overshoot is
+charged to the CPU's clock. Measured against the four targets:
+
+| quantity | ares | per-access (kept) | burst+charge |
+|---|---|---|---|
+| `$7F4F` write, clocks after `$7F48` | +3,798 | +126 | **+2,891** |
+| lead at `$7F4F` | +90..+152 | -2,442 | (closer, not printed) |
+| lead at `$7F48` | +375..+966 | 0 | **0** |
+| frames 3300 / 3400 / 3500 / 3700 | - | 100 / 100 / 96.406 / 96.488 % | 97.876 / 100 / 96.153 / 95.776 % |
+
+So the burst charge moves `$7F4F` most of the way to ares' position, but the lead
+at `$7F48` is still 0 (the coprocessor does not lag, because it is stepped to the
+CPU's clock at every instruction) and parity degrades on three of the four
+frames. Reverted.
+
+Six scheduling models have now been implemented and measured; the remaining
+difference is the *sub-instruction* interleaving - ares resumes the S-CPU from
+inside the coprocessor's `step()` while the current instruction's bus cycle is
+still open (`Thread::synchronize(cpu)` re-entering `cpu.main()`). That cannot be
+expressed while `Snes::step()` runs exactly one instruction to completion.
+
 ### Frame-locked ares capture: started, not yet calibrated
 
 A hash at the PPU frame boundary (`ARES_FLHASH`, sampling the region `dac.cpp`
