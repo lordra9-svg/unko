@@ -325,6 +325,11 @@ RAM ("$40:0000 = $A5, $40:0001 = $A4, ..., $4F:FFFF = $5A").
   colr`) and per `RPIX` (`R x y data`), prefixed with the frame. The two logs
   line up event for event (ares' frame number is one ahead), which is how the
   Star Fox divergence was shown to be outside the GSU.
+- `WRAM_DIR=<dir>` / `ARES_WRAM_DIR` + `ARES_WRAM_FROM`, and `VRAM_DIR=<dir>`
+  / `ARES_VRAM_DIR` + `ARES_VRAM_FROM`: per-frame dumps of work RAM (128 KiB)
+  and VRAM (64 KiB) for bisecting where state first diverges. Note that
+  frame-boundary WRAM diffs are usually just stack residue; VRAM is the
+  displayed state and a much better signal.
 - `GSU_RAM_OUT=<path>` / `GSU_RAM_DIR=<dir>` / `ARES_GSURAM_DIR` +
   `ARES_GSURAM_FROM`: dump the 32 KiB Game Pak work RAM (the GSU screen buffer
   lives in it) once, or per frame.

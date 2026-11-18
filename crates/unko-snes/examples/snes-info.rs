@@ -291,6 +291,18 @@ fn main() -> ExitCode {
                         }
                     }
                 }
+                if let Some(dir) = std::env::var_os("VRAM_DIR") {
+                    let mut bytes = Vec::with_capacity(0x1_0000);
+                    for word in system.ppu.vram_words() {
+                        bytes.extend_from_slice(&word.to_le_bytes());
+                    }
+                    let path = std::path::Path::new(&dir).join(format!("vram-{frames}.bin"));
+                    let _ = std::fs::write(path, &bytes);
+                }
+                if let Some(dir) = std::env::var_os("WRAM_DIR") {
+                    let path = std::path::Path::new(&dir).join(format!("wram-{frames}.bin"));
+                    let _ = std::fs::write(path, system.wram());
+                }
                 if let Some(dir) = std::env::var_os("GSU_RAM_DIR") {
                     if let Some(gsu) = &system.gsu {
                         let mut bytes = Vec::with_capacity(gsu.ram_len());

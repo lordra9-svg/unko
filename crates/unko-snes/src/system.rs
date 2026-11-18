@@ -1031,37 +1031,29 @@ impl CpuBus for Snes {
                 );
             }
         }
-        if std::env::var_os("VMDATA_LOG").is_some() {
+        if let Some(path) = std::env::var_os("VMDATA_LOG") {
             use std::io::Write;
             let offset = (address & 0xFFFF) as u16;
             if offset == 0x2118 || offset == 0x2119 {
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open("/tmp/opencode/vmdata.log")
+                    .open(path)
                 {
-                    let _ = writeln!(
-                        f,
-                        "{:04X}={:02X} pc={:06X} bus={:06X}",
-                        offset, value, self.live_pc, address
-                    );
+                    let _ = writeln!(f, "{} {} {:02X}", self.clock, offset, value);
                 }
             }
         }
-        if std::env::var_os("DMAREG_LOG").is_some() {
+        if let Some(path) = std::env::var_os("DMAREG_LOG") {
             use std::io::Write;
             let offset = (address & 0xFFFF) as u16;
             if (0x4300..=0x437F).contains(&offset) {
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open("/tmp/opencode/dmareg.log")
+                    .open(path)
                 {
-                    let _ = writeln!(
-                        f,
-                        "{:04X}={:02X} pc={:06X} bus={:06X}",
-                        offset, value, self.live_pc, address
-                    );
+                    let _ = writeln!(f, "{} {:04X} {:02X}", self.clock, offset, value);
                 }
             }
         }

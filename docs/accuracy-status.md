@@ -235,9 +235,12 @@ Validation so far:
   (frame 320 has a large object region, the rest are scattered pixels). The
   result is non-monotonic, so it is a per-frame difference rather than a drift.
   The GSU's own `PLOT`/`RPIX` stream is **bit-identical** to ares over frames
-  154-308 (51,476 events, zero differences), so GSU rendering is not the cause;
-  the remaining difference is on the S-CPU/PPU side or in GSU-RAM state the
-  S-CPU shares. Getting there needed two fixes: `$4201` PIO powers up with
+  154-308 (51,476 events, zero differences), and per-frame dumps show VRAM
+  byte-identical through frame 152 with the first difference at **frame 153**
+  (a 45-word run of `$010B` at `$7A38-$7A63`), where the GSU work RAM is also
+  identical. So the remaining difference is in the S-CPU's VRAM fill/upload,
+  not in the GSU. (Frame-boundary WRAM diffs are just stack residue - the only
+  WRAM difference before frame 130 is 5 bytes at `$02F1-$02F5` with `S=$02F4`.) Getting there needed two fixes: `$4201` PIO powers up with
   bit 7 set (ares `n8 pio = 0xff`), and the `$4201` high-to-low edge latches the
   `$213C`/`$213D` beam counters; without them the game spun in a scanline-wait
   loop at `$03:BD83` and never enabled the screen.

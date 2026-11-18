@@ -1975,6 +1975,36 @@ S-CPU also uses), not from GSU rendering.
 local `x` to `(x & 7) ^ 7` before the read, so logging after that shows 7 where
 the caller passed 0.)
 
+### Bisected to the first differing frame: 153, in the S-CPU's VRAM upload
+
+`WRAM_DIR` / `ARES_WRAM_DIR` and `VRAM_DIR` / `ARES_VRAM_DIR` dump work RAM and
+VRAM per frame. Against ares:
+
+- **WRAM**: into the 3D scene the only difference is **5 bytes at `$02F1-$02F5`
+  for frames 60-129**, which then becomes identical. Those bytes are the
+  **stack** (the S-CPU's `S` is `$02F4` there), i.e. call-history residue from
+  interrupting the game at a different instruction - not a state divergence.
+  Frame-boundary WRAM diffs are dominated by this, so WRAM is a poor signal.
+- **VRAM** (the displayed state) is **byte-identical from frame 60 through
+  152** and first differs at **frame 153**, by 89 bytes: a 45-word run of
+  `0x010B` at words `$7A38-$7A63` where ares has `0000` after `$7A37`:
+
+```
+frame 153, words $7A30..$7A3F
+ares 1905 1906 1907 010B 010B 010B 010B 000B 0000 0000 ...
+ours 1905 1906 1907 010B 010B 010B 010B 010B 010B 010B ...
+```
+
+At that same frame the **GSU work RAM is byte-identical** and the **plot/rpix
+stream is identical** (1,823 events from power-on, zero differences), so the
+difference is in the S-CPU's VRAM fill/upload: our core writes a longer run of
+the same word (`$7A33-$7A63`) where ares stops at `$7A37`.
+
+The raw `$2118/$2119` write logs are not directly comparable - ours logs every
+bus write (102,747 lines to frame 154), ares logs in `PPU::writeIO` (142,805) -
+so the next step is to log the same point in both cores with the DMA flag and
+compare the transfer that covers `$7A37`.
+
 ## CX4 gameplay diffed (2026-11-18)
 
 Mega Man X2 reaches its in-game intro on its own (no input needed), so CX4
