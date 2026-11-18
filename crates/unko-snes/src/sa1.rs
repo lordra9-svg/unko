@@ -710,7 +710,22 @@ impl Sa1 {
         if self.bwram_dma {
             return self.dma_cc1_read(offset, bwram);
         }
-        Self::bwram_read_raw(bwram, offset, 0)
+        let value = Self::bwram_read_raw(bwram, offset, 0);
+        if std::env::var_os("F602A_LOG").is_some() && offset == 0x602A {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/opencode/602a.log")
+            {
+                let _ = writeln!(
+                    f,
+                    "{} R602A->{:02X} spc={:06X}",
+                    self.master_clock, value, self.snes_live_pc
+                );
+            }
+        }
+        value
     }
 
     /// Write `$00-$3F,$80-$BF:$6000-$7FFF` or `$40-$4F:$0000-$FFFF` from the
@@ -730,6 +745,20 @@ impl Sa1 {
         }
         Self::log_bwram("CPU", offset, data, self.master_clock);
         Self::bwram_write_raw(bwram, offset, data);
+        if std::env::var_os("F602A_LOG").is_some() && offset == 0x602A {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/opencode/602a.log")
+            {
+                let _ = writeln!(
+                    f,
+                    "{} W602A={:02X} spc={:06X}",
+                    self.master_clock, data, self.snes_live_pc
+                );
+            }
+        }
     }
 
     /// Read `$00-$3F,$80-$BF:$3000-$37FF` from the S-CPU.

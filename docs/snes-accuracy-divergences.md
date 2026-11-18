@@ -1452,6 +1452,32 @@ bit 7, `$4210` reads, and whether the NMI is being acknowledged/cleared on the
 same instruction in both cores. Our NMIs all show `r4210 = $80` at acceptance,
 so the flag is set at the moment we deliver.
 
+## KDL3: the S-CPU takes the wrong frame-wait branch (2026-11-17)
+
+Instrumenting BWRAM `$602a` (the frame flag) in both cores over 125 frames
+gives a lopsided result:
+
+| | `$602a` events |
+|---|---|
+| ours | **79,795** (79,795 reads, all from `$9498`, plus a handful of writes) |
+| ares | **31** (almost all `W602a=01`, no polling storm) |
+
+The frame rendezvous is:
+
+```
+$9490: INC $602C
+$9493: BIT $6002
+$9496: BPL $949F      ; bit 7 clear -> wait on $4212 vblank edges
+$9498: LDA $602A      ; bit 7 set   -> wait on the SA-1 frame flag
+$949B: BEQ $9498
+```
+
+So **ares takes the `BPL` branch and waits on `$4212`, while we take the `BMI`
+branch and spin on `$602a`** - our `$6002` bit 7 is set where ares' is clear at
+that moment. `$6002` bit 7 is written by the S-CPU itself at `$B8b0`
+(`LDA $6002; ORA #$81; STA $6002`), so the next step is to compare the `$6002`
+value and that write's timing between the cores.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):
