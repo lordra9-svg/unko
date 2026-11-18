@@ -2247,6 +2247,30 @@ This also explains why the earlier machine-time experiment overshot: it advanced
 the whole machine (including the PPU) by the reload instead of letting the CPU
 execute through it, so it shifted video timing as well.
 
+### Tested: dragging the S-CPU through the reload (no effect)
+
+Two more variants were implemented and measured on the shared clock:
+
+1. after every instruction, keep executing CPU instructions while the CX4 is
+   ahead (`Thread::synchronize(cpu)` in `Snes::step`) - 494,150 extra
+   instructions over the run;
+2. additionally service pending coprocessor work at the end of the instruction
+   that requested it (`advance_cx4(0)`), so the `$7F48` reload no longer waits
+   for the next bus access (which, during the handshake, is the `$7F4F` store
+   itself).
+
+Result: **identical output** - frames 3300/3400 100.000%, 3500 96.406%, and the
+lead at `$7F4F` still -2,442 cycles. Variant 1 cannot help because those
+instructions execute anyway; only their grouping changes. Variant 2 did not move
+the probe, so the reload is still serviced at the next access rather than at the
+end of the requesting instruction.
+
+So the remaining gap is not "how many instructions the CPU runs" but the
+*ordering* between the CPU's instruction stream and the coprocessor's blocking
+work inside a single instruction - which our one-instruction-per-`step()` model
+cannot express without restructuring the step loop around ares' cooperative
+threads.
+
 Reproducing this needs the coprocessor to be stepped from the CPU's own clock
 budget (as `Thread::synchronize` does) rather than from a separate credit, so
 that both catch-up phases fall out of the same arithmetic. The mechanism is now clear:
