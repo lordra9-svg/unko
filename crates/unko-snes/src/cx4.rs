@@ -347,6 +347,10 @@ impl Cx4 {
             }
             0x7f48 => {
                 self.io.cache.page = data & 1 != 0;
+                if insn_logging() {
+                    let lead = DEBUG_CPU_LEAD.load(std::sync::atomic::Ordering::Relaxed);
+                    self.log_event("LEAD", lead as u32 & 0xffff, 0x48);
+                }
                 if self.io.halt {
                     self.regs.pb = self.io.cache.pb;
                     self.io.cache.preload = true;
@@ -371,6 +375,8 @@ impl Cx4 {
                     let pb = self.io.cache.pb;
                     let ticks = self.ticks as u32;
                     self.log_event("T4F", u32::from(pb) | (u32::from(halt) << 24), ticks);
+                    let lead = DEBUG_CPU_LEAD.load(std::sync::atomic::Ordering::Relaxed);
+                    self.log_event("LEAD", lead as u32 & 0xffff, u32::from(pb));
                 }
                 if self.io.halt {
                     self.io.halt = false;
@@ -1438,6 +1444,10 @@ pub static DEBUG_FRAME: std::sync::atomic::AtomicU32 = std::sync::atomic::Atomic
 
 /// Debug: first frame to include in the instruction log (`CX4_INSN_FROM`).
 pub static DEBUG_INSN_FROM: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Debug: S-CPU lead over the CX4 in CX4 cycles at the last sync (positive =
+/// the coprocessor is behind), mirroring the ares `cc`/`pc` probe.
+pub static DEBUG_CPU_LEAD: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
 /// Debug: master clock at the most recent bus access, so an instruction log can
 /// be aligned event-for-event with a reference emulator's per-access log.

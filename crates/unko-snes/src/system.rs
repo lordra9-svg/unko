@@ -54,7 +54,8 @@ pub struct SnesState {
     /// Capcom CX4 coprocessor, when firmware is installed.
     pub cx4: Option<Cx4>,
     /// Carried CX4 clock credit.
-    pub cx4_credit: i64,
+    /// CX4 clock in the scheduler's scaled base (ares `Thread::_clock`).
+    pub cx4_clock: u128,
     /// S-DD1 decompression coprocessor, when the cartridge has one.
     pub sdd1: Option<Sdd1>,
     /// SA-1 coprocessor, when the cartridge has one.
@@ -190,7 +191,7 @@ pub struct Snes {
     /// Capcom CX4 coprocessor, when firmware is installed.
     pub cx4: Option<Cx4>,
     /// Carried CX4 clock credit.
-    cx4_credit: i64,
+    cx4_clock: u128,
     /// S-DD1 decompression coprocessor, when the cartridge has one.
     pub sdd1: Option<Sdd1>,
     /// SA-1 coprocessor, when the cartridge has one.
@@ -284,7 +285,7 @@ impl Snes {
             dsp1: None,
             dsp_credit: 0,
             cx4: None,
-            cx4_credit: 0,
+            cx4_clock: 0,
             sdd1: if has_sdd1 { Some(Sdd1::new()) } else { None },
             sa1: if has_sa1 {
                 Some(Sa1::new(region))
@@ -359,7 +360,7 @@ impl Snes {
     /// host.
     pub fn set_cx4_firmware(&mut self, firmware: &[u8]) -> Result<(), Cx4Error> {
         self.cx4 = Some(Cx4::from_firmware(firmware)?);
-        self.cx4_credit = 0;
+        self.cx4_clock = 0;
         Ok(())
     }
 
@@ -379,7 +380,7 @@ impl Snes {
             dsp1: self.dsp1.clone(),
             dsp_credit: self.dsp_credit,
             cx4: self.cx4.clone(),
-            cx4_credit: self.cx4_credit,
+            cx4_clock: self.cx4_clock,
             sdd1: self.sdd1.clone(),
             sa1: self.sa1.clone(),
             spc7110: self.spc7110.clone(),
@@ -443,7 +444,7 @@ impl Snes {
         self.dsp1 = state.dsp1.clone();
         self.dsp_credit = state.dsp_credit;
         self.cx4 = state.cx4.clone();
-        self.cx4_credit = state.cx4_credit;
+        self.cx4_clock = state.cx4_clock;
         self.sdd1 = state.sdd1.clone();
         self.sa1 = state.sa1.clone();
         self.spc7110 = state.spc7110.clone();
@@ -540,7 +541,7 @@ impl Snes {
         if let Some(cx4) = self.cx4.as_mut() {
             cx4.power();
         }
-        self.cx4_credit = 0;
+        self.cx4_clock = 0;
         if let Some(sdd1) = self.sdd1.as_mut() {
             sdd1.power();
         }
@@ -807,14 +808,30 @@ impl Snes {
         // leave it up to one instruction behind at every sync point, which
         // accumulates and eventually changes the outcome of the handshake where
         // the game starts a job before writing its parameters.
+        // ares' scheduler: each thread keeps a clock in a shared scaled base
+        // (`_scalar = Second / frequency`, `_clock += _scalar * cycles`), and a
+        // thread is only stepped while it is behind: `while(thread.clock <
+        // cpu.clock) thread.main()`. There is no separate "credit"; whatever a
+        // job leaves outstanding simply stays in the difference between the two
+        // clocks, which is why the lead/lag varies from job to job (+375..+966
+        // CX4 cycles at `$7F48`, +90..+152 at `$7F4F` in ares).
         if let Some(cx4) = self.cx4.as_mut() {
-            let den = self.region.master_clock() as i64;
+            const SECOND: u128 = (u64::MAX >> 1) as u128;
+            let cpu_scalar = SECOND / u128::from(self.region.master_clock());
+            let cx4_scalar = SECOND / 20_000_000u128;
             let rom = self.cart.rom();
             let sram = self.cart.sram();
-            self.cx4_credit += i64::from(clocks) * 20_000_000;
-            while self.cx4_credit > 0 {
-                let cost = cx4.run_one(rom, sram);
-                self.cx4_credit -= den * i64::from(cost.max(1));
+            let target = (u128::from(self.clock) + u128::from(clocks)) * cpu_scalar;
+            while self.cx4_clock < target {
+                let cost = u128::from(cx4.run_one(rom, sram).max(1));
+                self.cx4_clock += cost * cx4_scalar;
+            }
+            if crate::cx4::debug_clock_needed() {
+                // Lead of the CPU over the coprocessor, in CX4 cycles (the
+                // quantity the ares `cc`/`pc` probe reports).
+                let diff = target as i128 - self.cx4_clock as i128;
+                let lead = diff / cx4_scalar as i128;
+                crate::cx4::DEBUG_CPU_LEAD.store(lead as i64, std::sync::atomic::Ordering::Relaxed);
             }
         }
         // The SA-1 runs at half the master clock: one SA-1 cycle is two master

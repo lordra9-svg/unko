@@ -2223,8 +2223,29 @@ clock) before `cache()` finally runs; the 1,216-clock gap after `$7F4F` is the C
 catching up to the coprocessor's post-reload position.
 
 The catch-up amount varies job to job (+375 .. +966), so it cannot be a constant
-delay: it is whatever the previous job left outstanding. That is exactly what a
-single shared clock produces and what a separate credit does not.
+delay: it is whatever the previous job left outstanding.
+
+Replacing the independent credit with a shared scaled clock (ares' scheduler
+shape: `cx4_clock += cost * scalar` against `cpu_clock = master_clock *
+cpu_scalar`) is **behaviour-identical**, as the arithmetic predicts - frames
+3300/3400 stay 100.000%, 3500 stays 96.406%, reloads stay 2,920. It is kept
+because it makes the lead/lag directly measurable, and that measurement is
+decisive:
+
+| at the write | ares | ours (shared clock) |
+|---|---|---|
+| `$7F48` | +375 .. +966 (coprocessor behind) | (probe not yet wired) |
+| `$7F4F` | +90 .. +152 (coprocessor behind) | **-2,405 .. -2,443 (coprocessor AHEAD)** |
+
+So at the job start our coprocessor is **~2,440 cycles ahead** where ares' is
+~100 *behind* - a sign inversion of about one full reload. That is the concrete
+defect: we charge the reload to the clock *after* it happens, so the coprocessor
+ends up ahead while the CPU catches up; ares lets the CPU run *through* the
+reload so it is slightly behind by the time it writes `$7F4F`.
+
+This also explains why the earlier machine-time experiment overshot: it advanced
+the whole machine (including the PPU) by the reload instead of letting the CPU
+execute through it, so it shifted video timing as well.
 
 Reproducing this needs the coprocessor to be stepped from the CPU's own clock
 budget (as `Thread::synchronize` does) rather than from a separate credit, so
