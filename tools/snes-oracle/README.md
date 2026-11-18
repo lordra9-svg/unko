@@ -228,6 +228,35 @@ ARES_REGION=NTSC tools/snes-oracle/ares-capture.sh /tmp/mid.sfc 30 /tmp/mid-a
 Measured: our first dim row is 100, ares' is 99 - ares samples a mid-line write
 one scanline earlier than we do.
 
+## Controller scripting
+
+The patched ares build accepts scripted controller input so captures with a
+peripheral are reproducible (needed for anything past a title screen):
+
+```sh
+# hold Start on port 1 from completed frame 150 onwards
+ARES_JOYPAD0=4096 ARES_JOYPAD0_FROM=150 ares-capture.sh game.sfc 600 out
+
+# or a timed sequence: frame:mask pairs, the last one at or before the current
+# frame applies
+ARES_JOYPAD_SEGMENTS="60:1000,90:0000,120:0080" ares-capture.sh game.sfc 600 out
+```
+
+Masks use the same bit order as `snes-info`'s `JOYPAD0`: B=15, Y=14, Select=13,
+Start=12, Up=11, Down=10, Left=9, Right=8, A=7, X=6, L=5, R=4. When either
+variable is set the harness allocates a Gamepad on the port if the headless
+configuration has none, and `Gamepad::data()`/`latch()` serve the script instead
+of the host input.
+
+Verified: with `ARES_JOYPAD0=4096 ARES_JOYPAD0_FROM=20` the auto-poll result
+register `$4218` reads `$1000` from frame 20 onwards (logged via
+`ARES_JOY_POLL_LOG`), so the game sees a held Start exactly as our core does.
+
+`gen-joypad-rom.py` builds a first-party ROM that publishes `$4218`/`$4219` as
+CGRAM colour 0, for checking the path end to end. Note that the registers are
+cleared while polling runs, so a valid sample must wait for `$4212` bit 0 to
+clear; the current fixture is a debugging aid rather than a settled oracle.
+
 ## Deterministic captures
 
 ares seeds the power-on work-RAM pattern from the host clock, so two captures of
