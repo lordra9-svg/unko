@@ -2171,7 +2171,25 @@ over the two jobs in the captured window:
 | 0 | 1,240 clocks | 2,584 clocks |
 | 1 | 1,216 clocks | 2,624 clocks |
 
-Ours starts the firmware **~1,350 clocks later**. The mechanism is now clear:
+Measuring the *other* half of the handshake (reload request to the `$7F4F` write)
+corrects the picture: ares 2,860 clocks, ours 122.
+
+| phase | ares | ours |
+|---|---|---|
+| `$7F48`/reload request -> `$7F4F` write | 2,860 | 122 |
+| `$7F4F` -> first firmware instruction | 1,240 | 2,604 |
+| request -> first instruction | ~4,100 | ~2,726 |
+
+The wait registers match (`w=4`, so the reload is 512 x 5 cycles = 2,560
+coprocessor cycles ~ 2,750 CPU clocks in both). So ares *delays the S-CPU by the
+reload* - the `$7F4F` write only happens after ~2,860 clocks - and then starts
+the job 1,240 clocks later. We instead write `$7F4F` almost immediately (122) and
+then wait 2,604. The phase is inverted and the whole handshake is ~1,374 clocks
+*shorter*: ours starts the job too early relative to the request, then pays the
+debt.
+
+That is why the machine-time experiment (which advanced the clock by the reload)
+looked close but made parity worse: it fixes the first row and not the second. The mechanism is now clear:
 the forced reload costs ~2,560 coprocessor cycles (~2,749 CPU clocks), and in
 ares the S-CPU *executes during it* (`Thread::synchronize(cpu)`), so the `$7F4F`
 write lands about halfway through the reload (~145 clocks after `$7F48` in our

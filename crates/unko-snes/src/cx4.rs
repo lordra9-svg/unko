@@ -1290,13 +1290,14 @@ impl Cx4 {
             let locks = u8::from(self.io.cache.lock[0]) | (u8::from(self.io.cache.lock[1]) << 1);
             let _ = writeln!(
                 f,
-                "t={clock} prep pb={:04X} req={:06X} page={} a0={:06X} a1={:06X} l={}",
+                "t={clock} prep pb={:04X} req={:06X} page={} a0={:06X} a1={:06X} l={} w={}",
                 self.regs.pb,
                 request,
                 u8::from(self.io.cache.page),
                 self.io.cache.address[0],
                 self.io.cache.address[1],
-                locks
+                locks,
+                self.io.wait.rom
             );
         }
     }
