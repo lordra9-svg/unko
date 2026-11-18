@@ -1182,18 +1182,21 @@ frames of gameplay HUD rendering.
   A residual still remains at frame 500 (mean |d| 23.3), so this is a large fix
   rather than the end of the story.
 
-  **Re-checked after the routing fix: channel 5's pointer is still wrong.** The
-  per-scanline dump still shows `ind=C010` versus ares' `5001`, so this
-  particular fetch was *not* what the routing fix repaired - the big frame
-  improvement must have come from another HDMA read (most likely a
-  BWRAM-sourced channel that previously hit `cart.read` instead of the SA-1's
-  BWRAM). Two new leads fall out of the same dump:
+  **Re-checked after the routing fix: channel 5 now matches ares exactly.** The
+  earlier "still `$C010`" reading came from a log produced before the fix
+  binary was in place. `HDMA_RELOAD_LOG` shows the fetch is right
+  (`countAt=$C299 count=$F0 low=$00 high=$50 -> ind=$5000`, then `$C29C ->
+  $5000`, then the terminator `$C29F -> $00A2`), and the per-scanline traces
+  are identical for all 1338 entries:
 
-  - our channel 5 logs **2694** advances over the run where ares logs **1338**,
-    i.e. our ch5 HDMA is active over roughly twice as many frames (or advances
-    twice as often), and
-  - the pointer is `$C00F`-based rather than `$5000`-based, which needs the
-    read to be traced for that one address.
+  ```
+  ours  ch5 table=c29c ind=5001 lc=ef   |   ares ch5 table=c29c ind=5001 lc=ef
+  ours  ch5 table=c29c ind=5002 lc=ee   |   ares ch5 table=c29c ind=5002 lc=ee
+  ```
+
+  (our run logs 1344 advances against ares' 1338 - the run boundary, not a
+  functional difference). So HDMA is no longer implicated in the SMRPG
+  residual; whatever remains at frame 500 (mean |d| 23.3) is elsewhere.
 
   Kirby's Dream Land 3 is unchanged by the routing fix (0% exact at frames
   120/300/600; 1 colour versus ares' 10 at frame 600).

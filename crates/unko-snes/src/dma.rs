@@ -186,6 +186,25 @@ impl Dma {
             let high = bus.read_a((u32::from(channel.bank) << 16) | u32::from(state.address));
             state.address = state.address.wrapping_add(1);
             state.indirect_address = u16::from_le_bytes([low, high]);
+            if std::env::var_os("HDMA_RELOAD_LOG").is_some() && index == 5 {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/opencode/reload.log")
+                {
+                    let _ = writeln!(
+                        f,
+                        "ch5 bank={:02X} countAt={:04X} count={:02X} low={:02X} high={:02X} -> ind={:04X}",
+                        channel.bank,
+                        state.address.wrapping_sub(3),
+                        count,
+                        low,
+                        high,
+                        state.indirect_address
+                    );
+                }
+            }
             reads += 2;
         }
         reads
