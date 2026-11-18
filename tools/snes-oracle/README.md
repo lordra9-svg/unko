@@ -299,6 +299,47 @@ same frame number ((90,74,0) at 300, (99,74,0) at 301). So the two harnesses
 agree exactly - any frame-to-frame difference seen between them is emulation,
 not capture alignment.
 
+## EXSPC7110 (7 MiB) fixture
+
+No 7 MiB EXSPC7110 image exists in the local test set, so `gen-exspc7110-rom.py`
+builds one: a 7 MiB image (1 MiB program, 5 MiB data, 1 MiB expansion) whose
+header sits at the end of the program (`$FFD5`, map mode `0x3A`, type `0xF9`,
+reset vector `$FFFC`) exactly like Momotarou Dentetsu Happy. The program reads
+thirteen `$40-$4F:$0000-$FFFF` expansion addresses and stores them to
+`$7E:1000`, so the expansion window is directly observable.
+
+```sh
+tools/snes-oracle/gen-exspc7110-rom.py /tmp/exspc7110.sfc
+FRAMES=10 WRAM_OUT=/tmp/ex.wram target/release/examples/snes-info /tmp/exspc7110.sfc "$IPL"
+# ares, at the same frame:
+ARES_DETERMINISTIC=1 ARES_PPU_DUMP=/tmp/ex/cpu.txt ARES_PPU_DUMP_FRAME=9 \
+  ARES_DUMP_BASE=/tmp/ex/ex ares-capture.sh /tmp/exspc7110.sfc 10 /tmp/ex
+```
+
+Both cores produce the same 13 bytes at `$7E:1000` and identical 128 KiB work
+RAM ("$40:0000 = $A5, $40:0001 = $A4, ..., $4F:FFFF = $5A").
+
+## CX4 instruction tracing
+
+The CX4 has env-gated debug hooks used to localise divergence against ares:
+
+- `CX4_TRACE=<path>` / `ARES_CX4_TRACE`: every S-CPU write into the CX4 data
+  RAM (`D addr data`) and register window (`I addr data`), with `F <frame>`
+  markers from `snes-info`.
+- `CX4_WR_LOG=<path>` / `ARES_CX4_WR_LOG`: the firmware's own writes to the
+  bitmap cells that differed (0x71E/0x71F/0x7D0/0x7D1).
+- `CX4_INSN_LOG=<path>` + `CX4_INSN_FROM=<frame>` / `ARES_CX4_INSN_LOG` +
+  `ARES_CX4_INSN_FROM`: one line per executed HG51B instruction with
+  `pb:pc opcode a p dpr ram gpr0,gpr14,gpr15,gpr13`. The two logs line up
+  instruction for instruction once the frame gates are aligned, so the first
+  differing line names the instruction that diverged.
+- `CX4_RAM_DIR=<dir>` / `ARES_CX4RAM_DIR` + `ARES_CX4RAM_FROM`: a dump of the
+  3 KiB CX4 data RAM per frame.
+
+**Keep these logs on the big filesystem**, not `/tmp/opencode`: that tmpfs has a
+quota and `fs::write`/`writeln` failures there are silent (`let _ = ...`), which
+once truncated a trace mid-run and looked like an emulation difference.
+
 ## Regression baseline
 
 `baseline.py` runs every ROM under `test-roms/snes/` for a fixed frame count and

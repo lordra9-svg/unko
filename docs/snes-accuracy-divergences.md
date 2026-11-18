@@ -1905,49 +1905,48 @@ All 161 lib tests pass and the three local SPC7110 titles (MDH, SPL, TMZ) remain
 Mega Man X2 reaches its in-game intro on its own (no input needed), so CX4
 gameplay can be diffed after all. Against deterministic ares captures:
 
-| frame | result |
-|---|---|
-| 1800 | **100.000%** (57,344/57,344) |
-| 2400 | **100.000%** |
-| 3000 | **100.000%** |
-| 3100 | **100.000%** |
-| 3200 | **100.000%** |
-| 3300 | 99.224% (445 pixels) |
-| 3400 | 97.811% |
-| 3700 | 97.583% |
-| 3900 | 86.679% |
-| 4000 | 84.321% |
+| frame | before the fix | after the fix |
+|---|---|---|
+| 1800 | 100.000% (57,344/57,344) | **100.000%** |
+| 2400 | 100.000% | **100.000%** |
+| 3000 | 100.000% | **100.000%** |
+| 3100 | 100.000% | **100.000%** |
+| 3200 | 100.000% | **100.000%** |
+| 3300 | 99.224% (445 pixels) | **100.000%** |
+| 3400 | 97.811% | **100.000%** |
+| 3700 | 97.583% | 96.488% |
+| 3900 | 86.679% | 95.933% |
+| 4000 | 84.321% | 93.687% |
 
-So ~3,000 frames of CX4-driven graphics are pixel-exact and the first
-divergence is a **445-pixel region at x=161..208, y=30..71** - a 48x42 window in
-which the game draws a character portrait through the CX4 bitmap/plot path. The
-diff map is an 8x8-celled grid pattern with partial glyph strokes, i.e. our
-`plot` output differs inside that window rather than the scene shifting.
+**Resolved (2026-11-18):** the first divergence was a 445-pixel region at
+x=161..208, y=30..71 - a character portrait drawn through the CX4 bitmap/plot
+path - caused by our `MUL` not sign-extending its 24-bit operands (see below).
+CX4 output is now pixel-exact through frame 3400; a second, later defect remains
+(3700 onwards).
 
-Bisected with per-frame CX4 data-RAM snapshots (`CX4_RAM_DIR` /
-`ARES_CX4RAM_DIR`). The RAM is byte-identical through frame 3229 and first
-differs at **frame 3230, by exactly four bytes**:
+### Root cause: `MUL`/`ASR` sign extension
 
-```
-071E  ares=01 ours=03
-071F  ares=01 ours=03
-07D0  ares=01 ours=03
-07D1  ares=01 ours=03
-```
+Per-frame CX4 data-RAM snapshots (`CX4_RAM_DIR` / `ARES_CX4RAM_DIR`) show the RAM
+is byte-identical through frame 3229 and first differs at frame 3230 by four
+bytes (`071E/071F/07D0/07D1`, `ares=01 ours=03`). S-CPU traffic into the CX4
+windows (`CX4_TRACE` / `ARES_CX4_TRACE`) is identical through frame 3232, and
+the HG51B executes the same number of instructions per frame (122,804 at frame
+3229), so the firmware was being driven identically and was computing differently.
 
-i.e. one extra bitmap bit in each of two 16-byte rows. The difference then grows
-monotonically (8 bytes at 3233, 20 at 3242, 353 at 3299), which fits one extra
-plot iteration per frame rather than a wrong computation.
+Aligning the per-instruction logs (`CX4_INSN_LOG` / `ARES_CX4_INSN_LOG`, which
+record `pb:pc opcode a p dpr ram gpr0,gpr14,gpr15,gpr13`) puts the first
+difference at `$0008:6A` (`LD A, mul`, opcode `0x6001`): ares reads `$FFFFB5`
+from the multiplier's high word, we read `$00FFB4`.
 
-The firmware's writes to those cells are **identical in both cores** - same
-values (`ram=000101`, `ram=000303`), same `pb=$000A`, same `pc=$7A/$7B`, same
-`dpr=$071E` (`CX4_WR_LOG` / `ARES_CX4_WR_LOG`). So the firmware is executing the
-same plot loop; what differs is **how many times**, i.e. the plot parameters or
-the iteration count handed to it, not the arithmetic.
+`MUL` took `(self.regs.a as i32)` / `read_register(reg) as i32` without
+sign-extending bit 23, so a negative 24-bit operand became a large positive
+value; ares multiplies `i24` operands. `ASR` had the same class of bug: it
+shifted `(a & 0xffffff) as i32`, i.e. logically rather than arithmetically. Both
+now use a `sign_extend_24()` helper (the `MUL` immediate stays unsigned, as in
+ares' `instructionMUL(n8)`).
 
-Next step: compare the S-CPU side of the handshake at frame 3230 - the data-RAM
-block header the game writes before triggering the CX4 (3200 and 3220 are
-byte-identical, so the difference appears in that window).
+After the fix the firmware's data-RAM writes are identical for frames 3225-3232
+(`CX4_WR_LOG`) and frames 3300/3400 are 100.000%.
 
 Controller scripting is now also a settled oracle: `gen-joypad-rom.py`
 (publishing `$4218`/`$4219` as CGRAM colour 0) gives identical colours in both

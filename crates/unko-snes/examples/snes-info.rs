@@ -136,6 +136,13 @@ fn main() -> ExitCode {
     if std::env::var_os("PORT_OUT").is_some() || std::env::var_os("SPC_TRACE").is_some() {
         system.apu.set_port_logging(true);
     }
+    unko_snes::cx4::DEBUG_INSN_FROM.store(
+        std::env::var("CX4_INSN_FROM")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+        std::sync::atomic::Ordering::Relaxed,
+    );
     system.reset();
     if let Some(path) = std::env::var_os("STATE_LOAD") {
         let bytes = std::fs::read(&path).expect("read STATE_LOAD");
@@ -235,6 +242,54 @@ fn main() -> ExitCode {
                 );
             }
             if system.ppu.frame_ready() {
+                if let Some(path) = std::env::var_os("CX4_WR_LOG") {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&path)
+                    {
+                        let _ = writeln!(f, "F {frames}");
+                    }
+                }
+                unko_snes::cx4::DEBUG_FRAME.store(frames, std::sync::atomic::Ordering::Relaxed);
+                if let Some(path) = std::env::var_os("CX4_TRACE") {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&path)
+                    {
+                        let _ = writeln!(f, "F {frames}");
+                    }
+                }
+                if let Some(path) = std::env::var_os("CX4_STATE_LOG") {
+                    use std::io::Write;
+                    if let Some(cx4) = &system.cx4 {
+                        if let Ok(mut f) = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&path)
+                        {
+                            let _ = writeln!(
+                                f,
+                                "{frames} pc={:02X} pb={:04X} halt={} lock={} cache={} dma={} suspend={} busy={} ticks={} a={:06X} ram={:06X} dpr={:04X}",
+                                cx4.regs.pc,
+                                cx4.regs.pb,
+                                cx4.io.halt,
+                                cx4.io.lock,
+                                cx4.io.cache.enable,
+                                cx4.io.dma.enable,
+                                cx4.io.suspend.enable,
+                                cx4.busy(),
+                                cx4.ticks,
+                                cx4.regs.a,
+                                cx4.regs.ram,
+                                cx4.regs.dpr
+                            );
+                        }
+                    }
+                }
                 if let Some(dir) = std::env::var_os("CX4_RAM_DIR") {
                     if let Some(cx4) = &system.cx4 {
                         let path = std::path::Path::new(&dir).join(format!("cx4-{frames}.ram"));

@@ -257,12 +257,17 @@ Validation so far:
   (type `$F9`, with the RTC) are also **100.000%** exact against ares at
   frames 300 and 600.
 - CX4 gameplay is diffed: Mega Man X2's in-game intro is **100.000%** exact
-  against ares at frames 1800, 2400, 3000, 3100 and 3200; the first difference
-  is a 445-pixel CX4 bitmap/plot window at frame 3300.
+  against ares at frames 1800, 2400, 3000, 3100, 3200, 3300 and 3400. The
+  former 445-pixel difference at frame 3300 was a `MUL` sign-extension bug
+  (ares multiplies signed `i24` operands; `ASR` was logical as well). A second
+  divergence remains from frame 3700 (96.488% at 3700, 93.687% at 4000).
 - The `EXSPC7110-` (7 MiB) layout is implemented: 1 MiB program + 5 MiB data +
   1 MiB expansion, with the expansion ROM at `$40-$4F:$0000-$FFFF` (20-bit
-  offset across sixteen 64 KiB banks) on both the CPU and HDMA buses. Covered by
-  unit tests that construct the image in memory, so no 7 MiB ROM is needed.
+  offset across sixteen 64 KiB banks) on both the CPU and HDMA buses. It is now
+  verified end-to-end with a first-party fixture (`gen-exspc7110-rom.py`, header
+  and vectors at the end of the program like a real SPC7110 board): all 13
+  `$40-$4F` expansion probes and the entire 128 KiB of work RAM are
+  byte-identical to ares.
 - Sprite OAM x is treated as a signed nine-bit position, so objects partially
   off the left edge (x >= 256) draw their visible columns like ares. This fixed
   the last 11 pixels of Super Mario Kart (frame 600 is now 100.000%).

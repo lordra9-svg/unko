@@ -324,6 +324,7 @@ impl Cx4 {
     /// Write one CX4 register byte from an S-CPU offset.
     pub fn write_io(&mut self, address: u16, data: u8) {
         let address = 0x7c00 | (address & 0x03ff);
+        self.trace("I", address, data);
         match address {
             0x7f40 => self.io.dma.source = (self.io.dma.source & 0xffff00) | u32::from(data),
             0x7f41 => self.io.dma.source = (self.io.dma.source & 0xff00ff) | (u32::from(data) << 8),
@@ -440,14 +441,15 @@ impl Cx4 {
     pub fn write_dram(&mut self, address: u32, data: u8) {
         let address = (address & 0xfff) as usize;
         if address < 0xc00 {
-            if std::env::var_os("CX4_WR_LOG").is_some()
-                && matches!(address, 0x71e | 0x71f | 0x7d0 | 0x7d1)
+            self.trace("D", address as u16, data);
+            if let Some(path) = std::env::var_os("CX4_WR_LOG")
+                .filter(|_| matches!(address, 0x71e | 0x71f | 0x7d0 | 0x7d1))
             {
                 use std::io::Write;
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open("/tmp/opencode/cx4wr.log")
+                    .open(path)
                 {
                     let _ = writeln!(f, "CPU {:04X} = {:02X}", address, data);
                 }
@@ -625,6 +627,7 @@ impl Cx4 {
         let page = usize::from(self.io.cache.page);
         let pc = usize::from(self.regs.pc);
         let opcode = self.program[page * 256 + pc];
+        self.log_instruction(opcode);
         self.advance(rom, sram);
         self.step(rom, sram, 1);
         self.ticks = self.ticks.wrapping_add(1);
@@ -862,7 +865,8 @@ impl Cx4 {
 
     fn algorithm_asr(&mut self, a: u32, s: u32) -> u32 {
         let s = if s > 24 { 0 } else { s };
-        let value = (((a & 0xff_ffff) as i32) >> s) as u32 & 0xff_ffff;
+        // ares shifts `(i24)a`, i.e. with bit 23 as the sign bit.
+        let value = (Self::sign_extend_24(a) >> s) as u32 & 0xff_ffff;
         self.set_nz(value);
         value
     }
@@ -890,6 +894,12 @@ impl Cx4 {
         };
         self.set_nz(value);
         value
+    }
+
+    /// Sign-extend a 24-bit value the way ares' `i24` type does.
+    const fn sign_extend_24(value: u32) -> i64 {
+        let low = (value & 0xff_ffff) as i32;
+        (low << 8 >> 8) as i64
     }
 
     fn algorithm_sx(&mut self, value: u32) -> u32 {
@@ -1073,12 +1083,13 @@ impl Cx4 {
                     self.regs.a = self.algorithm_sub(self.regs.a << shift, u32::from(data));
                 }
                 2 => {
-                    let value = self.read_register(reg) as i32;
-                    let product = (self.regs.a as i32) as i64 * i64::from(value);
+                    let value = self.read_register(reg);
+                    let product = Self::sign_extend_24(self.regs.a) * Self::sign_extend_24(value);
                     self.regs.mul = product as u64 & 0xffff_ffff_ffff;
                 }
                 _ => {
-                    let product = (self.regs.a as i32) as i64 * i64::from(data as i32);
+                    // ares `instructionMUL(n8 imm)`: the immediate is unsigned.
+                    let product = Self::sign_extend_24(self.regs.a) * i64::from(data as u8);
                     self.regs.mul = product as u64 & 0xffff_ffff_ffff;
                 }
             },
@@ -1241,11 +1252,61 @@ impl Cx4 {
         self.data_ram[usize::from(address)] = value;
     }
 
-    /// Debug: log writes to the CX4 bitmap cells that first diverge from ares.
-    fn log_wrram(&self, address: u16, byte: u32) {
-        if std::env::var_os("CX4_WR_LOG").is_none() {
+    /// Debug: log one executed instruction (`CX4_INSN_LOG=/path`), for
+    /// instruction-by-instruction comparison against ares. `snes-info` keeps
+    /// [`DEBUG_FRAME`] current and reads the start frame from
+    /// `CX4_INSN_FROM`.
+    fn log_instruction(&self, opcode: u16) {
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let enabled = *ENABLED.get_or_init(|| std::env::var_os("CX4_INSN_LOG").is_some());
+        if !enabled {
             return;
         }
+        let frame = DEBUG_FRAME.load(std::sync::atomic::Ordering::Relaxed);
+        if frame < DEBUG_INSN_FROM.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        let Some(path) = std::env::var_os("CX4_INSN_LOG") else {
+            return;
+        };
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = writeln!(
+                f,
+                "{:04X}:{:02X} {:03X} a={:06X} p={:04X} dpr={:04X} ram={:06X} g={:06X},{:06X},{:06X},{:06X}",
+                self.regs.pb, self.regs.pc, opcode, self.regs.a, self.regs.p, self.regs.dpr, self.regs.ram,
+                self.regs.gpr[0], self.regs.gpr[14], self.regs.gpr[15], self.regs.gpr[13]
+            );
+        }
+    }
+
+    /// Debug: trace S-CPU writes into the CX4 windows (`CX4_TRACE=/path`).
+    fn trace(&self, kind: &str, address: u16, data: u8) {
+        let Some(path) = std::env::var_os("CX4_TRACE") else {
+            return;
+        };
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = writeln!(f, "{kind} {address:04X} {data:02X}");
+        }
+    }
+
+    /// Debug: log writes to the CX4 bitmap cells that first diverge from ares.
+    ///
+    /// `CX4_WR_LOG=/path` enables it; `snes-info` appends `F <frame>` markers to
+    /// the same file so the sequence can be compared against ares frame by frame.
+    fn log_wrram(&self, address: u16, byte: u32) {
+        let Some(path) = std::env::var_os("CX4_WR_LOG") else {
+            return;
+        };
         if !matches!(address, 0x71e | 0x71f | 0x7d0 | 0x7d1) {
             return;
         }
@@ -1253,7 +1314,7 @@ impl Cx4 {
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open("/tmp/opencode/cx4wr.log")
+            .open(path)
         {
             let _ = writeln!(
                 f,
@@ -1279,6 +1340,13 @@ impl Cx4 {
         self.data_ram[usize::from(address)] = value;
     }
 }
+
+/// Debug: frame counter kept current by the harness (`snes-info`) so the
+/// instruction log can be limited to a frame range.
+pub static DEBUG_FRAME: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Debug: first frame to include in the instruction log (`CX4_INSN_FROM`).
+pub static DEBUG_INSN_FROM: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Cartesian-product helper used by [`cx4_window`] tests.
 ///
