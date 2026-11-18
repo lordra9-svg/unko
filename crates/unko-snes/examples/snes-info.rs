@@ -208,6 +208,34 @@ fn main() -> ExitCode {
                 );
             }
             if system.ppu.frame_ready() {
+                if let Some(path) = std::env::var_os("PRESENT_STATE") {
+                    use std::io::Write;
+                    fn fnv(bytes: impl Iterator<Item = u8>) -> u32 {
+                        let mut h = 2_166_136_261u32;
+                        for b in bytes {
+                            h ^= u32::from(b);
+                            h = h.wrapping_mul(16_777_619);
+                        }
+                        h
+                    }
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                    {
+                        let hw = fnv(system.wram().iter().copied());
+                        let hv = fnv(system.ppu.vram_words().iter().flat_map(|w| w.to_le_bytes()));
+                        let hc =
+                            fnv((0..256u16)
+                                .flat_map(|i| system.ppu.cgram_word(i as u8).to_le_bytes()));
+                        let frame = system.ppu.frame_buffer();
+                        let _ = writeln!(
+                            f,
+                            "state {} pf={} wram={:08x} vram={:08x} cgram={:08x} pix={:02x}{:02x}{:02x}{:02x}",
+                            frames, system.ppu.debug_frame, hw, hv, hc, frame[0], frame[1], frame[2], frame[3]
+                        );
+                    }
+                }
                 if let Some(path) = std::env::var_os("PRESENT_LOG") {
                     use std::io::Write;
                     if let Ok(mut f) = std::fs::OpenOptions::new()

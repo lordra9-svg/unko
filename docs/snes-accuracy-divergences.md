@@ -1769,6 +1769,49 @@ Note: ares presents one extra frame at start-up (502 presentations for
 `--frames 501` versus our 501), which is worth knowing when reading its trace
 but does not affect the captured index.
 
+## SMRPG phase: state, not presentation - and one unpresented frame
+
+`PRESENT_STATE` / `ARES_PRESENT_STATE` record FNV-1a hashes of WRAM, VRAM and
+CGRAM plus the presented pixel at the instant a frame is presented.
+
+Super Mario RPG (501 frames):
+
+```
+ours  state 497 wram=a2f3c947 vram=653c1828 cgram=5f63e71a pix=00003fff
+      state 498 wram=f51a6c6f ...
+      state 499 wram=3254284a ...
+      state 500 wram=44eae006 ...
+
+ares  state 498 wram=a2f3c947 vram=653c1828 cgram=5f63e71a pix=0001fc00
+      state 499 wram=f51a6c6f ...
+      state 500 wram=3254284a ...
+      state 501 wram=44eae006 ...
+```
+
+The *state* sequence is identical but shifted by one index: our presentation N
+shows the state ares presents at N+1. So our game is one frame ahead in
+emulated time while presenting the same number of images.
+
+The same probe on the frame-index fixture matches at the **same index**
+(301/301 states), so this is not the probe or the harness: it is specific to
+this game.
+
+And our own PPU frame counter gives the mechanism away:
+
+```
+                 presentation index    Ppu::debug_frame
+fixture                   300                  301   (+1, correct)
+SMRPG                     500                  502   (+2)
+```
+
+For SMRPG our PPU completes one more frame boundary than we present - a
+`line == 240` event that is never handed to the harness - so every later
+presentation shows a state one frame newer. The fixture does not have it.
+
+Next step: log every `line == 240` event with its master clock in both cores and
+find the extra one in SMRPG (it will be a frame whose `frame_ready` is set but
+never consumed, or a duplicated boundary).
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):
