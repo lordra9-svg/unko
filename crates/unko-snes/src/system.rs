@@ -981,6 +981,23 @@ impl CpuBus for Snes {
                 );
             }
         }
+        if std::env::var_os("VMDATA_LOG").is_some() {
+            use std::io::Write;
+            let offset = (address & 0xFFFF) as u16;
+            if offset == 0x2118 || offset == 0x2119 {
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/opencode/vmdata.log")
+                {
+                    let _ = writeln!(
+                        f,
+                        "{:04X}={:02X} pc={:06X} bus={:06X}",
+                        offset, value, self.live_pc, address
+                    );
+                }
+            }
+        }
         if std::env::var_os("DMAREG_LOG").is_some() {
             use std::io::Write;
             let offset = (address & 0xFFFF) as u16;

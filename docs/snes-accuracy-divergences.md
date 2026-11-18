@@ -1631,6 +1631,63 @@ memory image.
 Next step: log `STA $2118/$2119` with the accumulator and PC in both cores and
 trace where the differing byte is loaded from.
 
+## Resolved 2026-11-17 - VMADD reloads the VRAM read latch
+
+ares' `$2116`/`$2117` handlers reload the VRAM read latch:
+
+```cpp
+case 0x2116: { vram.address.bit(0,7) = data; latch.vram = readVRAM(); return; }
+case 0x2117: { vram.address.bit(8,15) = data; latch.vram = readVRAM(); return; }
+```
+
+We only updated `vram_address`. That matters for **read-modify-write uploads**,
+which Super Mario RPG uses for its tilemaps:
+
+```
+C3:C2B9: LDA $A000,X     ; 8-bit: replaces A.b, keeps A.h
+C3:C2BC: REP #$20
+C3:C2BE: PHA
+C3:C2BF: LDA $60
+C3:C2C1: STA $2116       ; ares reloads the read latch here
+C3:C2C5: PLA             ; A = 00|byte  (high byte preserved from the $2139 read)
+C3:C2C6: STA $002118     ; write low + high in one 16-bit store
+```
+
+Because the latch was stale, the high byte the routine preserved was whatever a
+previous read had left behind, so the uploaded words were wrong.
+
+Fix: reload `vram_read_latch` in both handlers.
+
+Verification, all against deterministic ares captures:
+
+| check | before | after |
+|---|---|---|
+| CPU stores to `$2118`/`$2119` (frames 0-440) | diverged at #16,453 (`$2119 = $00` vs `$58`) | **20,482 vs 20,482, identical** |
+| VRAM at frame 440 | 557 bytes differ | **0 / 65,536** |
+| VRAM at frame 500 | 557 bytes differ | **0 / 65,536** |
+
+Super Mario RPG's rendered frame at 493-501 is **unchanged** by this (it still
+shows the one-frame relationship below), so the two defects are independent: the
+VRAM corruption is fixed, and the presentation phase remains.
+
+## SMRPG presentation phase (open)
+
+With WRAM (0/131,072), BW-RAM (0/32,768), VRAM (0/65,536), CGRAM (0/256) and the
+per-rendered-line register snapshot (`$2100`/`$212C`/`$2130-$2132`, lines 50 and
+150 over frames 498-501) all identical, the rendered frame is still exactly one
+frame ahead of ares:
+
+```
+ours 493 == ares 494   100.000%
+ours 499 == ares 500   100.000%
+ours 493 vs ares 493    88.438%
+```
+
+The frame-index fixture shows the two harnesses select the same frame (CGRAM
+colour 0 = `0x12c`/`0x12d`/`0x12e` at 300/301/302 in both), so this is not a
+capture artefact: it affects only content that changes per frame, and every
+piece of state we can compare matches at the same frame index.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

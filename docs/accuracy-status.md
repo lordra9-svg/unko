@@ -256,6 +256,10 @@ Validation so far:
   `32768 * 64` Hz. `Super Power League 4` (type `$F5`) and `Tengai Makyou Zero`
   (type `$F9`, with the RTC) are also **100.000%** exact against ares at
   frames 300 and 600.
+- Writing `$2116`/`$2117` reloads the VRAM read latch, as on ares and real
+  hardware (we only updated the address). Super Mario RPG's read-modify-write
+  tilemap uploads depend on it; with the fix its VRAM is **byte-identical** to
+  ares at frames 440 and 500 (0 of 65,536 bytes, was 557).
 - The SA-1 (Super Accelerator 1) is implemented (`sa1.rs`): a second 65C816
   backed by the super-MMC ROM banking, shared BWRAM (banking, bit-map formats
   and write protection), 2 KiB I-RAM, the three DMA modes including both

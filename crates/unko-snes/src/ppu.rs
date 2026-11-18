@@ -827,8 +827,18 @@ impl Ppu {
                 }
             }
             0x2115 => self.vmain = data,
-            0x2116 => self.vram_address = (self.vram_address & 0xFF00) | u16::from(data),
-            0x2117 => self.vram_address = (self.vram_address & 0x00FF) | (u16::from(data) << 8),
+            0x2116 => {
+                self.vram_address = (self.vram_address & 0xFF00) | u16::from(data);
+                // ares `PPU::writeIO`: writing VMADDL/VMADDH also reloads the
+                // VRAM read latch from the new address. Games rely on it - a
+                // read-modify-write upload (`STA $2116; LDA $2139; ...`) reads
+                // back the high byte it is about to preserve.
+                self.vram_read_latch = self.read_vram_word();
+            }
+            0x2117 => {
+                self.vram_address = (self.vram_address & 0x00FF) | (u16::from(data) << 8);
+                self.vram_read_latch = self.read_vram_word();
+            }
             0x2118 => self.write_vram_byte(data, false),
             0x2119 => self.write_vram_byte(data, true),
             0x211A => self.m7sel = data,
