@@ -1730,6 +1730,45 @@ It does **not** change the SMRPG frame phase (still `ours493 == ares494`,
 `ours500 == ares501`, 100.000%, with `ours493` vs `ares493` at 88.438%), so that
 phase is not intra-line sampling.
 
+## SMRPG phase: presentation logged, harness misalignment ruled out
+
+`PRESENT_LOG` (ours, at `Ppu::acknowledge_frame`) and `ARES_PRESENT_LOG` (ares,
+at `vcounter() == 240`) record the presentation index and the first visible
+pixel at the exact moment a frame is presented.
+
+Super Mario RPG, 501 frames:
+
+```
+ours  present 497 pix=00003fff
+      present 498 pix=00003fff
+      present 499 pix=00004fff   <- fade step
+      present 500 pix=00004fff
+
+ares  present 498 pix=0001fc00
+      present 499 pix=0001fc00
+      present 500 pix=00027c00   <- same fade step
+      present 501 pix=00027c00
+```
+
+The same visual transition lands at presentation index 499 in ours and 500 in
+ares, i.e. the offset is in the *emulated* frame, not in the harness: for the
+frame-index fixture both harnesses display the same ROM frame at the same `N`
+(CGRAM colour 0 = `0x12c` at 300 in both), and `ares-capture.sh` waits for trace
+index `frames - 1`, exactly like ours.
+
+A like-for-like pairing was also tested and falsified:
+
+```
+ares@493 frames vs ours@494 frames   83.827%
+ares@500 frames vs ours@501 frames    0.000%
+```
+
+so re-indexing the capture does not remove the difference.
+
+Note: ares presents one extra frame at start-up (502 presentations for
+`--frames 501` versus our 501), which is worth knowing when reading its trace
+but does not affect the captured index.
+
 ## Oracle toolkit
 
 `tools/snes-oracle/` holds the capture and diff harness (see its README):

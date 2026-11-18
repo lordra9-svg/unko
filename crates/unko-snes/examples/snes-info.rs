@@ -208,6 +208,22 @@ fn main() -> ExitCode {
                 );
             }
             if system.ppu.frame_ready() {
+                if let Some(path) = std::env::var_os("PRESENT_LOG") {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                    {
+                        let frame = system.ppu.frame_buffer();
+                        let pixel = [frame[0], frame[1], frame[2], frame[3]];
+                        let _ = writeln!(
+                            f,
+                            "present {} pix={:02x}{:02x}{:02x}{:02x}",
+                            frames, pixel[0], pixel[1], pixel[2], pixel[3]
+                        );
+                    }
+                }
                 system.ppu.acknowledge_frame();
                 frames += 1;
                 if let Some(path) = std::env::var_os("SCROLL_LOG") {
