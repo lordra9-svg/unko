@@ -2343,6 +2343,25 @@ So "the halted coprocessor does not track the CPU" is too strong: ares' CX4 does
 few hundred cycles behind. The residual ~900-cycle lag therefore comes from the
 job's own tail, not from the inter-job period. Reverted.
 
+### Where the lead is created: the job's tail
+
+Logging the coprocessor and CPU clocks at every `HALT` and every `$7F48` (both in
+CX4 cycles) answers the question the halted-lead experiment raised:
+
+| | min | median | max |
+|---|---|---|---|
+| lead at `HALT` (end of a job) | +4 | **+173** | +1,260 |
+| lead at the next `$7F48` | +7 | **+642** | +1,272 |
+
+So the coprocessor is *already* a few hundred cycles behind when it halts (median
+173, up to 1,260) and the lead roughly triples during the inter-job gap. Neither
+"created while idle" (the halted-lead experiment produced 15,000) nor "created
+during the job" alone is right: about a third is left at `HALT` and the rest
+accrues before the next request.
+
+That points the next attempt at the **job's tail** - the last `execute()` through
+`HALT` - where the coprocessor is already behind, rather than at the idle period.
+
 So the fix is the *conjunction* of the two things tried separately:
 
 1. a ~924-clock delay before the reload starts = the coprocessor catching up its
