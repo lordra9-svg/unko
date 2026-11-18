@@ -2148,6 +2148,22 @@ by which time the game has moved on.
 
 The interleaving is therefore still not bit-identical around the blocking reload.
 
+`PREP` now also logs the page-cache state *before* the page is overwritten
+(`page`, `a0`, `a1` and the lock bits) on both sides. At the split the two states
+are identical - every one of the 2,900 (ares) / 2,920 (ours) reloads has the same
+program bank, request address, page and residents - and every request is one
+whose address is already resident in `a0`/`a1`, i.e. the reloads are *forced* by
+`$7F48` (or by a locked page) rather than misses. **The page-cache bookkeeping is
+not stale.**
+
+Only the *number* of reloads differs: 2,920 vs 2,900. ares sees 2,725 `$7F48`
+writes (all while halted), so the remainder come from locked-page paths. Ours
+performs one more reload right at the split (a forced reload of `$29000`, which
+is already resident in `a1`) where ares starts executing instead. Since the
+S-CPU write stream is identical up to the split, that extra reload is a request
+our core honours and ares has already absorbed - i.e. a scheduling artefact, as
+the ledger suspected, not a bookkeeping error.
+
 ### Tested: charging the reload to machine time (falsified)
 
 ares implements the blocking reload with cooperative threads: `HG51B::cache()`

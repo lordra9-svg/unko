@@ -582,11 +582,7 @@ impl Cx4 {
         let page = usize::from(self.io.cache.page);
         self.io.cache.address[page] = address;
         if insn_logging() {
-            self.log_event(
-                "PREP",
-                u32::from(self.regs.pb),
-                (self.io.cache.base & 0xff_ffff) | (u32::from(self.io.cache.page) << 24),
-            );
+            self.log_prep(address);
         }
         let debug_load = insn_logging();
 
@@ -1267,6 +1263,33 @@ impl Cx4 {
     /// instruction-by-instruction comparison against ares. `snes-info` keeps
     /// [`DEBUG_FRAME`] current and reads the start frame from
     /// `CX4_INSN_FROM`.
+    /// Debug: log a cache reload request with the page-cache state *before* the
+    /// page is overwritten, so a miss can be compared against a reference.
+    fn log_prep(&self, request: u32) {
+        let Some(path) = std::env::var_os("CX4_INSN_LOG") else {
+            return;
+        };
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let clock = DEBUG_CLOCK.load(std::sync::atomic::Ordering::Relaxed);
+            let locks = u8::from(self.io.cache.lock[0]) | (u8::from(self.io.cache.lock[1]) << 1);
+            let _ = writeln!(
+                f,
+                "t={clock} prep pb={:04X} req={:06X} page={} a0={:06X} a1={:06X} l={}",
+                self.regs.pb,
+                request,
+                u8::from(self.io.cache.page),
+                self.io.cache.address[0],
+                self.io.cache.address[1],
+                locks
+            );
+        }
+    }
+
     /// Debug: append a non-instruction event to the instruction log.
     fn log_event(&self, kind: &str, value: u32, extra: u32) {
         let Some(path) = std::env::var_os("CX4_INSN_LOG") else {
