@@ -1182,6 +1182,22 @@ frames of gameplay HUD rendering.
   A residual still remains at frame 500 (mean |d| 23.3), so this is a large fix
   rather than the end of the story.
 
+  **Re-checked after the routing fix: channel 5's pointer is still wrong.** The
+  per-scanline dump still shows `ind=C010` versus ares' `5001`, so this
+  particular fetch was *not* what the routing fix repaired - the big frame
+  improvement must have come from another HDMA read (most likely a
+  BWRAM-sourced channel that previously hit `cart.read` instead of the SA-1's
+  BWRAM). Two new leads fall out of the same dump:
+
+  - our channel 5 logs **2694** advances over the run where ares logs **1338**,
+    i.e. our ch5 HDMA is active over roughly twice as many frames (or advances
+    twice as often), and
+  - the pointer is `$C00F`-based rather than `$5000`-based, which needs the
+    read to be traced for that one address.
+
+  Kirby's Dream Land 3 is unchanged by the routing fix (0% exact at frames
+  120/300/600; 1 colour versus ares' 10 at frame 600).
+
   Off-by-one: we also issue two extra `$2100` writes ares does not (`$01` at
   frame 24 and `$AC` at frame 418), both invisible because both cores are
   force-blanked there.
