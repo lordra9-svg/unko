@@ -174,7 +174,10 @@ impl CpuIo {
             auto_joy2: 0,
             auto_joy3: 0,
             auto_joy4: 0,
-            pio: 0,
+            // ares `CPU::IO`: `n8 pio = 0xff`. Bit 7 enables $213C/$213D
+            // counter latching, so it powers up *set* and $2137 reads latch
+            // the beam position until software clears it.
+            pio: 0xFF,
             math: MathUnit {
                 multiplicand: 0,
                 multiplier: 0,

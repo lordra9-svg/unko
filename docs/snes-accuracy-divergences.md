@@ -1900,6 +1900,62 @@ Verified by tests that need no ROM image:
 All 161 lib tests pass and the three local SPC7110 titles (MDH, SPL, TMZ) remain
 100.000% exact at frame 600.
 
+## Star Fox hangs: `$4201` PIO powers up set (2026-11-18)
+
+The first *release* SuperFX title is now available locally, and it exposed a
+boot bug: Star Fox never enabled the screen and never took an NMI, spinning
+forever at `$03:BD83`:
+
+```
+BD83  E2 20     SEP #$20
+BD85  AD 37 21  LDA $2137
+BD88  AD 3D 21  LDA $213D     ; OPVCT
+BD8B  EB        XBA
+BD8C  AD 3D 21  LDA $213D
+BD8F  EB        XBA
+BD90  CD DD 16  CMP $16DD     ; target scanline
+BD93  D0 EE     BNE $BD83
+```
+
+That is the standard "wait for the beam" idiom: `$2137` reads latch the H/V
+counters when `$4201` bit 7 (`PIO`) is set, and `$213C`/`$213D` then return the
+latched value, low byte first then the high bit. Two things were wrong:
+
+- `CpuIo` powered up with `pio = 0`, but ares' `CPU::IO` has `n8 pio = 0xff`,
+  so bit 7 is *set* at reset. With it clear, no `$2137` read ever latched the
+  counters and `$213D` stayed 0 forever.
+- The `$4201` write path did not implement ares' edge latch
+  (`if(io.pio.bit(7) && !data.bit(7)) ppu.latchCounters()`), so a game that
+  clears bit 7 explicitly would still not sample the beam.
+
+Instruction-level comparison against ares' `ARES_PC_TRACE` located this exactly:
+the first difference was A at `$03:BD8B` (ares `1`, ours `0`), i.e. the OPVCT
+read.
+
+### Star Fox vs deterministic ares captures
+
+| frame | result |
+|---|---|
+| 120 | **100.000%** (57,344/57,344) |
+| 300 | **100.000%** |
+| 310 | 97.062% (1,685 px) |
+| 320 | 83.245% (9,608 px, a large object region) |
+| 330 | 96.165% (2,199 px) |
+| 340 | **100.000%** |
+| 350 | 99.248% (431 px) |
+| 400 | 98.678% |
+| 500 | 98.699% |
+| 600 | 98.247% |
+| 900 | 97.923% |
+
+So a release GSU title now boots, runs its GSU-driven intro and produces
+pixel-exact frames. The result is **not monotonic** - frame 340 is exact again
+after 310-330 differ - so this is not a cumulative drift but a per-frame
+difference in the GSU-rendered picture (frame 320 shows a large contiguous
+object region, the others are scattered single pixels, e.g. 940 of 1,005 at
+frame 600 have one side black). The next step is to compare the GSU screen
+buffer and `PLOT`/`RPIX` traffic for a diverging frame such as 320.
+
 ## CX4 gameplay diffed (2026-11-18)
 
 Mega Man X2 reaches its in-game intro on its own (no input needed), so CX4

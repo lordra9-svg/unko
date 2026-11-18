@@ -342,6 +342,18 @@ The CX4 has env-gated debug hooks used to localise divergence against ares:
 quota and `fs::write`/`writeln` failures there are silent (`let _ = ...`), which
 once truncated a trace mid-run and looked like an emulation difference.
 
+## Commercial test ROMs
+
+Test ROMs used for parity work are unpacked from the No-Intro set into
+`~/.cache/unko-roms/` (persistent). Do **not** stage them in `/tmp`: it is tmpfs
+here and a host restart silently removes them (it cost a reboot's worth of Star
+Fox captures). Titles currently staged:
+
+- `Star Fox (USA).sfc` - release SuperFX/GSU title (intro frames 120/300/340
+  are 100.000% exact against ares).
+- `Mega Man X2 (USA).sfc`, `Mega Man X3 (USA).sfc` - CX4 titles.
+- `exspc7110.sfc` - the generated 7 MiB EXSPC7110 fixture.
+
 ## Regression baseline
 
 `baseline.py` runs every ROM under `test-roms/snes/` for a fixed frame count and

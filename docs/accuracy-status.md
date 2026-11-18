@@ -229,9 +229,15 @@ Validation so far:
   the ROM/RAM buffer handshake, the plot/colour/rpix pixel pipeline, and the
   S-CPU `$3000-$34FF` register window plus the `$70-$71` and `$6000-$7FFF`
   work-RAM windows. The public PeterLemon GSU suite (31 opcode tests) is
-  verified against ares below. A release SuperFX image (e.g. Star Fox) is not
-  present locally, so the end-to-end game path is not yet measured; Final
-  Fantasy V was still in its boot sequence at the 20M-cycle sample.
+  verified against ares below. A release SuperFX title is now verified too:
+  **Star Fox (USA)** boots and its GSU-driven intro is **100.000%** exact
+  against ares at frames 120, 300 and 340; other sampled frames are 83-99%
+  (frame 320 has a large object region, the rest are scattered pixels). The
+  result is non-monotonic, so it is a per-frame rendering difference rather than
+  a drift. Getting there needed two fixes: `$4201` PIO powers up with
+  bit 7 set (ares `n8 pio = 0xff`), and the `$4201` high-to-low edge latches the
+  `$213C`/`$213D` beam counters; without them the game spun in a scanline-wait
+  loop at `$03:BD83` and never enabled the screen.
 - Power-on work RAM matches ares (`random.rs`): ares fills S-CPU WRAM with a
   structured low-entropy pseudo-random pattern (`Random::array`) instead of
   zeros, seeded `(0, 0)` in its deterministic mode. Our core reproduces that

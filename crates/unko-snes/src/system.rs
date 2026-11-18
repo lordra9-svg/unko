@@ -1604,8 +1604,13 @@ impl CpuBus for SnesBus<'_> {
                     *self.nmi_enable = enable;
                     self.io.write(0x4200, value);
                 } else if offset == 0x4201 {
-                    // WRIO bit 7 enables $2137 counter latching; without it
-                    // $213C/$213D never change (Mesen/ares `io.pio`).
+                    // WRIO bit 7 enables counter latching. ares latches on the
+                    // high-to-low transition (`if(io.pio.bit(7) && !data.bit(7))
+                    // ppu.latchCounters()`), which is how games sample the beam
+                    // position: Star Fox polls $213D after toggling this bit.
+                    if self.io.pio() & 0x80 != 0 && value & 0x80 == 0 {
+                        self.ppu.latch_counters();
+                    }
                     self.io.write(0x4201, value);
                 } else if (0x4202..=0x4206).contains(&offset) || (0x4207..=0x420A).contains(&offset)
                 {
