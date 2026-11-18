@@ -2362,6 +2362,24 @@ accrues before the next request.
 That points the next attempt at the **job's tail** - the last `execute()` through
 `HALT` - where the coprocessor is already behind, rather than at the idle period.
 
+### Frame-locked ares capture: started, not yet calibrated
+
+A hash at the PPU frame boundary (`ARES_FLHASH`, sampling the region `dac.cpp`
+renders at row 8 / column 26 of the 564-wide buffer) plus a matching raw dump
+(`ARES_FLFRAME`) was added to the ares build. It is **not yet usable**:
+
+- only all-black frames hash identically to ours (25/330), because for any
+  content the sampled region does not line up;
+- dumping ares' frame-320 buffer and searching +-2 pixel shifts against our
+  frame 320 finds a best alignment of only 12% - while the *host-callback*
+  capture at index 322 matches our 320 at 100%.
+
+So ares' `screen->pixels()` at the frame boundary is not the picture our frame
+index shows: the buffer reads ~2 frames behind (most likely `dac.cpp` alternates
+fields/buffers and the desktop-ui's conversion presents the other one). Until
+that is pinned down, Star Fox comparisons stay on the host-timed captures with
+the documented phase caveat.
+
 So the fix is the *conjunction* of the two things tried separately:
 
 1. a ~924-clock delay before the reload starts = the coprocessor catching up its
