@@ -2204,11 +2204,27 @@ first instruction  5,014      <- 1,216 clocks later
 
 Ours has the same reload duration and the same order, but the load begins
 immediately (~0 rather than 924) and the job starts 2,584 clocks after `$7F4F`
-rather than 1,216. So ares' coprocessor is *behind* the CPU when `$7F48` is
-written (it spends 924 clocks catching up on halted steps first), the reload then
-puts it *ahead*, and the CPU needs 1,216 clocks to catch up before the job's
-first instruction runs. We charge the reload to the credit (the right sign) but
-start it immediately and never reproduce either catch-up phase.
+rather than 1,216.
+
+Logging both thread clocks (`cc` = the HG51B thread's clock, `pc` = the S-CPU
+thread's, both in the scheduler's scaled base, `sc` = the HG51B scalar) gives the
+lead/lag directly, in CX4 cycles:
+
+| event | CPU lead over the coprocessor |
+|---|---|
+| `$7F48` write | **+375 .. +966 cycles** (coprocessor behind) |
+| `$7F4F` write | **+90 .. +152 cycles** (nearly in sync) |
+
+So the coprocessor is *behind* by a few hundred cycles when the reload is
+requested, and almost in sync when the job starts - it is **not** ahead after the
+load, which is what last turn's note assumed. The 924-clock gap before the reload
+is therefore the coprocessor catching up *while halted* (each `main()` costs one
+clock) before `cache()` finally runs; the 1,216-clock gap after `$7F4F` is the CPU
+catching up to the coprocessor's post-reload position.
+
+The catch-up amount varies job to job (+375 .. +966), so it cannot be a constant
+delay: it is whatever the previous job left outstanding. That is exactly what a
+single shared clock produces and what a separate credit does not.
 
 Reproducing this needs the coprocessor to be stepped from the CPU's own clock
 budget (as `Thread::synchronize` does) rather than from a separate credit, so
