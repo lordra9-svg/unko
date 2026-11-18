@@ -330,9 +330,11 @@ The CX4 has env-gated debug hooks used to localise divergence against ares:
   bitmap cells that differed (0x71E/0x71F/0x7D0/0x7D1).
 - `CX4_INSN_LOG=<path>` + `CX4_INSN_FROM=<frame>` / `ARES_CX4_INSN_LOG` +
   `ARES_CX4_INSN_FROM`: one line per executed HG51B instruction with
-  `pb:pc opcode a p dpr ram gpr0,gpr14,gpr15,gpr13`. The two logs line up
-  instruction for instruction once the frame gates are aligned, so the first
-  differing line names the instruction that diverged.
+  `t=<master clock> pb:pc opcode a p dpr ram mdr h=<register-file hash>` (ares
+  also prints the GPRs), plus `CACHE v=<pb> x=<address>` lines for forced
+  instruction-cache reloads. The two logs line up event for event once the frame
+  gates are aligned, so the first differing line names the instruction (or the
+  reload) that diverged.
 - `CX4_RAM_DIR=<dir>` / `ARES_CX4RAM_DIR` + `ARES_CX4RAM_FROM`: a dump of the
   3 KiB CX4 data RAM per frame.
 

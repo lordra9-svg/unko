@@ -581,6 +581,7 @@ impl Cx4 {
         self.io.cache.preload = false;
         let page = usize::from(self.io.cache.page);
         self.io.cache.address[page] = address;
+        let debug_load = insn_logging();
 
         for offset in 0..256 {
             let wait = self.wait(address);
@@ -594,6 +595,9 @@ impl Cx4 {
             self.program[page * 256 + offset] = u16::from_le_bytes([low, high]);
         }
         self.io.cache.enable = false;
+        if debug_load {
+            self.log_event("CACHE", u32::from(self.regs.pb), address);
+        }
         true
     }
 
@@ -1256,10 +1260,24 @@ impl Cx4 {
     /// instruction-by-instruction comparison against ares. `snes-info` keeps
     /// [`DEBUG_FRAME`] current and reads the start frame from
     /// `CX4_INSN_FROM`.
+    /// Debug: append a non-instruction event to the instruction log.
+    fn log_event(&self, kind: &str, value: u32, extra: u32) {
+        let Some(path) = std::env::var_os("CX4_INSN_LOG") else {
+            return;
+        };
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let clock = DEBUG_CLOCK.load(std::sync::atomic::Ordering::Relaxed);
+            let _ = writeln!(f, "t={clock} {kind} v={value:06X} x={extra:06X}");
+        }
+    }
+
     fn log_instruction(&self, opcode: u16) {
-        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        let enabled = *ENABLED.get_or_init(|| std::env::var_os("CX4_INSN_LOG").is_some());
-        if !enabled {
+        if !insn_logging() {
             return;
         }
         let frame = DEBUG_FRAME.load(std::sync::atomic::Ordering::Relaxed);
@@ -1275,11 +1293,37 @@ impl Cx4 {
             .append(true)
             .open(path)
         {
+            // FNV-1a over the whole register file: the first differing line is
+            // the instruction *after* the one that diverged.
+            let mut hash = 2_166_136_261u32;
+            let mut mix = |byte: u8| {
+                hash ^= u32::from(byte);
+                hash = hash.wrapping_mul(16_777_619);
+            };
+            for value in self
+                .regs
+                .gpr
+                .iter()
+                .copied()
+                .chain([self.regs.mdr, self.regs.ram])
+            {
+                for byte in value.to_le_bytes() {
+                    mix(byte);
+                }
+            }
+            let mut gprs = String::new();
+            for (index, value) in self.regs.gpr.iter().enumerate() {
+                if index != 0 {
+                    gprs.push(',');
+                }
+                gprs.push_str(&format!("{value:06X}"));
+            }
             let _ = writeln!(
                 f,
-                "{:04X}:{:02X} {:03X} a={:06X} p={:04X} dpr={:04X} ram={:06X} g={:06X},{:06X},{:06X},{:06X}",
-                self.regs.pb, self.regs.pc, opcode, self.regs.a, self.regs.p, self.regs.dpr, self.regs.ram,
-                self.regs.gpr[0], self.regs.gpr[14], self.regs.gpr[15], self.regs.gpr[13]
+                "t={} {:04X}:{:02X} {:03X} a={:06X} p={:04X} dpr={:04X} ram={:06X} mdr={:06X} h={:08X} g={gprs}",
+                DEBUG_CLOCK.load(std::sync::atomic::Ordering::Relaxed),
+                self.regs.pb, self.regs.pc, opcode, self.regs.a, self.regs.p, self.regs.dpr,
+                self.regs.ram, self.regs.mdr, hash
             );
         }
     }
@@ -1295,7 +1339,11 @@ impl Cx4 {
             .append(true)
             .open(path)
         {
-            let _ = writeln!(f, "{kind} {address:04X} {data:02X}");
+            let _ = writeln!(
+                f,
+                "{} {kind} {address:04X} {data:02X}",
+                DEBUG_CLOCK.load(std::sync::atomic::Ordering::Relaxed)
+            );
         }
     }
 
@@ -1347,6 +1395,24 @@ pub static DEBUG_FRAME: std::sync::atomic::AtomicU32 = std::sync::atomic::Atomic
 
 /// Debug: first frame to include in the instruction log (`CX4_INSN_FROM`).
 pub static DEBUG_INSN_FROM: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Debug: master clock at the most recent bus access, so an instruction log can
+/// be aligned event-for-event with a reference emulator's per-access log.
+pub static DEBUG_CLOCK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Whether the CX4 instruction log is enabled (cached once).
+pub fn insn_logging() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("CX4_INSN_LOG").is_some())
+}
+
+/// Whether any debug log needs the master clock kept current (cached once).
+pub fn debug_clock_needed() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var_os("CX4_INSN_LOG").is_some() || std::env::var_os("CX4_TRACE").is_some()
+    })
+}
 
 /// Cartesian-product helper used by [`cx4_window`] tests.
 ///

@@ -260,7 +260,10 @@ Validation so far:
   against ares at frames 1800, 2400, 3000, 3100, 3200, 3300 and 3400. The
   former 445-pixel difference at frame 3300 was a `MUL` sign-extension bug
   (ares multiplies signed `i24` operands; `ASR` was logical as well). A second
-  divergence remains from frame 3700 (96.488% at 3700, 93.687% at 4000).
+  divergence remains from frame 3477 (96.488% at 3700, 93.687% at 4000); it is a
+  race between the CX4 job start (`$7F4F`) and the parameter GPR writes that
+  only the 2,728-clock cache reload covers, and our per-access credit model
+  performs more reloads at the boundary than ares' cooperative threads do.
 - The `EXSPC7110-` (7 MiB) layout is implemented: 1 MiB program + 5 MiB data +
   1 MiB expansion, with the expansion ROM at `$40-$4F:$0000-$FFFF` (20-bit
   offset across sixteen 64 KiB banks) on both the CPU and HDMA buses. It is now

@@ -735,6 +735,15 @@ impl Snes {
     }
 
     fn advance_peripherals_inner(&mut self, clocks: u32) {
+        if crate::cx4::debug_clock_needed() {
+            // The access this slice belongs to completes at `clock + clocks`;
+            // record that before any coprocessor instruction runs so the CX4
+            // logs and the bus traces agree on the event time.
+            crate::cx4::DEBUG_CLOCK.store(
+                self.clock + u64::from(clocks),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
         // The S-SMP runs at 2,050,560 Hz regardless of region; the master clock
         // differs (21,477,272 NTSC / 21,281,370 PAL). Draining *one SMP clock*
         // at a time (rather than one two-clock access unit) is what makes an
@@ -791,12 +800,19 @@ impl Snes {
             }
         }
         // The CX4 (HG51B) runs at 20 MHz; tick it with a rational credit.
+        //
+        // ares `Thread::synchronize` runs the coprocessor until its clock
+        // reaches the CPU's, carrying the overshoot into the next sync. Running
+        // only while a whole instruction is covered (`credit >= den`) would
+        // leave it up to one instruction behind at every sync point, which
+        // accumulates and eventually changes the outcome of the handshake where
+        // the game starts a job before writing its parameters.
         if let Some(cx4) = self.cx4.as_mut() {
             let den = self.region.master_clock() as i64;
             let rom = self.cart.rom();
             let sram = self.cart.sram();
             self.cx4_credit += i64::from(clocks) * 20_000_000;
-            while self.cx4_credit >= den {
+            while self.cx4_credit > 0 {
                 let cost = cx4.run_one(rom, sram);
                 self.cx4_credit -= den * i64::from(cost.max(1));
             }

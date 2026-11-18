@@ -1948,6 +1948,42 @@ ares' `instructionMUL(n8)`).
 After the fix the firmware's data-RAM writes are identical for frames 3225-3232
 (`CX4_WR_LOG`) and frames 3300/3400 are 100.000%.
 
+### Remaining: a handshake race at frame 3477
+
+The next divergence starts at **frame 3477** (CX4 data RAM differs by 1295 of
+3072 bytes; the difference then persists). What is already ruled out:
+
+- The S-CPU traffic into the CX4 is identical: comparing the full
+  `CX4_TRACE`/`ARES_CX4_TRACE` streams, all **177,547** data-RAM and register
+  writes match, in order, for the whole run up to this point.
+- The firmware's instruction stream is identical up to the first job start after
+  the previous `HALT`; the first difference is one GPR value.
+
+The cause is the handshake itself. Momotarou-style job setup writes
+`$7F4D/$7F4E` (program bank), then `$7F48` (cache page, which forces a reload),
+then **`$7F4F` (which clears `halt` and starts the job), and only then the
+parameter GPRs** `$7F80+`. The job therefore races with the parameter writes; it
+only works because the forced reload started by `$7F48` takes ~2,728 coprocessor
+clocks, covering the ~90 clocks of GPR writes.
+
+Both cores perform that reload (measured in the instruction log: ares `d=2728`),
+but ours performs **more reloads at the job boundary** - 2,920 vs 2,900 in a
+two-frame window - and so starts the job ~1.4k clocks later in CPU time. By the
+time the firmware reads its parameters, ares has already written `gpr2 = 0`
+while ours still sees the previous job's `0x200`.
+
+The interleaving is therefore still not bit-identical around the blocking reload.
+Ares implements it with cooperative threads: `HG51B::cache()` is one blocking
+`main()` call, and `HitachiDSP::step` then runs `Thread::synchronize(cpu)` to
+pull the S-CPU forward by the reload's duration. Our per-bus-access credit model
+(`Snes::advance_peripherals`) reproduces the total timing but not that exact
+scheduling.
+
+Debug hooks added while chasing this (`CX4_TRACE`, `CX4_STATE_LOG`,
+`CX4_INSN_LOG`/`CX4_INSN_FROM`, `CX4_RAM_OUT`, plus a master-clock stamp on each
+logged event) make the comparison repeatable: the instruction logs line up until
+the handshake, and the cache-load events are logged as `CACHE v=<pb> x=<addr>`.
+
 Controller scripting is now also a settled oracle: `gen-joypad-rom.py`
 (publishing `$4218`/`$4219` as CGRAM colour 0) gives identical colours in both
 cores for every realistic mask tested - `0x0000`, `0x0080` (A), `0x1000`
