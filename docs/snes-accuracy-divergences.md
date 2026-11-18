@@ -1230,11 +1230,22 @@ frames of gameplay HUD rendering.
   Kart the aligned pairing is `ours 600` vs `ares 600` (99.981%), and `ours 599`
   vs `ares 600` is worse (97.586%), so the harness indices agree there.
 
-  Which side is "one frame ahead" cannot be decided from a static screen, so no
-  change was made to `Ppu::tick`/the frame boundary - shifting it would risk
-  every currently-exact result. The discriminator needed is a ROM with a
-  per-frame visible counter (e.g. a blargg test that prints a frame number), so
-  the absolute frame index can be read off the screen rather than inferred.
+  **Settled: the harnesses agree, so the offset is emulation.** A first-party
+  fixture (`tools/snes-oracle/gen-frame-counter-rom.py`) publishes its own NMI
+  frame counter as CGRAM colour 0, so the frame index is readable off the
+  frame. Our dump shows colour 0 = `0x12c` / `0x12d` / `0x12e` at frames
+  300 / 301 / 302, and the captured pixel is **identical in both emulators at
+  the same frame number** ((90,74,0) at 300 and (99,74,0) at 301). So
+  `FRAMES=N` and `--frames N` select the same frame, there is no capture
+  off-by-one, and Super Mario RPG really is one frame ahead of ares through the
+  fade.
+
+  Since CGRAM at frame 500 is identical (0/256) and the pixel difference is
+  purely the `INIDISP` brightness relation, our `$2100 = $04` is taking effect
+  for frame 499 where ares applies it to frame 500. The remaining question is
+  therefore which per-frame event (the NMI that performs the write, or the
+  line-240 frame boundary it is measured against) is positioned one frame
+  differently - not the values, which are all proven identical.
 
   Kirby's Dream Land 3 is unchanged by the routing fix (0% exact at frames
   120/300/600; 1 colour versus ares' 10 at frame 600).

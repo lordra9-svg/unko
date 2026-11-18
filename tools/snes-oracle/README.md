@@ -209,6 +209,28 @@ adds the Epson RTC at `$4840-$4842`) are both 100.000% identical to ares at
 frames 300 and 600 as well. Clear any `time.rtc` save under ares' `Saves`
 directory between runs so the RTC starts from the same state.
 
+## Frame-index fixture
+
+`gen-frame-counter-rom.py` builds a 32 KiB first-party LoROM whose NMI handler
+increments a 16-bit counter and publishes its low 10 bits into CGRAM colour 0
+(blue = bits 0-4, green = bits 5-9). The main screen is off, so the whole frame
+is one flat backdrop colour that encodes the frame index - which makes it
+possible to check whether `ours-capture.sh`'s `FRAMES=N` and ares'
+`--frames N` dump the *same* frame, something no game can tell you because they
+are either static or need an oracle.
+
+```sh
+tools/snes-oracle/gen-frame-counter-rom.py /tmp/fc.sfc
+FRAMES=300 CGRAM_OUT=/tmp/cg.bin ./target/release/examples/snes-info /tmp/fc.sfc ipl.rom
+ARES_REGION=NTSC tools/snes-oracle/ares-capture.sh /tmp/fc.sfc 300 /tmp/fc-a300
+```
+
+Measured result: our CGRAM colour 0 is `0x12c` / `0x12d` / `0x12e` at frames
+300 / 301 / 302, and the captured pixel is identical in both emulators at the
+same frame number ((90,74,0) at 300, (99,74,0) at 301). So the two harnesses
+agree exactly - any frame-to-frame difference seen between them is emulation,
+not capture alignment.
+
 ## Regression baseline
 
 `baseline.py` runs every ROM under `test-roms/snes/` for a fixed frame count and
