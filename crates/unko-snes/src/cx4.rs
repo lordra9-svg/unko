@@ -389,6 +389,7 @@ impl Cx4 {
                     self.log_event("LEAD", lead as u32 & 0xffff, u32::from(pb));
                 }
                 if self.io.halt {
+                    DEBUG_JOB_STARTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     // Debug: a job starts here, so the data RAM at this point is
                     // content-addressed (no frame-boundary phase involved). The
                     // Nth job start must hash identically in both cores.
@@ -516,6 +517,49 @@ impl Cx4 {
                 }
             }
             self.data_ram[address] = data;
+            // Debug: hash the data RAM after each S-CPU write into the
+            // `$6000`/`$7000` window (`CX4_CPUWR_HASH`), so the CPU's uploads
+            // can be compared with the reference core's.
+            if let Some(path) = std::env::var_os("CX4_CPUWR_HASH") {
+                use std::io::Write;
+                let frame = DEBUG_FRAME.load(std::sync::atomic::Ordering::Relaxed);
+                let from: u32 = std::env::var("CX4_CPUWR_FROM")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                let to: u32 = std::env::var("CX4_CPUWR_TO")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(u32::MAX);
+                if (from..=to).contains(&frame) {
+                    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+                    for b in &self.data_ram {
+                        hash ^= u64::from(*b);
+                        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+                    }
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&path)
+                    {
+                        let _ = writeln!(
+                            f,
+                            "{} {} {:03X}={:02X} {:016x} pb={:04X} pc={:02X} run={} busy={} ticks={} halts={}",
+                            DEBUG_CLOCK.load(std::sync::atomic::Ordering::Relaxed),
+                            frame,
+                            address,
+                            data,
+                            hash,
+                            self.regs.pb,
+                            self.regs.pc,
+                            u8::from(self.running()),
+                            u8::from(self.busy()),
+                            self.ticks,
+                            DEBUG_HALTS.load(std::sync::atomic::Ordering::Relaxed)
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -723,9 +767,29 @@ impl Cx4 {
     }
 
     fn halt(&mut self) {
+        DEBUG_HALTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.io.halt = true;
         if !self.io.irq {
             self.regs.i = true;
+        }
+        // Debug: hash the data RAM at the halt instruction, i.e. the job's
+        // output before the S-CPU reads it.
+        if let Some(path) = std::env::var_os("CX4_HALT_HASH") {
+            use std::io::Write;
+            static JOB: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let job = JOB.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+            for b in &self.data_ram {
+                hash ^= u64::from(*b);
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+            {
+                let _ = writeln!(f, "H {job} {hash:016x}");
+            }
         }
     }
 
@@ -1501,6 +1565,12 @@ pub static DEBUG_CLOCK: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 /// Debug: the live S-CPU program counter, kept current alongside `DEBUG_CLOCK`
 /// so bus-write traces can name the instruction that performed the write.
 pub static DEBUG_PC: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Debug: number of CX4 halt instructions since power-on.
+pub static DEBUG_HALTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Debug: number of CX4 jobs started by a `$7F4F` write.
+pub static DEBUG_JOB_STARTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Debug: hash of the whole S-CPU WRAM, sampled at a CX4 job start.
 ///

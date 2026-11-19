@@ -371,6 +371,19 @@ The CX4 has env-gated debug hooks used to localise divergence against ares:
   reload) that diverged.
 - `CX4_RAM_DIR=<dir>` / `ARES_CX4RAM_DIR` + `ARES_CX4RAM_FROM`: a dump of the
   3 KiB CX4 data RAM per frame.
+- `CX4_HALT_HASH=<path>` / `ARES_CX4_HALT_HASH`: the data-RAM hash at every
+  HG51B `halt()` (cache reloads included), so job *outputs* can be compared
+  element for element. Ours has one extra power-on halt; the rest must match
+  after that shift.
+- `CX4_CPUWR_HASH=<path>` + `CX4_CPUWR_FROM/TO` / `ARES_CX4_CPUWR_HASH` +
+  `ARES_CX4_CPUWR_FROM/TO`: hash the data RAM after every S-CPU write into the
+  `$6000`/`$7000` window, with the live `pb`/`pc`/`running`/`busy`/instruction
+  and halt counts. Frame numbers differ by one between the cores (ares' capture
+  index lags), so align by the *content* of the first matching line.
+- `VRAM_CX4_LOG=<path>` + `VRAM_CX4_FROM/TO` / the extended `ARES_VRAM_LOG`
+  (+ `ARES_VRAM_FROM/TO`): the live CX4 state at every VRAM data-port write
+  (`$2118`/`$2119`), i.e. exactly how far the coprocessor had progressed when
+  the S-CPU copied its output into BG character data.
 
 **Keep these logs on the big filesystem**, not `/tmp/opencode`: that tmpfs has a
 quota and `fs::write`/`writeln` failures there are silent (`let _ = ...`), which

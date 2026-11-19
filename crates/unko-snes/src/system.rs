@@ -1664,6 +1664,50 @@ impl CpuBus for SnesBus<'_> {
             }
             if offset < 0x6000 {
                 if (0x2100..=0x213F).contains(&offset) {
+                    // Debug: the coprocessor's live position when the S-CPU
+                    // feeds the VRAM data port, which is how the CX4's plot is
+                    // copied into BG3 character data.
+                    if offset == 0x2118 || offset == 0x2119 {
+                        if let (Some(path), Some(cx4)) =
+                            (std::env::var_os("VRAM_CX4_LOG"), self.cx4.as_ref())
+                        {
+                            use std::io::Write;
+                            let from: u64 = std::env::var("VRAM_CX4_FROM")
+                                .ok()
+                                .and_then(|v| v.parse().ok())
+                                .unwrap_or(0);
+                            let to: u64 = std::env::var("VRAM_CX4_TO")
+                                .ok()
+                                .and_then(|v| v.parse().ok())
+                                .unwrap_or(u64::MAX);
+                            if (from..=to).contains(&self.ppu.debug_frame) {
+                                if let Ok(mut f) = std::fs::OpenOptions::new()
+                                    .create(true)
+                                    .append(true)
+                                    .open(path)
+                                {
+                                    let _ = writeln!(
+                                        f,
+                                        "{} f={} {:04X}={:02X} pb={:04X} pc={:02X} run={} busy={} ticks={} halts={} jobs={}",
+                                        crate::cx4::DEBUG_CLOCK
+                                            .load(std::sync::atomic::Ordering::Relaxed),
+                                        self.ppu.debug_frame,
+                                        offset,
+                                        value,
+                                        cx4.regs.pb,
+                                        cx4.regs.pc,
+                                        u8::from(cx4.running()),
+                                        u8::from(cx4.busy()),
+                                        cx4.ticks,
+                                        crate::cx4::DEBUG_HALTS
+                                            .load(std::sync::atomic::Ordering::Relaxed),
+                                        crate::cx4::DEBUG_JOB_STARTS
+                                            .load(std::sync::atomic::Ordering::Relaxed)
+                                    );
+                                }
+                            }
+                        }
+                    }
                     self.ppu.write(offset as u16, value);
                 } else if (0x2140..=0x2143).contains(&offset) {
                     self.apu.cpu_write(offset - 0x2140, value);

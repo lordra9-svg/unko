@@ -306,6 +306,15 @@ Validation so far:
   the coprocessor's progress relative to the S-CPU during the copy. The VRAM
   write stream shows the same: the first write to each address is identical in
   both cores, later passes differ.
+- The copy instant is now measured directly. Both cores are halted at the same
+  program point (`pb=0002 pc=61 run=0`) for every VRAM data-port write, and
+  every HG51B `halt()` output hashes identically (2,746/2,746 through frame
+  3600). The CPU's uploads into the CX4 data RAM also match exactly for the
+  first 28 writes of the frame-3477 burst; write 28 differs while both cores
+  are at `pb=0008 pc=61`, with ares having executed 52,972 coprocessor
+  instructions since write 27 and ours 52,444. At the copy, ares is at job
+  2,550 and ours at 2,562 - the CPU is sampling a different job's output. The
+  remaining defect is the coprocessor's rate/phase relative to the S-CPU.
 - Separately, the interrupt phase is measurable: at the same job the WRAM
   differs by 5 bytes only (interrupt stack byte `$02FD` = pushed PCL, counter
   `$09CF`, three scratch values ~0x2F apart), and watching `$02FD` shows ares

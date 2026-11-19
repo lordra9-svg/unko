@@ -2669,6 +2669,63 @@ each of the 2304 `(address, byte)` keys is identical in both cores, while the
 later passes differ - the CPU rewrites the BG3 tile block during the frame and
 the second copy reads a different CX4 RAM state.
 
+### Copy-instant measurement: the CX4 is halted, but at a different job index
+
+Four probes measure the copy itself.
+
+**1. The coprocessor is idle at every VRAM data-port write.** `VRAM_CX4_LOG`
+(ours, `$2118`/`$2119` writes in `SnesBus::write`) and the extended
+`ARES_VRAM_LOG` (ares, inside `PPU::writeVRAM`) record the live HG51B state:
+
+```
+ares: pb=0002 pc=61 run=0 busy=0
+ours: pb=0002 pc=61 run=0 busy=0     (for every write in the window)
+```
+
+So the copy reads a static image, not a job in flight.
+
+**2. Every job output is identical.** `CX4_HALT_HASH` / `ARES_CX4_HALT_HASH`
+hash the 3 KiB data RAM at every `halt()` (which also fires on cache reloads):
+
+```
+ours: 7e8e0fa784351325 (power-on), then 72f0dd7c…, 987fdc90…, d55e0f22…
+ares:                            72f0dd7c…, 987fdc90…, d55e0f22…
+```
+
+Ours has one extra halt at power-on; after that the streams are identical
+element for element (2746/2746 through frame 3600). The HG51B produces exactly
+the same outputs.
+
+**3. The CPU's uploads are identical up to a point.** `CX4_CPUWR_HASH` /
+`ARES_CX4_CPUWR_HASH` hash the data RAM after every CPU write into the
+`$6000`/`$7000` window, with the live PB/PC/running state. In the frame-3477
+burst the first 28 writes match exactly (address, value, resulting hash and
+state). At write 28 (`295=CC`) both cores are at `pb=0008 pc=61`, but the hash
+differs:
+
+```
+       write 27  813b44e07f795766   pb=0000 pc=ed
+ares   write 28  23ea60b78f59707f   pb=0008 pc=61   (ins +52,972 since 27)
+ours   write 28  6109d0c4bf07b3e3   pb=0008 pc=61   (+52,444 since 27)
+```
+
+**4. The job index at the copy differs by 12.** Logging the number of `$7F4F`
+job starts and `halt()`s at each VRAM write:
+
+```
+ares frame 3481 copy: jobs=2550 halts=2550   (2553/2553 by the end of the frame)
+ours frame 3480 copy: jobs=2562 halts=2563   (2565/2566)
+```
+
+Both are halted at the same program point, but ours has started 12 more jobs
+(and one more cache-reload halt) by the same displayed frame. The image the
+CPU copies is therefore a *different job's* output, which is why the BG3 tile
+block differs while every individual job output matches.
+
+So the remaining difference is the coprocessor's **rate/phase relative to the
+S-CPU**, now measurable three ways (instructions per inter-write interval,
+halt count, job-start count), not its computation and not the PPU.
+
 ### Tested: a non-atomic (interruptible) reload (falsified)
 
 The diagnosis above suggested making the reload interruptible - one byte per
