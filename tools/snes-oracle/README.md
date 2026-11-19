@@ -395,7 +395,10 @@ The CX4 has env-gated debug hooks used to localise divergence against ares:
   `ARES_CX4_JOB_FROM/TO`: the state at every `$7F4F` job request (halt flag,
   requested `pb`/`pc`, running/busy, CX4 instruction count and the S-CPU PC).
   The S-CPU PC is the instruction start in ours and `r.pc.d` (after the
-  operand fetch) in ares, so the two differ by the instruction length.
+  operand fetch) in ares, so the two differ by the instruction length. The
+  line also carries the S-CPU stack pointer and eight bytes above it, which
+  decodes to the `JSL` return frame and the caller of the WRAM dispatcher (the
+  two cores must produce identical words).
 
 **Keep these logs on the big filesystem**, not `/tmp/opencode`: that tmpfs has a
 quota and `fs::write`/`writeln` failures there are silent (`let _ = ...`), which

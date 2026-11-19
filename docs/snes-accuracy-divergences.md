@@ -2793,6 +2793,37 @@ caller at `$01:D2A6` sets `A=0, X=1, Y=0` and starts a job, so the four skipped
 frames are the game choosing not to run that update - a CPU-side decision, not
 a coprocessor or PPU difference.
 
+### The dispatcher's caller: a state machine on `$3A`, called once per update
+
+Frame-gated S-CPU traces (`ARES_PC_TRACE_FROM/TO` with a raised
+`ARES_PC_TRACE_TAKE`) show the same instruction sequence in both cores up to
+the dispatch:
+
+```
+00:CF4C CF4D CF4E    (return from a JSR $CE73)
+00:8981 20 50 DC     JSR $DC50
+00:DC50 .. 00:DCE8   (the routine; RTS)
+00:8984 20 5A D2     JSR $D25A     <- the CX4 update
+```
+
+and the block at `$897E` is entered from `$88C6`:
+
+```
+88C0: 20 FC 87     JSR $87FC
+88C3: 4C CD 86     JMP $86CD
+88C6: A6 3A        LDX $3A
+88C8: 7C C9 88     JMP ($88C9,X)   ; jump table
+88C9: EB 88 16 89 7E 89 94 89 ...  ; entry 2 = $897E
+```
+
+So `$897E` (the handler that calls `$D25A` and thus dispatches CX4 jobs) is
+selected by the state variable `$3A` and runs once per call of the state
+machine. Both cores' stacks match at every dispatch (the return frame is
+`$00:D2A9` / `P` / `$8635`-style caller words, identical byte for byte), and
+`$3A` itself is not among the 38 differing WRAM bytes at frame 3324 - so the
+two cores run the same handler when the machine is called; they simply call it
+a different number of times in frames 3324/3326/3328/3330.
+
 ### Tested: a non-atomic (interruptible) reload (falsified)
 
 The diagnosis above suggested making the reload interruptible - one byte per

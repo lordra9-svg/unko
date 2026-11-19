@@ -400,7 +400,7 @@ impl Cx4 {
                         {
                             let _ = writeln!(
                                 f,
-                                "{} halt={} pb={:04X} pc={:02X} run={} busy={} ticks={} cpu_pc={:06X}",
+                                "{} halt={} pb={:04X} pc={:02X} run={} busy={} ticks={} cpu_pc={:06X} sp={:02X} stack={:012X}",
                                 frame,
                                 u8::from(self.io.halt),
                                 self.io.cache.pb,
@@ -408,7 +408,9 @@ impl Cx4 {
                                 u8::from(self.running()),
                                 u8::from(self.busy()),
                                 self.ticks,
-                                DEBUG_PC.load(std::sync::atomic::Ordering::Relaxed)
+                                DEBUG_PC.load(std::sync::atomic::Ordering::Relaxed),
+                                DEBUG_SP.load(std::sync::atomic::Ordering::Relaxed) & 0xFF,
+                                DEBUG_STACK.load(std::sync::atomic::Ordering::Relaxed)
                             );
                         }
                     }
@@ -1605,6 +1607,12 @@ pub static DEBUG_HALTS: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 
 /// Debug: number of CX4 jobs started by a `$7F4F` write.
 pub static DEBUG_JOB_STARTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Debug: S-CPU stack pointer and the six bytes above it at a job request, so
+/// the return address identifies which caller dispatched the job.
+pub static DEBUG_SP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Debug: eight S-CPU stack bytes at the most recent job request.
+pub static DEBUG_STACK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Whether the `$7F4F` job-request log is enabled (cached once).
 pub fn job_logging() -> bool {

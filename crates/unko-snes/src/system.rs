@@ -611,6 +611,7 @@ impl Snes {
                 u64::from(self.live_pc),
                 std::sync::atomic::Ordering::Relaxed,
             );
+            crate::cx4::DEBUG_SP.store(u64::from(self.cpu.s), std::sync::atomic::Ordering::Relaxed);
         }
         // ares `CPU::step` clears `irqLock` as each bus access starts; the one
         // case that matters is a `$4200` write, which is its instruction's last
@@ -1615,6 +1616,16 @@ impl CpuBus for SnesBus<'_> {
                 // job, so the S-CPU state at that instant is content-addressed
                 // (unlike a frame boundary). Hash WRAM for the job-start probe.
                 if offset == 0x034f && self.cx4.as_ref().is_some_and(|cx4| cx4.io.halt) {
+                    if crate::cx4::job_logging() {
+                        let sp = (crate::cx4::DEBUG_SP.load(std::sync::atomic::Ordering::Relaxed)
+                            & 0xFF) as usize;
+                        let mut packed: u64 = 0;
+                        for i in 0..8 {
+                            let index = (0x100 + sp + i) & 0x1_FFFF;
+                            packed |= u64::from(self.wram[index]) << (8 * i);
+                        }
+                        crate::cx4::DEBUG_STACK.store(packed, std::sync::atomic::Ordering::Relaxed);
+                    }
                     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
                     for b in self.wram.iter() {
                         hash ^= u64::from(*b);
