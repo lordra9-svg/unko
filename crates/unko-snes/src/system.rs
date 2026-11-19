@@ -22,7 +22,7 @@ use crate::spc7110::Spc7110;
 /// Magic number at the start of a serialized save state (`"SNES"`).
 pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
 /// Save-state format version. Bump whenever the serialized shape changes.
-pub const SAVE_STATE_VERSION: u32 = 7;
+pub const SAVE_STATE_VERSION: u32 = 8;
 
 /// A complete `unko-snes` snapshot.
 ///
@@ -98,6 +98,9 @@ pub struct SnesState {
     pub auto_poll_started: bool,
     /// This line's HDMA run completed.
     pub hdma_run_done: bool,
+    /// HDMA read clocks still owed to the CPU; the DMA-counter alignment is
+    /// added when the next bus access pays the debt (ares `CPU::dmaEdge`).
+    pub hdma_pending_cost: u32,
     /// Latched IRQ output.
     pub irq_line: bool,
     /// NMI edge waiting for an instruction boundary.
@@ -242,6 +245,8 @@ pub struct Snes {
     auto_poll_started: bool,
     /// Whether this line's HDMA run (ares `hdmaPosition`, dot 276) has happened.
     hdma_run_done: bool,
+    /// HDMA read clocks still owed to the CPU (ares `CPU::hdmaRun`).
+    hdma_pending_cost: u32,
     /// IRQ line state latched by the H/V comparator, applied at the next
     /// instruction boundary.
     irq_line: bool,
@@ -326,6 +331,7 @@ impl Snes {
             refresh_pending: false,
             auto_poll_started: false,
             hdma_run_done: false,
+            hdma_pending_cost: 0,
             irq_line: false,
             nmi_line: false,
             nmi_hold: 0,
@@ -415,6 +421,7 @@ impl Snes {
             refresh_pending: self.refresh_pending,
             auto_poll_started: self.auto_poll_started,
             hdma_run_done: self.hdma_run_done,
+            hdma_pending_cost: self.hdma_pending_cost,
             irq_line: self.irq_line,
             nmi_line: self.nmi_line,
             nmi_count: self.nmi_count,
@@ -486,6 +493,7 @@ impl Snes {
         self.refresh_pending = state.refresh_pending;
         self.auto_poll_started = state.auto_poll_started;
         self.hdma_run_done = state.hdma_run_done;
+        self.hdma_pending_cost = state.hdma_pending_cost;
         self.irq_line = state.irq_line;
         self.nmi_line = state.nmi_line;
         self.nmi_lock = false;
@@ -958,8 +966,7 @@ impl Snes {
                     snes_mar: self.snes_mar,
                     snes_refresh: self.refresh_active,
                 };
-                let cost = self.dma.hdma_line(&mut bus);
-                self.cpu_stall += cost;
+                self.hdma_pending_cost += self.dma.hdma_line(&mut bus);
             }
             if let Some(line) = self.ppu.take_line_event() {
                 cx4_scanline = true;
@@ -1296,7 +1303,18 @@ impl CpuBus for Snes {
         // HDMA bytes transferred inside hblank and the scanline's DRAM refresh
         // both steal master clocks from the CPU (ares); the debt is paid on the
         // next access, which also advances the peripherals by the same amount.
-        base + std::mem::take(&mut self.cpu_stall)
+        let mut stall = std::mem::take(&mut self.cpu_stall);
+        let pending = std::mem::take(&mut self.hdma_pending_cost);
+        if pending != 0 {
+            // ares `CPU::dmaEdge`: align the DMA counter to the 8-clock grid,
+            // run the transfers, then round the steal up to this access's bus
+            // cycle (`status.clockCount`). Without the rounding the CPU is a
+            // little early relative to HDMA on every line.
+            let dma_clock = (8 - (self.clock as u32 & 7)) + pending;
+            let wait = base.max(1);
+            stall += dma_clock + (wait - dma_clock % wait);
+        }
+        base + stall
     }
 
     fn idle(&mut self) {

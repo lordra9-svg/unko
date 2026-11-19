@@ -3260,18 +3260,38 @@ column exactly like the ares oracle, and DKC then matched at every present with
 a wide content window (its present rate falls far behind ours on the static
 title screen).
 
-**Super Mario World (USA), no input, presents 0-599:** 597 exact. Presents 369,
-372 and 373 differ by 4-12 px on 1-3 scanlines, all inside SMW's window-HDMA
-iris (channel 7, indirect, mode 1, writing `$2126`/`$2127` from WRAM `$05xx`).
-The remaining frames are 100.000% identical.
+**Super Mario World (USA), no input, presents 0-599:** 599 exact. Present 373
+differs by 4 px on one scanline, inside SMW's window-HDMA iris (channel 7,
+mode 1, writing `$2126`/`$2127` from WRAM `$05xx`). The remaining frames are
+100.000% identical.
 
-The three frames are a **sub-dot ordering race**, not a rendering difference:
-the game rewrites the iris table in WRAM during the visible frame, and at the
-transition line our HDMA reads the left byte before the CPU write lands
-(`21,E3`) where ares reads it after (`1D,E3`). WRAM is byte-identical at the
-frame boundary, VRAM matches, and moving the HDMA trigger dot over 274-276 does
-not change the result, so this is the CPU-write/HDMA-read order inside one dot.
-Recorded as an open item.
+Getting there required fixing the HDMA cycle steal itself. ares services HDMA
+from `CPU::dmaEdge` at the start of the next bus access, not as a flat charge:
+
+```cpp
+step(counter.dma = 8 - dmaCounter());   // align to the 8-clock grid
+hdmaRun();                              // 8 + 8 per read
+step(status.clockCount - counter.dma % status.clockCount);  // bus-cycle round
+```
+
+so the per-line steal is `pre + 8 + 8 * reads + post`, with `pre` from the
+DMA-counter phase and `post` rounding up to the current access's wait
+(`6`, `8` or `12`). `Channel::hdmaReload` also reads the block counter **every
+line**, and the B-bus write costs nothing. We previously charged 8 for every
+byte's read *and* write but only read the counter on reload lines, which
+averages out to the same 40 clocks but leaves the CPU ~1-2 clocks/line ahead of
+HDMA. Charging ares' exact `pre/post` at the paying access fixed presents 369
+and 372 without moving anything else; the whole battery stayed green, including
+Star Fox (10000/10000) and MMX3 (10000/10000).
+
+Present 373 is still a **sub-dot ordering race**, not a rendering difference:
+at line 60 the game rewrites the iris entry at WRAM `$0518` while HDMA is
+reading it. Our write lands 110 clocks before the read (`19,E7` is used), ares'
+lands 76 clocks after (`1D,E3` is used). The ~180-clock difference is accumulated
+before the table loop starts (the NMI entry matches ares within 8 clocks; the
+window-table routine is entered ~124 clocks early), so it is not the HDMA steal
+model. Moving the HDMA trigger dot over 274-276 does not change the result.
+Recorded as the remaining SMW item.
 
 **With scripted input** (`ARES_JOYPAD_SEGMENTS` / `JOYPAD0_SEGMENTS`), the two
 cores track through the logo, title, file-select and level entry. The present

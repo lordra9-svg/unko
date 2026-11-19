@@ -385,10 +385,12 @@ Validation so far:
 - **Base-console titles located and extracted** from the local No-Intro set
   into the ROM cache (all no-coprocessor): Super Mario World, A Link to the
   Past, Super Metroid, Super Mario All-Stars, Donkey Kong Country, F-Zero,
-  Chrono Trigger, Super Castlevania IV. First sweeps: SMW (USA) no-input
-  597/600 presents exact; presents 369/372/373 differ by 4-12 px inside a
-  window-HDMA iris, traced to a sub-dot CPU-write/HDMA-read race on the
-  mid-frame WRAM table (open item). Zelda (USA), Super Mario All-Stars (USA)
+  Chrono Trigger, Super Castlevania IV. First sweeps: SMW (USA) no-input is
+  599/600 presents exact; present 373 differs by 4 px on one line inside a
+  window-HDMA iris, a sub-dot CPU-write/HDMA-read race on the mid-frame WRAM
+  table (open item). The HDMA steal now matches ares' `CPU::dmaEdge` model
+  (`pre + 8 + 8 * reads + post`, a reload-counter read every line, free B-bus
+  write), which fixed the other two frames with no battery movement. Zelda (USA), Super Mario All-Stars (USA)
   and F-Zero (USA) are each **1200/1200 exact** (the Zelda run needed the OBJ1
   colour-math fix: ares never applies colour math to OBJ1 sprites). Donkey Kong
   Country is also 1200/1200 exact after making the hi-res DAC path per line

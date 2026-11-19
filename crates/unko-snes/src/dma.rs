@@ -175,7 +175,7 @@ impl Dma {
         if state.line_counter & 0x7F != 0 {
             return 0;
         }
-        let mut reads = 1;
+        let mut reads = 0;
         let address = (u32::from(channel.bank) << 16) | u32::from(state.address);
         let count = bus.read_a(address);
         state.address = state.address.wrapping_add(1);
@@ -230,7 +230,7 @@ impl Dma {
             state.address = channel.source;
             state.line_counter = 0;
             state.completed = false;
-            cost += 8 * self.hdma_reload(bus, index, channel);
+            cost += 8 + 8 * self.hdma_reload(bus, index, channel);
         }
         cost
     }
@@ -239,9 +239,11 @@ impl Dma {
     /// current block's bytes, then decrement the line counter and reload the
     /// next entry when the block is exhausted.
     ///
-    /// Returns the master clocks the transfer steals from the CPU (ares
-    /// `CPU::hdmaRun`: 8 for the run plus 8 per table read and 8 per byte
-    /// read + write).
+    /// Returns the master clocks the transfer's bus reads steal from the CPU.
+    /// ares `CPU::hdmaRun` costs 8 for the run plus 8 per table read, and
+    /// `Channel::hdmaReload` reads the block counter on *every* line (even
+    /// while the block still has lines left); the B-bus write itself is free.
+    /// The caller adds the DMA-counter alignment when the debt is paid.
     pub fn hdma_line(&mut self, bus: &mut impl DmaBus) -> u32 {
         if self.hdma_enable == 0 {
             return 0;
@@ -297,7 +299,7 @@ impl Dma {
                         }
                     }
                     bus.write_b(target, value);
-                    cost += 16;
+                    cost += 8;
                     if indirect {
                         state.indirect_address = state.indirect_address.wrapping_add(1);
                     } else {
@@ -308,6 +310,9 @@ impl Dma {
             let state = &mut self.hdma[index];
             state.line_counter = state.line_counter.wrapping_sub(1);
             state.do_transfer = state.line_counter & 0x80 != 0;
+            // The reload counter is read every line; only an indirect reload
+            // additionally reads the two pointer bytes.
+            cost += 8;
             cost += 8 * self.hdma_reload(bus, index, channel);
             if std::env::var_os("HDMA_LINE_LOG").is_some() && index == 5 {
                 use std::io::Write;
