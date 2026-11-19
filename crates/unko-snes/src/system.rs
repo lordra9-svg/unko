@@ -744,6 +744,10 @@ impl Snes {
                 self.clock + u64::from(clocks),
                 std::sync::atomic::Ordering::Relaxed,
             );
+            crate::cx4::DEBUG_PC.store(
+                u64::from(self.live_pc),
+                std::sync::atomic::Ordering::Relaxed,
+            );
         }
         // The S-SMP runs at 2,050,560 Hz regardless of region; the master clock
         // differs (21,477,272 NTSC / 21,281,370 PAL). Draining *one SMP clock*
@@ -1215,6 +1219,41 @@ struct SnesBus<'a> {
     hblank: bool,
 }
 
+/// Debug: log every write to one WRAM byte (`WRAM_WATCH=<hex index>`).
+///
+/// The line carries the master clock so the two cores' write streams can be
+/// aligned even though their frame boundaries differ.
+fn watch_wram(address: u32, index: usize, value: u8) {
+    use std::sync::OnceLock;
+    static WATCH: OnceLock<Option<usize>> = OnceLock::new();
+    let watch = *WATCH.get_or_init(|| {
+        std::env::var("WRAM_WATCH").ok().and_then(|v| {
+            let v = v.trim();
+            usize::from_str_radix(v.trim_start_matches("0x"), 16).ok()
+        })
+    });
+    if watch != Some(index) {
+        return;
+    }
+    use std::io::Write;
+    let path = std::env::var_os("WRAM_WATCH_LOG").unwrap_or_else(|| "wram-watch.log".into());
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(
+            f,
+            "{} addr={:06X} idx={:05X} v={:02X} pc={:04X}",
+            crate::cx4::DEBUG_CLOCK.load(std::sync::atomic::Ordering::Relaxed),
+            address,
+            index,
+            value,
+            crate::cx4::DEBUG_PC.load(std::sync::atomic::Ordering::Relaxed)
+        );
+    }
+}
+
 impl SnesBus<'_> {
     fn read_wram_port(&mut self, offset: usize) -> u8 {
         match offset {
@@ -1521,7 +1560,9 @@ impl CpuBus for SnesBus<'_> {
         let offset = (address & 0xFFFF) as usize;
 
         if bank == 0x7E || bank == 0x7F {
-            self.wram[((bank as usize & 1) << 16) | offset] = value;
+            let index = ((bank as usize & 1) << 16) | offset;
+            self.wram[index] = value;
+            watch_wram(address, index, value);
             return;
         }
         *self.snes_mar = address;
@@ -1564,6 +1605,33 @@ impl CpuBus for SnesBus<'_> {
         }
         if self.cx4.is_some() {
             if let Some(offset) = Cx4::io_window(address) {
+                // Debug: a `$7F4F` write while the coprocessor is halted starts a
+                // job, so the S-CPU state at that instant is content-addressed
+                // (unlike a frame boundary). Hash WRAM for the job-start probe.
+                if offset == 0x034f && self.cx4.as_ref().is_some_and(|cx4| cx4.io.halt) {
+                    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+                    for b in self.wram.iter() {
+                        hash ^= u64::from(*b);
+                        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+                    }
+                    crate::cx4::DEBUG_WRAM_HASH.store(hash, std::sync::atomic::Ordering::Relaxed);
+                    // Debug: dump the whole WRAM at one job index
+                    // (`CX4_WRAM_DUMP=<path>`, `CX4_WRAM_DUMP_JOB=<index>`) so
+                    // the image can be diffed against the reference core's.
+                    if let (Some(path), Some(want)) = (
+                        std::env::var_os("CX4_WRAM_DUMP"),
+                        std::env::var("CX4_WRAM_DUMP_JOB")
+                            .ok()
+                            .and_then(|v| v.parse::<u64>().ok()),
+                    ) {
+                        static JOB: std::sync::atomic::AtomicU64 =
+                            std::sync::atomic::AtomicU64::new(0);
+                        let job = JOB.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if job == want {
+                            let _ = std::fs::write(path, &self.wram);
+                        }
+                    }
+                }
                 self.cx4
                     .as_mut()
                     .expect("CX4 present")
@@ -1591,6 +1659,7 @@ impl CpuBus for SnesBus<'_> {
         if bank <= 0x3F || (0x80..=0xBF).contains(&bank) {
             if offset < 0x2000 {
                 self.wram[offset & 0x1FFF] = value;
+                watch_wram(address, offset & 0x1FFF, value);
                 return;
             }
             if offset < 0x6000 {
@@ -1742,12 +1811,15 @@ impl HdmaBus<'_> {
         let bank = (address >> 16) as u8;
         let offset = (address & 0xFFFF) as usize;
         if bank == 0x7E || bank == 0x7F {
-            self.wram[((bank as usize & 1) << 16) | offset] = value;
+            let index = ((bank as usize & 1) << 16) | offset;
+            self.wram[index] = value;
+            watch_wram(address, index, value);
             return;
         }
         if bank <= 0x3F || (0x80..=0xBF).contains(&bank) {
             if offset < 0x2000 {
                 self.wram[offset & 0x1FFF] = value;
+                watch_wram(address, offset & 0x1FFF, value);
                 return;
             }
             if offset < 0x6000 {

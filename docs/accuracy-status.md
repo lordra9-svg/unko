@@ -278,17 +278,29 @@ Validation so far:
   (type `$F9`, with the RTC) are also **100.000%** exact against ares at
   frames 300 and 600.
 - CX4 gameplay is diffed: Mega Man X2's in-game intro is **100.000%** exact
-  against ares at frames 1800, 2400, 3000, 3100, 3200, 3300 and 3400. The
-  former 445-pixel difference at frame 3300 was a `MUL` sign-extension bug
-  (ares multiplies signed `i24` operands; `ASR` was logical as well). A second
-  divergence remains from frame 3477 (96.488% at 3700, 93.687% at 4000); it is a
-  race between the CX4 job start (`$7F4F`) and the parameter GPR writes that
-  only the 2,728-clock cache reload covers, and our per-access credit model
-  performs more reloads at the boundary than ares' cooperative threads do.
-  Charging the reload's duration to machine time (the `Thread::synchronize(cpu)`
-  reading) was implemented and measured: it drops frames 3300/3400 from
-  100.000% to 98.512%/95.754%, so the reload is not machine time and that
-  hypothesis is falsified.
+  against ares at frames 1800, 2400, 3000, 3100, 3200, 3300 and 3400, and -
+  measured by content rather than by capture index - **exact through our frame
+  3479** (the ares capture labelled 3480 is one frame behind: ours 3479 matches
+  it 57344/57344). The former 445-pixel difference at frame 3300 was a `MUL`
+  sign-extension bug (ares multiplies signed `i24` operands; `ASR` was logical
+  as well).
+- The former "CX4 divergence from frame 3477" is **closed as mis-attributed**.
+  Hashing the CX4 data RAM and all 16 GPRs at every job start (a content-
+  addressed instant) gives byte-identical values for **2,747/2,747 jobs**
+  through frame 3600, including every job after the picture first differs. The
+  earlier per-frame GPR "divergence at frame 21" was a frame-boundary sampling
+  artefact: the two cores' boundaries are ~1,400 clocks apart and the boot code
+  runs a visible GPR-scratch loop; the full CX4 register-write streams are
+  identical write-for-write.
+- The first genuinely different picture frame is our 3480: a BG band
+  (x 80-168, y 59-181) sits 1-2 pixels off, with BG1 horizontal scroll 0 at the
+  frame boundary in both cores, i.e. a **mid-frame/per-line scroll** difference.
+  At the same job the WRAM differs by 5 bytes only: the interrupt stack byte
+  `$02FD` (pushed PCL), the wait-loop counter `$09CF`, and three 16-bit scratch
+  values ~0x2F apart. Watching `$02FD` shows ares takes the NMI before `$8100`
+  while we take it before `$8103`: ares pipelines NMI through `nmiPoll`
+  (`vcounter(2)`, 4-clock grid) + a 4-clock hold + `lastCycle()`. Reproducing
+  that latch is the open item.
 - The `EXSPC7110-` (7 MiB) layout is implemented: 1 MiB program + 5 MiB data +
   1 MiB expansion, with the expansion ROM at `$40-$4F:$0000-$FFFF` (20-bit
   offset across sixteen 64 KiB banks) on both the CPU and HDMA buses. It is now

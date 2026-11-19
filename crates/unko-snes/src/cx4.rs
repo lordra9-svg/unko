@@ -389,6 +389,41 @@ impl Cx4 {
                     self.log_event("LEAD", lead as u32 & 0xffff, u32::from(pb));
                 }
                 if self.io.halt {
+                    // Debug: a job starts here, so the data RAM at this point is
+                    // content-addressed (no frame-boundary phase involved). The
+                    // Nth job start must hash identically in both cores.
+                    if let Some(path) = std::env::var_os("CX4_DRAM_HASH") {
+                        use std::io::Write;
+                        static JOB: std::sync::atomic::AtomicU64 =
+                            std::sync::atomic::AtomicU64::new(0);
+                        let job = JOB.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+                        for b in &self.data_ram {
+                            hash ^= u64::from(*b);
+                            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+                        }
+                        let mut greg: u64 = 0xcbf2_9ce4_8422_2325;
+                        for g in &self.regs.gpr {
+                            for b in g.to_le_bytes().iter().take(3) {
+                                greg ^= u64::from(*b);
+                                greg = greg.wrapping_mul(0x0000_0100_0000_01b3);
+                            }
+                        }
+                        if let Ok(mut f) = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&path)
+                        {
+                            let _ = writeln!(
+                                f,
+                                "J {job} {hash:016x} g={greg:016x} w={:016x} t={} pb={:04X} pc={:02X}",
+                                DEBUG_WRAM_HASH.load(std::sync::atomic::Ordering::Relaxed),
+                                DEBUG_CLOCK.load(std::sync::atomic::Ordering::Relaxed),
+                                self.io.cache.pb,
+                                self.io.cache.pc
+                            );
+                        }
+                    }
                     self.io.halt = false;
                     self.regs.pb = self.io.cache.pb;
                     self.regs.pc = self.io.cache.pc;
@@ -1462,6 +1497,16 @@ pub static DEBUG_CPU_LEAD: std::sync::atomic::AtomicI64 = std::sync::atomic::Ato
 /// Debug: master clock at the most recent bus access, so an instruction log can
 /// be aligned event-for-event with a reference emulator's per-access log.
 pub static DEBUG_CLOCK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Debug: the live S-CPU program counter, kept current alongside `DEBUG_CLOCK`
+/// so bus-write traces can name the instruction that performed the write.
+pub static DEBUG_PC: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Debug: hash of the whole S-CPU WRAM, sampled at a CX4 job start.
+///
+/// The S-CPU owns WRAM, so `system.rs` fills this in just before the `$7F4F`
+/// write that starts a job; the job-start probe mixes it into its log line.
+pub static DEBUG_WRAM_HASH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Whether the CX4 instruction log is enabled (cached once).
 pub fn insn_logging() -> bool {

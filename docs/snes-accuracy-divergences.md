@@ -2472,6 +2472,10 @@ experiment would have changed frame 3500; it did not.
 
 ### The register divergence starts at frame 21, not 3477
 
+> **Superseded (2026-11-18).** The frame-21 "divergence" is a frame-boundary
+> sampling artefact, not a CX4 difference. See "Corrected: the CX4 is
+> byte-identical at every job start" below.
+
 Hashing the CX4 GPR window (the 48 bytes the S-CPU sees, 16 x 3) once per frame
 in both cores (`CX4_REGS_LOG` / `ARES_CX4_REGS`) and comparing 3,500 frames:
 
@@ -2538,6 +2542,83 @@ cause. Neither absorption nor extra loads is established; what is left is a pure
 **timing** difference: identical instruction stream, identical `$7F48` stream,
 identical reload parameters, but our firmware reaches the first instruction of
 the job one step earlier and reads a stale `gpr2`.
+
+### Corrected (2026-11-18): the CX4 is byte-identical at every job start
+
+Two probes settle this item.
+
+**1. The frame-21 GPR difference was a sampling artefact.** The per-frame hash
+samples at each core's frame boundary. Our boundary and ares' differ by ~1,400
+master clocks, and the boot code runs a visible GPR-scratch loop
+(`$7F83-$7F85` = `$111111`, `$222222`, ...), so the same instant of that loop
+lands in different frames. Comparing the *content* of every write into the CX4
+window (`CX4_TRACE` / `ARES_CX4_TRACE`):
+
+```
+ares 1192 writes, ours 975; first content difference: none
+```
+
+The streams are identical, write for write, at clocks within ~30 of each other
+(ours writes a given value at t=7833306 where ares writes it at t=7833330); the
+line-count difference is only the host-timed capture stopping ~1,400 clocks
+earlier. The same applies to the `$02FD` difference measured below: it is the
+interrupt stack frame (`SP=$02FF`, `$02FD` = pushed PCL), so it records *which
+instruction* the NMI landed on, not a different value.
+
+**2. The CX4 state is identical at every job start, through frame 3600.** Hashing
+the CX4 data RAM (3 KiB) and all 16 GPRs when `$7F4F` starts a job - a
+content-addressed instant in both cores, with no frame-boundary phase:
+
+```
+jobs compared: 2747   (ares capture frame 3600)
+first job with different data-RAM hash: none
+first job with different GPR hash:      none
+```
+
+2,747 of 2,747 jobs are byte-identical, including every job after the picture
+first differs. So the HG51B executes the same program on the same data: the
+"CX4 divergence" is not a coprocessor difference at all.
+
+**What actually differs.** Comparing frames by content (ares captures are not
+frame-locked, so the index is not trustworthy) shows the truth about the
+"frame 3477" item:
+
+```
+ours 3479 vs ares capture 3480:  100.000%   (57344/57344)
+ours 3480 vs ares capture 3481:   97.262%
+```
+
+So the picture is **exact through our frame 3479** - 58 seconds of gameplay -
+and the ares capture at 3480 is one frame behind. The first genuinely different
+frame is our 3480. Its difference is a **background band**: x 80-168,
+y 59-181, where one BG layer sits 1-2 pixels to the right in ares, in the same
+palette (BG palette 0 entry 3), while the rest of the frame is identical. BG1
+horizontal scroll is 0 at the frame boundary in both cores, so the difference is
+in **mid-frame (per-line) scroll**, not in framebuffer composition or CX4 data.
+
+At the same job (2400) the two cores' WRAM differs by 5 bytes:
+
+```
+02B5:5B/88, 02B7:61/90, 02B9:0E/3D, 02FD:00/03, 09CF:0D/05
+```
+
+`02FD` is the interrupt stack byte (phase), `09CF` is the wait-loop counter next
+to `$09CE`, and `02B5/B7/B9` are 16-bit scratch values ~0x2F apart - i.e. the
+residual is a few counters at a different phase, not different game state.
+
+**Measured interrupt phase.** Watching `$02FD` (pushed PCL) at the first NMIs:
+
+```
+ares: pc=008100  (NMI taken before $8100 LDA)
+ours: pc=8103    (NMI taken before $8103 BEQ)
+```
+
+ares' NMI path is `nmiPoll` (`vcounter(2)`, every 4 clocks) -> 4-clock `nmiHold`
+-> `nmiTransition` -> `lastCycle()` one CPU cycle before the instruction ends.
+We latch at the line start and apply at the end of the instruction, so we can
+take the interrupt one instruction earlier. That is the source of the residual
+counter phase, and the candidate mechanism for the per-line scroll difference at
+frame 3480.
 
 ### Tested: a non-atomic (interruptible) reload (falsified)
 
