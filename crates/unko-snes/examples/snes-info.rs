@@ -185,6 +185,9 @@ fn main() -> ExitCode {
     if std::env::var_os("DSP_TRACE_OUT").is_some() {
         system.apu.dsp_mut().enable_trace();
     }
+    if std::env::var_os("DSP_FULL_TRACE_OUT").is_some() {
+        system.apu.dsp_mut().enable_full_trace();
+    }
     println!("cpu reset:   {}", system.cpu);
     println!("spc reset:   {}", system.apu.spc);
     // Optional `PC_WATCH=8000,8195` breakpoint log (debug).
@@ -826,6 +829,21 @@ fn main() -> ExitCode {
         }
         let _ = std::fs::write(path, out);
     }
+    if let Some(path) = std::env::var_os("DSP_FULL_TRACE_OUT") {
+        if let Some(trace) = system.apu.dsp().full_trace.as_ref() {
+            let mut out = String::new();
+            for row in trace {
+                for (index, value) in row.iter().enumerate() {
+                    if index != 0 {
+                        out.push(' ');
+                    }
+                    out.push_str(&value.to_string());
+                }
+                out.push('\n');
+            }
+            let _ = std::fs::write(path, out);
+        }
+    }
     if let Some(path) = std::env::var_os("DSP_TRACE_OUT") {
         let base = PathBuf::from(&path);
         if let Some(trace) = system.apu.dsp().trace.as_ref() {
@@ -836,8 +854,8 @@ fn main() -> ExitCode {
             }
             let _ = std::fs::write(path, out);
             let mut wout = String::new();
-            for (sample, address, value) in &trace.writes {
-                wout.push_str(&format!("{sample} {address:02X} {value:02X}\n"));
+            for (sample, address, value, micro) in &trace.writes {
+                wout.push_str(&format!("{sample} {address:02X} {value:02X} {micro}\n"));
             }
             let wpath = std::env::var_os("DSP_WRITES_OUT")
                 .map(PathBuf::from)

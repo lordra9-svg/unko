@@ -234,6 +234,9 @@ pub struct Dsp {
     samples_run: u64,
     /// Optional bounded debug trace (see [`DspTrace`]).
     pub trace: Option<DspTrace>,
+    /// Optional all-voice per-sample trace used to diff the DSP pipeline.
+    #[serde(skip)]
+    pub full_trace: Option<std::collections::VecDeque<[i32; 195]>>,
 }
 
 /// Bounded S-DSP debug trace used to diff the voice pipeline against another
@@ -245,8 +248,8 @@ pub struct DspTrace {
     /// brr_address, brr_offset, gaussian_offset, latch_pitch, header, byte,
     /// latch_output, voice_pitch]` for voice 0.
     pub rows: std::collections::VecDeque<[i32; 12]>,
-    /// `(sample, register, value)` for every S-SMP S-DSP register write.
-    pub writes: std::collections::VecDeque<(u64, u8, u8)>,
+    /// `(sample, register, value, micro-step)` for every S-SMP S-DSP write.
+    pub writes: std::collections::VecDeque<(u64, u8, u8, u64)>,
 }
 
 impl Default for Dsp {
@@ -283,6 +286,7 @@ impl Dsp {
             sample_out: (0, 0),
             samples_run: 0,
             trace: None,
+            full_trace: None,
         }
     }
 
@@ -290,6 +294,13 @@ impl Dsp {
     pub fn enable_trace(&mut self) {
         if self.trace.is_none() {
             self.trace = Some(DspTrace::default());
+        }
+    }
+
+    /// Start recording every voice's state once per output sample.
+    pub fn enable_full_trace(&mut self) {
+        if self.full_trace.is_none() {
+            self.full_trace = Some(std::collections::VecDeque::new());
         }
     }
 
@@ -318,7 +329,12 @@ impl Dsp {
         }
         self.registers[usize::from(address)] = data;
         if let Some(trace) = &mut self.trace {
-            trace.writes.push_back((self.samples_run, address, data));
+            trace.writes.push_back((
+                self.samples_run,
+                address,
+                data,
+                self.samples_run * 32 + u64::from(self.step),
+            ));
             if trace.writes.len() > 2_000_000 {
                 trace.writes.pop_front();
             }
@@ -1037,6 +1053,60 @@ impl Dsp {
             right = 0;
         }
         self.sample_out = (left as i16, right);
+        // ares emits the DAC sample from `echo27`, so a full trace must be
+        // captured here (not at the end of the 32-step cycle) to compare the
+        // voice pipeline at the same point.
+        if let Some(trace) = &mut self.full_trace {
+            let mut row = [0i32; 195];
+            row[0] = self.samples_run as i32;
+            row[1] = i32::from(left as i16);
+            row[2] = i32::from(right);
+            row[163] = i32::from(self.brr._header);
+            row[164] = i32::from(self.brr._byte);
+            row[165] = i32::from(self.mainvol.volume[0]);
+            row[166] = i32::from(self.mainvol.volume[1]);
+            row[167] = self.mainvol.output[0];
+            row[168] = self.mainvol.output[1];
+            row[169] = i32::from(self.echo.feedback);
+            row[170] = i32::from(self.echo.volume[0]);
+            row[171] = i32::from(self.echo.volume[1]);
+            row[172] = self.echo.input[0];
+            row[173] = self.echo.input[1];
+            row[174] = self.echo.output[0];
+            row[175] = self.echo.output[1];
+            row[176] = i32::from(self.echo.page);
+            row[177] = i32::from(self.echo.delay);
+            row[178] = i32::from(self.echo._page);
+            row[179] = i32::from(self.echo._offset);
+            row[180] = i32::from(self.echo._length);
+            row[181] = i32::from(self.echo._history_offset);
+            row[182] = i32::from(self.noise.frequency);
+            row[183] = i32::from(self.noise.lfsr);
+            row[184] = self.latch.output;
+            row[185] = i32::from(self.echo._readonly);
+            row[186] = i32::from(self.mainvol.mute);
+            for (index, coefficient) in self.echo.fir.iter().enumerate() {
+                row[187 + index] = i32::from(*coefficient);
+            }
+            for (index, voice) in self.voice.iter().enumerate() {
+                let base = 3 + index * 20;
+                row[base] = i32::from(voice.envx);
+                row[base + 1] = i32::from(voice.envelope);
+                row[base + 2] = i32::from(voice.pitch);
+                row[base + 3] = i32::from(voice.brr_address);
+                row[base + 4] = voice.brr_offset as i32;
+                row[base + 5] = i32::from(voice.gaussian_offset);
+                row[base + 6] = i32::from(voice.keyon_delay);
+                row[base + 7] = voice.envelope_mode as i32;
+                for (n, sample) in voice.buffer.iter().enumerate() {
+                    row[base + 8 + n] = i32::from(*sample);
+                }
+            }
+            trace.push_back(row);
+            if trace.len() > 600_000 {
+                trace.pop_front();
+            }
+        }
     }
 
     fn echo28(&mut self) {

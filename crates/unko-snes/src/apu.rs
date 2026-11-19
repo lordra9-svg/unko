@@ -232,7 +232,7 @@ pub struct Apu {
     /// S-SMP clocks not yet converted into S-DSP micro-steps. The DSP runs one
     /// micro-step per two S-SMP clocks; split `$F4-$F7` reads advance it by one
     /// clock on each side of the access, so the remainder persists.
-    dsp_clock_credit: u32,
+    dsp_clock_credit: i64,
     samples: VecDeque<Sample>,
     /// Debug: S-CPU/S-SMP port handshake trace.
     pub debug: PortDebug,
@@ -614,7 +614,7 @@ struct ApuBus<'a> {
     timers: &'a mut [Timer; 3],
     dsp_address: &'a mut u8,
     dsp: &'a mut Dsp,
-    dsp_clock_credit: &'a mut u32,
+    dsp_clock_credit: &'a mut i64,
     samples: &'a mut VecDeque<Sample>,
     apu_ports: &'a mut [u8; 4],
     cpu_ports: &'a mut [u8; 4],
@@ -631,9 +631,11 @@ struct ApuBus<'a> {
 impl ApuBus<'_> {
     /// Advance the S-DSP by `clocks` S-SMP clocks (ares `Thread::step` +
     /// `synchronize(dsp)` inside `SMP::wait`). The DSP executes one micro-step
-    /// per two S-SMP clocks and finishes a 32-step sample every 64.
+    /// per two S-SMP clocks. ares' `DSP::main` ticks once and then synchronizes
+    /// with the SMP, which yields back mid-sample as soon as the DSP clock
+    /// catches up, so a register write can land between two micro-steps.
     fn step_dsp_clock(&mut self, clocks: u32) {
-        *self.dsp_clock_credit += clocks;
+        *self.dsp_clock_credit += i64::from(clocks);
         while *self.dsp_clock_credit >= 2 {
             *self.dsp_clock_credit -= 2;
             if let Some(sample) = self.dsp.tick(self.ram) {
