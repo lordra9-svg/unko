@@ -512,6 +512,17 @@ impl Ppu {
         &self.framebuffer[..self.frame_width() * self.frame_height() * 4]
     }
 
+    /// Dots in the current scanline (341 normal, 342/340 on the PAL/NTSC
+    /// long/short lines).
+    pub fn line_dots(&self) -> u16 {
+        self.line_dots
+    }
+
+    /// Lines in the current frame (262/263 NTSC, 312/313 PAL).
+    pub fn frame_lines(&self) -> u16 {
+        self.frame_lines
+    }
+
     /// Mark the current frame as presented.
     pub fn acknowledge_frame(&mut self) {
         self.frame_ready = false;

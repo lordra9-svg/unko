@@ -22,7 +22,7 @@ use crate::spc7110::Spc7110;
 /// Magic number at the start of a serialized save state (`"SNES"`).
 pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
 /// Save-state format version. Bump whenever the serialized shape changes.
-pub const SAVE_STATE_VERSION: u32 = 10;
+pub const SAVE_STATE_VERSION: u32 = 11;
 
 /// A complete `unko-snes` snapshot.
 ///
@@ -96,6 +96,10 @@ pub struct SnesState {
     pub refresh_position: u32,
     /// ares `counter.cpu`: master clocks advanced in 2-clock ticks.
     pub counter_cpu: u64,
+    /// PPU hcounter at 2-clock resolution (for line events/comparators).
+    pub ppu_hcounter: u32,
+    /// Scheduler line paired with `ppu_hcounter`.
+    pub ppu_hcounter_line: u16,
     /// ares `status.hdmaSetupPosition` for line 0.
     pub hdma_setup_position: u32,
     /// Whether line 0's HDMA setup has run.
@@ -250,6 +254,10 @@ pub struct Snes {
     refresh_position: u32,
     /// ares `counter.cpu`: master clocks advanced in 2-clock ticks.
     counter_cpu: u64,
+    /// PPU hcounter at 2-clock resolution (for line events/comparators).
+    ppu_hcounter: u32,
+    /// Scheduler line paired with `ppu_hcounter`.
+    ppu_hcounter_line: u16,
     /// ares `status.hdmaSetupPosition` (`12 + counter.cpu & 7` on line 0).
     hdma_setup_position: u32,
     /// Whether line 0's HDMA setup has run.
@@ -346,6 +354,8 @@ impl Snes {
             refresh_done: false,
             refresh_position: 538,
             counter_cpu: 0,
+            ppu_hcounter: 0,
+            ppu_hcounter_line: 0,
             hdma_setup_position: 12,
             hdma_setup_done: true,
             refresh_pending: false,
@@ -440,6 +450,8 @@ impl Snes {
             refresh_done: self.refresh_done,
             refresh_position: self.refresh_position,
             counter_cpu: self.counter_cpu,
+            ppu_hcounter: self.ppu_hcounter,
+            ppu_hcounter_line: self.ppu_hcounter_line,
             hdma_setup_position: self.hdma_setup_position,
             hdma_setup_done: self.hdma_setup_done,
             refresh_pending: self.refresh_pending,
@@ -516,6 +528,8 @@ impl Snes {
         self.refresh_done = state.refresh_done;
         self.refresh_position = state.refresh_position;
         self.counter_cpu = state.counter_cpu;
+        self.ppu_hcounter = state.ppu_hcounter;
+        self.ppu_hcounter_line = state.ppu_hcounter_line;
         self.hdma_setup_position = state.hdma_setup_position;
         self.hdma_setup_done = state.hdma_setup_done;
         self.refresh_pending = state.refresh_pending;
@@ -977,6 +991,9 @@ impl Snes {
                 self.sa1_credit -= i64::from(cost.max(2));
             }
         }
+        let hc_before = self.ppu_hcounter;
+        let counter_line_before = self.ppu_hcounter_line;
+        let line_len = u32::from(self.ppu.line_dots()) * 4;
         self.clock += u64::from(clocks);
         // ares `counter.cpu` advances 2 clocks per `CPU::step` tick. Keep it
         // separate from `self.clock` so `dmaCounter()`/refresh positions use the
@@ -989,6 +1006,24 @@ impl Snes {
         if ticks != 0 {
             self.counter_cpu += u64::from(ticks);
         }
+        // PPU hcounter at 2-clock resolution: independent of the 4-clock dot
+        // tick so a line event can fire in the bus access that actually
+        // crosses hcounter 0 (ares `PPUcounter::tickScanline`).
+        self.ppu_hcounter += clocks;
+        let mut wrapped = false;
+        let mut event_clock = 0u64;
+        if self.ppu_hcounter >= line_len {
+            self.ppu_hcounter -= line_len;
+            wrapped = true;
+            event_clock = (self.clock - u64::from(clocks)) + u64::from(line_len - hc_before);
+            self.ppu_hcounter_line = if u32::from(counter_line_before) + 1
+                >= u32::from(self.ppu.frame_lines())
+            {
+                0
+            } else {
+                counter_line_before + 1
+            };
+        }
         // One PPU dot is four master clocks in both regions; the PAL frame is
         // longer because it has 312 lines (and one 342-dot line), not because
         // the line clock differs.
@@ -997,7 +1032,6 @@ impl Snes {
         // `CPU::scanline()` only (once per scanline, at Hcounter 0), so the CX4
         // advances in scanline chunks and can sit up to a line behind the CPU.
         let mut cx4_scanline = false;
-        let line_before = self.ppu.line();
         while self.ppu_credit >= 4 {
             let pre_dot = self.ppu.dot();
             self.ppu.tick();
@@ -1033,16 +1067,10 @@ impl Snes {
             }
             if let Some(line) = self.ppu.take_line_event() {
                 cx4_scanline = true;
-                let event_clock = self
-                    .counter_cpu
-                    .saturating_sub(u64::try_from(self.ppu_credit.max(0)).unwrap_or(0));
                 self.refresh_done = false;
-                self.refresh_position = 538 - (event_clock as u32 & 7);
                 self.hdma_run_done = false;
                 if line == 0 {
                     self.auto_poll_started = false;
-                    self.hdma_setup_position = 12 + (event_clock as u32 & 7);
-                    self.hdma_setup_done = false;
                 }
             }
             // ares `PPU::main` runs `step(renderingCycle)` before rendering a
@@ -1058,36 +1086,67 @@ impl Snes {
                 self.ppu.render_current_line();
             }
         }
-        if !self.refresh_active && self.ppu.line() == line_before {
-            let hc_after =
-                u32::from(self.ppu.dot()) * 4 + u32::try_from(self.ppu_credit).unwrap_or(0);
-            let hc_before = hc_after.saturating_sub(clocks);
-            if !self.refresh_done
-                && hc_before < self.refresh_position
-                && hc_after >= self.refresh_position
-            {
-                self.refresh_done = true;
-                self.refresh_pending = true;
-            }
-            if !self.hdma_setup_done
-                && self.ppu.line() == 0
-                && hc_before < self.hdma_setup_position
-                && hc_after >= self.hdma_setup_position
-            {
-                self.hdma_setup_done = true;
-                self.dma.hdma_reset();
-                let mut bus = HdmaBus {
-                    wram: &mut self.wram,
-                    cart: &mut self.cart,
-                    apu: &mut self.apu,
-                    ppu: &mut self.ppu,
-                    sa1: &mut self.sa1,
-                    sdd1: &mut self.sdd1,
-                    spc7110: &mut self.spc7110,
-                    snes_mar: self.snes_mar,
-                    snes_refresh: self.refresh_active,
-                };
-                self.hdma_pending_cost += self.dma.hdma_setup(&mut bus);
+        if !self.refresh_active {
+            let hc_after = self.ppu_hcounter;
+            if wrapped {
+                let next_zero = self.ppu_hcounter_line == 0;
+                self.refresh_done = false;
+                self.refresh_position = 538 - (event_clock as u32 & 7);
+                self.hdma_run_done = false;
+                if next_zero {
+                    self.auto_poll_started = false;
+                    self.hdma_setup_position = 12 + (event_clock as u32 & 7);
+                    self.hdma_setup_done = false;
+                }
+                if !self.refresh_done && hc_after >= self.refresh_position {
+                    self.refresh_done = true;
+                    self.refresh_pending = true;
+                }
+                if !self.hdma_setup_done && next_zero && hc_after >= self.hdma_setup_position {
+                    self.hdma_setup_done = true;
+                    self.dma.hdma_reset();
+                    let mut bus = HdmaBus {
+                        wram: &mut self.wram,
+                        cart: &mut self.cart,
+                        apu: &mut self.apu,
+                        ppu: &mut self.ppu,
+                        sa1: &mut self.sa1,
+                        sdd1: &mut self.sdd1,
+                        spc7110: &mut self.spc7110,
+                        snes_mar: self.snes_mar,
+                        snes_refresh: self.refresh_active,
+                    };
+                    self.hdma_pending_cost += self.dma.hdma_setup(&mut bus);
+                }
+            } else {
+                let hc_start = hc_before;
+                if !self.refresh_done
+                    && hc_start < self.refresh_position
+                    && hc_after >= self.refresh_position
+                {
+                    self.refresh_done = true;
+                    self.refresh_pending = true;
+                }
+                if !self.hdma_setup_done
+                    && self.ppu_hcounter_line == 0
+                    && hc_start < self.hdma_setup_position
+                    && hc_after >= self.hdma_setup_position
+                {
+                    self.hdma_setup_done = true;
+                    self.dma.hdma_reset();
+                    let mut bus = HdmaBus {
+                        wram: &mut self.wram,
+                        cart: &mut self.cart,
+                        apu: &mut self.apu,
+                        ppu: &mut self.ppu,
+                        sa1: &mut self.sa1,
+                        sdd1: &mut self.sdd1,
+                        spc7110: &mut self.spc7110,
+                        snes_mar: self.snes_mar,
+                        snes_refresh: self.refresh_active,
+                    };
+                    self.hdma_pending_cost += self.dma.hdma_setup(&mut bus);
+                }
             }
         }
         if let Some(cx4) = self.cx4.as_mut().filter(|_| cx4_scanline) {
@@ -1384,6 +1443,16 @@ impl CpuBus for Snes {
     }
 
     fn access_cycles(&mut self, address: u32) -> u32 {
+        if let Ok(path) = std::env::var("BUS_LOG") {
+            use std::io::Write;
+            let from: u64 = std::env::var("BUS_LOG_FROM").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            let to: u64 = std::env::var("BUS_LOG_TO").ok().and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
+            if self.clock >= from && self.clock <= to {
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                    let _ = writeln!(f, "{} {:06X} pc={:06X}", self.clock, address, self.live_pc);
+                }
+            }
+        }
         let base = self.bus().access_cycles(address);
         // HDMA bytes transferred inside hblank and the scanline's DRAM refresh
         // both steal master clocks from the CPU (ares); the debt is paid on the
