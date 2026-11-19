@@ -3312,11 +3312,20 @@ cost difference.
 Implementing ares' exact refresh comparator (`dramRefreshPosition = 538 -
 clock & 7` at the line event, charged when the step's hcounter crosses it)
 makes the refresh events match ares to within one 4-clock dot, but the HDMA pay
-clock still differs by 0-8 clocks and SMW stays at 599/600. The residual is in
-the CPU access-boundary phase, not the refresh position. Aligning the HDMA
-setup and the general-DMA pre/post moved the boundary frames instead (SMW
-596-598/600), so those experiments were reverted; the committed tree stays at
-599/600. Moving the HDMA trigger dot over 274-276 does not change the result.
+clock still differs by 0-8 clocks and SMW stays at 599/600. Doing the same for
+the line-0 setup (`12 + counter.cpu & 7`, paid at the next access with
+`pre`/`post`) also stays 599/600: the line-0 pay clock is still +2. Adding the
+general-DMA `pre`/`post` (with `counter.dma` excluding the DRAM-refresh extra)
+gives 597/600 (370/373/374). All were reverted; the residual is the CPU
+access-boundary phase itself, not the comparator positions. Moving the HDMA
+trigger dot over 274-276 does not change the result.
+
+The line-0 HDMA pay access is the measured limit: with the DMA pre/post the
+NMI handler end and the table-loop entry are exact to the clock, yet the first
+HDMA payment is still 2 clocks early (ours 133298630, ares 133298632), and
+`pre = 8 - (clock & 7)` turns that into a 6-clock steal difference. Matching it
+needs ares' 2-clock CPU tick with a `dmaEdge` at every bus access, i.e. a
+scheduler-level port rather than another comparator tweak.
 
 **With scripted input** (`ARES_JOYPAD_SEGMENTS` / `JOYPAD0_SEGMENTS`), the two
 cores track through the logo, title, file-select and level entry. The present
