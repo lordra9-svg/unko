@@ -2858,6 +2858,54 @@ waiting for an event, of which the CX4 busy loops in the dispatcher
 (`$7E2696`, `$7E26B8`, `$7E26C5` spin on `$7F5E` bit 6) are the prime
 candidate in exactly these windows.
 
+### The dispatcher's wait loops, counted per job
+
+`CX4_SPIN_LOG` / `ARES_SPIN_LOG` count executions of the three `$7F5E` busy
+loop heads inside the WRAM dispatcher and print the running totals at every
+`$7F4F`, so consecutive lines give the per-job spin counts:
+
+```
+loop            ares total    ours total   ratio
+$7E2696 (idle)        2,333         2,333    1.00
+$7E26B8 (pre-start)  98,653         2,333    0.02
+$7E26C5 (post-start) 336,115       412,167    1.23
+```
+
+Per job: the pre-start loop spins **42 iterations (median 42, max 51) in ares
+and exactly 1 in ours**, while the post-start loop spins ~23 % more in ours.
+
+The pre-start loop (`$26B8: LDA $7F5E; AND #$40; BNE $26B8`) waits for the
+coprocessor to stop running, i.e. for the *previous* job to finish. In ares it
+is still running when the CPU arrives (42 iterations, roughly 500 CPU clocks);
+in ours it has already finished. After the new job starts, ours waits longer
+instead. The total waiting is nearly equal (ares 434,768 iterations, ours
+414,500, -4.7 %), so the coprocessor's *rate* is close; the difference is the
+**phase** at which its completion lands relative to the S-CPU - the same lead
+measured at `$7F4F` earlier, now expressible in CPU spin iterations.
+
+This also shows the +1.16 % S-CPU instruction excess is *not* these loops
+(ours spins slightly less overall); it must be the main loop's own `$09CE`
+wait (`$00:8100: LDA $09CE; BEQ`), which spins more or less depending on when
+the loop reaches it relative to the NMI.
+
+The master clock at each `$7F4F` (also in the spin log) shows the offset is a
+**constant phase, not a drift**:
+
+```
+job     ares clock     ours clock     delta
+    0     21,766,684     21,763,186    -3,498
+  500    469,625,426    469,621,546    -3,880
+ 1000    696,543,292    696,539,044    -4,248
+ 2000  1,098,925,106  1,098,921,730    -3,376
+```
+
+ours dispatches ~3,400-4,900 master clocks earlier all the way through, with no
+accumulating trend (the apparent drift after job 2,319 is the job-count
+divergence itself). The register handlers (`$7F48` preload/enable when halted,
+`$7F4F` halt clear + bank/pc) are byte-for-byte the same logic as ares, so the
+phase is set by the coprocessor's clock charge during the job, not by the
+start-up sequence.
+
 ### Tested: a non-atomic (interruptible) reload (falsified)
 
 The diagnosis above suggested making the reload interruptible - one byte per

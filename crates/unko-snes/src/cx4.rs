@@ -1614,6 +1614,18 @@ pub static DEBUG_SP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 /// Debug: eight S-CPU stack bytes at the most recent job request.
 pub static DEBUG_STACK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Debug: iterations of the three `$7F5E` busy loops in the WRAM dispatcher.
+pub static DEBUG_SPIN: [std::sync::atomic::AtomicU64; 3] = [
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+];
+/// Whether the `$7F5E` busy-loop counter is enabled (cached once).
+pub fn spin_logging() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("CX4_SPIN_LOG").is_some())
+}
+
 /// Debug: S-CPU instructions executed since power-on (`CX4_JOBS_LOG`).
 pub static DEBUG_INSTR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Whether the per-frame instruction counter is enabled (cached once).
@@ -1650,7 +1662,9 @@ pub fn insn_logging() -> bool {
 pub fn debug_clock_needed() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ENABLED.get_or_init(|| {
-        std::env::var_os("CX4_INSN_LOG").is_some() || std::env::var_os("CX4_TRACE").is_some()
+        std::env::var_os("CX4_INSN_LOG").is_some()
+            || std::env::var_os("CX4_TRACE").is_some()
+            || std::env::var_os("CX4_SPIN_LOG").is_some()
     })
 }
 

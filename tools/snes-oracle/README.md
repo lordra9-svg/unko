@@ -389,8 +389,12 @@ The CX4 has env-gated debug hooks used to localise divergence against ares:
   (`$2118`/`$2119`), i.e. exactly how far the coprocessor had progressed when
   the S-CPU copied its output into BG character data.
 - `CX4_JOBS_LOG=<path>` / `ARES_CX4_JOBS`: one line per frame with the
-  `$7F4F` job-start count and the `halt()` count, to bisect the game's job
-  cadence against ares.
+  `$7F4F` job-start count, the `halt()` count, `$09CE`, `$09CF` and the
+  cumulative S-CPU instruction count, to bisect the game's job cadence.
+- `CX4_SPIN_LOG=<path>` / `ARES_SPIN_LOG`: counts executions of the three
+  `$7F5E` busy loop heads (`$7E2696`, `$7E26B8`, `$7E26C5`) and appends the
+  running totals at every `$7F4F`, so consecutive lines give the per-job spin
+  counts on both sides.
 - `CX4_JOB_LOG=<path>` + `CX4_JOB_FROM/TO` / `ARES_CX4_JOB_LOG` +
   `ARES_CX4_JOB_FROM/TO`: the state at every `$7F4F` job request (halt flag,
   requested `pb`/`pc`, running/busy, CX4 instruction count and the S-CPU PC).

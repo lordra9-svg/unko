@@ -606,6 +606,17 @@ impl Snes {
     /// the machine.
     pub fn step(&mut self) -> u32 {
         self.live_pc = self.cpu.pc_address();
+        if crate::cx4::spin_logging() {
+            let slot = match self.live_pc {
+                0x7E_2696 => Some(0),
+                0x7E_26B8 => Some(1),
+                0x7E_26C5 => Some(2),
+                _ => None,
+            };
+            if let Some(slot) = slot {
+                crate::cx4::DEBUG_SPIN[slot].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
         if crate::cx4::sm_logging() && self.live_pc == 0x88C6 {
             // Debug: the game's frame state machine (`LDX $3A; JMP ($88C9,X)`).
             use std::io::Write;
@@ -1642,6 +1653,28 @@ impl CpuBus for SnesBus<'_> {
                 // job, so the S-CPU state at that instant is content-addressed
                 // (unlike a frame boundary). Hash WRAM for the job-start probe.
                 if offset == 0x034f && self.cx4.as_ref().is_some_and(|cx4| cx4.io.halt) {
+                    if let Some(path) = std::env::var_os("CX4_SPIN_LOG") {
+                        use std::io::Write;
+                        if let Ok(mut f) = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&path)
+                        {
+                            let _ = writeln!(
+                                f,
+                                "J {} {} {} {} {}",
+                                crate::cx4::DEBUG_JOB_STARTS
+                                    .load(std::sync::atomic::Ordering::Relaxed),
+                                crate::cx4::DEBUG_CLOCK.load(std::sync::atomic::Ordering::Relaxed),
+                                crate::cx4::DEBUG_SPIN[0]
+                                    .load(std::sync::atomic::Ordering::Relaxed),
+                                crate::cx4::DEBUG_SPIN[1]
+                                    .load(std::sync::atomic::Ordering::Relaxed),
+                                crate::cx4::DEBUG_SPIN[2]
+                                    .load(std::sync::atomic::Ordering::Relaxed)
+                            );
+                        }
+                    }
                     if crate::cx4::job_logging() {
                         let sp = (crate::cx4::DEBUG_SP.load(std::sync::atomic::Ordering::Relaxed)
                             & 0xFF) as usize;

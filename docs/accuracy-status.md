@@ -328,7 +328,14 @@ Validation so far:
   ~12,370, and our cumulative S-CPU instruction count is +1.16 % by frame
   3000, appearing in steps rather than linearly. Our bus wait-state model is a
   verbatim match of ares' `CPU::wait()`, so the excess is spin time waiting on
-  an event (the CX4 busy loops on `$7F5E` bit 6).
+  an event.
+- Counting the three `$7F5E` wait loops per job pins the coprocessor phase:
+  the pre-start loop (`$7E26B8`, waiting for the previous job) spins 42
+  iterations (median 42) in ares and exactly 1 in ours, while the post-start
+  loop spins 23 % more in ours; total wait is nearly equal (-4.7 % ours), so
+  the rate matches and the **phase** differs by roughly 500 CPU clocks. The
+  +1.16 % instruction excess is therefore the main loop's own `$09CE` wait,
+  not the CX4 loops.
 - Separately, the interrupt phase is measurable: at the same job the WRAM
   differs by 5 bytes only (interrupt stack byte `$02FD` = pushed PCL, counter
   `$09CF`, three scratch values ~0x2F apart), and watching `$02FD` shows ares
