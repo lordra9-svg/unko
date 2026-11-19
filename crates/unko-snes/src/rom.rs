@@ -148,6 +148,16 @@ impl RomHeader {
         matches!(self.cartridge_type, 0xf9)
     }
 
+    /// Whether the cartridge carries an OBC1 coprocessor.
+    ///
+    /// mia selects an `OBC1-` board when the cartridge type's high nibble is
+    /// `$2` and its low nibble is at least `$3`; Metal Combat: Falcon's Revenge
+    /// is type `$25`. The low-nibble gate keeps the plain `$20`-`$22` LoROM
+    /// types out.
+    pub const fn has_obc1(&self) -> bool {
+        self.cartridge_type >> 4 == 0x2 && self.cartridge_type & 0x0F >= 0x3
+    }
+
     /// Whether the cartridge declares an SA-1 (Super Accelerator) coprocessor.
     ///
     /// ares/mia select the `SA1-` board from map modes `$23`/`$33`.
@@ -266,7 +276,12 @@ impl Cartridge {
 
         let (header_score, mapping) = best.ok_or(RomError::NoValidHeader)?;
         let header = parse_header(rom, mapping, header_score);
-        let sram_size = header.declared_sram_size.unwrap_or(0).min(MAX_SRAM_SIZE);
+        let mut sram_size = header.declared_sram_size.unwrap_or(0).min(MAX_SRAM_SIZE);
+        if header.has_obc1() {
+            // The OBC1's 8 KiB work RAM is the board's battery-backed save
+            // memory, independent of the (often zero) header SRAM code.
+            sram_size = crate::obc1::OBC1_RAM_SIZE;
+        }
 
         Ok(Self {
             rom: rom.to_vec(),

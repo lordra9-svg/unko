@@ -79,6 +79,39 @@ fn main() -> ExitCode {
         }
         println!("cx4:         {}", path.to_string_lossy());
     }
+    if let Some(path) = std::env::var_os("MSU1_DATA") {
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                system.set_msu1_data(bytes);
+                println!("msu1 data:   {}", path.to_string_lossy());
+            }
+            Err(error) => {
+                eprintln!("{}: {error}", path.to_string_lossy());
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    // `MSU1_TRACK=<track>:<path>[,<track>:<path>...]`.
+    if let Ok(spec) = std::env::var("MSU1_TRACK") {
+        for item in spec.split(',') {
+            let Some((track, path)) = item.split_once(':') else {
+                continue;
+            };
+            let Ok(track) = track.trim().parse::<u16>() else {
+                continue;
+            };
+            match std::fs::read(path) {
+                Ok(bytes) => {
+                    system.set_msu1_track(track, bytes);
+                    println!("msu1 track:  {track} {}", path);
+                }
+                Err(error) => {
+                    eprintln!("{path}: {error}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+    }
     if let Some(ipl_path) = env::args().nth(2) {
         let bytes = match std::fs::read(&ipl_path) {
             Ok(bytes) => bytes,
@@ -162,6 +195,8 @@ fn main() -> ExitCode {
         .collect();
     let mut audio_out = std::env::var_os("AUDIO_OUT")
         .map(|path| std::fs::File::create(path).expect("create AUDIO_OUT"));
+    let mut msu1_audio_out = std::env::var_os("MSU1_AUDIO_OUT")
+        .map(|path| std::fs::File::create(path).expect("create MSU1_AUDIO_OUT"));
     let target_frames: u32 = std::env::var("FRAMES")
         .ok()
         .and_then(|value| value.parse().ok())
@@ -231,6 +266,18 @@ fn main() -> ExitCode {
                     bytes.extend_from_slice(&(f32::from(right) / 32768.0).to_le_bytes());
                 }
                 let _ = file.write_all(&bytes);
+            }
+            {
+                use std::io::Write;
+                let samples = system.drain_msu1_samples();
+                if let Some(file) = msu1_audio_out.as_mut() {
+                    let mut bytes = Vec::with_capacity(samples.len() * 4);
+                    for (left, right) in samples {
+                        bytes.extend_from_slice(&left.to_le_bytes());
+                        bytes.extend_from_slice(&right.to_le_bytes());
+                    }
+                    let _ = file.write_all(&bytes);
+                }
             }
             if system.cpu.stp && std::env::var_os("STP_LOG").is_some() {
                 eprintln!(

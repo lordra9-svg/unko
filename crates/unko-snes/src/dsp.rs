@@ -299,6 +299,11 @@ impl Dsp {
         *self = Self::new();
     }
 
+    /// Whether the global mute flag (`$6C` bit 6) is set.
+    pub const fn muted(&self) -> bool {
+        self.mainvol.mute
+    }
+
     /// Read a DSP register.
     pub fn read(&self, address: u8) -> u8 {
         self.registers[usize::from(address & 0x7F)]
