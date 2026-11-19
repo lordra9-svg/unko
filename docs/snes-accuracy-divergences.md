@@ -3287,11 +3287,31 @@ Star Fox (10000/10000) and MMX3 (10000/10000).
 Present 373 is still a **sub-dot ordering race**, not a rendering difference:
 at line 60 the game rewrites the iris entry at WRAM `$0518` while HDMA is
 reading it. Our write lands 110 clocks before the read (`19,E7` is used), ares'
-lands 76 clocks after (`1D,E3` is used). The ~180-clock difference is accumulated
-before the table loop starts (the NMI entry matches ares within 8 clocks; the
-window-table routine is entered ~124 clocks early), so it is not the HDMA steal
-model. Moving the HDMA trigger dot over 274-276 does not change the result.
-Recorded as the remaining SMW item.
+lands 76 clocks after (`1D,E3` is used).
+
+The ~180-clock offset is accumulated in the NMI handler / table loop, and the
+handler side is now understood. ares starts a general DMA from `CPU::dmaEdge`
+with the same DMA-counter alignment it uses for HDMA:
+
+```cpp
+step(counter.dma = 8 - dmaCounter());                        // pre
+dmaRun();                                                    // 8 + 8 per byte
+step(status.clockCount - counter.dma % status.clockCount);   // post
+```
+
+SMW's NMI handler ends with a `$420B` OAM/VRAM DMA. Without the alignment our
+handler end was **122 clocks early** (ours 133270310, ares 133270432). Adding
+`pre`/`post` to the general-DMA charge makes the handler end and the
+window-table loop entry exact to the clock (loop entry 133274180 on both).
+
+It does not yet settle the race, because the per-line HDMA steal still depends
+on the CPU phase at the *paying* bus access: the pay clock differs by 0-10
+clocks, and `pre = 8 - (clock & 7)` turns a 2-clock difference into a 6-clock
+cost difference. Aligning the HDMA setup and the DRAM-refresh position moved
+the boundary frames instead (SMW 596-598/600), so those experiments were
+reverted; the committed tree stays at 599/600. The remaining lead is the mod-8
+pay-access phase (2-clock refresh/DMA scheduling resolution), not the steal
+formula. Moving the HDMA trigger dot over 274-276 does not change the result.
 
 **With scripted input** (`ARES_JOYPAD_SEGMENTS` / `JOYPAD0_SEGMENTS`), the two
 cores track through the logo, title, file-select and level entry. The present
