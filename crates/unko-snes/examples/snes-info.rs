@@ -252,6 +252,22 @@ fn main() -> ExitCode {
                         let _ = writeln!(f, "F {frames}");
                     }
                 }
+                if let Some(path) = std::env::var_os("OAM_HASH") {
+                    use std::io::Write;
+                    let oam = system.ppu.oam();
+                    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+                    for b in oam.iter().take(0x220) {
+                        h ^= u64::from(*b);
+                        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+                    }
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&path)
+                    {
+                        let _ = writeln!(f, "{} {:016x}", frames, h);
+                    }
+                }
                 if let Some(path) = std::env::var_os("CX4_JOBS_LOG") {
                     use std::io::Write;
                     if let Ok(mut f) = std::fs::OpenOptions::new()

@@ -614,7 +614,7 @@ impl Ppu {
                         (self.bg_scroll(0), self.bg_scroll(1), self.bg_scroll(2));
                     let _ = writeln!(
                         f,
-                        "frame={} line={} mode={} tm={:02X} h0={:03X} v0={:03X} h1={:03X} v1={:03X} h2={:03X} v2={:03X} sc2={:04X} td2={:04X} mos={:02X}",
+                        "frame={} line={} mode={} tm={:02X} h0={:03X} v0={:03X} h1={:03X} v1={:03X} h2={:03X} v2={:03X} sc2={:04X} td2={:04X} mos={:02X} cgw={:02X} sub={:02X} cold={:02X} tmw={:02X} tsw={:02X} w12={:02X} w34={:02X} wobj={:02X} wbg={:02X} wo={:02X} wh={:02X}{:02X}{:02X}{:02X} fc={:02X}{:02X}{:02X}",
                         self.debug_frame,
                         self.line,
                         self.bg_mode & 0x07,
@@ -627,7 +627,24 @@ impl Ppu {
                         v2,
                         (u16::from(self.bg_sc(2) & 0xFC)) << 8,
                         u16::from(self.bg_nba(2)) << 12,
-                        self.mosaic
+                        self.mosaic,
+                        self.cgwsel,
+                        self.cgadsub,
+                        self.coldata,
+                        self.tmw,
+                        self.tsw,
+                        self.w12sel,
+                        self.w34sel,
+                        self.wobjsel,
+                        self.wbglog,
+                        self.wobjlog,
+                        self.wh[0],
+                        self.wh[1],
+                        self.wh[2],
+                        self.wh[3],
+                        self.color_red,
+                        self.color_green,
+                        self.color_blue
                     );
                 }
             }

@@ -2919,6 +2919,33 @@ Done alone, (1) is neutral: the frames and spins are unchanged (35 vs ares'
 45; 3480 100.000%, 3500 96.706%, 4000 94.877%). Both together are the next
 experiment.
 
+### Frame 3980: colour math, windows, VRAM and CGRAM all match
+
+The first persistent divergence after the scanline fix is frame 3980 (3979 is
+exact). Comparing every externally visible input at that frame:
+
+```
+VRAM differing bytes                     0
+CGRAM differing bytes                    0
+CX4 data RAM differing bytes             0
+copied BG3 tile block differing bytes    0
+per-line PPU state differing lines       0 / 224
+  (mode, tm, BG1/2/3 scroll, map/tile base, mosaic,
+   CGWSEL, CGADSUB, COLDATA fixed colour, W12/W34/WOBJ,
+   window positions and logic)
+WRAM differing bytes                    15  ($0001, $012A-$0130, $01F3/$01F5/$01F8, $02B5/$02B7/$02B9, $09CF)
+```
+
+The 297 differing pixels carry colours `(0,0,8)` (268x) and `(8,0,0)` (29x)
+that are absent from CGRAM, i.e. colour-math results, in x 92-165 / y 85-163;
+`tm=0x13` (BG1, BG2, OBJ) and `CGADSUB=0x94` (add, half, BG1+BG2+COL) match.
+
+So the PPU inputs match and the difference is inside the renderer or in OAM.
+An OAM hash was added on both sides (`OAM_HASH` / `ARES_OAM_HASH`, hashing the
+raw 0x220-byte layout, re-encoded on the ares side from its decoded objects)
+but it differs from frame 1 while the pictures match, so the encoding mapping
+is not calibrated yet - same status as the earlier frame-locked hash.
+
 ### Resolved: the CX4 is advanced once per scanline, like PROFILE_PERFORMANCE
 
 ares' oracle build syncs coprocessors in `CPU::scanline()` only (the per-step
