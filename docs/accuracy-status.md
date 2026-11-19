@@ -300,6 +300,12 @@ Validation so far:
   offset ~800 clocks, and frames **3480 and 3900 are now 100.000%** (3500
   96.706%, 3700 96.594%, 4000 94.877%; 3300/3400/3479 unchanged at 100.000%,
   baseline 212/212).
+- The residual ~476-cycle CX4 lag at `$7F48` is explained by the oracle build:
+  ares is compiled with `PROFILE_PERFORMANCE`, which disables per-step
+  coprocessor synchronization (`cpu/timing.cpp:52`), so the CX4 advances only
+  on CX4-window accesses and starts a reload at the *next* one. Mirroring it
+  needs "advance before the access" as well as "only on CX4 accesses"; the
+  access filter alone is measured neutral.
 - (Historical) The first genuinely different picture frame was our 3480. All 224 scanlines'
   PPU state is identical (`mode=1 tm=04`, the same BG1/2/3 scroll, BG3 map
   `$3000`, tile base `$1000`, mosaic) and only BG3 is enabled, so this is not a

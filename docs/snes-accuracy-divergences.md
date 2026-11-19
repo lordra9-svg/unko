@@ -2886,6 +2886,39 @@ measured at `$7F4F` earlier, now expressible in CPU spin iterations.
 The +1.16% S-CPU instruction excess is therefore the main loop's own `$09CE`
 wait (`$00:8100: LDA $09CE; BEQ`), not the CX4 loops.
 
+### Why ares' chip lags: PROFILE_PERFORMANCE does not sync coprocessors per step
+
+The residual ~476-cycle lag at `$7F48` is explained by the oracle build's
+configuration, not by chunk size or a rate error:
+
+```
+ares/CMakeLists.txt:29   target_compile_definitions(ares PUBLIC PROFILE_PERFORMANCE)
+ares/sfc/cpu/timing.cpp:52   #if !defined(PROFILE_PERFORMANCE)
+                             for(auto coprocessor : coprocessors) Thread::synchronize(*coprocessor);
+                             #endif
+```
+
+In this build the S-CPU does **not** synchronize coprocessors on every step;
+the CX4 is advanced only when the CPU touches its window (on-demand). The chip
+therefore sits behind the CPU by however much CPU time elapsed since the last
+access - the 476 cycles measured in ares' `SET48` line
+(`(pc - cc)/sc = 476.4`), and it starts the cache reload at the *next* CX4
+access, which is why ares' `prep` is 860 clocks after `SET48`.
+
+Our scheduler advances the CX4 after every bus access (and after processing a
+write), so the chip is always level (our `L48` lead is 0) and the reload starts
+immediately. Mirroring ares needs two ordering changes:
+
+1. advance the CX4 only on CX4-window accesses (a `snes_mar` filter is
+   sufficient and was measured neutral on its own), and
+2. advance it **before** the access is processed (ares' `cpu.synchronize` at
+   the start of the access), not after - which needs the current master clock
+   inside `SnesBus`.
+
+Done alone, (1) is neutral: the frames and spins are unchanged (35 vs ares'
+45; 3480 100.000%, 3500 96.706%, 4000 94.877%). Both together are the next
+experiment.
+
 ### Resolved: the reload is now spread over the coprocessor clock
 
 The atomic reload was the cause of the phase, and making it interruptible fixes
