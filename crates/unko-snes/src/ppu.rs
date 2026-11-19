@@ -302,6 +302,11 @@ impl Ppu {
         self.display_brightness
     }
 
+    /// Current INIDISP forced-blank bit (debug/test helper).
+    pub const fn display_disable(&self) -> bool {
+        self.display_disable
+    }
+
     /// Read a word from VRAM (debug/test helper).
     pub fn vram_word(&self, address: u16) -> u16 {
         self.vram[usize::from(address & 0x7FFF)]
@@ -614,7 +619,7 @@ impl Ppu {
                         (self.bg_scroll(0), self.bg_scroll(1), self.bg_scroll(2));
                     let _ = writeln!(
                         f,
-                        "frame={} line={} mode={} tm={:02X} h0={:03X} v0={:03X} h1={:03X} v1={:03X} h2={:03X} v2={:03X} sc2={:04X} td2={:04X} mos={:02X} cgw={:02X} sub={:02X} cold={:02X} tmw={:02X} tsw={:02X} w12={:02X} w34={:02X} wobj={:02X} wbg={:02X} wo={:02X} wh={:02X}{:02X}{:02X}{:02X} fc={:02X}{:02X}{:02X}",
+                        "frame={} line={} mode={} tm={:02X} h0={:03X} v0={:03X} h1={:03X} v1={:03X} h2={:03X} v2={:03X} sc2={:04X} td2={:04X} mos={:02X} cgw={:02X} sub={:02X} cold={:02X} tmw={:02X} tsw={:02X} w12={:02X} w34={:02X} wobj={:02X} wbg={:02X} wo={:02X} wh={:02X}{:02X}{:02X}{:02X} fc={:02X}{:02X}{:02X} br={} bd={}",
                         self.debug_frame,
                         self.line,
                         self.bg_mode & 0x07,
@@ -644,14 +649,33 @@ impl Ppu {
                         self.wh[3],
                         self.color_red,
                         self.color_green,
-                        self.color_blue
+                        self.color_blue,
+                        self.display_brightness,
+                        u8::from(self.display_disable)
                     );
                 }
             }
         }
         if let Some(path) = std::env::var_os("PPU_LINE_LOG") {
             use std::io::Write;
-            if (498..=501).contains(&self.debug_frame) {
+            let want: Option<u64> = std::env::var("PPU_LINE_FRAME")
+                .ok()
+                .and_then(|v| v.parse().ok());
+            let from: Option<u64> = std::env::var("PPU_LINE_FROM")
+                .ok()
+                .and_then(|v| v.parse().ok());
+            let to: Option<u64> = std::env::var("PPU_LINE_TO")
+                .ok()
+                .and_then(|v| v.parse().ok());
+            let selected = if let Some(from) = from {
+                self.debug_frame >= from && self.debug_frame <= to.unwrap_or(from)
+            } else {
+                want.map_or_else(
+                    || (498..=501).contains(&self.debug_frame),
+                    |f| f == self.debug_frame,
+                )
+            };
+            if selected {
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
@@ -1790,8 +1814,15 @@ impl Ppu {
                 self.cgram[usize::from(above.color)]
             };
             let below_transparent = below.priority == 0;
+            // ares `DAC::prepare`: the empty Below screen is the backdrop in
+            // hi-res but the *fixed colour* otherwise, so a transparent
+            // sub-screen subtracts/adds COLDATA rather than cgram[0].
             let below_color = if below_transparent {
-                self.cgram[0]
+                if self.frame_hires {
+                    self.cgram[0]
+                } else {
+                    fixed
+                }
             } else {
                 self.cgram[usize::from(below.color)]
             };
@@ -2585,6 +2616,27 @@ mod tests {
         assert!(ppu.debug_sprite_row(0).is_empty());
         assert_eq!(ppu.debug_sprite_row(1), vec![(0, 129, 3)]);
         assert_eq!(ppu.debug_sprite_row(9), vec![(0, 129, 3)]);
+    }
+
+    #[test]
+    fn transparent_sub_screen_subtracts_the_fixed_colour() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2105, 0x00); // mode 0
+        ppu.write(0x212C, 0x00); // no main layers: main shows the backdrop
+        ppu.write(0x212D, 0x00); // no sub layers
+        ppu.write(0x2130, 0x02); // CGWSEL bit 1: blend with the sub screen
+        ppu.write(0x2131, 0xA0); // subtract + backdrop enable
+        for channel in [0x20, 0x40, 0x80] {
+            ppu.write(0x2132, channel | 0x18); // fixed colour $18 per channel
+        }
+        ppu.write(0x2121, 0x00); // CGRAM word 0
+        ppu.write(0x2122, 0xFF); // cgram[0] = white
+        ppu.write(0x2122, 0x7F);
+        ppu.write(0x2100, 0x0F); // full brightness, no forced blank
+        ppu.render_line(0, 0);
+        // ares `DAC::prepare` makes the empty sub screen the fixed colour, so
+        // the result is white - $18 = 7 per channel, not white - white = black.
+        assert_eq!(&ppu.framebuffer[0..4], &[0x39, 0x39, 0x39, 0xFF]);
     }
 
     #[test]

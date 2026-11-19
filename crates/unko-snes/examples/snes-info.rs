@@ -360,9 +360,28 @@ fn main() -> ExitCode {
                         .ok()
                         .and_then(|v| v.parse::<u32>().ok()),
                 ) {
-                    if every > 0 && frames.is_multiple_of(every) {
+                    let from = std::env::var("FRAME_FROM")
+                        .ok()
+                        .and_then(|v| v.parse::<u32>().ok())
+                        .unwrap_or(0);
+                    if every > 0 && frames >= from && frames.is_multiple_of(every) {
                         let path = std::path::Path::new(&dir).join(format!("f-{frames}.raw"));
                         let _ = std::fs::write(path, system.ppu.frame_buffer());
+                    }
+                }
+                if let Some(path) = std::env::var_os("BRIGHT_LOG") {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&path)
+                    {
+                        let _ = writeln!(
+                            f,
+                            "{frames} {} {}",
+                            system.ppu.display_brightness(),
+                            u8::from(system.ppu.display_disable())
+                        );
                     }
                 }
                 if let Some(path) = std::env::var_os("PRESENT_HASH") {

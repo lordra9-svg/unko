@@ -42,6 +42,33 @@ in `docs/mapper-audit.md`; the dated measurements are below.
 
 ## SNES core (in progress, 2026-11-16)
 
+### SNES definition of done (recorded 2026-11-19)
+
+The SNES accuracy track counts as finished when all five hold at once:
+
+1. **Gates** - `tools/snes-oracle/baseline.py --frames 180` is 212/212, all
+   `unko-snes` tests pass, clippy `-D warnings` is clean and `cargo fmt --check`
+   is clean.
+2. **Pixel parity** - every present of every available reference title matches
+   the calibrated ares presentation oracle at 100.000% inside a content window.
+   A present may only be excluded if it is proved a host-timing capture
+   artefact (a torn present): byte-identical emulated state at the same frame
+   plus a row-level split between two adjacent frames. Any other mismatch is a
+   bug to fix, not to exclude.
+3. **Audio** - the S-DSP pre-resampler PCM is bit-exact against ares
+   (`diff-audio-raw.py` reports 0 differing i16 samples) over a long run.
+4. **Save states** - a state saved mid-run and restored produces output
+   byte-identical to the straight run.
+5. **Public suites** - the 212-entry test-ROM baseline (above) passes.
+
+Current standing against that definition: gates 1 and 5 green; covers 2 with
+Mega Man X2 0-6000, Mega Man X3 0-3000 and Star Fox 0-3000 plus the
+coprocessor titles recorded below, with only three torn MMX2 presents excluded;
+3 bit-exact (639,700 stereo frames); 4 covered by the state round-trip and
+continuation tests. The one gap is a **commercial base-console cartridge**:
+no such ROM is available locally, so it is recorded as a coverage request, not
+as a known failure.
+
 `unko-snes` is a new isolated crate with no `unko-core` or shell dependency.
 
 Implemented so far:
@@ -309,9 +336,8 @@ Validation so far:
   96.706%, 3700 96.594%, 4000 94.877%; 3300/3400/3479 unchanged at 100.000%,
   baseline 212/212).
 - Coverage sweep with the calibrated oracle is now **exhaustive, every present**:
-  Mega Man X2 4998/5001 exact over 0-5000, Mega Man X3 1800/1801 exact over
-  0-1800 (the one miss is present 1800, past our last frame), Star Fox 1801/1801
-  exact over 0-1800. The three
+  Mega Man X2 5998/6001 exact over 0-6000, Mega Man X3 3001/3001 exact over
+  0-3000, Star Fox 3001/3001 exact over 0-3000. The three
   MMX2 outliers (presents 816, 3172, 4310) are torn presentations, not emulation:
   ares' state at 816 is byte-identical to ours (WRAM/VRAM/CX4 RAM all 0 bytes
   different) and at 3172 VRAM/CGRAM/OAM are identical, while the frames are
@@ -332,7 +358,15 @@ Validation so far:
   must draw its last rows at the top of the screen (`(vcounter - (Y+1)) mod 256
   < height`, ares `within<0,255>`); our on-scanline test was a plain interval
   and dropped the wrapped rows. MMX2 4808 -> 4998/5001. Pinned by a unit test.
-- PCM re-checked after both PPU fixes: `blargg_near_cd_quality` against ares'
+- Fixed the colour-math operand for an empty sub screen (Star Fox
+  presents 2416-2451): ares `DAC::prepare` fills the empty Below screen with
+  the **fixed colour** (COLDATA) in non-hires, not `cgram[0]`. During the fade
+  we blended against black, so the whole visible band stayed too bright
+  (Star Fox 2416: ours 0x3f3f3f vs ares 0x0e0e0e; the delta was exactly the
+  COLDATA term scaled by brightness). The sub-screen backdrop is now
+  `fixed_color()` (or `cgram[0]` in hi-res). Star Fox 2416-2451 exact; sweep
+  1801 -> 3001/3001. Pinned by a unit test.
+- PCM re-checked after all PPU fixes: `blargg_near_cd_quality` against ares'
   pre-resampler i16 stream is still bit-exact (0 differing samples over 639,700
   stereo frames).
 - The compositor changes from 20564dc (colour-window zeroing, sub-backdrop

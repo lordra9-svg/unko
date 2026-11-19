@@ -2986,6 +2986,31 @@ below-window early return). The fix makes 907-972 exact and takes MMX3 from
 1184/1801 to **1800/1801** (present 1800 is one past our last frame). Pinned by
 `ppu::tests::fixed_colour_blend_halves_when_cgadsub_bit6_is_set`.
 
+### Fixed: an empty sub screen blends with the fixed colour, not cgram[0]
+
+Star Fox was exact through present 2415, then diverged over presents 2416-2451
+by a whole visible band (18-206) during a fade, with the image shape matching
+but every colour too bright (ours `0x3f3f3f`, ares `0x0e0e0e` at present 2416).
+Per-line logging showed identical inputs otherwise: brightness 3/6/9/12/15 in
+step, `CGWSEL=0x12` (blend with the sub screen), `CGADSUB=0xA7` (subtract, no
+halve) and COLDATA `0x181818`.
+
+The difference is the operand of an *empty* sub screen. ares `DAC::prepare`
+initialises the Below screen to
+
+```cpp
+n15 belowColor = hires ? cgram[0] : fixedColor();
+```
+
+so a transparent sub screen subtracts/adds the **fixed colour**, not the
+backdrop. We used `cgram[0]` (black here), so the COLDATA term was never
+subtracted: the observed delta (`0x3f - 0x0e = 0x31`) is exactly `0x18 * 8`
+scaled by brightness 3 (`L = 4/16`). The sub-screen backdrop now follows ares
+(`fixed_color()` in non-hires, `cgram[0]` in hi-res, where ares uses the
+backdrop for both screens). Presents 2416-2451 are exact and the Star Fox sweep
+goes 1801 to **3001/3001**. Pinned by
+`ppu::tests::transparent_sub_screen_subtracts_the_fixed_colour`.
+
 ### Fixed: sprites wrap vertically at the top of the screen
 
 MMX2 was exact through present 4067 and then had 8-48 pixels too few in a
@@ -3022,9 +3047,9 @@ compared against our frames with a content window (ares skips presents via
 
 ```
 title        presents   exact      notes
-Mega Man X2     5001    4998/5001  three torn captures (816, 3172, 4310)
-Mega Man X3     1801    1800/1801  present 1800 is past our last frame
-Star Fox        1801    1801/1801  0-1800
+Mega Man X2     6001    5998/6001  three torn captures (816, 3172, 4310)
+Mega Man X3     3001    3001/3001  0-3000
+Star Fox        3001    3001/3001  0-3000
 ```
 
 MMX2 was captured twice at every present and the two runs are byte-identical
