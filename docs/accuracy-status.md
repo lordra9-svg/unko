@@ -385,14 +385,16 @@ Validation so far:
 - **Base-console titles located and extracted** from the local No-Intro set
   into the ROM cache (all no-coprocessor): Super Mario World, A Link to the
   Past, Super Metroid, Super Mario All-Stars, Donkey Kong Country, F-Zero,
-  Chrono Trigger, Super Castlevania IV. First sweep: SMW (USA) no-input
+  Chrono Trigger, Super Castlevania IV. First sweeps: SMW (USA) no-input
   597/600 presents exact; presents 369/372/373 differ by 4-12 px inside a
   window-HDMA iris, traced to a sub-dot CPU-write/HDMA-read race on the
-  mid-frame WRAM table (open item). With scripted input the cores track
-  through level entry; the apparent "divergence" from present 542 was a
-  present-rate drift, and every ares present 600-820 matches one of our frames
-  pixel-for-pixel (0 px). Input-driven sweeps need a same-phase state sample
-  (next instrumentation step).
+  mid-frame WRAM table (open item). Zelda (USA) is **1200/1200 exact** after
+  fixing the OBJ1 colour-math rule (ares never applies colour math to OBJ1
+  sprites). With scripted input the cores track through level entry; the
+  apparent "divergence" from present 542 was a present-rate drift, and every
+  ares present 600-820 matches one of our frames pixel-for-pixel (0 px).
+  Input-driven sweeps need a same-phase state sample (next instrumentation
+  step).
 - Save-state round-trip re-verified after the PPU changes: `hvdma` 60+60 video
   and `blargg_near_cd_quality` 600+600 PCM are byte-identical to the straight
   runs, and Mega Man X2 (CX4), Mega Man X3 (CX4) and Star Fox (GSU) 150+150

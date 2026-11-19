@@ -3106,6 +3106,31 @@ Chrono Trigger (USA)                           HiROM  0x31  4 MiB  788C
 Super Castlevania IV (USA)                     LoROM  0x20    1 MiB  0325
 ```
 
+### Fixed: OBJ1 sprites never receive colour math
+
+The first A Link to the Past sweep was 1153/1200, with 6-11 px clusters at
+presents 760-765, 778-783 etc. ares' per-pixel log showed the difference at a
+single object pixel:
+
+```
+ares 760 vc127 x197  a=4/9/0842 b=0/5/0842 r=0842
+ours 760 row126 x197 a=4/9/A6   b=0/5/6F   px=212121
+```
+
+`source 4` is ares' `OBJ1`, selected when the palette index is below 192.
+ares hard-wires `dac.io.colorEnable[Source::OBJ1] = 0`, so OBJ1 objects never
+get colour math, while `OBJ2` follows `$2131` bit 4. We used a single object
+source and keyed the enable off `$2131` bit 4 for every sprite, so OBJ1 pixels
+were blended with the sub-screen/fixed colour and came out brighter.
+
+Objects now carry source `4` (palette < 192) or `5` (palette >= 192), and
+`dac_pixel` disables colour math for OBJ1. Presents 756-784 and the whole
+1200-frame sweep are exact. Pinned by
+`ppu::tests::obj1_objects_never_receive_colour_math`. MMX2/MMX3/Star Fox were
+re-run at 10000 presents with no change (9997 + three torn / 10000 / 10000).
+
+**Zelda, A Link to the Past (USA), presents 0-1199:** 1200 exact.
+
 **Super Mario World (USA), no input, presents 0-599:** 597 exact. Presents 369,
 372 and 373 differ by 4-12 px on 1-3 scanlines, all inside SMW's window-HDMA
 iris (channel 7, indirect, mode 1, writing `$2126`/`$2127` from WRAM `$05xx`).

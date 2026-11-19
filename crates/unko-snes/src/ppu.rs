@@ -1868,7 +1868,21 @@ impl Ppu {
             let above_backdrop = above.priority == 0;
             // ares `DAC::paletteColor` latches the palette index it looked up.
             self.latch_cgram_address = if above_backdrop { 0 } else { above.color };
-            let above_layer = if above_backdrop { 5 } else { above.layer };
+            // ares `Object::render`: palette < 192 is OBJ1, >= 192 is OBJ2.
+            // `DAC::pixel` indexes `colorEnable[]` by that source, and
+            // `colorEnable[OBJ1]` is hard-wired to zero, so OBJ1 never gets
+            // colour math while OBJ2 follows `$2131` bit 4.
+            let above_layer = if above_backdrop {
+                6
+            } else if above.layer == 4 {
+                if above.color < 192 {
+                    4
+                } else {
+                    5
+                }
+            } else {
+                above.layer
+            };
             let above_color = if above_backdrop {
                 self.cgram[0]
             } else {
@@ -1887,7 +1901,17 @@ impl Ppu {
             } else {
                 self.cgram[usize::from(below.color)]
             };
-            let below_layer = if below_transparent { 5 } else { below.layer };
+            let below_layer = if below_transparent {
+                6
+            } else if below.layer == 4 {
+                if below.color < 192 {
+                    4
+                } else {
+                    5
+                }
+            } else {
+                below.layer
+            };
             // ares `Background::run`: the Above screen is advanced by one dot
             // (`if(screen == Screen::Above) x++`), so in hi-res the Above
             // screen occupies the ODD output column and Below the even one.
@@ -1974,7 +1998,12 @@ impl Ppu {
         let enable = if backdrop {
             self.cgadsub & 0x20 != 0
         } else {
-            self.cgadsub & (1 << layer) != 0
+            match layer {
+                0..=3 => self.cgadsub & (1 << layer) != 0,
+                4 => false,                    // OBJ1: colour math disabled
+                5 => self.cgadsub & 0x10 != 0, // OBJ2: $2131 bit 4
+                _ => false,
+            }
         };
         if colour_below && enable {
             // Operand selection is coarse (`$2130` bit 1); halving stays on for
@@ -2707,6 +2736,45 @@ mod tests {
         assert!(ppu.debug_sprite_row(0).is_empty());
         assert_eq!(ppu.debug_sprite_row(1), vec![(0, 129, 3)]);
         assert_eq!(ppu.debug_sprite_row(9), vec![(0, 129, 3)]);
+    }
+
+    #[test]
+    fn obj1_objects_never_receive_colour_math() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2105, 0x00); // mode 0
+        ppu.write(0x212C, 0x10); // objects on the main screen
+        ppu.write(0x2101, 0x03); // OBSEL character base $6000
+        ppu.write(0x2102, 0x00);
+        ppu.write(0x2103, 0x00);
+        // Sprite 0: palette 0 -> OBJ1 ($80 colour). Sprite 1: palette 4 -> OBJ2.
+        for byte in [0x00u8, 0x00, 0x00, 0x00] {
+            ppu.write(0x2104, byte);
+        }
+        for byte in [0x10u8, 0x00, 0x00, 0x08] {
+            ppu.write(0x2104, byte);
+        }
+        ppu.write(0x2103, 0x01);
+        ppu.write(0x2104, 0x00);
+        ppu.write(0x2104, 0x00);
+        // Tile 0 row 0 has colour 1 at x = 0.
+        ppu.vram[0x6000] = 0x0080;
+        // Both palettes are blue; the fixed colour is red.
+        ppu.write(0x2121, 0x81); // CGRAM 129 (OBJ1)
+        ppu.write(0x2122, 0x00);
+        ppu.write(0x2122, 0x7C);
+        ppu.write(0x2121, 0xC1); // CGRAM 193 (OBJ2)
+        ppu.write(0x2122, 0x00);
+        ppu.write(0x2122, 0x7C);
+        ppu.write(0x2132, 0x20 | 31); // red 31
+        ppu.write(0x2132, 0x40); // green 0
+        ppu.write(0x2132, 0x80); // blue 0
+        ppu.write(0x2131, 0x10); // add mode, OBJ2 enabled
+        ppu.write(0x2100, 0x0F);
+        ppu.render_line(1, 0);
+        // ares `colorEnable[OBJ1]` is hard-wired to zero, so the OBJ1 pixel
+        // stays blue while the OBJ2 pixel is blue + red.
+        assert_eq!(&ppu.framebuffer[0..3], &[0x00, 0x00, 0xFF]);
+        assert_eq!(&ppu.framebuffer[16 * 4..16 * 4 + 3], &[0xFF, 0x00, 0xFF]);
     }
 
     #[test]
