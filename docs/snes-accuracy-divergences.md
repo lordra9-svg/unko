@@ -3088,6 +3088,44 @@ The colour-math and sprite fixes were re-checked against the PCM oracle.
 stream is still **bit-exact: 0 differing samples over 639,700 stereo frames**
 (2-sample alignment). The PPU changes do not touch the APU path.
 
+### Base-console coverage from the local No-Intro set (2026-11-19)
+
+The local No-Intro collection at
+`/var/home/Lordra/ai/refs/Minerva_Myrient/No-Intro/Nintendo - Super Nintendo Entertainment System/`
+(4,642 zips) supplies the missing base-console titles. These were extracted to
+the ROM cache and header-checked (all `type 0x02`/`0x00`, no coprocessor):
+
+```
+Super Mario World (USA)                        LoROM  0x20  512 KiB  A0DA
+Legend of Zelda, The - A Link to the Past (USA) LoROM  0x20    1 MiB  AF0D
+Super Metroid (Japan, USA)                     LoROM  0x30  4 MiB  F8DF
+Super Mario All-Stars (USA)                    LoROM  0x20  2 MiB  AA5C
+Donkey Kong Country (USA)                      HiROM  0x31  4 MiB  EF80
+F-Zero (USA)                                   LoROM  0x20  512 KiB  C92E
+Chrono Trigger (USA)                           HiROM  0x31  4 MiB  788C
+Super Castlevania IV (USA)                     LoROM  0x20    1 MiB  0325
+```
+
+**Super Mario World (USA), no input, presents 0-599:** 597 exact. Presents 369,
+372 and 373 differ by 4-12 px on 1-3 scanlines, all inside SMW's window-HDMA
+iris (channel 7, indirect, mode 1, writing `$2126`/`$2127` from WRAM `$05xx`).
+The remaining frames are 100.000% identical.
+
+The three frames are a **sub-dot ordering race**, not a rendering difference:
+the game rewrites the iris table in WRAM during the visible frame, and at the
+transition line our HDMA reads the left byte before the CPU write lands
+(`21,E3`) where ares reads it after (`1D,E3`). WRAM is byte-identical at the
+frame boundary, VRAM matches, and moving the HDMA trigger dot over 274-276 does
+not change the result, so this is the CPU-write/HDMA-read order inside one dot.
+Recorded as an open item.
+
+**With scripted input** (`ARES_JOYPAD_SEGMENTS` / `JOYPAD0_SEGMENTS`), the two
+cores track exactly through the logo, title, file-select and level entry and
+then diverge persistently from present 542. Shifting every segment by +/-1
+frame changes the first divergence but not the 542 split, so it is not a
+segment-alignment artefact; it is an emulation difference in the level scene and
+is the next item to bisect.
+
 ### Coverage sweep against the calibrated oracle (2026-11-19, exhaustive)
 
 The sweep was upgraded from sampling to **every present**. Each ares present is

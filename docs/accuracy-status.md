@@ -382,6 +382,14 @@ Validation so far:
 - PCM re-checked after all PPU fixes: `blargg_near_cd_quality` against ares'
   pre-resampler i16 stream is still bit-exact (0 differing samples over 639,700
   stereo frames).
+- **Base-console titles located and extracted** from the local No-Intro set
+  into the ROM cache (all no-coprocessor): Super Mario World, A Link to the
+  Past, Super Metroid, Super Mario All-Stars, Donkey Kong Country, F-Zero,
+  Chrono Trigger, Super Castlevania IV. First sweep: SMW (USA) no-input
+  597/600 presents exact; presents 369/372/373 differ by 4-12 px inside a
+  window-HDMA iris, traced to a sub-dot CPU-write/HDMA-read race on the
+  mid-frame WRAM table (open item). With scripted input the cores track to
+  level entry and then diverge from present 542 (open item, next bisect).
 - Save-state round-trip re-verified after the PPU changes: `hvdma` 60+60 video
   and `blargg_near_cd_quality` 600+600 PCM are byte-identical to the straight
   runs, and Mega Man X2 (CX4), Mega Man X3 (CX4) and Star Fox (GSU) 150+150
