@@ -177,7 +177,6 @@ pub const WRAM_SIZE: usize = 0x2_0000;
 /// Master clocks the 5A22 spends refreshing WRAM on every scanline
 /// (ares `CPU::step`: five stalls of 6 + 2 clocks).
 const DRAM_REFRESH_CLOCKS: u32 = 40;
-/// Dot (ares hcounter 536 / 4) at which that refresh completes.
 
 /// Dot within a scanline at which a line's pixels are rendered.
 ///
