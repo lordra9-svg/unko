@@ -360,7 +360,7 @@ fn main() -> ExitCode {
                         .ok()
                         .and_then(|v| v.parse::<u32>().ok()),
                 ) {
-                    if every > 0 && frames % every == 0 {
+                    if every > 0 && frames.is_multiple_of(every) {
                         let path = std::path::Path::new(&dir).join(format!("f-{frames}.raw"));
                         let _ = std::fs::write(path, system.ppu.frame_buffer());
                     }
@@ -410,6 +410,19 @@ fn main() -> ExitCode {
                         let path = std::path::Path::new(&dir).join(format!("cx4-{frames}.ram"));
                         let _ = std::fs::write(path, &cx4.data_ram);
                     }
+                }
+                if let Some(dir) = std::env::var_os("CGRAM_DIR") {
+                    let mut cgram = Vec::with_capacity(512);
+                    for address in 0..256u16 {
+                        cgram
+                            .extend_from_slice(&system.ppu.cgram_word(address as u8).to_le_bytes());
+                    }
+                    let path = std::path::Path::new(&dir).join(format!("cgram-{frames}.bin"));
+                    let _ = std::fs::write(path, &cgram);
+                }
+                if let Some(dir) = std::env::var_os("OAM_DIR") {
+                    let path = std::path::Path::new(&dir).join(format!("oam-{frames}.bin"));
+                    let _ = std::fs::write(path, system.ppu.oam());
                 }
                 if let Some(path) = std::env::var_os("PRESENT_STATE") {
                     use std::io::Write;

@@ -395,6 +395,16 @@ The CX4 has env-gated debug hooks used to localise divergence against ares:
   actually shows (`Screen::refresh()`'s `_output`, after palette conversion),
   dumped as 564x242 RGBA - the correct frame-locked pixel reference.
   `ARES_PHASH=<path>` writes a matching 256x224 RGBA hash per present.
+  Two caveats: ares' present index lags the emulated frame count (0 early,
+  ~22 by frame 900 on Star Fox, because `runAhead()` skips presents), so match
+  by *content* with a window that grows with the run; and the hook reads the
+  PPU buffer while the emulator thread renders, so a present can be **torn**
+  (rows from two adjacent frames). A torn present has no exact match and
+  reproduces across runs; confirm it against `ARES_WRAM_DIR`/`ARES_VRAM_DIR`/
+  `ARES_CGRAM_DIR`/`ARES_OAM_RAW` state at the same frame before treating a
+  pixel difference as an emulation error.
+- `CGRAM_DIR` / `OAM_DIR` (ours) and `ARES_CGRAM_DIR` / `ARES_OAM_RAW` (ares)
+  dump the palette and sprite tables per frame, for exactly that state check.
 - `NMI_POLL=<path>` / `ARES_NMI_POLL`: the master clock and S-CPU PC at every
   rising `vcounter(2) >= vdisp` poll, i.e. the exact NMI edge time. Ours logs
   `live_pc` (instruction start), ares logs `r.pc.d` (current byte).

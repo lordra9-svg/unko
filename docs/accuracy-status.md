@@ -308,15 +308,18 @@ Validation so far:
   offset ~800 clocks, and frames **3480 and 3900 are now 100.000%** (3500
   96.706%, 3700 96.594%, 4000 94.877%; 3300/3400/3479 unchanged at 100.000%,
   baseline 212/212).
-- Coverage sweep with the calibrated oracle: Mega Man X2 40/40 samples exact
-  (0-3900), Mega Man X3 25/25 exact (0-600), and Star Fox exact at every
-  present 630-690 except a single transient frame (present 677 / our ~665:
-  625 scattered pixels flipping bright/black, one animation step; 676 and 678
-  are exact). State at the blip: GSU RAM is byte-identical at the neighbouring
-  frames and differs by only 6 bytes (of 32 KiB) at the blip - a one-frame
-  timing effect, not a persistent divergence. Our frame counter runs ~13 ahead
-  of ares' emulated count by then, so frames must be matched by content. ares skips presents via `runAhead()`, so its index lags ours by
-  up to ~12 and comparisons must use a content window.
+- Coverage sweep with the calibrated oracle is now **exhaustive, every present**:
+  Mega Man X2 3999/4001 exact over 0-4000, Mega Man X3 601/601 exact over
+  0-600, Star Fox 901/901 exact over 0-900 (and 880-919 re-run: exact). The two
+  MMX2 outliers (presents 816, 3172) are torn presentations, not emulation:
+  ares' state at 816 is byte-identical to ours (WRAM/VRAM/CX4 RAM all 0 bytes
+  different) and at 3172 VRAM/CGRAM/OAM are identical, while the frames are
+  row-wise mixtures of our adjacent frames (3172: rows 0-18 and 168-223 from
+  our 3168, rows 19-167 from our 3172). The Star Fox "present 677" earlier
+  reported as transient was a matcher-window artefact (window 12 vs lag 13);
+  with the window widened it matches our 664 at 100.000%. ares skips presents
+  via `runAhead()`, so its index lags ours by 0 at the start and ~22 by frame
+  900; comparisons must use a content window that grows with the run.
 - The compositor changes from 20564dc (colour-window zeroing, sub-backdrop
   fixed colour, OBJ1/OBJ2 split) were **reverted**: against the calibrated
   presentation oracle the original code is 100.000% at frames 3979/3980/3990/

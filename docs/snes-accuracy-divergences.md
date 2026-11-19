@@ -2955,46 +2955,62 @@ current byte), and the interrupted instruction is simply a different iteration
 of the same 42-clock `$8100` wait loop. Both cores enter the same NMI within
 one loop instruction, and the wait loop is a pure spin (no state consequence).
 
-### Coverage sweep against the calibrated oracle (2026-11-19)
+### Coverage sweep against the calibrated oracle (2026-11-19, exhaustive)
 
-Sweeping the presentation reference across the verified ranges, comparing each
-ares present against our frames in a content window (ares skips presents via
-`runAhead()`, so its index lags ours - 10 frames by frame 650 - and only a
-window comparison is meaningful):
-
-```
-title      range            samples   exact
-Mega Man X2 0-3900 (100)    40        40/40
-Mega Man X3 0-600  (25)     25        25/25
-Star Fox    0-900  (25)     37        27/37 (exact through present 650)
-```
-
-Every MMX2/MMX3 sample matches our emulation exactly once the presentation lag
-is allowed for (the one apparent MMX2 failure, present 3800, is our frame 3799
-at 100.000%). A denser pass (every present, 630-690) shows Star Fox is exact at **every**
-present except one: present 676 is exact (ours 664), present 677 has no exact
-match (best ours 665, 98.910%), and present 678 is exact again (ours 666). The
-presentation lag there is 12 frames.
-
-So the Star Fox "divergence from 675" is a **single transient frame**, present
-677 / our ~665: 625 pixels spread over the whole screen (x 16-239, y 16-205)
-flipping between bright and black, i.e. one animation/flash step, not a
-persistent drift. Every other sampled frame around it matches exactly.
-
-State at the blip, aligned by GSU-RAM content (our frame counter runs ~13 ahead
-of ares' emulated frame count by this point, so frames are matched by content):
+The sweep was upgraded from sampling to **every present**. Each ares present is
+compared against our frames with a content window (ares skips presents via
+`runAhead()`, so its index lags ours and only content matches are meaningful):
 
 ```
-ares GSU frame -> best our frame   differing bytes
-674 -> 662   8      677 -> 664   6     679 -> 666   0
-675 -> 662 152      678 -> 665   1
-676 -> 663   0
+title        presents   exact      notes
+Mega Man X2     4001    3999/4001  two torn captures (816, 3172)
+Mega Man X3      601     601/601
+Star Fox         901     901/901   0-900, plus 880-919 re-run
 ```
 
-Neighbouring frames are byte-identical (0 and 0 at 676/679) and the blip frame
-differs by only **6 GSU-RAM bytes** from its best match, i.e. the blip is a
-one-frame timing effect in the GSU/CPU interaction (a few bytes in flight at
-the sample), not a persistent state divergence.
+MMX2 was captured twice at every present and the two runs are byte-identical
+(same-index differing presents: 0), so the capture is deterministic.
+
+### The MMX2 outliers are torn presentations, not emulation
+
+Presents 816 and 3172 have no exact match anywhere in our 4000-frame run. They
+are capture tears, proved from state and geometry:
+
+- **Full state identity.** At ares frame 816 the dumped state is byte-identical
+  to ours - WRAM 0 bytes differ, VRAM 0, CX4 data RAM 0. At 3172 VRAM differs by
+  0 bytes, CGRAM by 0, OAM by 0 and WRAM by the usual ~20 scratch bytes (the
+  same ~18-22 every neighbouring frame has, which matches exactly). Rendering
+  inputs are identical, so the pixels cannot differ from emulation.
+- **Row geometry.** ares 3172 is a clean three-part tear: rows 0-18 and 168-223
+  are our frame 3168 (identical to 3169-3171 in that section) and rows 19-167
+  are our 3172. ares 816 is a row-level mixture of our 816 and 817 whose 38
+  colours are all present in those two frames (ares-only colours: 0).
+
+The present hook reads the PPU pixel buffer while the emulator thread renders
+(no lock), so a host refresh can catch a partly-rendered frame; that the tear
+reproduces is a consequence of the deterministic host schedule, not of a stable
+emulation difference.
+
+### Star Fox present 677: window truncation, not a divergence
+
+The earlier "present 677 has no exact match" was an analysis-window artefact.
+The matcher searched only `[present-12, present]`, but the presentation lag at
+that point is 13 frames. With the window widened, present 677 matches our frame
+664 at **100.000%**, and presents 675-679 all match exactly:
+
+```
+ares present -> ours    676 -> 664   677 -> 664   678 -> 666
+```
+
+A longer Star Fox capture (920 presents) also matches the tail that the earlier
+900-present run flagged (presents 885/889/893/897), at an offset of ~22:
+
+```
+ares 885 -> ours 861   889 -> 865   893 -> 869   897 -> 873
+```
+
+The lag grows from 0 to ~22 present frames over the run, so the content window
+must grow with it. Star Fox is exact at every present from 0 to 919.
 
 ### Resolved: presentation-time oracle calibrated (ares `Screen::refresh`)
 
