@@ -2955,6 +2955,26 @@ current byte), and the interrupted instruction is simply a different iteration
 of the same 42-clock `$8100` wait loop. Both cores enter the same NMI within
 one loop instruction, and the wait loop is a pure spin (no state consequence).
 
+### Coverage sweep against the calibrated oracle (2026-11-19)
+
+Sweeping the presentation reference across the verified ranges, comparing each
+ares present against our frames in a content window (ares skips presents via
+`runAhead()`, so its index lags ours - 10 frames by frame 650 - and only a
+window comparison is meaningful):
+
+```
+title      range            samples   exact
+Mega Man X2 0-3900 (100)    40        40/40
+Mega Man X3 0-600  (25)     25        25/25
+Star Fox    0-900  (25)     37        27/37 (exact through present 650)
+```
+
+Every MMX2/MMX3 sample matches our emulation exactly once the presentation lag
+is allowed for (the one apparent MMX2 failure, present 3800, is our frame 3799
+at 100.000%). Star Fox is exact through present 650 (our ~640) and then has no
+exact match in a +/-10 frame window from present 675 onward, best ~98.5% - a
+real divergence between our frames ~640 and ~665, not a sampling artefact.
+
 ### Resolved: presentation-time oracle calibrated (ares `Screen::refresh`)
 
 The frame the UI actually shows is `_output` at the end of

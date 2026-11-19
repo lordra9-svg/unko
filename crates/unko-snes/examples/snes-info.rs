@@ -354,6 +354,17 @@ fn main() -> ExitCode {
                         }
                     }
                 }
+                if let (Some(dir), Some(every)) = (
+                    std::env::var_os("FRAME_DIR"),
+                    std::env::var("FRAME_EVERY")
+                        .ok()
+                        .and_then(|v| v.parse::<u32>().ok()),
+                ) {
+                    if every > 0 && frames % every == 0 {
+                        let path = std::path::Path::new(&dir).join(format!("f-{frames}.raw"));
+                        let _ = std::fs::write(path, system.ppu.frame_buffer());
+                    }
+                }
                 if let Some(path) = std::env::var_os("PRESENT_HASH") {
                     use std::io::Write;
                     // Same FNV-1a-64 over the same 256x224 RGBA pixel set that
