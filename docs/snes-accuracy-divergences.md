@@ -3329,9 +3329,19 @@ The scheduler-level variant was also tried: general DMA moved out of
 `Snes::step` into `access_cycles` (ares `CPU::dmaEdge`), processed after the
 pending HDMA, with `post` rounded using that access's wait. SMW stays 599/600
 (373) and Zelda regresses from 1000/1000 to 797/1000 from present 296, so the
-port was reverted. The residual is the CPU access boundary itself, below the
-current access-granular scheduler; closing it needs a cycle-exact `CPU::step`
-rewrite, not another pending-placement change.
+port was reverted.
+
+An instruction-level trace of the table loop (window 133274000-133299000,
+1005 instructions) settles what is left. The PC sequence matches ares exactly
+(0 mismatches); every per-instruction cycle delta matches except the ±40
+DRAM-refresh attribution pairs and **two +48 transitions** (`$CC3E->$CC3F`
+and `$CB01->$CB02`), where ares spends 40 refresh + **8 HDMA** clocks and we
+spend only the refresh. The net drift over the window is +16 clocks, exactly
+those two 8-clock HDMA steals. The CPU instruction timing is therefore already
+exact; the residual is the HDMA `pre` phase at those two pay accesses (the pay
+clock differs by 2, `pre` flips between 0 and 8). Closing it needs the HDMA
+payment to be evaluated on ares' 2-clock `counter.cpu` boundary, not the
+current access-granular clock.
 
 **With scripted input** (`ARES_JOYPAD_SEGMENTS` / `JOYPAD0_SEGMENTS`), the two
 cores track through the logo, title, file-select and level entry. The present
