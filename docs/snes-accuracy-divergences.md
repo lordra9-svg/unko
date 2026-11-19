@@ -2986,6 +2986,29 @@ below-window early return). The fix makes 907-972 exact and takes MMX3 from
 1184/1801 to **1800/1801** (present 1800 is one past our last frame). Pinned by
 `ppu::tests::fixed_colour_blend_halves_when_cgadsub_bit6_is_set`.
 
+### Fixed: objects merge into the background once, with a strict priority test
+
+Extending MMX2 past 6000 found a divergence at the very end: present 6992
+differed by 11 pixels at `x 224-226, y 112-117`, growing to 102 by 6996. The
+DAC inputs showed the same geometry but different layers: ares had **BG1
+priority 7**, we had **OBJ priority 6** at those columns.
+
+Both cores fetch the same BG1 pixel with priority 7, so the object should lose.
+Our object pass replaced it anyway: objects are merged into the background one
+at a time, and `plot_object` replaces any existing *object* pixel
+unconditionally (which is right for object-over-object, where ares' last emitted
+tile wins). A higher-priority object (12) therefore replaced BG1, and a later
+lower-priority object (3/6) replaced *that*, leaving a low-priority object on
+top without ever re-testing it against the background.
+
+ares builds the final per-column object pixel first (`Object::render`
+`palette[]`/`priority[]`), then calls `DAC::plotAbove` once, which only replaces
+a background pixel on `priority > above.priority`. The renderer now renders
+sprites into their own buffer and merges once with the same strict comparison.
+Presents 6992-6999 are exact, and MMX2's sweep extends to 7000:
+**6998/7001** with only the three torn presents. Pinned by
+`ppu::tests::a_lower_priority_object_cannot_hide_a_higher_priority_background`.
+
 ### Fixed: an empty sub screen blends with the fixed colour, not cgram[0]
 
 Star Fox was exact through present 2415, then diverged over presents 2416-2451
@@ -3047,9 +3070,9 @@ compared against our frames with a content window (ares skips presents via
 
 ```
 title        presents   exact      notes
-Mega Man X2     6001    5998/6001  three torn captures (816, 3172, 4310)
-Mega Man X3     3001    3001/3001  0-3000
-Star Fox        3001    3001/3001  0-3000
+Mega Man X2     7001    6998/7001  three torn captures (816, 3172, 4310)
+Mega Man X3     6001    6001/6001  0-6000
+Star Fox        6001    6001/6001  0-6000
 ```
 
 MMX2 was captured twice at every present and the two runs are byte-identical

@@ -62,7 +62,7 @@ The SNES accuracy track counts as finished when all five hold at once:
 5. **Public suites** - the 212-entry test-ROM baseline (above) passes.
 
 Current standing against that definition: gates 1 and 5 green; covers 2 with
-Mega Man X2 0-6000, Mega Man X3 0-3000 and Star Fox 0-3000 plus the
+Mega Man X2 0-7000, Mega Man X3 0-6000 and Star Fox 0-6000 plus the
 coprocessor titles recorded below, with only three torn MMX2 presents excluded;
 3 bit-exact (639,700 stereo frames); 4 covered by the state round-trip and
 continuation tests. The one gap is a **commercial base-console cartridge**:
@@ -336,8 +336,8 @@ Validation so far:
   96.706%, 3700 96.594%, 4000 94.877%; 3300/3400/3479 unchanged at 100.000%,
   baseline 212/212).
 - Coverage sweep with the calibrated oracle is now **exhaustive, every present**:
-  Mega Man X2 5998/6001 exact over 0-6000, Mega Man X3 3001/3001 exact over
-  0-3000, Star Fox 3001/3001 exact over 0-3000. The three
+  Mega Man X2 6998/7001 exact over 0-7000, Mega Man X3 6001/6001 exact over
+  0-6000, Star Fox 6001/6001 exact over 0-6000. The three
   MMX2 outliers (presents 816, 3172, 4310) are torn presentations, not emulation:
   ares' state at 816 is byte-identical to ours (WRAM/VRAM/CX4 RAM all 0 bytes
   different) and at 3172 VRAM/CGRAM/OAM are identical, while the frames are
@@ -366,6 +366,12 @@ Validation so far:
   COLDATA term scaled by brightness). The sub-screen backdrop is now
   `fixed_color()` (or `cgram[0]` in hi-res). Star Fox 2416-2451 exact; sweep
   1801 -> 3001/3001. Pinned by a unit test.
+- Fixed object/background priority merging (MMX2 presents 6992-6999): objects
+  were merged into the background one at a time and replaced each other
+  unconditionally, so a later low-priority object hid a background that had
+  already beaten a higher-priority object. ares builds the final object pixel
+  and compares its priority once; the renderer does the same now. MMX2
+  0-7000 is 6998/7001 (three torn presents). Pinned by a unit test.
 - PCM re-checked after all PPU fixes: `blargg_near_cd_quality` against ares'
   pre-resampler i16 stream is still bit-exact (0 differing samples over 639,700
   stereo frames).

@@ -1224,8 +1224,24 @@ impl Ppu {
         // ares evaluates the object layer on every line (for OAM latching and
         // the $213E overflow flags) and only draws it when enabled.
         let obj_enabled = main_mask & 0x10 != 0 || self.ts & 0x10 != 0;
+        // ares `Object::render` builds the final object pixel for each column
+        // (the last emitted tile wins) and calls `DAC::plotAbove/plotBelow`
+        // once, which only replaces a background pixel on a *higher* priority.
+        // Merging objects into the background one at a time would let a later
+        // low-priority object replace an earlier high-priority one.
         let (range_over, time_over, latch_oam) = if obj_enabled {
-            self.render_sprites(&mut main, &mut sub, y, &obj_priority)
+            let mut obj_main = [Pixel::default(); SCREEN_WIDTH];
+            let mut obj_sub = [Pixel::default(); SCREEN_WIDTH];
+            let result = self.render_sprites(&mut obj_main, &mut obj_sub, y, &obj_priority);
+            for x in 0..SCREEN_WIDTH {
+                if obj_main[x].priority > main[x].priority {
+                    main[x] = obj_main[x];
+                }
+                if obj_sub[x].priority > sub[x].priority {
+                    sub[x] = obj_sub[x];
+                }
+            }
+            result
         } else {
             let mut scratch_main = [Pixel::default(); SCREEN_WIDTH];
             let mut scratch_sub = [Pixel::default(); SCREEN_WIDTH];
@@ -1801,6 +1817,30 @@ impl Ppu {
         let luma = (num, den);
         let width = self.frame_width();
         let stride = width / SCREEN_WIDTH;
+        // Diagnostics are parsed once per line, not once per pixel.
+        let px_log = std::env::var_os("PPU_PX_LOG").map(|path| {
+            let want_frame: Option<u64> = std::env::var("PPU_PX_FRAME")
+                .ok()
+                .and_then(|v| v.parse().ok());
+            let want_line: Option<usize> = std::env::var("PPU_PX_LINE")
+                .ok()
+                .and_then(|v| v.parse().ok());
+            let x0: usize = std::env::var("PPU_PX_X0")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            let x1: usize = std::env::var("PPU_PX_X1")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(255);
+            (
+                std::path::PathBuf::from(path),
+                want_frame,
+                want_line,
+                x0,
+                x1,
+            )
+        });
         for x in 0..SCREEN_WIDTH {
             let above = main[x];
             let below = sub[x];
@@ -1850,6 +1890,36 @@ impl Ppu {
                 luma,
                 fixed,
             );
+            if let Some((path, want_frame, want_line, x0, x1)) = &px_log {
+                use std::io::Write;
+                if *want_line == Some(y)
+                    && want_frame.is_none_or(|f| f == self.debug_frame)
+                    && (*x0..=*x1).contains(&x)
+                {
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                    {
+                        let _ = writeln!(
+                            f,
+                            "{} {} {} a={}/{}/{:02X} b={}/{}/{:02X} px={:02X}{:02X}{:02X}",
+                            self.debug_frame,
+                            y,
+                            x,
+                            above.layer,
+                            above.priority,
+                            above.color,
+                            below.layer,
+                            below.priority,
+                            below.color,
+                            above_px[0],
+                            above_px[1],
+                            above_px[2]
+                        );
+                    }
+                }
+            }
             let base = y * width + x * stride;
             if self.frame_hires {
                 self.framebuffer[base * 4..base * 4 + 4].copy_from_slice(&below_px);
@@ -2616,6 +2686,44 @@ mod tests {
         assert!(ppu.debug_sprite_row(0).is_empty());
         assert_eq!(ppu.debug_sprite_row(1), vec![(0, 129, 3)]);
         assert_eq!(ppu.debug_sprite_row(9), vec![(0, 129, 3)]);
+    }
+
+    #[test]
+    fn a_lower_priority_object_cannot_hide_a_higher_priority_background() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2105, 0x00); // mode 0
+        ppu.write(0x2107, 0x00); // BG1 map at $0000
+        ppu.write(0x210B, 0x01); // BG1 characters at $1000
+        ppu.write(0x212C, 0x11); // BG1 and objects on the main screen
+        ppu.write(0x2101, 0x03); // OBSEL character base $6000
+        ppu.write(0x2102, 0x00); // OAM address
+        ppu.write(0x2103, 0x00);
+        // Sprite 0: low priority (priority index 0 -> 3). Sprite 1: high
+        // priority (index 3 -> 12). Sprites are drawn in reverse index order,
+        // so the low-priority sprite is the final object pixel.
+        for byte in [0x00u8, 0x00, 0x00, 0x00] {
+            ppu.write(0x2104, byte);
+        }
+        for byte in [0x00u8, 0x00, 0x00, 0x30] {
+            ppu.write(0x2104, byte);
+        }
+        // BG1 map entry 0: tile 0, palette 0, priority bit clear -> 8.
+        ppu.vram[0x0000] = 0x0000;
+        // BG1 tile 0 row 0 and object tile 0 row 0: one pixel at x = 0.
+        ppu.vram[0x1001] = 0x0080; // BG1 row 1 (visible line 1)
+        ppu.vram[0x6000] = 0x0080; // object row 0
+                                   // distingudish the palettes: BG colour 1 red, object colour 129 blue.
+        ppu.write(0x2121, 0x01);
+        ppu.write(0x2122, 0x1F);
+        ppu.write(0x2122, 0x00);
+        ppu.write(0x2121, 0x81);
+        ppu.write(0x2122, 0x00);
+        ppu.write(0x2122, 0x7C);
+        ppu.write(0x2100, 0x0F);
+        ppu.render_line(1, 0);
+        // BG1 (priority 8) must beat the final object pixel (priority 3),
+        // even though the earlier high-priority object (12) was replaced.
+        assert_eq!(&ppu.framebuffer[0..4], &[0xFF, 0x00, 0x00, 0xFF]);
     }
 
     #[test]
