@@ -379,6 +379,40 @@ impl Cx4 {
             0x7f4d => self.io.cache.pb = (self.io.cache.pb & 0xff00) | u16::from(data),
             0x7f4e => self.io.cache.pb = (self.io.cache.pb & 0x00ff) | (u16::from(data) << 8),
             0x7f4f => {
+                // Debug: the state at each job-request write, to compare the
+                // coprocessor's phase with the reference core's.
+                if let Some(path) = std::env::var_os("CX4_JOB_LOG") {
+                    use std::io::Write;
+                    let frame = DEBUG_FRAME.load(std::sync::atomic::Ordering::Relaxed);
+                    let from: u32 = std::env::var("CX4_JOB_FROM")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
+                    let to: u32 = std::env::var("CX4_JOB_TO")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(u32::MAX);
+                    if (from..=to).contains(&frame) {
+                        if let Ok(mut f) = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&path)
+                        {
+                            let _ = writeln!(
+                                f,
+                                "{} halt={} pb={:04X} pc={:02X} run={} busy={} ticks={} cpu_pc={:06X}",
+                                frame,
+                                u8::from(self.io.halt),
+                                self.io.cache.pb,
+                                self.io.cache.pc,
+                                u8::from(self.running()),
+                                u8::from(self.busy()),
+                                self.ticks,
+                                DEBUG_PC.load(std::sync::atomic::Ordering::Relaxed)
+                            );
+                        }
+                    }
+                }
                 self.io.cache.pc = data;
                 if insn_logging() {
                     let halt = u8::from(self.io.halt);
@@ -1571,6 +1605,12 @@ pub static DEBUG_HALTS: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 
 /// Debug: number of CX4 jobs started by a `$7F4F` write.
 pub static DEBUG_JOB_STARTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Whether the `$7F4F` job-request log is enabled (cached once).
+pub fn job_logging() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("CX4_JOB_LOG").is_some())
+}
 
 /// Debug: hash of the whole S-CPU WRAM, sampled at a CX4 job start.
 ///

@@ -2726,6 +2726,73 @@ So the remaining difference is the coprocessor's **rate/phase relative to the
 S-CPU**, now measurable three ways (instructions per inter-write interval,
 halt count, job-start count), not its computation and not the PPU.
 
+### Bisected: the job-count gap starts at frame 3324, in the CPU's dispatch cadence
+
+Per-frame job-start counts in both cores (`CX4_JOBS_LOG` in `snes-info`,
+`ARES_CX4_JOBS` in the ares build) agree **frame for frame until 3324**:
+
+```
+frame  ares  ours  delta
+3300   2250  2250    0
+3323   2319  2319    0
+3324   2319  2322   +3
+3326   2322  2328   +6
+3328   2325  2334   +9
+3330   2328  2340  +12
+3400   2433  2445  +12   (constant from here)
+```
+
+So there are exactly four frames where ares performs **no `$7F4F` write at all**
+and we perform three: 3324, 3326, 3328, 3330. The 12-job gap at the copy is the
+residue of those four skipped dispatches.
+
+`CX4_JOB_LOG` / `ARES_CX4_JOB_LOG` show the state at every dispatch:
+
+```
+ares: halt=1 ... cpu_pc=7e26c5   (frames 3323, 3325, 3327, 3329, 3331, 3333)
+ours: halt=1 ... cpu_pc=7e26c1   (frames 3324 .. 3330, every frame)
+```
+
+Both CPUs execute the same instruction - `$7E26C1: 8F 4F 7F 00` (`STA $7F4F`)
+inside the WRAM code at `$7E2695` - and the coprocessor is idle (`halt=1`) in
+both. The instruction counts per dispatch are also identical (e.g. `+1,029`
+then `+43,700` between the three writes of one frame, in both cores), so the
+HG51B does the same work; only *how often the game calls the dispatcher* differs.
+
+The dispatcher (`$7E2695`) is:
+
+```
+2696: LDA $7F5E   ; wait until the CX4 is not running
+269A: AND #$40
+269C: BNE $2696
+269E: LDA $00C3   ; bit 0 -> $4200 (NMI enable)
+26A2: AND #$01
+26A4: STA $4200
+26A8: PLA
+26A9: STA $7F4D   ; cache pb
+26AD: LDA #$00
+26AF: STA $7F4E
+26B3: TXA
+26B4: STA $7F48   ; cache page
+26B8: LDA $7F5E
+26BC: AND #$40
+26BE: BNE $26B8
+26C0: TYA
+26C1: STA $7F4F   ; <- start the job (the logged write)
+26C5: LDA $7F5E
+26C9: AND #$40
+26CB: BNE $26C5   ; wait for completion
+26CD: LDA $00C3
+26D1: STA $4200
+26D4: RTL
+```
+
+and is reached through the jump table at `$7E2680` (`JSL $7E2680`, `$7E2683`,
+`$7E2686`, `$7E268C` occur in ROM at `$01:D2A6`, `$01:D2EC`, ...). The ROM
+caller at `$01:D2A6` sets `A=0, X=1, Y=0` and starts a job, so the four skipped
+frames are the game choosing not to run that update - a CPU-side decision, not
+a coprocessor or PPU difference.
+
 ### Tested: a non-atomic (interruptible) reload (falsified)
 
 The diagnosis above suggested making the reload interruptible - one byte per

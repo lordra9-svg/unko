@@ -252,6 +252,23 @@ fn main() -> ExitCode {
                         let _ = writeln!(f, "F {frames}");
                     }
                 }
+                if let Some(path) = std::env::var_os("CX4_JOBS_LOG") {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&path)
+                    {
+                        let _ = writeln!(
+                            f,
+                            "{} {} {}",
+                            frames,
+                            unko_snes::cx4::DEBUG_JOB_STARTS
+                                .load(std::sync::atomic::Ordering::Relaxed),
+                            unko_snes::cx4::DEBUG_HALTS.load(std::sync::atomic::Ordering::Relaxed)
+                        );
+                    }
+                }
                 unko_snes::cx4::DEBUG_FRAME.store(frames, std::sync::atomic::Ordering::Relaxed);
                 unko_snes::gsu::DEBUG_FRAME.store(frames, std::sync::atomic::Ordering::Relaxed);
                 if let Some(path) = std::env::var_os("CX4_TRACE") {

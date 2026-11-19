@@ -606,6 +606,12 @@ impl Snes {
     /// the machine.
     pub fn step(&mut self) -> u32 {
         self.live_pc = self.cpu.pc_address();
+        if crate::cx4::job_logging() {
+            crate::cx4::DEBUG_PC.store(
+                u64::from(self.live_pc),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
         // ares `CPU::step` clears `irqLock` as each bus access starts; the one
         // case that matters is a `$4200` write, which is its instruction's last
         // access, so clearing once per instruction is equivalent.

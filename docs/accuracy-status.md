@@ -315,6 +315,13 @@ Validation so far:
   instructions since write 27 and ours 52,444. At the copy, ares is at job
   2,550 and ours at 2,562 - the CPU is sampling a different job's output. The
   remaining defect is the coprocessor's rate/phase relative to the S-CPU.
+- The job-count gap is bisected: the per-frame `$7F4F` counts agree frame for
+  frame until **3324**, then ares performs no dispatch at 3324/3326/3328/3330
+  while we perform three, leaving a constant +12. Both CPUs execute the same
+  instruction (`$7E26C1 STA $7F4F` in the WRAM dispatcher at `$7E2695`) with
+  the CX4 idle, and the CX4 instruction count per dispatch is identical
+  (+1,029 then +43,700), so the difference is the game's dispatch cadence on
+  the S-CPU side, not coprocessor work.
 - Separately, the interrupt phase is measurable: at the same job the WRAM
   differs by 5 bytes only (interrupt stack byte `$02FD` = pushed PCL, counter
   `$09CF`, three scratch values ~0x2F apart), and watching `$02FD` shows ares

@@ -384,6 +384,14 @@ The CX4 has env-gated debug hooks used to localise divergence against ares:
   (+ `ARES_VRAM_FROM/TO`): the live CX4 state at every VRAM data-port write
   (`$2118`/`$2119`), i.e. exactly how far the coprocessor had progressed when
   the S-CPU copied its output into BG character data.
+- `CX4_JOBS_LOG=<path>` / `ARES_CX4_JOBS`: one line per frame with the
+  `$7F4F` job-start count and the `halt()` count, to bisect the game's job
+  cadence against ares.
+- `CX4_JOB_LOG=<path>` + `CX4_JOB_FROM/TO` / `ARES_CX4_JOB_LOG` +
+  `ARES_CX4_JOB_FROM/TO`: the state at every `$7F4F` job request (halt flag,
+  requested `pb`/`pc`, running/busy, CX4 instruction count and the S-CPU PC).
+  The S-CPU PC is the instruction start in ours and `r.pc.d` (after the
+  operand fetch) in ares, so the two differ by the instruction length.
 
 **Keep these logs on the big filesystem**, not `/tmp/opencode`: that tmpfs has a
 quota and `fs::write`/`writeln` failures there are silent (`let _ = ...`), which
