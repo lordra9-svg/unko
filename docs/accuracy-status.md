@@ -345,9 +345,14 @@ Validation so far:
   spins 45 iterations there vs our 1, and from then on ares spins in every one
   of 2,333 jobs while we never do. A job takes ~357,300 master clocks - almost
   exactly one frame - so the arrival lands on a tie that is self-sustaining
-  (ares coprocessor-limited, ours CPU-limited). At that first dispatch ares
-  has executed 763 more CX4 instructions (20,269,417 vs 20,268,654): the
-  power-on boot run from the zeroed program RAM is the perturbation.
+  (ares coprocessor-limited, ours CPU-limited). The wait is for the
+  instruction-cache reload: ares' `SET48/prep/CACHE` shows it running for
+  2,728 cycles while the CPU polls, which is exactly the 45 spins; our atomic
+  reload clears the busy bit in one step, so the CPU never waits. (The
+  20,269,417 vs 20,268,654 figures from the previous entry are cycles, not
+  instructions; the instruction logs show ares executing nothing before the
+  first job and ours running 512 boot instructions from the zeroed program
+  RAM.)
 - Separately, the interrupt phase is measurable: at the same job the WRAM
   differs by 5 bytes only (interrupt stack byte `$02FD` = pushed PCL, counter
   `$09CF`, three scratch values ~0x2F apart), and watching `$02FD` shows ares

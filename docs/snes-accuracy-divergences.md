@@ -2913,11 +2913,41 @@ pre-start wait just at the moment the previous job finishes, and whichever side
 of that tie a core lands on is self-sustaining - ares is coprocessor-limited
 (it waits every frame), ours is CPU-limited (it never waits).
 
-The initial perturbation is visible in the coprocessor instruction count at
-that first dispatch: ares has executed **20,269,417** instructions, ours
-**20,268,654** - 763 fewer, the same size as the clock offset. That is the
-power-on boot execution from the zero-filled program RAM before the game's
-first halt, which is where to look next.
+**Correction**: the 20,269,417 / 20,268,654 figures quoted earlier are
+coprocessor **cycles**, not instructions. The instruction logs show the real
+difference at the first job:
+
+```
+ares: first executed instruction is ins=1 at t=21,767,958, right after T4F
+      (t=21,766,684) - the chip executes NOTHING before the first job;
+ours: ins=0..511 at t=4..578 from the zeroed program RAM, then halt.
+```
+
+so our chip runs 512 boot instructions at power-on where ares runs none. That
+is a real difference (our scheduler steps the CX4 from power-on; ares does not)
+and our power-on GPRs are 0 where ares has 0xFFFFFF, but it only costs ~578
+master clocks and the game overwrites the GPRs before the first real job.
+
+The 42-vs-1 pre-start spin has a different, larger cause, visible in the same
+log: the wait is for the **instruction-cache reload**. At the first job ares
+logs
+
+```
+t=21,763,006 SET48 ... x=100        ($7F48 write, halted -> preload/enable)
+t=21,763,866 prep pb=000e req=029c00
+t=21,766,594 CACHE v=00000e x=029e00 d=2728   (reload took 2,728 cycles)
+t=21,766,684 T4F ...                 ($7F4F, after the reload)
+```
+
+The reload keeps the chip busy (`io.cache.enable = 1`, so `running()` is true)
+for 2,728 coprocessor cycles while the S-CPU runs and polls `$7F5E`; the 45
+pre-start spin iterations *are* that reload. Ours performs the whole 512-byte
+load inside one `run_one` and clears the enable immediately, so the CPU sees an
+idle chip and proceeds.
+
+That is the atomic-reload decision. It does not change the cycle *total*
+(exonerated above) but it changes *when* the chip reports busy, which is what
+the game's wait loop and the phase depend on.
 
 ### Tested: the coprocessor clock charge is not the cause (within 0.15%)
 
