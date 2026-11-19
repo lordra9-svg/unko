@@ -2919,6 +2919,35 @@ Done alone, (1) is neutral: the frames and spins are unchanged (35 vs ares'
 45; 3480 100.000%, 3500 96.706%, 4000 94.877%). Both together are the next
 experiment.
 
+### Resolved: the CX4 is advanced once per scanline, like PROFILE_PERFORMANCE
+
+ares' oracle build syncs coprocessors in `CPU::scanline()` only (the per-step
+sync is compiled out by `PROFILE_PERFORMANCE`), so the chip advances in
+scanline chunks and starts a reload at the next line, not immediately. Our
+scheduler advanced it after every bus access.
+
+Moving the CX4 block after the PPU loop and gating it on a scanline event
+(`take_line_event`) reproduces ares exactly:
+
+```
+              pre-start spin   post-start spin   dispatch clock
+ares                   45               17         21,766,684
+before                 35                5         21,765,918  (-766)
+after                  45               17         21,766,698  (+14)
+```
+
+Frames against ares:
+
+```
+3300 3400 3479 3480 3500 3700 3900   100.000% each
+4000                                 96.652%  (was 94.877%)
+Mega Man X3 300 / 600                100.000% each
+baseline 212/212, 161 tests
+```
+
+`3500` and `3700` moved from ~96.5% to 100.000%; the first divergence is now
+between frames 3970 (100%) and 3980 (99.482%).
+
 ### Resolved: the reload is now spread over the coprocessor clock
 
 The atomic reload was the cause of the phase, and making it interruptible fixes

@@ -292,6 +292,14 @@ Validation so far:
   artefact: the two cores' boundaries are ~1,400 clocks apart and the boot code
   runs a visible GPR-scratch loop; the full CX4 register-write streams are
   identical write-for-write.
+- **Resolved 2026-11-18 (scanline sync)**: ares' PROFILE_PERFORMANCE build
+  synchronizes coprocessors only in `CPU::scanline()`, so the CX4 advances in
+  scanline chunks. Advancing ours once per scanline (after the PPU loop, on
+  `take_line_event`) makes the first-job pre-start spin 45 (ares 45), the
+  post-start spin 17 (ares 17) and the dispatch clock +14 clocks (ares
+  21,766,698 vs 21,766,684). Frames 3300/3400/3479/3480/3500/3700/3900 are
+  all **100.000%**, Mega Man X3 300/600 100.000%, baseline 212/212. The first
+  divergence is now between frames 3970 and 3980.
 - **Resolved 2026-11-18**: the atomic instruction-cache reload kept the
   coprocessor's busy flag from the S-CPU, so the pre-start wait never spun
   (1 iteration vs ares' 45) and the phase offset was ~3,500 clocks. The reload

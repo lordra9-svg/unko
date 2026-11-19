@@ -881,25 +881,6 @@ impl Snes {
         // job leaves outstanding simply stays in the difference between the two
         // clocks, which is why the lead/lag varies from job to job (+375..+966
         // CX4 cycles at `$7F48`, +90..+152 at `$7F4F` in ares).
-        if let Some(cx4) = self.cx4.as_mut() {
-            const SECOND: u128 = (u64::MAX >> 1) as u128;
-            let cpu_scalar = SECOND / u128::from(self.region.master_clock());
-            let cx4_scalar = SECOND / 20_000_000u128;
-            let rom = self.cart.rom();
-            let sram = self.cart.sram();
-            let target = (u128::from(self.clock) + u128::from(clocks)) * cpu_scalar;
-            while self.cx4_clock < target {
-                let cost = u128::from(cx4.run_one(rom, sram).max(1));
-                self.cx4_clock += cost * cx4_scalar;
-            }
-            if crate::cx4::debug_clock_needed() {
-                // Lead of the CPU over the coprocessor, in CX4 cycles (the
-                // quantity the ares `cc`/`pc` probe reports).
-                let diff = target as i128 - self.cx4_clock as i128;
-                let lead = diff / cx4_scalar as i128;
-                crate::cx4::DEBUG_CPU_LEAD.store(lead as i64, std::sync::atomic::Ordering::Relaxed);
-            }
-        }
         // The SA-1 runs at half the master clock: one SA-1 cycle is two master
         // clocks. Its DMA cost is charged through `dma_clocks` on the next run.
         if let Some(sa1) = self.sa1.as_mut() {
@@ -918,6 +899,10 @@ impl Snes {
         // longer because it has 312 lines (and one 342-dot line), not because
         // the line clock differs.
         self.ppu_credit += i64::from(clocks);
+        // ares' PROFILE_PERFORMANCE build synchronizes coprocessors in
+        // `CPU::scanline()` only (once per scanline, at Hcounter 0), so the CX4
+        // advances in scanline chunks and can sit up to a line behind the CPU.
+        let mut cx4_scanline = false;
         while self.ppu_credit >= 4 {
             let pre_dot = self.ppu.dot();
             self.ppu.tick();
@@ -963,6 +948,7 @@ impl Snes {
                 self.cpu_stall += cost;
             }
             if let Some(line) = self.ppu.take_line_event() {
+                cx4_scanline = true;
                 self.refresh_done = false;
                 self.hdma_run_done = false;
                 if line == 0 {
@@ -996,6 +982,25 @@ impl Snes {
                 && self.ppu.line() <= self.ppu.visible_last()
             {
                 self.ppu.render_current_line();
+            }
+        }
+        if let Some(cx4) = self.cx4.as_mut().filter(|_| cx4_scanline) {
+            const SECOND: u128 = (u64::MAX >> 1) as u128;
+            let cpu_scalar = SECOND / u128::from(self.region.master_clock());
+            let cx4_scalar = SECOND / 20_000_000u128;
+            let rom = self.cart.rom();
+            let sram = self.cart.sram();
+            let target = (u128::from(self.clock) + u128::from(clocks)) * cpu_scalar;
+            while self.cx4_clock < target {
+                let cost = u128::from(cx4.run_one(rom, sram).max(1));
+                self.cx4_clock += cost * cx4_scalar;
+            }
+            if crate::cx4::debug_clock_needed() {
+                // Lead of the CPU over the coprocessor, in CX4 cycles (the
+                // quantity the ares `cc`/`pc` probe reports).
+                let diff = target as i128 - self.cx4_clock as i128;
+                let lead = diff / cx4_scalar as i128;
+                crate::cx4::DEBUG_CPU_LEAD.store(lead as i64, std::sync::atomic::Ordering::Relaxed);
             }
         }
         self.io.step(clocks);
