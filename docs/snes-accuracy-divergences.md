@@ -2971,9 +2971,15 @@ Star Fox    0-900  (25)     37        27/37 (exact through present 650)
 
 Every MMX2/MMX3 sample matches our emulation exactly once the presentation lag
 is allowed for (the one apparent MMX2 failure, present 3800, is our frame 3799
-at 100.000%). Star Fox is exact through present 650 (our ~640) and then has no
-exact match in a +/-10 frame window from present 675 onward, best ~98.5% - a
-real divergence between our frames ~640 and ~665, not a sampling artefact.
+at 100.000%). A denser pass (every present, 630-690) shows Star Fox is exact at **every**
+present except one: present 676 is exact (ours 664), present 677 has no exact
+match (best ours 665, 98.910%), and present 678 is exact again (ours 666). The
+presentation lag there is 12 frames.
+
+So the Star Fox "divergence from 675" is a **single transient frame**, present
+677 / our ~665: 625 pixels spread over the whole screen (x 16-239, y 16-205)
+flipping between bright and black, i.e. one animation/flash step, not a
+persistent drift. Every other sampled frame around it matches exactly.
 
 ### Resolved: presentation-time oracle calibrated (ares `Screen::refresh`)
 
