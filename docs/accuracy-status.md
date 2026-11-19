@@ -393,7 +393,11 @@ Validation so far:
   colour-math fix: ares never applies colour math to OBJ1 sprites). Donkey Kong
   Country is also 1200/1200 exact after making the hi-res DAC path per line
   (its title switches Mode 7 -> 1 -> 5 mid-frame) and making `PRESENT_HASH`
-  width-aware for 512-wide frames. With scripted input the cores track through level entry; the
+  width-aware for 512-wide frames. Super Metroid and Super Castlevania IV are
+  1200/1200 exact too. Chrono Trigger is exact through ares present 1073 and
+  then open: the WRAM images already differ by ~52 bytes and the cores hold
+  different BG1 scrolls at the split, so it is a CPU-state divergence to
+  bisect (`$0008` = ours+3 at frames 600-800). With scripted input the cores track through level entry; the
   apparent "divergence" from present 542 was a present-rate drift, and every
   ares present 600-820 matches one of our frames pixel-for-pixel (0 px).
   Input-driven sweeps need a same-phase state sample (next instrumentation

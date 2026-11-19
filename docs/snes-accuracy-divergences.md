@@ -3135,6 +3135,19 @@ re-run at 10000 presents with no change (9997 + three torn / 10000 / 10000).
 initially looked like misses because our frame was one ahead; a symmetric
 window resolves them.
 
+**Super Metroid (Japan, USA), presents 0-1199:** 1200 exact.
+**Super Castlevania IV (USA), presents 0-1199:** 1200 exact.
+
+**Chrono Trigger (USA):** exact through ares present 1073, then open. From
+present 1074 ares shows content entering at the right edge while our run stays
+static, and no frame in our run matches ares 1074-1200 at any offset. The WRAM
+images already differ slightly at frame 200 and stay ~52 bytes apart at
+600-800 (e.g. `$0008` is ours+3), and at the divergence the cores hold
+different BG1 scrolls (`h0=0x300` vs `0x30A`) with different register writes
+per frame (ours writes `$2111`/`$210D`/`$210E`, ares only `$210E`), i.e. the
+game logic is in a different state, not a renderer difference. This is the next
+CPU-state bisect.
+
 **Donkey Kong Country (USA), presents 0-1199:** 1200 exact.
 
 DKC's title sequence switches PPU mode *mid-frame* (frame 351 runs Mode 7 on
