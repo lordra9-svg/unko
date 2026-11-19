@@ -421,6 +421,15 @@ The CX4 has env-gated debug hooks used to localise divergence against ares:
   pixel difference as an emulation error.
 - `CGRAM_DIR` / `OAM_DIR` (ours) and `ARES_CGRAM_DIR` / `ARES_OAM_RAW` (ares)
   dump the palette and sprite tables per frame, for exactly that state check.
+- `PPU_LINE_LOG=<path>` + `PPU_LINE_FRAME` (or `PPU_LINE_FROM`/`PPU_LINE_TO`):
+  our per-line `INIDISP` brightness, forced blank, `CGWSEL`/`CGADSUB`,
+  `COLDATA` and the fixed colour. `BRIGHT_LOG=<path>` writes one line per frame.
+  Matching ares hooks are `ARES_BRIGHT_LOG` (per line: frame, line, brightness,
+  blank) and `ARES_CM_LOG` + `ARES_CM_FRAME` (per line: fixed colour,
+  `blendMode`, mode/halve, brightness, blank). These are how the
+  colour-math/sub-screen and brightness discrepancies were pinned.
+- `FRAME_FROM=<n>` limits our `FRAME_DIR`/`FRAME_EVERY` dumps to frames `>= n`,
+  so a bisect window costs a few MB instead of the whole run.
 - `NMI_POLL=<path>` / `ARES_NMI_POLL`: the master clock and S-CPU PC at every
   rising `vcounter(2) >= vdisp` poll, i.e. the exact NMI edge time. Ours logs
   `live_pc` (instruction start), ares logs `r.pc.d` (current byte).
