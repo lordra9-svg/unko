@@ -3135,11 +3135,25 @@ re-run at 10000 presents with no change (9997 + three torn / 10000 / 10000).
 initially looked like misses because our frame was one ahead; a symmetric
 window resolves them.
 
-**Donkey Kong Country (USA):** exact through present 350, then present 351
-differs by 230 px in a single region (`x 213-234`, `y 170-198`) whose colours
-are the same palette shifted by 1-2 px, and by present 360 no frame in our run
-matches. This is an open item: a per-line scroll/sprite offset in the level
-scene, to be bisected next.
+**Donkey Kong Country (USA), presents 0-1199:** 1200 exact.
+
+DKC's title sequence switches PPU mode *mid-frame* (frame 351 runs Mode 7 on
+lines 1-127, Mode 1 on 128-151 and Mode 5 from 152). ares chooses the hi-res
+DAC path from the *current* `hires()` on every line, while our `frame_hires`
+was latched once at the frame start, so the Mode 5 band was composited as
+non-hi-res and differed by 230 px (`x 213-234`, `y 170-198`).
+
+`present_line` now takes the line's `hires()` into account: inside a hi-res
+frame a non-hi-res line duplicates the Above colour into both columns, and
+inside a non-hi-res frame a hi-res line keeps the even (Below) column that the
+256-wide frame samples. Pinned by
+`ppu::tests::a_hires_line_inside_a_non_hires_frame_keeps_the_below_column`.
+
+The sweep harness also hashed `frame.iter().take(256*224*4)`, which is wrong
+for 512-wide (hi-res) frames; `PRESENT_HASH` now samples one pixel per screen
+column exactly like the ares oracle, and DKC then matched at every present with
+a wide content window (its present rate falls far behind ours on the static
+title screen).
 
 **Super Mario World (USA), no input, presents 0-599:** 597 exact. Presents 369,
 372 and 373 differ by 4-12 px on 1-3 scanlines, all inside SMW's window-HDMA

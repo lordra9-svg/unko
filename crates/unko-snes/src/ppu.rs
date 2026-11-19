@@ -1966,12 +1966,28 @@ impl Ppu {
                 }
             }
             let base = y * width + x * stride;
+            // ares `DAC::render` chooses the hi-res path from the *current*
+            // `hires()` on every line, so a frame that switches to mode 5/6
+            // part-way through (DKC does this at the title screen) renders the
+            // affected lines as two interleaved pixels. Our buffer width is
+            // fixed per frame; when the frame is not hi-res but the line is,
+            // keep the sampled (even) column ares would show.
+            let line_hires = self.setini & 0x08 != 0 || matches!(self.bg_mode & 0x07, 5 | 6);
             if self.frame_hires {
-                self.framebuffer[base * 4..base * 4 + 4].copy_from_slice(&below_px);
-                let odd = base + 1;
-                self.framebuffer[odd * 4..odd * 4 + 4].copy_from_slice(&above_px);
+                if line_hires {
+                    self.framebuffer[base * 4..base * 4 + 4].copy_from_slice(&below_px);
+                    let odd = base + 1;
+                    self.framebuffer[odd * 4..odd * 4 + 4].copy_from_slice(&above_px);
+                } else {
+                    // ares writes the Above colour to both output columns when
+                    // the line itself is not hi-res.
+                    self.framebuffer[base * 4..base * 4 + 4].copy_from_slice(&above_px);
+                    let odd = base + 1;
+                    self.framebuffer[odd * 4..odd * 4 + 4].copy_from_slice(&above_px);
+                }
             } else {
-                self.framebuffer[base * 4..base * 4 + 4].copy_from_slice(&above_px);
+                let pixel = if line_hires { below_px } else { above_px };
+                self.framebuffer[base * 4..base * 4 + 4].copy_from_slice(&pixel);
             }
         }
     }
@@ -2736,6 +2752,33 @@ mod tests {
         assert!(ppu.debug_sprite_row(0).is_empty());
         assert_eq!(ppu.debug_sprite_row(1), vec![(0, 129, 3)]);
         assert_eq!(ppu.debug_sprite_row(9), vec![(0, 129, 3)]);
+    }
+
+    #[test]
+    fn a_hires_line_inside_a_non_hires_frame_keeps_the_below_column() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2105, 0x05); // mode 5 (hi-res BG), but the frame started non-hires
+        ppu.write(0x2107, 0x00); // BG1 map at $0000
+        ppu.write(0x210B, 0x01); // BG1 characters at $1000
+        ppu.write(0x212C, 0x01); // BG1 on the main screen
+        ppu.write(0x212D, 0x01); // BG1 on the sub screen
+                                 // Name table entry 0: tile 0, palette 0, priority 0.
+        ppu.vram[0x0000] = 0x0000;
+        // Row 1 (visible row 0): column 0 (below) is colour 1, column 1
+        // (above) is colour 2.
+        ppu.vram[0x1001] = 0x4080;
+        ppu.write(0x2121, 0x01); // CGRAM 1 red
+        ppu.write(0x2122, 0x1F);
+        ppu.write(0x2122, 0x00);
+        ppu.write(0x2121, 0x02); // CGRAM 2 blue
+        ppu.write(0x2122, 0x00);
+        ppu.write(0x2122, 0x7C);
+        ppu.write(0x2100, 0x0F);
+        ppu.frame_hires = false; // the frame latched non-hires at its start
+        ppu.render_line(1, 0);
+        // ares renders this line through the hi-res path; the even output
+        // column (the one the 256-wide frame keeps) is the Below pixel.
+        assert_eq!(&ppu.framebuffer[0..3], &[0xFF, 0x00, 0x00]);
     }
 
     #[test]

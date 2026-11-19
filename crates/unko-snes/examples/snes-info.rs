@@ -387,12 +387,20 @@ fn main() -> ExitCode {
                 if let Some(path) = std::env::var_os("PRESENT_HASH") {
                     use std::io::Write;
                     // Same FNV-1a-64 over the same 256x224 RGBA pixel set that
-                    // the ares harness hashes, so frames align by content.
+                    // the ares harness hashes: one sample per screen column, so
+                    // hi-res (512-wide) frames contribute their even columns.
                     let frame = system.ppu.frame_buffer();
+                    let width = system.ppu.frame_width();
+                    let stride = width / 256;
                     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-                    for byte in frame.iter().take(256 * 224 * 4) {
-                        hash ^= u64::from(*byte);
-                        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+                    for y in 0..224 {
+                        for x in 0..256 {
+                            let index = (y * width + x * stride) * 4;
+                            for byte in &frame[index..index + 4] {
+                                hash ^= u64::from(*byte);
+                                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+                            }
+                        }
                     }
                     if let Ok(mut f) = std::fs::OpenOptions::new()
                         .create(true)

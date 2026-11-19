@@ -391,8 +391,9 @@ Validation so far:
   mid-frame WRAM table (open item). Zelda (USA), Super Mario All-Stars (USA)
   and F-Zero (USA) are each **1200/1200 exact** (the Zelda run needed the OBJ1
   colour-math fix: ares never applies colour math to OBJ1 sprites). Donkey Kong
-  Country is exact through present 350 and then diverges (open item: a 1-2 px
-  shift in one `x 213-234, y 170-198` region at present 351). With scripted input the cores track through level entry; the
+  Country is also 1200/1200 exact after making the hi-res DAC path per line
+  (its title switches Mode 7 -> 1 -> 5 mid-frame) and making `PRESENT_HASH`
+  width-aware for 512-wide frames. With scripted input the cores track through level entry; the
   apparent "divergence" from present 542 was a present-rate drift, and every
   ares present 600-820 matches one of our frames pixel-for-pixel (0 px).
   Input-driven sweeps need a same-phase state sample (next instrumentation
