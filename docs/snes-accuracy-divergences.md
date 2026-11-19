@@ -2919,6 +2919,32 @@ Done alone, (1) is neutral: the frames and spins are unchanged (35 vs ares'
 45; 3480 100.000%, 3500 96.706%, 4000 94.877%). Both together are the next
 experiment.
 
+### NMI latch: 4-clock hold + `lastCycle` test implemented
+
+`advance_peripherals_inner` now mirrors ares `CPU::nmiPoll`/`lastCycle`:
+
+* the PPU's vcount>=`vdisp` edge sets `$4210`'s flag immediately and arms a
+  **4-clock `nmiHold`** (`nmi_hold`);
+* when the hold expires the interrupt line is raised and its clock recorded
+  (`nmi_line_clock`);
+* `apply_interrupts` only takes it when the edge arrived at least one CPU
+  cycle (6 master clocks) before the instruction ended, i.e. ares'
+  `lastCycle()` test; otherwise it waits for the next boundary.
+
+Two mechanical changes, no frame changes:
+
+```
+spin at first job: 45 (ares 45)   dispatch clock 21,766,698 (ares 21,766,684)
+frames 3300/3480/3500/3700/3900: 100.000%, baseline 212/212
+```
+
+The `$02FD` landing at the *first* NMI (frame ~1.9) is still ours `$8103`
+(pushed PCL 0x03) where ares has `$8100` (0x00): that difference is one loop
+instruction (~24 clocks), not the 4-clock hold, so it is a CPU-phase difference
+at that early frame rather than the latch shape. A later NMI (t=2,451,162)
+flipped in the opposite direction, which also indicates jitter rather than a
+systematic shift.
+
 ### Frame 3980 onward is a capture-lag artefact, not a divergence
 
 Per-pixel logging (`PX_LOG` / `ARES_PX_LOG`, above/below colour, fixed colour,

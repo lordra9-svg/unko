@@ -308,6 +308,12 @@ Validation so far:
   offset ~800 clocks, and frames **3480 and 3900 are now 100.000%** (3500
   96.706%, 3700 96.594%, 4000 94.877%; 3300/3400/3479 unchanged at 100.000%,
   baseline 212/212).
+- The ares NMI latch shape is implemented: the vcount>=vdisp edge sets the
+  `$4210` flag and arms a 4-clock hold, and the interrupt is only taken when
+  the edge arrived at least one CPU cycle before the instruction ended
+  (`lastCycle`). Neutral on MMX2 (spin 45/45, frames 3300/3480/3500/3700/3900
+  100.000%, baseline 212/212); the first-NMI landing still differs by one wait
+  loop instruction (~24 clocks), which is a CPU phase, not the latch.
 - The apparent divergence from frame 3980 is a **capture-lag artefact**: ours
   3977 and 3978 both match ares' capture labelled 3980 at 100.000%, and the
   per-pixel DAC log shows both cores computing the same final pixel

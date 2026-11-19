@@ -245,6 +245,13 @@ pub struct Snes {
     /// NMI edge seen while the CPU was mid-instruction, applied at the next
     /// instruction boundary.
     nmi_line: bool,
+    /// ares `status.nmiHold`: 4 master clocks between the vcounter poll that
+    /// raises /NMI and the transition that can request the interrupt.
+    nmi_hold: u8,
+    /// Master clock at which `nmi_line` was raised, so the request is only
+    /// taken when it arrived at least one CPU cycle before the instruction
+    /// ends (ares `lastCycle()` tests one cycle early).
+    nmi_line_clock: u64,
     /// Number of NMI edges delivered (debug).
     pub nmi_count: u64,
     /// Master clock elapsed since reset (debug).
@@ -317,6 +324,8 @@ impl Snes {
             hdma_run_done: false,
             irq_line: false,
             nmi_line: false,
+            nmi_hold: 0,
+            nmi_line_clock: 0,
             nmi_count: 0,
             clock: 0,
             live_pc: 0,
@@ -747,7 +756,7 @@ impl Snes {
         let sa1_irq = self.sa1.as_ref().is_some_and(|sa1| sa1.cpu_irq_line());
         self.cpu
             .set_irq(self.irq_line || gsu_irq || cx4_irq || sa1_irq);
-        if self.nmi_line && !self.nmi_lock {
+        if self.nmi_line && !self.nmi_lock && self.clock >= self.nmi_line_clock + 6 {
             self.nmi_line = false;
             self.cpu.trigger_nmi();
             if std::env::var_os("NMI_LOG").is_some() {
@@ -1012,7 +1021,15 @@ impl Snes {
         if self.ppu.take_nmi() {
             self.nmi_flag = true;
             if self.nmi_enable {
+                self.nmi_hold = 4;
+            }
+        }
+        if self.nmi_hold > 0 {
+            let step = clocks.min(u32::from(self.nmi_hold));
+            self.nmi_hold -= step as u8;
+            if self.nmi_hold == 0 {
                 self.nmi_line = true;
+                self.nmi_line_clock = self.clock;
                 self.nmi_count += 1;
             }
         }
