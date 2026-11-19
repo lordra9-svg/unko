@@ -388,9 +388,11 @@ Validation so far:
   Chrono Trigger, Super Castlevania IV. First sweeps: SMW (USA) no-input
   597/600 presents exact; presents 369/372/373 differ by 4-12 px inside a
   window-HDMA iris, traced to a sub-dot CPU-write/HDMA-read race on the
-  mid-frame WRAM table (open item). Zelda (USA) is **1200/1200 exact** after
-  fixing the OBJ1 colour-math rule (ares never applies colour math to OBJ1
-  sprites). With scripted input the cores track through level entry; the
+  mid-frame WRAM table (open item). Zelda (USA), Super Mario All-Stars (USA)
+  and F-Zero (USA) are each **1200/1200 exact** (the Zelda run needed the OBJ1
+  colour-math fix: ares never applies colour math to OBJ1 sprites). Donkey Kong
+  Country is exact through present 350 and then diverges (open item: a 1-2 px
+  shift in one `x 213-234, y 170-198` region at present 351). With scripted input the cores track through level entry; the
   apparent "divergence" from present 542 was a present-rate drift, and every
   ares present 600-820 matches one of our frames pixel-for-pixel (0 px).
   Input-driven sweeps need a same-phase state sample (next instrumentation

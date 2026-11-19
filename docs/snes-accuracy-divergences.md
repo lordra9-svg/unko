@@ -3130,6 +3130,16 @@ Objects now carry source `4` (palette < 192) or `5` (palette >= 192), and
 re-run at 10000 presents with no change (9997 + three torn / 10000 / 10000).
 
 **Zelda, A Link to the Past (USA), presents 0-1199:** 1200 exact.
+**Super Mario All-Stars (USA), presents 0-1199:** 1200 exact (Modes 0/1/7).
+**F-Zero (USA), presents 0-1199:** 1200 exact (Mode 7 only). Two presents
+initially looked like misses because our frame was one ahead; a symmetric
+window resolves them.
+
+**Donkey Kong Country (USA):** exact through present 350, then present 351
+differs by 230 px in a single region (`x 213-234`, `y 170-198`) whose colours
+are the same palette shifted by 1-2 px, and by present 360 no frame in our run
+matches. This is an open item: a per-line scroll/sprite offset in the level
+scene, to be bisected next.
 
 **Super Mario World (USA), no input, presents 0-599:** 597 exact. Presents 369,
 372 and 373 differ by 4-12 px on 1-3 scanlines, all inside SMW's window-HDMA
