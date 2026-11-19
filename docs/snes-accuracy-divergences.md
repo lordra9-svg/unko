@@ -2956,6 +2956,23 @@ sub-screen mode, blends with the backdrop even when it is transparent
 (`halve && windowAbove[x] && below.source != COL`). Ours only gated the blend.
 The fix is neutral for MMX2's frame 3980 but matches ares' documented order and
 keeps the 212/212 baseline.
+
+Two more compositor rules were aligned in the same pass:
+
+* ares `DAC::prepare` gives the below screen the **fixed colour** as its
+  backdrop in non-hires modes (`belowColor = hires ? cgram[0] : fixedColor()`),
+  not `cgram[0]`; ours now does the same.
+* ares `Object::render` tags sprites `Source::OBJ1` for palettes 0-3 and
+  `OBJ2` for 4-7, and `DAC::colorEnable[OBJ1]` is forced to zero, so only
+  palette 4-7 sprites take part in colour math. Ours treated every sprite as
+  `OBJ2`. Per-pixel logging confirmed the difference (ares source `05` vs our
+  `04` on the same sprite pixels) and the split is now encoded in the layer id.
+
+Per-pixel logging (`PE_LOG` / `ARES_PE_LOG`, above/below source/priority/colour
+per x) shows the remaining differing pixels carry the *same* sprite colour and
+priority in both cores, so the residual is not the layer selection there. After
+these fixes frame 3980 is 99.496% (was 99.482%); the bulk of the 297 pixels is
+still unexplained.
 An OAM hash was added on both sides (`OAM_HASH` / `ARES_OAM_HASH`, hashing the
 raw 0x220-byte layout, re-encoded on the ares side from its decoded objects)
 but it differs from frame 1 while the pictures match, so the encoding mapping
