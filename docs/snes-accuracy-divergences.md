@@ -2955,6 +2955,36 @@ current byte), and the interrupted instruction is simply a different iteration
 of the same 42-clock `$8100` wait loop. Both cores enter the same NMI within
 one loop instruction, and the wait loop is a pure spin (no state consequence).
 
+### Resolved: presentation-time oracle calibrated (ares `Screen::refresh`)
+
+The frame the UI actually shows is `_output` at the end of
+`Screen::refresh()` (ares/ares/node/video/screen.cpp), after the palette
+conversion. A dump there (`ARES_PRESENT_DIR` + `ARES_PRESENT_FROM/TO`) produces
+a 564x242 viewport image in exactly the geometry `diff-frame` expects, and a
+matching hash (`ARES_PHASH`) reproduces our per-frame content bit for bit (a
+256x224 sample at (26,9), sx=2, RGBA).
+
+Calibration on MMX2 (first 60 frames): **60/60 presentation hashes equal at the
+same index**, so presents map 1:1 to our frames - no lag.
+
+Pixel results with this reference:
+
+```
+MMX2  3979 100.000%   3980 100.000%   3990 100.000%   3995 100.000%
+      3999  99.960%   4000  99.960%   4001  99.960%   (23 px)
+Star Fox 150 100.000%  153 100.000%  155 100.000%
+```
+
+So MMX2 is pixel-exact at the previously disputed frames; the `$02FD`/VRAM
+"divergences" were sampling offsets. Star Fox frame 153 is pixel-exact, which
+closes that item. The only known pixel difference left in MMX2 is 23 pixels in
+x 96-164, y 136-157 at frames 3999-4001, with shading deltas such as
+`00 00 00 -> 00 00 31` and `00 31 8C -> 00 42 AD`.
+
+Note: our `PRESENT_HASH` log indexes differently from its own frame dumps (the
+hash of dumped frame 3980 equals ares' hash for 3980, but our log lists another
+value), so content comparisons must use the dumped frames, not the hash log.
+
 ### Frame-locked oracle: the pixel buffer is unusable, but state is decisive
 
 Two ways to get a frame-locked ares reference were tested at the PPU frame

@@ -308,6 +308,11 @@ Validation so far:
   offset ~800 clocks, and frames **3480 and 3900 are now 100.000%** (3500
   96.706%, 3700 96.594%, 4000 94.877%; 3300/3400/3479 unchanged at 100.000%,
   baseline 212/212).
+- The frame-locked pixel oracle is **calibrated**: ares' presented frame is
+  `Screen::refresh()`'s `_output`, dumped via `ARES_PRESENT_DIR`. Presents map
+  1:1 to our frames (60/60 hashes equal). With it, MMX2 is 100.000% at
+  3979/3980/3990/3995 and 99.960% (23 px) at 3999-4001, and Star Fox is
+  100.000% at 150/153/155 - so the frame-153 Star Fox item is closed.
 - The ares NMI latch shape is implemented: the vcount>=vdisp edge sets the
   `$4210` flag and arms a 4-clock hold, and the interrupt is only taken when
   the edge arrived at least one CPU cycle before the instruction ended
