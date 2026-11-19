@@ -2886,6 +2886,39 @@ measured at `$7F4F` earlier, now expressible in CPU spin iterations.
 The +1.16% S-CPU instruction excess is therefore the main loop's own `$09CE`
 wait (`$00:8100: LDA $09CE; BEQ`), not the CX4 loops.
 
+### The phase is created at the first dispatch and latched by a wait race
+
+`CX4_FRAME_LOG` / `ARES_FRAME_LOG` stamp the master clock at the NMI entry
+(`$00:1FEF`, the vector stub that jumps to `$7E:2000`), at the handler's `RTI`
+(`$7E:2042`) and at the state-machine entry (`$88C6`). Median deltas over the
+run are **E +14, X +30, S +42 clocks**: the frame, the NMI handler and the main
+loop are aligned to within tens of clocks.
+
+The ~3,500-clock offset is born at the very first `$7F4F` (frame ~60):
+
+```
+frame 60   NMI entry  RTI        first dispatch
+ares       21,748,946 21,761,106 21,766,684   (+5,584 after RTI)
+ours       21,748,946 21,761,098 21,763,186   (+2,088 after RTI)
+```
+
+At that dispatch ares' pre-start loop spins **45** iterations (the coprocessor
+is still running) and ours spins **1**. From then on the difference is locked
+in: over all 2,333 jobs, **ares spins >2 iterations in every one and ours
+never does** (`ares-waits-only: 2333, ours-waits-only: 0`).
+
+The reason it is bistable: a job takes ~332,800 coprocessor cycles ≈ 357,300
+master clocks, i.e. almost exactly one frame. The CPU therefore arrives at the
+pre-start wait just at the moment the previous job finishes, and whichever side
+of that tie a core lands on is self-sustaining - ares is coprocessor-limited
+(it waits every frame), ours is CPU-limited (it never waits).
+
+The initial perturbation is visible in the coprocessor instruction count at
+that first dispatch: ares has executed **20,269,417** instructions, ours
+**20,268,654** - 763 fewer, the same size as the clock offset. That is the
+power-on boot execution from the zero-filled program RAM before the game's
+first halt, which is where to look next.
+
 ### Tested: the coprocessor clock charge is not the cause (within 0.15%)
 
 `CX4_SPIN_LOG` now also exports the accumulated coprocessor cycles at every

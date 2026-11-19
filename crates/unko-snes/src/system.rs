@@ -606,6 +606,24 @@ impl Snes {
     /// the machine.
     pub fn step(&mut self) -> u32 {
         self.live_pc = self.cpu.pc_address();
+        if crate::cx4::frame_logging() {
+            let tag = match self.live_pc {
+                0x001FEF => Some('E'),
+                0x7E_2042 => Some('X'),
+                0x0088C6 => Some('S'),
+                _ => None,
+            };
+            if let Some(tag) = tag {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(std::env::var_os("CX4_FRAME_LOG").unwrap_or_default())
+                {
+                    let _ = writeln!(f, "{} {} {}", tag, self.ppu.debug_frame, self.clock);
+                }
+            }
+        }
         if crate::cx4::spin_logging() {
             let slot = match self.live_pc {
                 0x7E_2696 => Some(0),

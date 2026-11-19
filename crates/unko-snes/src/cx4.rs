@@ -1617,6 +1617,12 @@ pub static DEBUG_SP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 /// Debug: eight S-CPU stack bytes at the most recent job request.
 pub static DEBUG_STACK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Whether the per-frame milestone clock log is enabled (cached once).
+pub fn frame_logging() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("CX4_FRAME_LOG").is_some())
+}
+
 /// Debug: coprocessor clock cycles charged since power-on (`CX4_SPIN_LOG`).
 pub static DEBUG_CYCLES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 

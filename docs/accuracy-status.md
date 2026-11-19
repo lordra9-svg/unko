@@ -340,6 +340,14 @@ Validation so far:
   job match ares within ~0.5 % (cumulative 1,089,016,920 vs 1,087,349,779,
   -0.15 %). The phase comes from S-CPU time: ours reaches the dispatcher
   ~3,500 master clocks earlier each frame and spends it in the `$09CE` spin.
+- The offset is created at the **first dispatch** (frame ~60) and then latched:
+  NMI entry/RTI/state-machine clocks match within tens, ares' pre-start wait
+  spins 45 iterations there vs our 1, and from then on ares spins in every one
+  of 2,333 jobs while we never do. A job takes ~357,300 master clocks - almost
+  exactly one frame - so the arrival lands on a tie that is self-sustaining
+  (ares coprocessor-limited, ours CPU-limited). At that first dispatch ares
+  has executed 763 more CX4 instructions (20,269,417 vs 20,268,654): the
+  power-on boot run from the zeroed program RAM is the perturbation.
 - Separately, the interrupt phase is measurable: at the same job the WRAM
   differs by 5 bytes only (interrupt stack byte `$02FD` = pushed PCL, counter
   `$09CF`, three scratch values ~0x2F apart), and watching `$02FD` shows ares

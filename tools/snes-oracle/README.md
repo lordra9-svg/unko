@@ -391,6 +391,9 @@ The CX4 has env-gated debug hooks used to localise divergence against ares:
 - `CX4_JOBS_LOG=<path>` / `ARES_CX4_JOBS`: one line per frame with the
   `$7F4F` job-start count, the `halt()` count, `$09CE`, `$09CF` and the
   cumulative S-CPU instruction count, to bisect the game's job cadence.
+- `CX4_FRAME_LOG=<path>` / `ARES_FRAME_LOG`: the master clock at the NMI entry
+  (`$00:1FEF`), the handler's `RTI` (`$7E:2042`) and the state-machine entry
+  (`$88C6`), one line per hit, to compare frame-level timing point by point.
 - `CX4_SPIN_LOG=<path>` / `ARES_SPIN_LOG`: counts executions of the three
   `$7F5E` busy loop heads (`$7E2696`, `$7E26B8`, `$7E26C5`) and appends the
   running totals at every `$7F4F`, so consecutive lines give the per-job spin
