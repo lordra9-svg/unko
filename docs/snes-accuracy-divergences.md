@@ -2919,6 +2919,38 @@ Done alone, (1) is neutral: the frames and spins are unchanged (35 vs ares'
 45; 3480 100.000%, 3500 96.706%, 4000 94.877%). Both together are the next
 experiment.
 
+### Frame 3980 onward is a capture-lag artefact, not a divergence
+
+Per-pixel logging (`PX_LOG` / `ARES_PX_LOG`, above/below colour, fixed colour,
+layer, halve and the final 15-bit result per x) shows the two cores computing
+the **same** pixel at line 86, x 121: `above=7E40 below=7BDE fixed=7BDE
+layer=OBJ2 halve=0 add=1 -> result=0400` in both.
+
+Yet ares' *captured* frame has black there while ares' own `DAC::render` logged
+0x0400. Comparing by frame offset resolves it:
+
+```
+ours 3977 vs ares capture 3980: 100.000%  (57344/57344)
+ours 3978 vs ares capture 3980: 100.000%
+ours 3979 vs ares capture 3979: 100.000%
+ours 3980 vs ares capture 3980:  99.496%
+```
+
+So the ares capture labelled 3980 is our frame 3977/3978 - the same
+presentation-buffer lag already documented for the frame-locked hook, which
+only becomes visible when the content moves. The earlier "exact at 3500/3700"
+frames are static scenes, which is why they matched at the same index.
+
+This is the same class of error as the Star Fox "content-exact" caveat: ares
+captures are host-timed and its `screen->pixels()` lags the emulated frame. On
+static content any offset matches; on moving content only a
+content-anchored (best-offset) comparison is meaningful.
+
+At frame 4000 the best offset is 3999 at 99.960% (23 pixels), versus 96.650% at
+the same index - i.e. the "divergence" shrinks by an order of magnitude once
+the offset is allowed for, with a small residual that still needs a
+frame-locked reference to judge.
+
 ### Frame 3980: colour math, windows, VRAM and CGRAM all match
 
 The first persistent divergence after the scanline fix is frame 3980 (3979 is
