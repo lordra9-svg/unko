@@ -3323,9 +3323,15 @@ trigger dot over 274-276 does not change the result.
 The line-0 HDMA pay access is the measured limit: with the DMA pre/post the
 NMI handler end and the table-loop entry are exact to the clock, yet the first
 HDMA payment is still 2 clocks early (ours 133298630, ares 133298632), and
-`pre = 8 - (clock & 7)` turns that into a 6-clock steal difference. Matching it
-needs ares' 2-clock CPU tick with a `dmaEdge` at every bus access, i.e. a
-scheduler-level port rather than another comparator tweak.
+`pre = 8 - (clock & 7)` turns that into a 6-clock steal difference.
+
+The scheduler-level variant was also tried: general DMA moved out of
+`Snes::step` into `access_cycles` (ares `CPU::dmaEdge`), processed after the
+pending HDMA, with `post` rounded using that access's wait. SMW stays 599/600
+(373) and Zelda regresses from 1000/1000 to 797/1000 from present 296, so the
+port was reverted. The residual is the CPU access boundary itself, below the
+current access-granular scheduler; closing it needs a cycle-exact `CPU::step`
+rewrite, not another pending-placement change.
 
 **With scripted input** (`ARES_JOYPAD_SEGMENTS` / `JOYPAD0_SEGMENTS`), the two
 cores track through the logo, title, file-select and level entry. The present
