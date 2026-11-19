@@ -646,6 +646,9 @@ impl Cx4 {
         } else {
             self.execute(rom, sram);
         }
+        if spin_logging() {
+            DEBUG_CYCLES.fetch_add(u64::from(self.cost), std::sync::atomic::Ordering::Relaxed);
+        }
         self.cost
     }
 
@@ -1613,6 +1616,9 @@ pub static DEBUG_JOB_STARTS: std::sync::atomic::AtomicU64 = std::sync::atomic::A
 pub static DEBUG_SP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Debug: eight S-CPU stack bytes at the most recent job request.
 pub static DEBUG_STACK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Debug: coprocessor clock cycles charged since power-on (`CX4_SPIN_LOG`).
+pub static DEBUG_CYCLES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Debug: iterations of the three `$7F5E` busy loops in the WRAM dispatcher.
 pub static DEBUG_SPIN: [std::sync::atomic::AtomicU64; 3] = [

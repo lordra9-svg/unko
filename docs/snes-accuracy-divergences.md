@@ -2883,10 +2883,33 @@ instead. The total waiting is nearly equal (ares 434,768 iterations, ours
 **phase** at which its completion lands relative to the S-CPU - the same lead
 measured at `$7F4F` earlier, now expressible in CPU spin iterations.
 
-This also shows the +1.16 % S-CPU instruction excess is *not* these loops
-(ours spins slightly less overall); it must be the main loop's own `$09CE`
-wait (`$00:8100: LDA $09CE; BEQ`), which spins more or less depending on when
-the loop reaches it relative to the NMI.
+The +1.16% S-CPU instruction excess is therefore the main loop's own `$09CE`
+wait (`$00:8100: LDA $09CE; BEQ`), not the CX4 loops.
+
+### Tested: the coprocessor clock charge is not the cause (within 0.15%)
+
+`CX4_SPIN_LOG` now also exports the accumulated coprocessor cycles at every
+`$7F4F` (ours: the sum of `run_one` costs in CX4 clocks; ares: the sum of the
+clocks passed to `HitachiDSP::step`, since ares' scaled `Thread::clock()` wraps
+u64 several times per job and cannot be differenced):
+
+```
+job   ares_cycles  ours_cycles   delta
+   1      332,786      332,763      -23
+   2  251,047,106  251,046,880     -226
+ 101      364,543      363,765     -778
+ 501      364,545      363,009   -1,536
+2301      269,275      272,341   +3,066
+
+total 1,089,016,920  1,087,349,779   ratio 0.99847  (-0.153%)
+```
+
+Per-job deltas are within ~0.5% and the cumulative total within 0.15%, so the
+"~4.7% rate difference" implied by the spin totals is **not** the coprocessor's
+cycle charge: the cost model is essentially exact. The phase therefore comes
+from S-CPU time - ours arrives at the dispatcher ~3,500 master clocks earlier
+each frame and spends the difference spinning in the main loop's `$09CE` wait,
+which is exactly the +1.16% instruction excess.
 
 The master clock at each `$7F4F` (also in the spin log) shows the offset is a
 **constant phase, not a drift**:

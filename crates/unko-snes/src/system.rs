@@ -1662,10 +1662,11 @@ impl CpuBus for SnesBus<'_> {
                         {
                             let _ = writeln!(
                                 f,
-                                "J {} {} {} {} {}",
+                                "J {} {} {} {} {} {}",
                                 crate::cx4::DEBUG_JOB_STARTS
                                     .load(std::sync::atomic::Ordering::Relaxed),
                                 crate::cx4::DEBUG_CLOCK.load(std::sync::atomic::Ordering::Relaxed),
+                                crate::cx4::DEBUG_CYCLES.load(std::sync::atomic::Ordering::Relaxed),
                                 crate::cx4::DEBUG_SPIN[0]
                                     .load(std::sync::atomic::Ordering::Relaxed),
                                 crate::cx4::DEBUG_SPIN[1]

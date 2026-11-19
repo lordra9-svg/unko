@@ -336,6 +336,10 @@ Validation so far:
   the rate matches and the **phase** differs by roughly 500 CPU clocks. The
   +1.16 % instruction excess is therefore the main loop's own `$09CE` wait,
   not the CX4 loops.
+- The coprocessor's cycle charge is **exonerated**: accumulated CX4 cycles per
+  job match ares within ~0.5 % (cumulative 1,089,016,920 vs 1,087,349,779,
+  -0.15 %). The phase comes from S-CPU time: ours reaches the dispatcher
+  ~3,500 master clocks earlier each frame and spends it in the `$09CE` spin.
 - Separately, the interrupt phase is measurable: at the same job the WRAM
   differs by 5 bytes only (interrupt stack byte `$02FD` = pushed PCL, counter
   `$09CF`, three scratch values ~0x2F apart), and watching `$02FD` shows ares
