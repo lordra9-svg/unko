@@ -292,7 +292,15 @@ Validation so far:
   artefact: the two cores' boundaries are ~1,400 clocks apart and the boot code
   runs a visible GPR-scratch loop; the full CX4 register-write streams are
   identical write-for-write.
-- The first genuinely different picture frame is our 3480. All 224 scanlines'
+- **Resolved 2026-11-18**: the atomic instruction-cache reload kept the
+  coprocessor's busy flag from the S-CPU, so the pre-start wait never spun
+  (1 iteration vs ares' 45) and the phase offset was ~3,500 clocks. The reload
+  is now spread over the coprocessor clock (`reload_pending`, 1 cycle per
+  `run_one`, `CacheState::{Ready,Busy,Failed}`): the spin is 35 (ares 45), the
+  offset ~800 clocks, and frames **3480 and 3900 are now 100.000%** (3500
+  96.706%, 3700 96.594%, 4000 94.877%; 3300/3400/3479 unchanged at 100.000%,
+  baseline 212/212).
+- (Historical) The first genuinely different picture frame was our 3480. All 224 scanlines'
   PPU state is identical (`mode=1 tm=04`, the same BG1/2/3 scroll, BG3 map
   `$3000`, tile base `$1000`, mosaic) and only BG3 is enabled, so this is not a
   scroll or layer difference. The differing pixels are BG3 character data:

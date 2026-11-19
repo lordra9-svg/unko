@@ -168,6 +168,17 @@ impl Default for Cx4Io {
     }
 }
 
+/// Result of an instruction-cache lookup or reload step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CacheState {
+    /// The requested page is resident; the instruction may execute.
+    Ready,
+    /// The reload is still in progress; the coprocessor is busy this cycle.
+    Busy,
+    /// Both pages are locked and neither matches; the chip halts.
+    Failed,
+}
+
 /// The CX4 / Hitachi HG51B core.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Cx4 {
@@ -185,6 +196,14 @@ pub struct Cx4 {
     pub data_ram: Vec<u8>,
     /// Eight-entry call stack.
     pub stack: [u16; 8],
+    /// Remaining cycles of an instruction-cache reload (transient).
+    ///
+    /// ares spreads the 512-byte reload over the coprocessor's clock, keeping
+    /// the chip busy while the S-CPU polls `$7F5E`. Not serialized: a state
+    /// saved inside the ~2,700-cycle window restarts the busy period, which
+    /// only shifts the poll by those cycles.
+    #[serde(skip)]
+    pub reload_pending: u32,
     /// Running clock cost of the current `main` call (transient).
     pub cost: u32,
     /// Number of instructions/operations executed (debug).
@@ -225,6 +244,7 @@ impl Default for Cx4 {
             data_rom: Vec::new(),
             data_ram: vec![0; 0xC00],
             stack: [0; 8],
+            reload_pending: 0,
             cost: 0,
             ticks: 0,
         }
@@ -694,7 +714,20 @@ impl Cx4 {
         0
     }
 
-    fn cache(&mut self, rom: &[u8], sram: &[u8]) -> bool {
+    fn cache(&mut self, rom: &[u8], sram: &[u8]) -> CacheState {
+        // ares spreads the 512-byte reload over the coprocessor's clock: the
+        // chip reports busy (`io.cache.enable`) for the whole ~2,700 cycles,
+        // and the S-CPU's `$7F5E` poll loops until it finishes. Charge one
+        // cycle per call here so the busy period lasts exactly that long.
+        if self.reload_pending != 0 {
+            self.step(rom, sram, 1);
+            self.reload_pending -= 1;
+            if self.reload_pending == 0 {
+                self.io.cache.enable = false;
+                return CacheState::Ready;
+            }
+            return CacheState::Busy;
+        }
         let mut address = self
             .io
             .cache
@@ -705,13 +738,13 @@ impl Cx4 {
         if !self.io.cache.preload {
             if self.io.cache.address[page] == address {
                 self.io.cache.enable = false;
-                return true;
+                return CacheState::Ready;
             }
             self.io.cache.page = !self.io.cache.page;
             let page = usize::from(self.io.cache.page);
             if self.io.cache.address[page] == address {
                 self.io.cache.enable = false;
-                return true;
+                return CacheState::Ready;
             }
             if self.io.cache.lock[page] {
                 self.io.cache.page = !self.io.cache.page;
@@ -719,7 +752,7 @@ impl Cx4 {
             let page = usize::from(self.io.cache.page);
             if self.io.cache.lock[page] {
                 self.io.cache.enable = false;
-                return false;
+                return CacheState::Failed;
             }
         }
         self.io.cache.preload = false;
@@ -730,23 +763,37 @@ impl Cx4 {
         }
         let debug_load = insn_logging();
 
+        // Total reload cost, exactly as ares charges it: one `wait()` per byte.
+        let mut probe = address;
+        let mut total: u32 = 0;
+        for _ in 0..512 {
+            total = total.saturating_add(self.wait(probe));
+            probe = probe.wrapping_add(1);
+        }
+
         for offset in 0..256 {
-            let wait = self.wait(address);
-            self.step(rom, sram, wait);
             let low = self.read_bus(rom, sram, address);
             address = address.wrapping_add(1);
-            let wait = self.wait(address);
-            self.step(rom, sram, wait);
             let high = self.read_bus(rom, sram, address);
             address = address.wrapping_add(1);
             self.program[page * 256 + offset] = u16::from_le_bytes([low, high]);
         }
-        self.io.cache.enable = false;
         self.cache_loads = self.cache_loads.wrapping_add(1);
         if debug_load {
             self.log_event("CACHE", u32::from(self.regs.pb), address);
         }
-        true
+        // Stay busy for the reload's duration; `run_one` drives it one cycle
+        // per call, so the CPU sees `$7F5E` bit 6 set while it polls.
+        if total > 0 {
+            self.reload_pending = total;
+            self.io.cache.enable = true;
+            self.step(rom, sram, 1);
+            self.reload_pending -= 1;
+            CacheState::Busy
+        } else {
+            self.io.cache.enable = false;
+            CacheState::Ready
+        }
     }
 
     fn dma(&mut self, rom: &[u8], sram: &[u8]) {
@@ -772,9 +819,13 @@ impl Cx4 {
     }
 
     fn execute(&mut self, rom: &[u8], sram: &[u8]) {
-        if !self.cache(rom, sram) {
-            self.halt();
-            return;
+        match self.cache(rom, sram) {
+            CacheState::Ready => {}
+            CacheState::Busy => return,
+            CacheState::Failed => {
+                self.halt();
+                return;
+            }
         }
         let page = usize::from(self.io.cache.page);
         let pc = usize::from(self.regs.pc);
@@ -799,7 +850,7 @@ impl Cx4 {
                 return;
             }
             self.regs.pb = self.regs.p;
-            if !self.cache(rom, sram) {
+            if let CacheState::Failed = self.cache(rom, sram) {
                 self.halt();
             }
         }
@@ -1816,15 +1867,29 @@ mod tests {
 
     #[test]
     fn executes_a_cached_instruction() {
-        // Zeroed ROM executes NOPs. The firmware powers up running, so the
-        // first `run_one` fills the instruction cache and retires one opcode.
+        // Zeroed ROM executes NOPs. The firmware powers up running; the first
+        // `run_one` starts the 512-byte cache reload, which keeps the chip busy
+        // for its duration (ares spreads it over the coprocessor clock) before
+        // the first opcode retires.
         let rom = vec![0u8; 0x1_0000];
         let mut cx4 = Cx4::from_firmware(&firmware()).expect("firmware");
         cx4.write_io(0x7F49, 0x00);
         cx4.write_io(0x7F4A, 0x80); // cache base = $008000
         cx4.write_io(0x7F4B, 0x00);
-        let cost = cx4.run_one(&rom, &[]);
-        assert!(cost > 0);
+        let first = cx4.run_one(&rom, &[]);
+        assert!(first > 0);
+        assert!(cx4.running(), "the reload must keep the chip busy");
+        let mut total = first;
+        for _ in 0..100_000 {
+            if cx4.ticks == 1 {
+                break;
+            }
+            total += cx4.run_one(&rom, &[]);
+        }
+        assert!(
+            total > 1_000,
+            "reload cost should be charged over the busy period"
+        );
         assert_eq!(cx4.ticks, 1);
     }
 }

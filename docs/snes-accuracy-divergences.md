@@ -2886,6 +2886,41 @@ measured at `$7F4F` earlier, now expressible in CPU spin iterations.
 The +1.16% S-CPU instruction excess is therefore the main loop's own `$09CE`
 wait (`$00:8100: LDA $09CE; BEQ`), not the CX4 loops.
 
+### Resolved: the reload is now spread over the coprocessor clock
+
+The atomic reload was the cause of the phase, and making it interruptible fixes
+the first divergent frame. `cache()` now performs the 512-byte load, computes
+the ares cost (one `wait()` per byte) and then keeps the chip **busy for that
+many cycles**, charging one cycle per `run_one` (`reload_pending`, a transient
+field that is `#[serde(skip)]` so the save-state layout and version are
+unchanged). `CacheState::{Ready, Busy, Failed}` distinguishes "reload still in
+progress" from "both pages locked".
+
+Measured at the first job (frames to 100):
+
+```
+              pre-start spin   dispatch clock
+ares                   45          21,766,684
+before (atomic)         1          21,763,186   (-3,498)
+after (spread)         35          21,765,918   (-766)
+```
+
+The phase offset drops from ~3,500 to ~800 clocks. Frame results against ares:
+
+```
+frame    before      after
+3480     97.262%     100.000%
+3900     95.933%     100.000%
+3500     96.406%     96.706%
+3700     96.488%     96.594%
+4000     93.687%     94.877%
+3300/3400/3479  100.000% (unchanged)
+baseline 212/212 (unchanged)
+```
+
+So the first diverging frame is gone; 3500/3700/4000 remain, with a smaller
+residual (~800 clocks at the dispatch) to chase.
+
 ### The phase is created at the first dispatch and latched by a wait race
 
 `CX4_FRAME_LOG` / `ARES_FRAME_LOG` stamp the master clock at the NMI entry
