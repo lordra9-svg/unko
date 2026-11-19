@@ -61,13 +61,25 @@ The SNES accuracy track counts as finished when all five hold at once:
    byte-identical to the straight run.
 5. **Public suites** - the 212-entry test-ROM baseline (above) passes.
 
-Current standing against that definition: gates 1 and 5 green; covers 2 with
-Mega Man X2 0-10000, Mega Man X3 0-9999 and Star Fox 0-10000 plus the
-coprocessor titles recorded below, with only three torn MMX2 presents excluded;
-3 bit-exact (639,700 stereo frames); 4 covered by the state round-trip and
-continuation tests. The one gap is a **commercial base-console cartridge**:
-no such ROM is available locally, so it is recorded as a coverage request, not
-as a known failure.
+Current standing against that definition: gates 1 and 5 green; item 2 is
+green for every available reference title - Super Mario World 600/600 (the last
+present via the documented per-title HDMA phase calibration), Zelda /
+Super Mario All-Stars / F-Zero / Donkey Kong Country / Chrono Trigger 1200/1200,
+Mega Man X3 and Star Fox 10000/10000, Mega Man X2 9996/10000 with only three
+proved torn presents excluded; item 3 is bit-exact on the blargg
+`near_cd_quality` oracle (639,700 stereo frames) and is measured per retail
+title below; item 4 is covered by the state round-trip and continuation tests.
+
+Definition-of-done item 3 is the one place where the reference titles are not
+yet 100%: the S-DSP sample stream matches ares exactly for sparse music (Zelda
+99.83%, Mega Man X2 99.87%) but dense soundtracks still differ at note and
+echo boundaries (Super Mario World 89.44%, Chrono Trigger 78.29%, Donkey Kong
+Country 67.60%, Super Metroid 64.49%, F-Zero 25.12% over 350,000 stereo frames).
+The residual is traced to register writes landing on a slightly different
+32-step DSP micro-step, so a KON/EDL/EVOL write takes effect one sample earlier
+or later; one such difference (EDL at driver init) shifts the echo buffer by one
+sample for the rest of the run. This is a known open item, not a rendering or
+CPU-timing failure; the PCM of the blargg oracle remains bit-exact.
 
 `unko-snes` is a new isolated crate with no `unko-core` or shell dependency.
 
@@ -590,6 +602,39 @@ Validation so far:
   Tech Demo **95.714%** with the DSP-driven grid exact, and
   **Dungeon Master (DSP-2), SD Gundam GX (DSP-3) and Top Gear 3000 (DSP-4) all
   at 100.000%** (Top Gear also 100.000% at frame 1,500).
+
+- The OBC1 coprocessor (Metal Combat: Falcon's Revenge) is implemented
+  (`obc1.rs`): the 8 KiB battery-backed work RAM, its `$6000-$7FFF` window in
+  banks `$00-$3F/$80-$BF` plus the `$70-$71/$F0-$F1` aliases, the
+  `$1FF0-$1FF7` register indirection (base-pointer table select, object index
+  and packed attribute bits), power-on latching, save-state coverage and unit
+  tests. Cartridge type `$25` selects the board and forces an 8 KiB save-RAM
+  allocation. No local Metal Combat image is available, so verification is the
+  bus/register unit suite plus a synthetic LoROM header test; the oracle sweep
+  is recorded as a coverage request.
+- The MSU1 media streamer (SD2SNES/FXPak enhancement) is implemented (`msu1.rs`):
+  the `$2000-$2007` window in banks `$00-$3F/$80-$BF`, the four-byte data seek
+  and auto-incrementing data read, the `S-MSU1` signature and revision status
+  bits, track selection with the 8-byte `MSU1` loop header, 44.1 kHz stereo
+  playback with master-clock credit, volume scaling, DSP mute, repeat and
+  resume, save-state coverage and unit tests. The host attaches
+  `msu1.data.rom` and `track-N.pcm` through `Snes::set_msu1_data` /
+  `Snes::set_msu1_track` and drains the 44.1 kHz stream with
+  `Snes::drain_msu1_samples`. `tools/snes-oracle/gen-msu1-rom.py` builds a
+  first-party fixture whose `$2001` data-read colour (`0x2211`) and
+  play+repeat status colour (`0x0032`) are both identical to ares.
+- Retail audio parity was measured for the first time across the reference
+  battery with the improved `tools/snes-oracle/diff-audio-raw.py` (loud-probe
+  alignment, 700,000 interleaved samples = 350,000 stereo frames): Zelda 1175
+  differing samples (99.8321%), Mega Man X2 915 (99.8693%), Super Mario
+  All-Stars 31,593 (95.4867%), Super Mario World 73,895 (89.4436%), Super
+  Castlevania IV 76,746 (89.0363%), Chrono Trigger 151,957 (78.2919%), Donkey
+  Kong Country 226,813 (67.5981%), Super Metroid 248,565 (64.4907%) and F-Zero
+  524,169 (25.1187%). The DSP-trace diff (see the divergence ledger) shows the
+  voice envelope/pitch state matching at the first Zelda divergence while the
+  echo volume/offset and voice `gaussianOffset`/`brrAddress` differ by one
+  sample, i.e. a register-write micro-step placement difference rather than an
+  arithmetic difference.
 
 The PPU is line-based rather than dot-scheduled. **Interlace is implemented**
 (448-line output, odd field on the odd output rows, sprite and hires BG vertical

@@ -5,7 +5,7 @@ chosen reference (real hardware, then ares, then a public test ROM). It is the
 SNES counterpart to `docs/accuracy-divergences.md` and follows the charter in
 `docs/accuracy.md`.
 
-Current snapshot: **2026-11-17**, 65C816 + SPC700 + APU + S-DSP + PPU + DMA + HDMA.
+Current snapshot: **2026-11-19**, 65C816 + SPC700 + APU + S-DSP + PPU + DMA/HDMA + SuperFX + SA-1 + SDD1 + SPC7110 + CX4 + DSP-1/2/3/4 + OBC1 + MSU1.
 
 ## Resolved 2026-11-17 — blargg `spc_dsp6` reports `PASSED TESTS`
 
@@ -3878,3 +3878,110 @@ ares frame 154 vs ours frame 154:  vram 2872, gsuram 15696   (one frame apart)
 
 So the frame-153 GSU discrepancy is gone (0 bytes) and the `$E000` VRAM delta is
 a **boundary-sampling offset of one frame**, not an upload difference.
+
+## OBC1 and MSU1 coprocessors (2026-11-19)
+
+Both were missing entirely; they are now implemented from the ISC-licensed ares
+`sfc/coprocessor/obc1` and `sfc/coprocessor/msu1` sources (behaviour only, no
+code copied).
+
+**OBC1** (`obc1.rs`). Metal Combat: Falcon's Revenge is the only retail board.
+The 8 KiB work RAM is also the battery-backed save, so it lives in
+`Cartridge::sram` and the cartridge-type `$25` (high nibble `$2`, low nibble
+`$3` or more) forces an 8 KiB allocation even when the header SRAM code is
+zero. The RAM appears at `$00-$3F/$80-$BF:$6000-$7FFF` and at
+`$70-$71/$F0-$F1:$6000-$7FFF` / `$E000-$FFFF` (ares' `OBC1-LOROM-RAM` map).
+`$1FF5` bit 0 selects the `$1800`/`$1C00` object table, `$1FF6` carries the
+7-bit object index and the two-bit attribute shift, `$1FF0-$1FF3` alias the
+selected object's four bytes and `$1FF4` reads/writes the packed pair inside
+its attribute byte. Power-on latches the table pointer from `$1FF5`/`$1FF6`.
+
+No Metal Combat image is available locally, so this is verified by the module's
+window/power/indirection unit tests and a system test that builds a synthetic
+LoROM with type `$25` and drives the register aliases through the S-CPU bus
+(`obc1_maps_its_ram_and_register_indirection`). The oracle sweep remains a
+coverage request, not a known failure.
+
+**MSU1** (`msu1.rs`). Enhancement-chip media streaming, selected by the
+presence of `msu1.data.rom` rather than a header field. Registers are
+`$2000-$2007` in banks `$00-$3F/$80-$BF`:
+
+- `$2000` status: revision `2` plus audio-error, playing, repeat, busy and
+  data-busy bits;
+- `$2001` auto-incrementing data read, `$2002-$2007` the `S-MSU1` signature;
+- writes build a 32-bit data seek (committed by the fourth write), select a
+  16-bit track (low/high bytes), set volume and start/stop/repeat/resume.
+
+A track is a `MSU1` magic word followed by a 32-bit little-endian loop sector;
+playback reads interleaved `i16` stereo pairs at 44.1 kHz, scaled by
+`volume / 255`, muted by the S-DSP mute flag, and either loops at the header
+offset or stops at the end. The player is clocked from the same master-clock
+credit as the other coprocessors. `Snes::set_msu1_data` / `set_msu1_track`
+attach media and `Snes::drain_msu1_samples` yields the 44.1 kHz stereo stream;
+attaching media enables the window, mirroring ares' board detection.
+
+Verification: unit tests cover signature/revision, seek/read wrap, loop and
+repeat, missing/malformed tracks, volume scaling and mute; a system test drives
+the window through the bus and checks the master-clock sample cadence. The
+first-party fixture `tools/snes-oracle/gen-msu1-rom.py` writes the two data
+bytes read through `$2001` into CGRAM colour 0 (phase 1) and the status byte
+after selecting and playing track 1 (phase 2). Both frames are identical to
+ares: colour `0x2211` for the data read and `0x0032` (revision 2 + playing +
+repeat) for the status. The fixture also produced the current 44.1 kHz sample
+path but ares' capture hooks only record the S-DSP stream, so MSU1 PCM is not
+yet diffed sample-by-sample.
+
+## Retail audio parity (2026-11-19, open)
+
+The S-DSP pre-resampler stream is bit-exact against ares for the blargg
+`near_cd_quality` oracle (639,700 stereo frames) but this had never been
+measured across retail music. The improved `tools/snes-oracle/diff-audio-raw.py`
+aligns on the loudest 40,000-sample probe (the opening seconds are silent and
+match at every offset) and compares 700,000 interleaved samples (350,000 stereo
+frames):
+
+```
+Zelda: A Link to the Past   1,175 differing   99.8321%
+Mega Man X2                   915            99.8693%
+Super Mario All-Stars      31,593            95.4867%
+Super Mario World          73,895            89.4436%
+Super Castlevania IV       76,746            89.0363%
+Chrono Trigger            151,957            78.2919%
+Donkey Kong Country       226,813            67.5981%
+Super Metroid             248,565            64.4907%
+F-Zero                    524,169            25.1187%
+```
+
+The DSP pipeline was then diffed at the same sample with a new all-voice trace
+(`DSP_FULL_TRACE_OUT` in `unko-snes`, plus a local `ARES_DSP_TRACE` hook in the
+ares checkout; the ares hook is not part of this repository).
+
+- **Zelda, first divergence at stereo sample 218,985 (6.83 s).** Every voice's
+  `envx`, envelope, pitch, BRR address/offset, Gaussian offset and 12-word BRR
+  buffer are identical, but `echo.volume[0]` is `39` here and `36` in ares and
+  `echo._offset` is `908` vs `904` (one sample ahead). The write log shows the
+  driver's `$2C` write at micro-step 4,558,676 vs ares' 4,558,673 and the
+  `$7D` (EDL) write one sample earlier, which starts the echo buffer one sample
+  earlier for the rest of the run. So the divergence is **register-write
+  placement inside the 32-step DSP sample**, not a mix/echo arithmetic bug.
+- **Super Mario World, first divergence at stereo sample 142,492 (4.45 s).**
+  The KON (`$4C`) write lands at micro-step 4,559,360 vs ares' 4,559,357, and
+  the new voice's `gaussianOffset`/`brrAddress` are one pitch accumulation /
+  one BRR block apart, so the note attack starts one sample differently before
+  the streams converge again.
+
+The write logs match in address/value order; the difference is only in the
+number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
+DSP is already ticked one micro-step per two S-SMP clocks inside the access's
+`wait`, and the official `spc_dsp6`/`spc_smp`/`spc_timer` suites pass, so the
+remaining work is to reproduce ares' thread-yield point exactly: `DSP::main`
+can run ahead of the S-SMP thread and yield mid-sample through
+`Thread::synchronize(smp)`, and a register write is applied at whatever
+micro-step that leaves. Candidate fixes are to derive the yield from the ares
+scheduler clocks rather than a per-access credit, or to calibrate the DSP
+micro-step phase at reset and at each `$F0` divider change.
+
+Until then, retail audio is **not** claimed bit-exact; the per-title numbers
+above are the measured baseline, and dense music (F-Zero, Super Metroid, Donkey
+Kong Country) shows the largest deviation. None of this affects the video
+parity, save states or the test-ROM baseline.

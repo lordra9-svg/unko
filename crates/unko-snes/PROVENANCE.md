@@ -130,7 +130,11 @@ material used to implement it. No GPL emulator source is translated or copied.
   [DMA examples](https://snes.nesdev.org/wiki/DMA_examples).
 - ISC-licensed ares `ares/sfc/cpu/dma.cpp` for the transfer-mode address
   stepping, A/B-bus validity rules and channel register layout.
-- HDMA table scheduling is not implemented yet.
+- HDMA table scheduling and the per-line steal model follow
+  `ares/sfc/cpu/dma.cpp` (`hdmaRun`, `hdmaReload`, `CPU::dmaEdge`); the
+  per-title SMW phase calibration is extracted timing data recorded in
+  `src/hdma_calibration.rs` and documented in
+  `docs/snes-accuracy-divergences.md`.
 
 ## `src/apu.rs`
 
@@ -154,8 +158,28 @@ material used to implement it. No GPL emulator source is translated or copied.
 - ISC-licensed ares `ares/sfc/cpu/memory.cpp` for the banked WRAM and I/O
   ranges.
 
+## `src/obc1.rs`
+
+- ISC-licensed ares `ares/sfc/coprocessor/obc1` for the 8 KiB RAM window,
+  `$1FF0-$1FF7` register indirection, base-pointer/object-index latches and
+  power-on behaviour.
+- ares `ares/System/Super Famicom/boards.bml` (`OBC1-LOROM-RAM`) for the
+  `$00-$3F/$80-$BF:$6000-$7FFF` and `$70-$71/$F0-$F1` mappings.
+- The implementation is written from the observed register contract; no ares
+  code is copied.
+
+## `src/msu1.rs`
+
+- ISC-licensed ares `ares/sfc/coprocessor/msu1` for the `$2000-$2007`
+  register map, status/signature bytes, data seek/read, track header parsing,
+  44.1 kHz volume-scaled playback and repeat/resume behaviour.
+- ares `ares/sfc/cartridge/load.cpp` for the `msu1.data.rom`-presence board
+  selection and the `00-3f,80-bf:2000-2007` window.
+- The host-attached media API is original to this crate; no ares code is
+  copied.
+
 ## Forthcoming modules
 
-The SPC700, S-DSP, PPU and DMA slices will extend this file with their own
-citations before merge. MesenCE remains a black-box compatibility oracle and
-must not be read while implementing this core.
+MesenCE remains a black-box compatibility oracle and must not be read while
+implementing this core. New coprocessors (ST018, Satellaview/BS-X, Sufami
+Turbo, Sharp RTC) must extend this file with their citations before merge.

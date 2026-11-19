@@ -72,6 +72,39 @@ IPL=.../ipl.rom tools/snes-oracle/ours-capture.sh ROM.sfc 600 /tmp/ours-cap
 ares' internal frame counter starts two vblanks later than ours, so capture
 ares at `N` and ours at `N - 2` (or compare a static screen).
 
+## MSU1 fixtures
+
+`gen-msu1-rom.py` builds a first-party LoROM that exercises the MSU1 window:
+phase 1 paints CGRAM colour 0 with the two bytes read through `$2001` after a
+seek to zero (`0x2211`), phase 2 paints the `$2000` status after selecting and
+playing track 1 (`0x0032` = revision 2 + playing + repeat). It also writes
+`msu1.data.rom` and `track-1.pcm` next to the ROM, which ares picks up
+automatically.
+
+Attach the same media to `snes-info` with:
+
+```sh
+MSU1_DATA=.../msu1.data.rom MSU1_TRACK=1:.../track-1.pcm \
+  FRAMES=20 FRAME_OUT=/tmp/ours.raw \
+  target/release/examples/snes-info msu1-test.sfc ipl.rom
+```
+
+`MSU1_AUDIO_OUT=<path>` writes the 44.1 kHz stereo track stream as
+interleaved `i16`. ares' `--dump-audio` covers only the S-DSP stream, so MSU1
+PCM is currently verified by the status fixture and unit tests rather than a
+sample diff.
+
+## Audio alignment
+
+`diff-audio-raw.py` now searches alignment on the loudest 40,000-sample probe
+inside the comparison window (the opening seconds of most games are silent and
+match at every offset) and then compares the whole requested overlap. Example:
+
+```sh
+tools/snes-oracle/diff-audio-raw.py /tmp/ours/audio.f32 /tmp/ares/raw.i16 \
+  --window 700000
+```
+
 ## Synthetic fixtures
 
 `gen-overscan-rom.py` assembles a minimal LoROM that enables PPU overscan

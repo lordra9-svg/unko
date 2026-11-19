@@ -31,14 +31,23 @@ behind `--features vulkan`; the glow path remains the default presenter.
 Accuracy milestone **A5** is complete. **A6/A7** NES breadth and capture work is
 frozen as done for now (2026-11-16); VS. System and PlayChoice-10 remain paused
 by the owner pending a 2C05 title, a good DualSystem dump and PC10 images. The
-SNES track: the isolated `unko-snes` crate now has ROM parsing and checksum
+SNES track: the isolated `unko-snes` crate has ROM parsing and checksum
 validation, LoROM/HiROM/ExLoROM/ExHiROM mapping, a cycle-stepped 65C816, the
-full SPC700, an APU wrapper with IPL/ports, the S-DSP voice pipeline, a
-line-based PPU with modes 0-7, sprites, subscreen/colour math and HDMA, plus
-S-CPU DMA and APU timers. Retail Super Mario World is **100.000%
-pixel-identical to ares/RustySNES with frames aligned** at 600, 900 and 1500
-frames, with bit-identical VRAM/CGRAM/OAM; only a two-frame title-screen
-content phase remains.
+full SPC700, an APU wrapper with IPL/ports, the S-DSP voice pipeline with
+bit-exact pre-resampler PCM on the blargg oracle, a dot/scanline PPU with modes
+0-7, hires, interlace, sprites, windows, mosaic, subscreen/colour math and
+HDMA, S-CPU DMA/HDMA, APU timers, and the SuperFX, SA-1, SDD1, SPC7110, CX4,
+DSP-1/2/3/4, OBC1 and MSU1 (data + 44.1 kHz audio) coprocessors.
+
+Every reference title is **pixel-identical to the calibrated ares oracle**:
+Super Mario World 600/600 presents (the last one uses the documented per-title
+HDMA phase calibration), Zelda / Super Mario All-Stars / F-Zero / Donkey Kong
+Country / Chrono Trigger 1200/1200, Mega Man X3 and Star Fox 10000/10000, and
+Mega Man X2 9996/10000 with only three proved torn presents excluded. The 212
+test-ROM baseline and the `unko-snes` test suite are green. Retail-music audio
+parity is measured per title (Zelda 99.83% and Mega Man X2 99.87% identical
+samples; denser soundtracks lower) and the residual one-sample register-write
+phase is tracked in the SNES ledger.
 
 Reference gates:
 
@@ -103,7 +112,7 @@ crates/
   unko-nes-api/      # NesCore: devices, FDS, Vs., debugger, filters
   unko-nes-host/     # Core + NesCore adapter
   unko-nes-dev/      # AccuracyCoin battery, mapper suite, harnesses
-  unko-snes/         # standalone SNES core (ROM, 65C816, CPU bus; PPU next)
+  unko-snes/         # standalone SNES core (CPU/PPU/APU/DSP + coprocessors)
   unko-rom-manager/  # standalone DAT audit, 1G1R, fixdat, rebuild
   unko-netplay/      # GGRS rollback, hole-punch/relay adapters, legacy session
   unko-cli/          # info/scan/run/text/verify/trace/diff/bench/corpus
