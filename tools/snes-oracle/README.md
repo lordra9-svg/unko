@@ -10,6 +10,22 @@ the locally built ares (patched for capture); RustySNES is the second oracle.
 | ares | `refs/ares/build_headless/desktop-ui/ares` | per-frame hash trace, last RGBA8 frame, full native-rate stereo PCM |
 | RustySNES | `refs/RustySNES/target/release/{vram_dump,port_clock}` | VRAM/ARAM/WRAM/CGRAM/framebuffer dump, S-SMP/port traces |
 
+### FPGA / hardware references (behavioural only)
+
+The MiSTer SNES core and its Analogue Pocket port are **cycle-level hardware
+implementations** of the 65C816, S-PPU, S-SMP, S-DSP and most coprocessors.
+They are a third kind of reference: they answer "what does the hardware do at
+this dot/cycle" when the software oracles disagree or when ares is ambiguous.
+They are GPL-3.0 HDL and are **not** a code source for this MIT crate: use them
+to confirm a timing/question, then write the Rust behaviour from the observed
+contract, never by translation.
+
+| Reference | Checkout | What it gives |
+|---|---|---|
+| MiSTer `SNES_MiSTer` | `refs/mister-snes` (GPL-3.0) | full RTL: `rtl/CPU.vhd`, `rtl/PPU.vhd`, `rtl/SMP.vhd`, `rtl/DSP.vhd`, `rtl/chip/` coprocessors |
+| `srg320/SNES_MiSTer` | `refs/mister-snes-dev` (GPL-3.0) | the author's development repository (often ahead of the MiSTer-devel integration) |
+| openfpga `openfpga-SNES` | `refs/openfpga-snes` (GPL-3.0) | Analogue Pocket port of the same RTL family |
+
 The ares build in `refs/ares` carries local capture patches:
 
 - `--frames N`, `--dump-trace path`, `--dump-frame path`, `--dump-audio path`
