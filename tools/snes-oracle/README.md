@@ -176,7 +176,11 @@ earlier than ares (frame 90 is 94.046%) but converges by frame 120.
 The local ares build carries two more oracle hooks used to localise CPU bugs:
 
 - `ARES_PC_TRACE=<path>` writes the S-CPU program counter for every step, with
-  `ARES_PC_TRACE_SKIP` / `ARES_PC_TRACE_TAKE` bounding the window.
+  `ARES_PC_TRACE_SKIP` / `ARES_PC_TRACE_TAKE` bounding the window, and
+  `ARES_PC_TRACE_FROM` / `ARES_PC_TRACE_TO` bounding it by frame. The take
+  limit defaults to 2,000,000 instructions, which is exhausted long before
+  frame 3000: set `ARES_PC_TRACE_TAKE` explicitly (e.g. `400000000`) for late
+  frames or the file is empty.
 - `ARES_SA1_PROBE=<path>` dumps the SA-1's I-RAM and BW-RAM plus the S-CPU
   registers the first time the S-CPU reaches `$00EF34`, and appends a short
   log of the interesting bytes.
