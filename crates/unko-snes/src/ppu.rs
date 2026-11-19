@@ -1842,19 +1842,32 @@ impl Ppu {
         luma: (u32, u32),
         fixed: u16,
     ) -> [u8; 4] {
-        let (colour_above, colour_below) = self.colour_window(x);
-        let enable = (if backdrop {
-            self.cgadsub & 0x20 != 0
-        } else {
-            self.cgadsub & (1 << layer) != 0
-        }) && colour_above
-            && colour_below;
+        // ares `DAC::pixel`: the colour window zeroes the main colour first,
+        // then decides whether colour math applies at all.
+        let (window_above, window_below) = self.colour_window(x);
         let mut color = color;
-        if enable {
-            let use_sub = self.cgwsel & 0x02 != 0 && !other_transparent;
-            let operand = if use_sub { other } else { fixed };
-            let halve = self.cgadsub & 0x40 != 0 && use_sub;
-            color = blend(color, operand, halve, self.cgadsub & 0x80 != 0);
+        if !window_above {
+            color = 0;
+        }
+        if window_below {
+            let enabled = if backdrop {
+                self.cgadsub & 0x20 != 0
+            } else {
+                self.cgadsub & (1 << layer) != 0
+            };
+            if enabled {
+                let halve = self.cgadsub & 0x40 != 0 && window_above;
+                color = if self.cgwsel & 0x02 == 0 {
+                    blend(color, fixed, halve, self.cgadsub & 0x80 != 0)
+                } else {
+                    blend(
+                        color,
+                        other,
+                        halve && !other_transparent,
+                        self.cgadsub & 0x80 != 0,
+                    )
+                };
+            }
         }
         let (num, den) = luma;
         let scale = |value: u16| {

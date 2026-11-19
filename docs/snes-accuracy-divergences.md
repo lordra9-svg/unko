@@ -2940,7 +2940,22 @@ The 297 differing pixels carry colours `(0,0,8)` (268x) and `(8,0,0)` (29x)
 that are absent from CGRAM, i.e. colour-math results, in x 92-165 / y 85-163;
 `tm=0x13` (BG1, BG2, OBJ) and `CGADSUB=0x94` (add, half, BG1+BG2+COL) match.
 
-So the PPU inputs match and the difference is inside the renderer or in OAM.
+OAM is also identical once the encoding is calibrated: ares stores sprite Y
+as `raw + 1` ("rendering happens one scanline late") and the attribute byte as
+`nameselect | palette<<1 | priority<<4 | hflip<<6 | vflip<<7`
+(`OAM::read`, ppu-performance/oam.cpp). With that mapping the raw 0x220-byte
+image is **byte-identical at frames 3970 and 3980** (0 differing bytes), so the
+coprocessor, VRAM, CGRAM, OAM and every per-line register all match.
+
+So the PPU inputs match and the difference is inside the renderer.
+
+One ares-faithful semantic gap was found and fixed while comparing the
+compositor: ares' `DAC::pixel` zeroes the main colour when the colour window
+masks the pixel (`if(!windowAbove[x]) above.color = 0x0000;`) and, in
+sub-screen mode, blends with the backdrop even when it is transparent
+(`halve && windowAbove[x] && below.source != COL`). Ours only gated the blend.
+The fix is neutral for MMX2's frame 3980 but matches ares' documented order and
+keeps the 212/212 baseline.
 An OAM hash was added on both sides (`OAM_HASH` / `ARES_OAM_HASH`, hashing the
 raw 0x220-byte layout, re-encoded on the ares side from its decoded objects)
 but it differs from frame 1 while the pictures match, so the encoding mapping

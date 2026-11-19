@@ -252,6 +252,9 @@ fn main() -> ExitCode {
                         let _ = writeln!(f, "F {frames}");
                     }
                 }
+                if let Some(path) = std::env::var_os("OAM_RAW") {
+                    let _ = std::fs::write(path, system.ppu.oam());
+                }
                 if let Some(path) = std::env::var_os("OAM_HASH") {
                     use std::io::Write;
                     let oam = system.ppu.oam();
