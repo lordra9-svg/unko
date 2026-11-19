@@ -396,8 +396,12 @@ Validation so far:
   width-aware for 512-wide frames. Super Metroid and Super Castlevania IV are
   1200/1200 exact too. Chrono Trigger is exact through ares present 1073 and
   then open: the WRAM images already differ by ~52 bytes and the cores hold
-  different BG1 scrolls at the split, so it is a CPU-state divergence to
-  bisect (`$0008` = ours+3 at frames 600-800). With scripted input the cores track through level entry; the
+  different BG1 scrolls at the split. Bisection with a frame-boundary dump on
+  both sides found the first persistent difference: the game frame counter
+  `$0008` starts ~3 frames early because we take an extra NMI at clock
+  11,742,640 that ares does not (ours 38 NMIs by frame 150, ares 36; both
+  agree from 12,100,002 onward). Concrete lead: the first `$4200 = 0x81`
+  enable at 11,599,376 followed by the next vblank edge. With scripted input the cores track through level entry; the
   apparent "divergence" from present 542 was a present-rate drift, and every
   ares present 600-820 matches one of our frames pixel-for-pixel (0 px).
   Input-driven sweeps need a same-phase state sample (next instrumentation

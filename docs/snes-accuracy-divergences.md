@@ -3145,8 +3145,25 @@ images already differ slightly at frame 200 and stay ~52 bytes apart at
 600-800 (e.g. `$0008` is ours+3), and at the divergence the cores hold
 different BG1 scrolls (`h0=0x300` vs `0x30A`) with different register writes
 per frame (ours writes `$2111`/`$210D`/`$210E`, ares only `$210E`), i.e. the
-game logic is in a different state, not a renderer difference. This is the next
-CPU-state bisect.
+game logic is in a different state, not a renderer difference.
+
+Bisecting the state with a frame-boundary dump on both sides (`ARES_DUMP_BASE_V0`
+at vcounter 0, matching our end-of-frame sample; ares' normal dump is at
+vcounter 240, which samples mid-vblank and was why earlier WRAM diffs
+fluctuated) shows the first persistent difference is the game's frame counter
+`$0008`: ours starts counting at frame ~138, ares at ~141, and stays 3 ahead.
+
+The cause is an extra NMI. `NMI_TRACE`/`ARES_NMI_LOG` over 150 frames:
+
+```
+ours: 38 NMIs, first at clock 11,742,640
+ares: 36 NMIs, first at clock 12,100,002  (= our second)
+```
+
+The first NMI enable is `$4200 = 0x81` at clock 11,599,376 (just after a
+`$4210` read); the next vblank is the 11,742,640 edge, where we take an NMI
+that ares does not. This is a `$4200`-enable / vblank-edge NMI difference in
+the boot sequence, and is the concrete lead for the next bisect.
 
 **Donkey Kong Country (USA), presents 0-1199:** 1200 exact.
 
