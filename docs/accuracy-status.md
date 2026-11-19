@@ -309,10 +309,10 @@ Validation so far:
   96.706%, 3700 96.594%, 4000 94.877%; 3300/3400/3479 unchanged at 100.000%,
   baseline 212/212).
 - Coverage sweep with the calibrated oracle is now **exhaustive, every present**:
-  Mega Man X2 3999/4001 exact over 0-4000, Mega Man X3 1800/1801 exact over
+  Mega Man X2 4998/5001 exact over 0-5000, Mega Man X3 1800/1801 exact over
   0-1800 (the one miss is present 1800, past our last frame), Star Fox 1801/1801
-  exact over 0-1800. The two
-  MMX2 outliers (presents 816, 3172) are torn presentations, not emulation:
+  exact over 0-1800. The three
+  MMX2 outliers (presents 816, 3172, 4310) are torn presentations, not emulation:
   ares' state at 816 is byte-identical to ours (WRAM/VRAM/CX4 RAM all 0 bytes
   different) and at 3172 VRAM/CGRAM/OAM are identical, while the frames are
   row-wise mixtures of our adjacent frames (3172: rows 0-18 and 168-223 from
@@ -328,6 +328,13 @@ Validation so far:
   windowAbove)`); the corner pixel was `0x7bfa` instead of `0x31f0`. The
   operand is now selected by `$2130` bit 1 alone and halving is suppressed only
   for a transparent subscreen, matching ares `DAC::pixel`/`blend`.
+- Fixed sprite vertical wrap (MMX2 presents 4068-4309): a sprite at OAM `Y=250`
+  must draw its last rows at the top of the screen (`(vcounter - (Y+1)) mod 256
+  < height`, ares `within<0,255>`); our on-scanline test was a plain interval
+  and dropped the wrapped rows. MMX2 4808 -> 4998/5001. Pinned by a unit test.
+- PCM re-checked after both PPU fixes: `blargg_near_cd_quality` against ares'
+  pre-resampler i16 stream is still bit-exact (0 differing samples over 639,700
+  stereo frames).
 - The compositor changes from 20564dc (colour-window zeroing, sub-backdrop
   fixed colour, OBJ1/OBJ2 split) were **reverted**: against the calibrated
   presentation oracle the original code is 100.000% at frames 3979/3980/3990/

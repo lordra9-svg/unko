@@ -1627,9 +1627,12 @@ impl Ppu {
             // ares `Object::onScanline`: `height >> interlace` scanlines carry
             // the sprite, each drawing one field's row.
             let height = sprite_height(size) >> u16::from(obj_interlace);
-            // Hardware quirk: a sprite's first visible line is OAM Y + 1.
+            // Hardware quirk: a sprite's first visible line is OAM Y + 1. The
+            // scanline test wraps modulo 256 (ares `within<0,255>`), so a
+            // sprite at Y = 250 draws its last rows at the top of the screen.
             let first = usize::from(self.oam[base + 1]) + 1;
-            if y < first || y >= first + usize::from(height) {
+            let row = (y as u16).wrapping_sub(first as u16) & 0xFF;
+            if row >= height {
                 continue;
             }
             latch_oam = sprite;
@@ -2582,6 +2585,32 @@ mod tests {
         assert!(ppu.debug_sprite_row(0).is_empty());
         assert_eq!(ppu.debug_sprite_row(1), vec![(0, 129, 3)]);
         assert_eq!(ppu.debug_sprite_row(9), vec![(0, 129, 3)]);
+    }
+
+    #[test]
+    fn sprite_y_wraps_modulo_256_at_the_top_of_the_screen() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2100, 0x80); // force blank for OAM access
+        ppu.write(0x2101, 0x03); // OBSEL: base size 0, tiledata $6000 words
+        ppu.write(0x212C, 0x10); // objects on the main screen
+        ppu.write(0x2102, 0x00);
+        ppu.write(0x2103, 0x00);
+        // Sprite 0: x=0, Y=250 (8x8, no flips). Its first line is 251, so tile
+        // rows 5-7 land on screen rows 0-2 through the 256-line wrap.
+        for byte in [0x00u8, 250, 0x00, 0x00] {
+            ppu.write(0x2104, byte);
+        }
+        // Sprite 1 off-screen, so the zeroed entry cannot draw.
+        for byte in [0x00u8, 0xF0, 0x00, 0x00] {
+            ppu.write(0x2104, byte);
+        }
+        // Only tile row 5 has a pixel in column 0 (plane 0, bit 7).
+        ppu.vram[0x6000 + 5] = 0x0080;
+
+        assert_eq!(ppu.debug_sprite_row(0), vec![(0, 129, 3)]);
+        assert!(ppu.debug_sprite_row(1).is_empty());
+        assert!(ppu.debug_sprite_row(2).is_empty());
+        assert!(ppu.debug_sprite_row(3).is_empty());
     }
 
     #[test]

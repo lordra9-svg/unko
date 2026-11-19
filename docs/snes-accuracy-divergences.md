@@ -2986,6 +2986,34 @@ below-window early return). The fix makes 907-972 exact and takes MMX3 from
 1184/1801 to **1800/1801** (present 1800 is one past our last frame). Pinned by
 `ppu::tests::fixed_colour_blend_halves_when_cgadsub_bit6_is_set`.
 
+### Fixed: sprites wrap vertically at the top of the screen
+
+MMX2 was exact through present 4067 and then had 8-48 pixels too few in a
+4-pixel-wide block at the very top of the screen (`x 210-213`, `y 0-5`, then
+`x 98-101`), until present 4309. OAM was identical; the block came from sprite
+79 at `x=208`, **`Y=250`** (and its twin at `x=96`).
+
+ares evaluates a sprite with `within<0,255>(object.y, height, vcounter)`, i.e.
+`(vcounter - (OAM Y + 1)) mod 256 < height`, so a sprite at Y=250 shows its last
+rows at the top of the screen. Our on-scanline test was a plain interval
+(`y < first || y >= first + height`) and dropped those wrapped rows; the fetch
+path already used the wrapped row, so only the visibility test was wrong. It now
+uses `row = (y - (oam_y + 1)) & 0xFF` and `row < height`.
+
+Result: presents 4068-4309 exact, and MMX2's 5000-present sweep goes from
+4808/5001 to **4998/5001**. The remaining miss, 4310, is a torn capture: its top
+24 rows still hold the previous frame's solid band while rows 24-223 are our
+next frame (ares 4311 matches our 4310 at 100.000%, and the body of 4310 matches
+our 4309). Pinned by
+`ppu::tests::sprite_y_wraps_modulo_256_at_the_top_of_the_screen`.
+
+### Audio re-checked after the PPU fixes
+
+The colour-math and sprite fixes were re-checked against the PCM oracle.
+`blargg_near_cd_quality.smc` at 1,200 frames against ares' pre-resampler i16
+stream is still **bit-exact: 0 differing samples over 639,700 stereo frames**
+(2-sample alignment). The PPU changes do not touch the APU path.
+
 ### Coverage sweep against the calibrated oracle (2026-11-19, exhaustive)
 
 The sweep was upgraded from sampling to **every present**. Each ares present is
@@ -2994,7 +3022,7 @@ compared against our frames with a content window (ares skips presents via
 
 ```
 title        presents   exact      notes
-Mega Man X2     4001    3999/4001  two torn captures (816, 3172)
+Mega Man X2     5001    4998/5001  three torn captures (816, 3172, 4310)
 Mega Man X3     1801    1800/1801  present 1800 is past our last frame
 Star Fox        1801    1801/1801  0-1800
 ```
