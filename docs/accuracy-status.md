@@ -62,7 +62,7 @@ The SNES accuracy track counts as finished when all five hold at once:
 5. **Public suites** - the 212-entry test-ROM baseline (above) passes.
 
 Current standing against that definition: gates 1 and 5 green; covers 2 with
-Mega Man X2 0-7000, Mega Man X3 0-6000 and Star Fox 0-6000 plus the
+Mega Man X2 0-8000, Mega Man X3 0-8000 and Star Fox 0-8000 plus the
 coprocessor titles recorded below, with only three torn MMX2 presents excluded;
 3 bit-exact (639,700 stereo frames); 4 covered by the state round-trip and
 continuation tests. The one gap is a **commercial base-console cartridge**:
@@ -336,8 +336,8 @@ Validation so far:
   96.706%, 3700 96.594%, 4000 94.877%; 3300/3400/3479 unchanged at 100.000%,
   baseline 212/212).
 - Coverage sweep with the calibrated oracle is now **exhaustive, every present**:
-  Mega Man X2 6998/7001 exact over 0-7000, Mega Man X3 6001/6001 exact over
-  0-6000, Star Fox 6001/6001 exact over 0-6000. The three
+  Mega Man X2 7998/8001 exact over 0-8000, Mega Man X3 8001/8001 exact over
+  0-8000, Star Fox 8001/8001 exact over 0-8000. The three
   MMX2 outliers (presents 816, 3172, 4310) are torn presentations, not emulation:
   ares' state at 816 is byte-identical to ours (WRAM/VRAM/CX4 RAM all 0 bytes
   different) and at 3172 VRAM/CGRAM/OAM are identical, while the frames are
@@ -372,9 +372,19 @@ Validation so far:
   already beaten a higher-priority object. ares builds the final object pixel
   and compares its priority once; the renderer does the same now. MMX2
   0-7000 is 6998/7001 (three torn presents). Pinned by a unit test.
+- Fixed the object tile budget (MMX2 presents 7395-7431): ares counts the
+  tiles of a sprite at exactly `x = 256` (they fetch and draw nothing) against
+  the 34-tile per-line limit; we skipped them before counting, so our budget
+  was four tiles lighter and two sprites appeared that ares dropped. The object
+  loop now mirrors ares' `objectX = (x + (tileX << 3)) & 511`, skip test and
+  per-pixel `& 511` masking. MMX2 0-8000 is 7998/8001. Pinned by a unit test.
 - PCM re-checked after all PPU fixes: `blargg_near_cd_quality` against ares'
   pre-resampler i16 stream is still bit-exact (0 differing samples over 639,700
   stereo frames).
+- Save-state round-trip re-verified after the PPU changes: `hvdma` 60+60 video
+  and `blargg_near_cd_quality` 600+600 PCM are byte-identical to the straight
+  runs, and Mega Man X2 (CX4), Mega Man X3 (CX4) and Star Fox (GSU) 150+150
+  video frames are byte-identical as well.
 - The compositor changes from 20564dc (colour-window zeroing, sub-backdrop
   fixed colour, OBJ1/OBJ2 split) were **reverted**: against the calibrated
   presentation oracle the original code is 100.000% at frames 3979/3980/3990/

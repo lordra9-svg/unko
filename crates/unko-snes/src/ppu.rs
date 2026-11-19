@@ -1686,6 +1686,30 @@ impl Ppu {
             item_count += 1;
         }
 
+        if let Some(path) = std::env::var_os("PPU_OBJLIST_LOG") {
+            let want_frame: Option<u64> = std::env::var("PPU_OBJLIST_FRAME")
+                .ok()
+                .and_then(|v| v.parse().ok());
+            let want_line: Option<usize> = std::env::var("PPU_OBJLIST_LINE")
+                .ok()
+                .and_then(|v| v.parse().ok());
+            if want_line == Some(y) && want_frame.is_none_or(|f| f == self.debug_frame) {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                {
+                    let _ = writeln!(
+                        f,
+                        "first={} count={} items={:?}",
+                        self.first_sprite,
+                        item_count,
+                        &items[..item_count]
+                    );
+                }
+            }
+        }
         // ares `Object::run`: walk the list backwards and overwrite opaque
         // pixels, so the lowest OAM index wins every overlap regardless of the
         // per-sprite priority bits (those only order the layer). The line also
@@ -1700,16 +1724,10 @@ impl Ppu {
             let size = (high >> (high_bit + 1)) & 1;
             let width = sprite_size(base_size, size, false);
             let height = sprite_height(size);
-            let x = u16::from(self.oam[base]) | (u16::from((high >> high_bit) & 1) << 8);
-            // OAM x is nine bits but the screen is 256 wide, so values >= 256
-            // are *negative* positions: an object at x = 511 sits one pixel off
-            // the left edge. ares clips these against a signed window
-            // (`Object::fetch`'s `x1`), so the rightmost columns still show.
-            let x = if x >= SCREEN_WIDTH as u16 {
-                i32::from(x) - 512
-            } else {
-                i32::from(x)
-            };
+            // OAM x is nine bits; ares works in the 0..511 space and masks
+            // each tile column with `& 511`, so x = 511 wraps onto the left
+            // edge instead of being treated as a negative position.
+            let x9 = u16::from(self.oam[base]) | (u16::from((high >> high_bit) & 1) << 8);
             let first = u16::from(self.oam[base + 1]) + 1;
             // ares `Object::fetch`: `y = t.y - sprite.y; if(interlace) y <<= 1`,
             // then the vertical flip, then the odd field takes the odd row.
@@ -1734,8 +1752,12 @@ impl Ppu {
             let tile_width = width / 8;
             let layer_priority = priority[usize::from((attr >> 4) & 0x03)];
             for tx in 0..tile_width {
-                let sx = x + (tx as i32) * 8;
-                if sx >= SCREEN_WIDTH as i32 || sx + 8 <= 0 {
+                // ares `Object::run`: `objectX = x + (tileX << 3) & 511`, and a
+                // tile is only skipped (not counted) when it lies wholly to the
+                // right and cannot wrap. A sprite at x = 256 therefore still
+                // consumes the 34-tile budget although it draws nothing.
+                let object_x = (u32::from(x9) + u32::from(tx) * 8) & 511;
+                if x9 != 256 && object_x >= 256 && object_x + 7 < 512 {
                     continue;
                 }
                 // ares `Object::fetch`: `if(t.tileCount++ >= 34) break;`, so
@@ -1761,11 +1783,10 @@ impl Ppu {
                     address += (u32::from(nameselect) + 1) << 12;
                 }
                 for px in 0..8 {
-                    let screen_x = sx + px;
-                    if !(0..SCREEN_WIDTH as i32).contains(&screen_x) {
+                    let screen_x = ((object_x + px) & 511) as usize;
+                    if screen_x >= SCREEN_WIDTH {
                         continue;
                     }
-                    let screen_x = screen_x as usize;
                     // Horizontal flip reverses the tile order and reads each
                     // tile from bit 0 upward; it does not mirror the plane bits
                     // a second time.
@@ -2686,6 +2707,42 @@ mod tests {
         assert!(ppu.debug_sprite_row(0).is_empty());
         assert_eq!(ppu.debug_sprite_row(1), vec![(0, 129, 3)]);
         assert_eq!(ppu.debug_sprite_row(9), vec![(0, 129, 3)]);
+    }
+
+    #[test]
+    fn object_x_wraps_modulo_512_like_ares() {
+        let mut ppu = Ppu::new();
+        ppu.write(0x2105, 0x00); // mode 0
+        ppu.write(0x212C, 0x10); // objects on the main screen
+        ppu.write(0x2101, 0x03); // OBSEL character base $6000
+        ppu.write(0x2102, 0x00);
+        ppu.write(0x2103, 0x00);
+        // Sprite 0: x = 511 (nine-bit), y = 0, tile 0, no flips.
+        for byte in [0xFFu8, 0x00, 0x00, 0x00] {
+            ppu.write(0x2104, byte);
+        }
+        // High table: x bit 8 and the 16x16 size bit (two writes: latch then
+        // commit).
+        ppu.write(0x2103, 0x01);
+        ppu.write(0x2104, 0x03); // latch
+        ppu.write(0x2104, 0x00); // commit
+                                 // Both tiles are solid colour 15.
+        for word in 0x6000..0x6020 {
+            ppu.vram[word] = 0xFFFF;
+        }
+        ppu.write(0x2121, 0x8F); // CGRAM word 143
+        ppu.write(0x2122, 0x1F);
+        ppu.write(0x2122, 0x00);
+        ppu.write(0x2100, 0x0F);
+        ppu.render_line(1, 0);
+        // ares masks with `& 511`: the tile at 511 wraps to x 0..6 and the
+        // second tile covers x 7..14; nothing lands at x 15 or 255.
+        for x in [0usize, 14] {
+            assert_eq!(&ppu.framebuffer[x * 4..x * 4 + 3], &[0xFF, 0x00, 0x00]);
+        }
+        for x in [15usize, 255] {
+            assert_eq!(&ppu.framebuffer[x * 4..x * 4 + 3], &[0x00, 0x00, 0x00]);
+        }
     }
 
     #[test]

@@ -2986,6 +2986,32 @@ below-window early return). The fix makes 907-972 exact and takes MMX3 from
 1184/1801 to **1800/1801** (present 1800 is one past our last frame). Pinned by
 `ppu::tests::fixed_colour_blend_halves_when_cgadsub_bit6_is_set`.
 
+### Fixed: the 34-object-tile budget counts x = 256 sprites
+
+Extending MMX2 past 7000 exposed presents 7395-7398 (3-28 px), 7409 (217 px),
+7412 (103 px) and 7431 (102 px). ares showed BG1 at `x 8..23` where we showed a
+sprite. The sprites are 2 and 3 at `x = 8`, and ares' per-line item list did
+include them, so the evaluation was the same.
+
+ares' 34-object-tile budget is consumed by *every* fetched tile, and a tile is
+only skipped (not counted) when
+
+```cpp
+if(x != width && objectX >= width && objectX + 7 < 512 + x1) continue;
+```
+
+so a sprite at exactly `x = 256` is **not** skipped: its tiles are fetched,
+counted and then draw nothing because the pixel loop keeps only `objectX & 511
+< 256`. On this line two such sprites (115, 74) consumed four tiles, pushing
+sprites 3 and 2 past the budget in ares. We skipped those tiles before counting,
+so our budget was four tiles lighter and we drew sprites 2/3.
+
+The object tile loop now mirrors ares: `objectX = (x + (tileX << 3)) & 511`, the
+same skip test, and per-pixel `(objectX + px) & 511` masking (which also covers
+the x = 511 wrap onto the left edge). Presents 7395-7431 are exact and the MMX2
+sweep extends to 8000: **7998/8001**, again only the three torn presents. Pinned
+by `ppu::tests::object_x_wraps_modulo_512_like_ares`.
+
 ### Fixed: objects merge into the background once, with a strict priority test
 
 Extending MMX2 past 6000 found a divergence at the very end: present 6992
@@ -3070,9 +3096,9 @@ compared against our frames with a content window (ares skips presents via
 
 ```
 title        presents   exact      notes
-Mega Man X2     7001    6998/7001  three torn captures (816, 3172, 4310)
-Mega Man X3     6001    6001/6001  0-6000
-Star Fox        6001    6001/6001  0-6000
+Mega Man X2     8001    7998/8001  three torn captures (816, 3172, 4310)
+Mega Man X3     8001    8001/8001  0-8000
+Star Fox        8001    8001/8001  0-8000
 ```
 
 MMX2 was captured twice at every present and the two runs are byte-identical
