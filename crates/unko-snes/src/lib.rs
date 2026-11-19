@@ -27,6 +27,7 @@ pub mod dma;
 pub mod dsp;
 pub mod epsonrtc;
 pub mod gsu;
+pub(crate) mod hdma_calibration;
 pub mod io;
 pub mod necdsp;
 pub mod ppu;

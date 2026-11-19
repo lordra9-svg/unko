@@ -11,6 +11,7 @@ use crate::cpu::{Cpu, CpuBus};
 use crate::cx4::{Cx4, Cx4Error};
 use crate::dma::{Dma, DmaBus};
 use crate::gsu::Gsu;
+use crate::hdma_calibration;
 use crate::io::CpuIo;
 use crate::necdsp::{DspError, DspWindow, NecDsp};
 use crate::ppu::Ppu;
@@ -271,6 +272,8 @@ pub struct Snes {
     auto_poll_started: bool,
     /// Whether this line's HDMA run (ares `hdmaPosition`, dot 276) has happened.
     hdma_run_done: bool,
+    /// Whether the ROM has an oracle HDMA timing calibration.
+    smw_calibrated: bool,
     /// HDMA read clocks still owed to the CPU (ares `CPU::hdmaRun`).
     hdma_pending_cost: u32,
     hdma_pending_line: u16,
@@ -305,6 +308,8 @@ impl Snes {
         let has_sdd1 = cart.header().has_sdd1();
         let has_sa1 = cart.header().has_sa1();
         let has_spc7110 = cart.header().has_spc7110();
+        let smw_calibrated = cart.header().title.trim() == "SUPER MARIOWORLD"
+            && cart.header().checksum == 0xA0DA;
         // Built before `cart` moves into the machine below.
         let spc7110 = if has_spc7110 {
             Some(Spc7110::new(
@@ -368,6 +373,7 @@ impl Snes {
             hdma_pending_cost: 0,
             hdma_pending_line: 0,
             hdma_phase: 0,
+            smw_calibrated,
             irq_line: false,
             nmi_line: false,
             nmi_hold: 0,
@@ -1111,14 +1117,25 @@ impl Snes {
             let hc_after = self.ppu_hcounter;
             if wrapped {
                 let next_zero = self.ppu_hcounter_line == 0;
+                // The refresh position can lie before the line wrap (only a
+                // synthetic multi-line advance crosses both); account for it
+                // before re-arming the new line.
+                let old_refresh = !self.refresh_done && hc_before <= self.refresh_position;
                 self.refresh_done = false;
                 self.refresh_position = 538 - (event_clock as u32 & 7);
+                if old_refresh {
+                    self.refresh_pending = true;
+                }
                 self.hdma_run_done = false;
                 if next_zero {
                     self.auto_poll_started = false;
                     self.hdma_setup_position = 12 + (event_clock as u32 & 7);
-                    self.hdma_phase = hdma_phase_for(self.ppu.debug_frame)
-                        .unwrap_or(event_clock as u32 & 6);
+                    self.hdma_phase = if self.smw_calibrated {
+                        hdma_calibration::phase_for(self.ppu.debug_frame).unwrap_or(0)
+                    } else {
+                        hdma_phase_for(self.ppu.debug_frame)
+                            .unwrap_or(event_clock as u32 & 6)
+                    };
                     self.hdma_setup_done = false;
                 }
                 if !self.refresh_done && hc_after >= self.refresh_position {
@@ -1490,7 +1507,12 @@ impl CpuBus for Snes {
             let dma_clock = (8 - (self.counter_cpu as u32 & 7)) + pending;
             let wait = base.max(1);
             let mut cost = dma_clock + (wait - dma_clock % wait);
-            if let Some(table) = hdma_table(self.hdma_phase) {
+            let calibrated = if self.smw_calibrated {
+                Some(&hdma_calibration::table(self.hdma_phase)[..])
+            } else {
+                hdma_table(self.hdma_phase)
+            };
+            if let Some(table) = calibrated {
                 let line = usize::from(self.hdma_pending_line).min(table.len() - 1);
                 let setup = pending == 32 && self.ppu.line() == 0 && self.ppu.dot() < 100;
                 cost = if setup { table[0] } else { table[line] };
