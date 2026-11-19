@@ -308,8 +308,8 @@ impl Snes {
         let has_sdd1 = cart.header().has_sdd1();
         let has_sa1 = cart.header().has_sa1();
         let has_spc7110 = cart.header().has_spc7110();
-        let smw_calibrated = cart.header().title.trim() == "SUPER MARIOWORLD"
-            && cart.header().checksum == 0xA0DA;
+        let smw_calibrated =
+            cart.header().title.trim() == "SUPER MARIOWORLD" && cart.header().checksum == 0xA0DA;
         // Built before `cart` moves into the machine below.
         let spc7110 = if has_spc7110 {
             Some(Spc7110::new(
@@ -1032,13 +1032,12 @@ impl Snes {
             self.ppu_hcounter -= line_len;
             wrapped = true;
             event_clock = (self.clock - u64::from(clocks)) + u64::from(line_len - hc_before);
-            self.ppu_hcounter_line = if u32::from(counter_line_before) + 1
-                >= u32::from(self.ppu.frame_lines())
-            {
-                0
-            } else {
-                counter_line_before + 1
-            };
+            self.ppu_hcounter_line =
+                if u32::from(counter_line_before) + 1 >= u32::from(self.ppu.frame_lines()) {
+                    0
+                } else {
+                    counter_line_before + 1
+                };
         }
         // One PPU dot is four master clocks in both regions; the PAL frame is
         // longer because it has 312 lines (and one 342-dot line), not because
@@ -1133,8 +1132,7 @@ impl Snes {
                     self.hdma_phase = if self.smw_calibrated {
                         hdma_calibration::phase_for(self.ppu.debug_frame).unwrap_or(0)
                     } else {
-                        hdma_phase_for(self.ppu.debug_frame)
-                            .unwrap_or(event_clock as u32 & 6)
+                        hdma_phase_for(self.ppu.debug_frame).unwrap_or(event_clock as u32 & 6)
                     };
                     self.hdma_setup_done = false;
                 }
@@ -1485,10 +1483,20 @@ impl CpuBus for Snes {
     fn access_cycles(&mut self, address: u32) -> u32 {
         if let Ok(path) = std::env::var("BUS_LOG") {
             use std::io::Write;
-            let from: u64 = std::env::var("BUS_LOG_FROM").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-            let to: u64 = std::env::var("BUS_LOG_TO").ok().and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
+            let from: u64 = std::env::var("BUS_LOG_FROM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            let to: u64 = std::env::var("BUS_LOG_TO")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(u64::MAX);
             if self.clock >= from && self.clock <= to {
-                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                {
                     let _ = writeln!(f, "{} {:06X} pc={:06X}", self.clock, address, self.live_pc);
                 }
             }
@@ -1534,7 +1542,11 @@ impl CpuBus for Snes {
 /// Master clocks a CPU bus access takes (ares `CPU::wait`).
 fn bus_wait(address: u32, fast_rom: bool) -> u32 {
     if address & 0x40_8000 != 0 {
-        return if address & 0x80_0000 != 0 && fast_rom { 6 } else { 8 };
+        return if address & 0x80_0000 != 0 && fast_rom {
+            6
+        } else {
+            8
+        };
     }
     if address.wrapping_add(0x6000) & 0x4000 != 0 {
         return 8;
@@ -1571,9 +1583,13 @@ fn hdma_phase_for(frame: u64) -> Option<u32> {
             if let Ok(text) = std::fs::read_to_string(path) {
                 for l in text.lines() {
                     let mut it = l.split_whitespace();
-                    let (Some(f), Some(p)) = (it.next(), it.next()) else { continue };
-                    let (Ok(f), Ok(p)): (Result<u64, _>, Result<u32, _>) =
-                        (f.parse(), p.parse()) else { continue };
+                    let (Some(f), Some(p)) = (it.next(), it.next()) else {
+                        continue;
+                    };
+                    let (Ok(f), Ok(p)): (Result<u64, _>, Result<u32, _>) = (f.parse(), p.parse())
+                    else {
+                        continue;
+                    };
                     if (f as usize) < v.len() {
                         v[f as usize] = Some(p);
                     }
