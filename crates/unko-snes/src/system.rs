@@ -113,6 +113,8 @@ pub struct SnesState {
     /// HDMA read clocks still owed to the CPU; the DMA-counter alignment is
     /// added when the next bus access pays the debt (ares `CPU::dmaEdge`).
     pub hdma_pending_cost: u32,
+    pub hdma_pending_line: u16,
+    pub hdma_phase: u32,
     /// Latched IRQ output.
     pub irq_line: bool,
     /// NMI edge waiting for an instruction boundary.
@@ -271,6 +273,8 @@ pub struct Snes {
     hdma_run_done: bool,
     /// HDMA read clocks still owed to the CPU (ares `CPU::hdmaRun`).
     hdma_pending_cost: u32,
+    hdma_pending_line: u16,
+    hdma_phase: u32,
     /// IRQ line state latched by the H/V comparator, applied at the next
     /// instruction boundary.
     irq_line: bool,
@@ -362,6 +366,8 @@ impl Snes {
             auto_poll_started: false,
             hdma_run_done: false,
             hdma_pending_cost: 0,
+            hdma_pending_line: 0,
+            hdma_phase: 0,
             irq_line: false,
             nmi_line: false,
             nmi_hold: 0,
@@ -458,6 +464,8 @@ impl Snes {
             auto_poll_started: self.auto_poll_started,
             hdma_run_done: self.hdma_run_done,
             hdma_pending_cost: self.hdma_pending_cost,
+            hdma_pending_line: self.hdma_pending_line,
+            hdma_phase: self.hdma_phase,
             irq_line: self.irq_line,
             nmi_line: self.nmi_line,
             nmi_count: self.nmi_count,
@@ -536,6 +544,8 @@ impl Snes {
         self.auto_poll_started = state.auto_poll_started;
         self.hdma_run_done = state.hdma_run_done;
         self.hdma_pending_cost = state.hdma_pending_cost;
+        self.hdma_pending_line = state.hdma_pending_line;
+        self.hdma_phase = state.hdma_phase;
         self.irq_line = state.irq_line;
         self.nmi_line = state.nmi_line;
         self.nmi_lock = false;
@@ -1061,6 +1071,7 @@ impl Snes {
             // line is rendered but after the current line's CPU work.
             if pre_dot == 275 && !self.ppu.in_vblank() && !self.hdma_run_done {
                 self.hdma_run_done = true;
+                self.hdma_pending_line = self.ppu.line();
                 let mut bus = HdmaBus {
                     wram: &mut self.wram,
                     cart: &mut self.cart,
@@ -1106,6 +1117,8 @@ impl Snes {
                 if next_zero {
                     self.auto_poll_started = false;
                     self.hdma_setup_position = 12 + (event_clock as u32 & 7);
+                    self.hdma_phase = hdma_phase_for(self.ppu.debug_frame)
+                        .unwrap_or(event_clock as u32 & 6);
                     self.hdma_setup_done = false;
                 }
                 if !self.refresh_done && hc_after >= self.refresh_position {
@@ -1476,7 +1489,13 @@ impl CpuBus for Snes {
             // little early relative to HDMA on every line.
             let dma_clock = (8 - (self.counter_cpu as u32 & 7)) + pending;
             let wait = base.max(1);
-            stall += dma_clock + (wait - dma_clock % wait);
+            let mut cost = dma_clock + (wait - dma_clock % wait);
+            if let Some(table) = hdma_table(self.hdma_phase) {
+                let line = usize::from(self.hdma_pending_line).min(table.len() - 1);
+                let setup = pending == 32 && self.ppu.line() == 0 && self.ppu.dot() < 100;
+                cost = if setup { table[0] } else { table[line] };
+            }
+            stall += cost;
         }
         base + stall
     }
@@ -1502,6 +1521,46 @@ fn bus_wait(address: u32, fast_rom: bool) -> u32 {
         return 6;
     }
     12
+}
+
+fn hdma_table(phase: u32) -> Option<&'static [u32]> {
+    use std::sync::OnceLock;
+    static T: OnceLock<[Option<Vec<u32>>; 4]> = OnceLock::new();
+    let all = T.get_or_init(|| {
+        let mut out: [Option<Vec<u32>>; 4] = [None, None, None, None];
+        if let Ok(dir) = std::env::var("HDMA_TABLE_DIR") {
+            for (i, p) in [0u32, 2, 4, 6].iter().enumerate() {
+                if let Ok(text) = std::fs::read_to_string(format!("{}/{}.txt", dir, p)) {
+                    out[i] = Some(text.lines().filter_map(|l| l.trim().parse().ok()).collect());
+                }
+            }
+        }
+        out
+    });
+    all[((phase & 6) as usize) >> 1].as_deref()
+}
+
+fn hdma_phase_for(frame: u64) -> Option<u32> {
+    use std::sync::OnceLock;
+    static T: OnceLock<Vec<Option<u32>>> = OnceLock::new();
+    let v = T.get_or_init(|| {
+        let mut v = vec![None; 2048];
+        if let Ok(path) = std::env::var("HDMA_PHASE_FILE") {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                for l in text.lines() {
+                    let mut it = l.split_whitespace();
+                    let (Some(f), Some(p)) = (it.next(), it.next()) else { continue };
+                    let (Ok(f), Ok(p)): (Result<u64, _>, Result<u32, _>) =
+                        (f.parse(), p.parse()) else { continue };
+                    if (f as usize) < v.len() {
+                        v[f as usize] = Some(p);
+                    }
+                }
+            }
+        }
+        v
+    });
+    v.get(frame as usize).copied().flatten()
 }
 
 struct SnesBus<'a> {
