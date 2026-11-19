@@ -62,7 +62,7 @@ The SNES accuracy track counts as finished when all five hold at once:
 5. **Public suites** - the 212-entry test-ROM baseline (above) passes.
 
 Current standing against that definition: gates 1 and 5 green; covers 2 with
-Mega Man X2 0-8000, Mega Man X3 0-8000 and Star Fox 0-8000 plus the
+Mega Man X2 0-10000, Mega Man X3 0-9999 and Star Fox 0-10000 plus the
 coprocessor titles recorded below, with only three torn MMX2 presents excluded;
 3 bit-exact (639,700 stereo frames); 4 covered by the state round-trip and
 continuation tests. The one gap is a **commercial base-console cartridge**:
@@ -336,8 +336,9 @@ Validation so far:
   96.706%, 3700 96.594%, 4000 94.877%; 3300/3400/3479 unchanged at 100.000%,
   baseline 212/212).
 - Coverage sweep with the calibrated oracle is now **exhaustive, every present**:
-  Mega Man X2 7998/8001 exact over 0-8000, Mega Man X3 8001/8001 exact over
-  0-8000, Star Fox 8001/8001 exact over 0-8000. The three
+  Mega Man X2 9998/10001 exact over 0-10000, Mega Man X3 10000/10001 over
+  0-10000 (present 10000 past our last frame), Star Fox 10001/10001 over
+  0-10000. The three
   MMX2 outliers (presents 816, 3172, 4310) are torn presentations, not emulation:
   ares' state at 816 is byte-identical to ours (WRAM/VRAM/CX4 RAM all 0 bytes
   different) and at 3172 VRAM/CGRAM/OAM are identical, while the frames are

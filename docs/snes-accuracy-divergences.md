@@ -3096,9 +3096,9 @@ compared against our frames with a content window (ares skips presents via
 
 ```
 title        presents   exact      notes
-Mega Man X2     8001    7998/8001  three torn captures (816, 3172, 4310)
-Mega Man X3     8001    8001/8001  0-8000
-Star Fox        8001    8001/8001  0-8000
+Mega Man X2    10001    9998/10001 three torn captures (816, 3172, 4310)
+Mega Man X3    10001   10000/10001 0-9999 (present 10000 past our last frame)
+Star Fox       10001   10001/10001 0-10000
 ```
 
 MMX2 was captured twice at every present and the two runs are byte-identical
