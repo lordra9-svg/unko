@@ -308,6 +308,11 @@ Validation so far:
   offset ~800 clocks, and frames **3480 and 3900 are now 100.000%** (3500
   96.706%, 3700 96.594%, 4000 94.877%; 3300/3400/3479 unchanged at 100.000%,
   baseline 212/212).
+- The compositor changes from 20564dc (colour-window zeroing, sub-backdrop
+  fixed colour, OBJ1/OBJ2 split) were **reverted**: against the calibrated
+  presentation oracle the original code is 100.000% at frames 3979/3980/3990/
+  3995/4000 while the changed build was 15-23 pixels off. MMX2 is therefore
+  pixel-exact at 4000, not 99.960%.
 - The frame-locked pixel oracle is **calibrated**: ares' presented frame is
   `Screen::refresh()`'s `_output`, dumped via `ARES_PRESENT_DIR`. Presents map
   1:1 to our frames (60/60 hashes equal). With it, MMX2 is 100.000% at

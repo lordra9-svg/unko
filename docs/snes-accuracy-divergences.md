@@ -3070,13 +3070,14 @@ coprocessor, VRAM, CGRAM, OAM and every per-line register all match.
 
 So the PPU inputs match and the difference is inside the renderer.
 
-One ares-faithful semantic gap was found and fixed while comparing the
-compositor: ares' `DAC::pixel` zeroes the main colour when the colour window
-masks the pixel (`if(!windowAbove[x]) above.color = 0x0000;`) and, in
-sub-screen mode, blends with the backdrop even when it is transparent
-(`halve && windowAbove[x] && below.source != COL`). Ours only gated the blend.
-The fix is neutral for MMX2's frame 3980 but matches ares' documented order and
-keeps the 212/212 baseline.
+**Correction (2026-11-19): the compositor "fix" below was wrong and has been
+reverted.** With the calibrated presentation oracle (see "presentation-time
+oracle calibrated"), the pre-change build is 100.000% at frames 3979, 3980,
+3990, 3995 and 4000, while the changed build is 99.974-99.960% (15-23 pixels).
+The per-pixel comparison that motivated it had mixed the above and below
+screens and compared stale frame dumps; the reference now shows the original
+code was right. The three rules (colour-window zeroing, sub-backdrop fixed
+colour, OBJ1/OBJ2 layer split) are removed.
 
 Two more compositor rules were aligned in the same pass:
 

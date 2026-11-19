@@ -998,29 +998,6 @@ impl Ppu {
         let address = self.vram_word_address() & 0x7FFF;
         // ares `PPU::writeVRAM`: writes during active display are dropped, but
         // the address still advances.
-        if !(self.display_disable || self.line >= self.vdisp())
-            && address >= 0xE000
-            && std::env::var_os("VRAM_REJECT_LOG").is_some()
-        {
-            use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(std::env::var_os("VRAM_REJECT_LOG").unwrap_or_default())
-            {
-                let _ = writeln!(
-                    f,
-                    "A={:04X} byte={} data={:02X} line={} vdisp={} blank={} frame={}",
-                    address,
-                    u8::from(high),
-                    data,
-                    self.line,
-                    self.vdisp(),
-                    u8::from(self.display_disable),
-                    self.debug_frame
-                );
-            }
-        }
         if self.display_disable || self.line >= self.vdisp() {
             if let Some(path) = std::env::var_os("VRAM_WRITE_LOG") {
                 use std::io::Write;
@@ -1759,16 +1736,11 @@ impl Ppu {
                     if color == 0 {
                         continue;
                     }
-                    // ares `Object::render` selects `Source::OBJ1` for palettes
-                    // 0-3 and `OBJ2` for 4-7; only OBJ2 takes part in colour
-                    // math (`colorEnable[OBJ1]` is forced to zero), so encode
-                    // the split in the layer id (4 = OBJ1, 5 = OBJ2).
-                    let palette_group = (u16::from(attr) >> 1) & 0x07;
-                    let palette = 128u16 + palette_group * 16 + color;
+                    let palette = 128u16 + ((u16::from(attr) >> 1) & 0x07) * 16 + color;
                     let pixel = Pixel {
                         color: palette as u8,
                         priority: layer_priority,
-                        layer: if palette_group >= 4 { 5 } else { 4 },
+                        layer: 4,
                     };
                     let masked = self.window_masks(4, screen_x);
                     if main_enable && !(self.tmw & 0x10 != 0 && masked) {
@@ -1815,49 +1787,12 @@ impl Ppu {
                 self.cgram[usize::from(above.color)]
             };
             let below_transparent = below.priority == 0;
-            // ares `DAC::prepare`: the below screen's backdrop is `cgram[0]`
-            // in hires modes and `fixedColor()` otherwise, so sub-screen
-            // colour math adds the fixed colour where the sub screen is empty.
             let below_color = if below_transparent {
-                if self.frame_hires {
-                    self.cgram[0]
-                } else {
-                    fixed
-                }
+                self.cgram[0]
             } else {
                 self.cgram[usize::from(below.color)]
             };
             let below_layer = if below_transparent { 5 } else { below.layer };
-            // Debug: the selected above/below pixel per x, to compare with
-            // ares' `DAC::above[]`/`below[]` (`PE_LOG` / `ARES_PE_LOG`).
-            if let Some(path) = std::env::var_os("PE_LOG") {
-                use std::io::Write;
-                let from: u64 = std::env::var("PE_FRAME")
-                    .ok()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(u64::MAX);
-                if from == self.debug_frame && (80..170).contains(&x) {
-                    if let Ok(mut f) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(path)
-                    {
-                        let _ = writeln!(
-                            f,
-                            "{} {} {} {:02X} {} {:04X} {:02X} {} {:04X}",
-                            self.debug_frame,
-                            self.line,
-                            x,
-                            above_layer,
-                            above.priority,
-                            above_color,
-                            below_layer,
-                            below.priority,
-                            below_color
-                        );
-                    }
-                }
-            }
             // ares `Background::run`: the Above screen is advanced by one dot
             // (`if(screen == Screen::Above) x++`), so in hi-res the Above
             // screen occupies the ODD output column and Below the even one.
@@ -1907,38 +1842,19 @@ impl Ppu {
         luma: (u32, u32),
         fixed: u16,
     ) -> [u8; 4] {
-        // ares `DAC::pixel`: the colour window zeroes the main colour first,
-        // then decides whether colour math applies at all.
-        let (window_above, window_below) = self.colour_window(x);
+        let (colour_above, colour_below) = self.colour_window(x);
+        let enable = (if backdrop {
+            self.cgadsub & 0x20 != 0
+        } else {
+            self.cgadsub & (1 << layer) != 0
+        }) && colour_above
+            && colour_below;
         let mut color = color;
-        if !window_above {
-            color = 0;
-        }
-        if window_below {
-            // ares `DAC::colorEnable`: BG1-4 use bits 0-3, OBJ1 is always
-            // disabled, OBJ2 uses bit 4 and the backdrop (COL) bit 5.
-            let enabled = if backdrop {
-                self.cgadsub & 0x20 != 0
-            } else if layer == 4 {
-                false
-            } else if layer == 5 {
-                self.cgadsub & 0x10 != 0
-            } else {
-                self.cgadsub & (1 << layer) != 0
-            };
-            if enabled {
-                let halve = self.cgadsub & 0x40 != 0 && window_above;
-                color = if self.cgwsel & 0x02 == 0 {
-                    blend(color, fixed, halve, self.cgadsub & 0x80 != 0)
-                } else {
-                    blend(
-                        color,
-                        other,
-                        halve && !other_transparent,
-                        self.cgadsub & 0x80 != 0,
-                    )
-                };
-            }
+        if enable {
+            let use_sub = self.cgwsel & 0x02 != 0 && !other_transparent;
+            let operand = if use_sub { other } else { fixed };
+            let halve = self.cgadsub & 0x40 != 0 && use_sub;
+            color = blend(color, operand, halve, self.cgadsub & 0x80 != 0);
         }
         let (num, den) = luma;
         let scale = |value: u16| {
