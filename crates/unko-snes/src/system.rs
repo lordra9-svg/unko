@@ -220,6 +220,9 @@ pub struct Snes {
     ppu_credit: i64,
     nmi_enable: bool,
     nmi_flag: bool,
+    /// ares `status.nmiLine` follows the vblank edges: it is also cleared when
+    /// vblank ends, not only by a `$4210` read. Transient, not serialized.
+    was_vblank: bool,
     /// ares `status.irqLock`: a `$4200` write suppresses the interrupt test
     /// for the rest of that instruction, so the NMI lands one instruction
     /// later.
@@ -314,6 +317,7 @@ impl Snes {
             ppu_credit: 0,
             nmi_enable: false,
             nmi_flag: false,
+            was_vblank: false,
             nmi_lock: false,
             fast_rom: false,
             wram_port: 0,
@@ -569,6 +573,7 @@ impl Snes {
         self.ppu_credit = 0;
         self.nmi_enable = false;
         self.nmi_flag = false;
+        self.was_vblank = false;
         self.nmi_lock = false;
         self.fast_rom = false;
         self.wram_port = 0;
@@ -1016,6 +1021,14 @@ impl Snes {
         self.irq_line = self
             .io
             .poll_irq(self.ppu.line(), u32::from(self.ppu.dot()) * 4 + 2);
+        // ares `nmiPoll`: `nmiLine` follows the vblank state on both edges, so
+        // `$4210` bit 7 drops when vblank ends even if it was never read. The
+        // CPU interrupt output is still gated by $4200 bit 7.
+        let vblank = self.ppu.in_vblank();
+        if self.was_vblank && !vblank {
+            self.nmi_flag = false;
+        }
+        self.was_vblank = vblank;
         // The $4210 flag latches at vblank regardless of $4200 bit 7; only the
         // CPU interrupt output is gated by NMI enable.
         if self.ppu.take_nmi() {

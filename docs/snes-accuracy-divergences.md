@@ -3168,10 +3168,26 @@ vblank. Because our enable lands one vblank earlier, we take the 11,742,640
 NMI that ares does not.
 
 Disabling our `$4200`-enable trigger (`NO_NMI_ENABLE_EDGE`) does not change
-the count, so the NMI logic is not the fault: the cores already differ at the
-`$4210` poll around 11.6M (our read sees the vblank flag; ares' loop waits for
-the following vblank). The lead is therefore the `$4210` vblank-flag timing
-(and an earlier ~2.6k-clock CPU offset), not the NMI delivery path.
+the count, so the NMI logic is not the fault. The difference was `$4210`
+semantics: ares returns `status.nmiLine`, which follows *both* vblank edges
+(`nmiPoll`: `nmiLine = nmiValid` on every edge), so bit 7 drops when vblank
+ends even if it was never read. We kept a sticky flag that only cleared on
+read, so a late-`$4210` poll saw vblank later than ares and enabled NMI one
+vblank early.
+
+`nmi_flag` is now cleared on the vblank falling edge as well. NMI lists then
+align one-for-one (ours 35 by frame 150, ares 36 with the last at clock
+53,911,830, past our 150-frame end), and the game frame counter matches:
+
+```
+frame 200: 0x08 ares 59  ours 59   (WRAM 29 bytes differ, was 55)
+frame 600: 0x08 ares 203 ours 203  (WRAM 1 byte differs, was 54)
+```
+
+The 1200-present sweep is still 1075/1200 (first miss at 1074): the renderer
+never shows ares' post-1074 animation, and WRAM differences grow again between
+frames 600 and 800 (1 -> 53 bytes), so a second state divergence remains. That
+window is the next bisect.
 
 **Donkey Kong Country (USA), presents 0-1199:** 1200 exact.
 
