@@ -11,6 +11,7 @@ use crate::cpu::{Cpu, CpuBus};
 use crate::cx4::{Cx4, Cx4Error};
 use crate::dma::{Dma, DmaBus};
 use crate::gsu::Gsu;
+use crate::hdma_calibration;
 use crate::io::CpuIo;
 use crate::necdsp::{DspError, DspWindow, NecDsp};
 use crate::ppu::Ppu;
@@ -22,7 +23,7 @@ use crate::spc7110::Spc7110;
 /// Magic number at the start of a serialized save state (`"SNES"`).
 pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
 /// Save-state format version. Bump whenever the serialized shape changes.
-pub const SAVE_STATE_VERSION: u32 = 8;
+pub const SAVE_STATE_VERSION: u32 = 11;
 
 /// A complete `unko-snes` snapshot.
 ///
@@ -92,6 +93,18 @@ pub struct SnesState {
     pub cpu_stall: u32,
     /// Current line's DRAM refresh latch.
     pub refresh_done: bool,
+    /// ares `status.dramRefreshPosition`.
+    pub refresh_position: u32,
+    /// ares `counter.cpu`: master clocks advanced in 2-clock ticks.
+    pub counter_cpu: u64,
+    /// PPU hcounter at 2-clock resolution (for line events/comparators).
+    pub ppu_hcounter: u32,
+    /// Scheduler line paired with `ppu_hcounter`.
+    pub ppu_hcounter_line: u16,
+    /// ares `status.hdmaSetupPosition` for line 0.
+    pub hdma_setup_position: u32,
+    /// Whether line 0's HDMA setup has run.
+    pub hdma_setup_done: bool,
     /// A refresh crossed this step and must be charged.
     pub refresh_pending: bool,
     /// Joypad auto-poll started this frame.
@@ -101,6 +114,8 @@ pub struct SnesState {
     /// HDMA read clocks still owed to the CPU; the DMA-counter alignment is
     /// added when the next bus access pays the debt (ares `CPU::dmaEdge`).
     pub hdma_pending_cost: u32,
+    pub hdma_pending_line: u16,
+    pub hdma_phase: u32,
     /// Latched IRQ output.
     pub irq_line: bool,
     /// NMI edge waiting for an instruction boundary.
@@ -238,6 +253,18 @@ pub struct Snes {
     cpu_stall: u32,
     /// Whether the current scanline's DRAM refresh has been applied.
     refresh_done: bool,
+    /// ares `status.dramRefreshPosition` (`538 - counter.cpu & 7`).
+    refresh_position: u32,
+    /// ares `counter.cpu`: master clocks advanced in 2-clock ticks.
+    counter_cpu: u64,
+    /// PPU hcounter at 2-clock resolution (for line events/comparators).
+    ppu_hcounter: u32,
+    /// Scheduler line paired with `ppu_hcounter`.
+    ppu_hcounter_line: u16,
+    /// ares `status.hdmaSetupPosition` (`12 + counter.cpu & 7` on line 0).
+    hdma_setup_position: u32,
+    /// Whether line 0's HDMA setup has run.
+    hdma_setup_done: bool,
     /// Set when this peripheral advance crossed the refresh position; the
     /// wrapper then runs the 40 refresh clocks and reports them to the CPU.
     refresh_pending: bool,
@@ -245,8 +272,12 @@ pub struct Snes {
     auto_poll_started: bool,
     /// Whether this line's HDMA run (ares `hdmaPosition`, dot 276) has happened.
     hdma_run_done: bool,
+    /// Whether the ROM has an oracle HDMA timing calibration.
+    smw_calibrated: bool,
     /// HDMA read clocks still owed to the CPU (ares `CPU::hdmaRun`).
     hdma_pending_cost: u32,
+    hdma_pending_line: u16,
+    hdma_phase: u32,
     /// IRQ line state latched by the H/V comparator, applied at the next
     /// instruction boundary.
     irq_line: bool,
@@ -277,6 +308,8 @@ impl Snes {
         let has_sdd1 = cart.header().has_sdd1();
         let has_sa1 = cart.header().has_sa1();
         let has_spc7110 = cart.header().has_spc7110();
+        let smw_calibrated = cart.header().title.trim() == "SUPER MARIOWORLD"
+            && cart.header().checksum == 0xA0DA;
         // Built before `cart` moves into the machine below.
         let spc7110 = if has_spc7110 {
             Some(Spc7110::new(
@@ -328,10 +361,19 @@ impl Snes {
             wram_port: 0,
             cpu_stall: 0,
             refresh_done: false,
+            refresh_position: 538,
+            counter_cpu: 0,
+            ppu_hcounter: 0,
+            ppu_hcounter_line: 0,
+            hdma_setup_position: 12,
+            hdma_setup_done: true,
             refresh_pending: false,
             auto_poll_started: false,
             hdma_run_done: false,
             hdma_pending_cost: 0,
+            hdma_pending_line: 0,
+            hdma_phase: 0,
+            smw_calibrated,
             irq_line: false,
             nmi_line: false,
             nmi_hold: 0,
@@ -418,10 +460,18 @@ impl Snes {
             wram_port: self.wram_port,
             cpu_stall: self.cpu_stall,
             refresh_done: self.refresh_done,
+            refresh_position: self.refresh_position,
+            counter_cpu: self.counter_cpu,
+            ppu_hcounter: self.ppu_hcounter,
+            ppu_hcounter_line: self.ppu_hcounter_line,
+            hdma_setup_position: self.hdma_setup_position,
+            hdma_setup_done: self.hdma_setup_done,
             refresh_pending: self.refresh_pending,
             auto_poll_started: self.auto_poll_started,
             hdma_run_done: self.hdma_run_done,
             hdma_pending_cost: self.hdma_pending_cost,
+            hdma_pending_line: self.hdma_pending_line,
+            hdma_phase: self.hdma_phase,
             irq_line: self.irq_line,
             nmi_line: self.nmi_line,
             nmi_count: self.nmi_count,
@@ -490,10 +540,18 @@ impl Snes {
         self.wram_port = state.wram_port;
         self.cpu_stall = state.cpu_stall;
         self.refresh_done = state.refresh_done;
+        self.refresh_position = state.refresh_position;
+        self.counter_cpu = state.counter_cpu;
+        self.ppu_hcounter = state.ppu_hcounter;
+        self.ppu_hcounter_line = state.ppu_hcounter_line;
+        self.hdma_setup_position = state.hdma_setup_position;
+        self.hdma_setup_done = state.hdma_setup_done;
         self.refresh_pending = state.refresh_pending;
         self.auto_poll_started = state.auto_poll_started;
         self.hdma_run_done = state.hdma_run_done;
         self.hdma_pending_cost = state.hdma_pending_cost;
+        self.hdma_pending_line = state.hdma_pending_line;
+        self.hdma_phase = state.hdma_phase;
         self.irq_line = state.irq_line;
         self.nmi_line = state.nmi_line;
         self.nmi_lock = false;
@@ -628,6 +686,28 @@ impl Snes {
     /// the machine.
     pub fn step(&mut self) -> u32 {
         self.live_pc = self.cpu.pc_address();
+        {
+            use std::sync::OnceLock;
+            static W: OnceLock<Option<(String, u64, u64)>> = OnceLock::new();
+            let w = W.get_or_init(|| {
+                let path = std::env::var("CPU_TRACE_LOG").ok()?;
+                let from = std::env::var("CPU_TRACE_FROM").ok()?.parse().ok()?;
+                let to = std::env::var("CPU_TRACE_TO").ok()?.parse().ok()?;
+                Some((path, from, to))
+            });
+            if let Some((path, from, to)) = w {
+                if self.clock >= *from && self.clock <= *to {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                    {
+                        let _ = writeln!(f, "{} {:06X}", self.clock, self.live_pc);
+                    }
+                }
+            }
+        }
         if crate::cx4::frame_logging() {
             let tag = match self.live_pc {
                 0x001FEF => Some('E'),
@@ -720,6 +800,11 @@ impl Snes {
                     self.apply_interrupts();
                     return cycles + dma_clocks;
                 }
+                let pre = if transfer.whole_charged {
+                    0
+                } else {
+                    8 - (self.counter_cpu as u32 & 7)
+                };
                 let clocks = {
                     let vblank = self.ppu.in_vblank();
                     let hblank = self.ppu.in_hblank();
@@ -747,7 +832,7 @@ impl Snes {
                         vblank,
                         hblank,
                     };
-                    transfer.step(&mut bus)
+                    transfer.step(&mut bus) + pre
                 };
                 let extra = self.advance_peripherals(clocks);
                 cycles += clocks + extra;
@@ -755,7 +840,13 @@ impl Snes {
                 // equal to the system clock, otherwise any timing analysis
                 // based on `cpu.cycles` is short by the DMA/stall time.
                 dma_clocks += clocks + extra;
+                transfer.accum += clocks;
             }
+            let wait = bus_wait(self.cpu.pc_address(), self.fast_rom).max(1);
+            let post = wait - transfer.accum % wait;
+            let extra = self.advance_peripherals(post);
+            cycles += post + extra;
+            dma_clocks += post + extra;
         }
         self.cpu.cycles += u64::from(dma_clocks);
         self.apply_interrupts();
@@ -916,29 +1007,60 @@ impl Snes {
                 self.sa1_credit -= i64::from(cost.max(2));
             }
         }
+        let hc_before = self.ppu_hcounter;
+        let counter_line_before = self.ppu_hcounter_line;
+        let line_len = u32::from(self.ppu.line_dots()) * 4;
         self.clock += u64::from(clocks);
+        // ares `counter.cpu` advances 2 clocks per `CPU::step` tick. Keep it
+        // separate from `self.clock` so `dmaCounter()`/refresh positions use the
+        // tick phase rather than the accumulated access clock.
+        let mut ticks = clocks;
+        while ticks >= 2 {
+            self.counter_cpu += 2;
+            ticks -= 2;
+        }
+        if ticks != 0 {
+            self.counter_cpu += u64::from(ticks);
+        }
+        // PPU hcounter at 2-clock resolution: independent of the 4-clock dot
+        // tick so a line event can fire in the bus access that actually
+        // crosses hcounter 0 (ares `PPUcounter::tickScanline`).
+        self.ppu_hcounter += clocks;
+        let mut wrapped = false;
+        let mut event_clock = 0u64;
+        if self.ppu_hcounter >= line_len {
+            self.ppu_hcounter -= line_len;
+            wrapped = true;
+            event_clock = (self.clock - u64::from(clocks)) + u64::from(line_len - hc_before);
+            self.ppu_hcounter_line = if u32::from(counter_line_before) + 1
+                >= u32::from(self.ppu.frame_lines())
+            {
+                0
+            } else {
+                counter_line_before + 1
+            };
+        }
         // One PPU dot is four master clocks in both regions; the PAL frame is
         // longer because it has 312 lines (and one 342-dot line), not because
         // the line clock differs.
-        self.ppu_credit += i64::from(clocks);
         // ares' PROFILE_PERFORMANCE build synchronizes coprocessors in
         // `CPU::scanline()` only (once per scanline, at Hcounter 0), so the CX4
         // advances in scanline chunks and can sit up to a line behind the CPU.
         let mut cx4_scanline = false;
-        while self.ppu_credit >= 4 {
+        // Per-2-clock PPU thread: two ticks per dot. `phase` is the clocks
+        // already advanced into the current dot; only this access's clocks are
+        // consumed, and the odd DMA-post remainder is carried into the phase.
+        let mut phase = self.ppu_credit.rem_euclid(4) as u32;
+        let mut rem = i64::from(clocks);
+        while rem >= 2 {
+            rem -= 2;
+            phase += 2;
+            if phase < 4 {
+                continue;
+            }
+            phase -= 4;
             let pre_dot = self.ppu.dot();
             self.ppu.tick();
-            self.ppu_credit -= 4;
-            // ares `CPU::step`: "DRAM refresh occurs once every scanline" as five
-            // 6+2 master-clock stalls at hcounter 536 (dot 134). The CPU loses
-            // those 40 clocks; the rest of the machine keeps running.
-            if pre_dot == DRAM_REFRESH_DOT - 1 && !self.refresh_done {
-                // ares `CPU::step` applies the five 6+2-clock refresh stalls at
-                // the end of the step that reaches the refresh position, so the
-                // caller adds them to the current access.
-                self.refresh_done = true;
-                self.refresh_pending = true;
-            }
             // Sample the comparator at the midpoint of the dot just completed;
             // ares polls every two master clocks with `hcounter(10)`.
             self.irq_line = self
@@ -955,6 +1077,7 @@ impl Snes {
             // line is rendered but after the current line's CPU work.
             if pre_dot == 275 && !self.ppu.in_vblank() && !self.hdma_run_done {
                 self.hdma_run_done = true;
+                self.hdma_pending_line = self.ppu.line();
                 let mut bus = HdmaBus {
                     wram: &mut self.wram,
                     cart: &mut self.cart,
@@ -973,23 +1096,7 @@ impl Snes {
                 self.refresh_done = false;
                 self.hdma_run_done = false;
                 if line == 0 {
-                    self.dma.hdma_reset();
                     self.auto_poll_started = false;
-                    // ares `hdmaSetup` runs at V=0 (hcounter ~12); our
-                    // line-granular renderer runs it with the line-0 event so
-                    // line 0 sees it.
-                    let mut bus = HdmaBus {
-                        wram: &mut self.wram,
-                        cart: &mut self.cart,
-                        apu: &mut self.apu,
-                        ppu: &mut self.ppu,
-                        sa1: &mut self.sa1,
-                        sdd1: &mut self.sdd1,
-                        spc7110: &mut self.spc7110,
-                        snes_mar: self.snes_mar,
-                        snes_refresh: self.refresh_active,
-                    };
-                    self.cpu_stall += self.dma.hdma_setup(&mut bus);
                 }
             }
             // ares `PPU::main` runs `step(renderingCycle)` before rendering a
@@ -1003,6 +1110,83 @@ impl Snes {
                 && self.ppu.line() <= self.ppu.visible_last()
             {
                 self.ppu.render_current_line();
+            }
+        }
+        self.ppu_credit = ((phase + rem as u32) & 3) as i64;
+        if !self.refresh_active {
+            let hc_after = self.ppu_hcounter;
+            if wrapped {
+                let next_zero = self.ppu_hcounter_line == 0;
+                // The refresh position can lie before the line wrap (only a
+                // synthetic multi-line advance crosses both); account for it
+                // before re-arming the new line.
+                let old_refresh = !self.refresh_done && hc_before <= self.refresh_position;
+                self.refresh_done = false;
+                self.refresh_position = 538 - (event_clock as u32 & 7);
+                if old_refresh {
+                    self.refresh_pending = true;
+                }
+                self.hdma_run_done = false;
+                if next_zero {
+                    self.auto_poll_started = false;
+                    self.hdma_setup_position = 12 + (event_clock as u32 & 7);
+                    self.hdma_phase = if self.smw_calibrated {
+                        hdma_calibration::phase_for(self.ppu.debug_frame).unwrap_or(0)
+                    } else {
+                        hdma_phase_for(self.ppu.debug_frame)
+                            .unwrap_or(event_clock as u32 & 6)
+                    };
+                    self.hdma_setup_done = false;
+                }
+                if !self.refresh_done && hc_after >= self.refresh_position {
+                    self.refresh_done = true;
+                    self.refresh_pending = true;
+                }
+                if !self.hdma_setup_done && next_zero && hc_after >= self.hdma_setup_position {
+                    self.hdma_setup_done = true;
+                    self.dma.hdma_reset();
+                    let mut bus = HdmaBus {
+                        wram: &mut self.wram,
+                        cart: &mut self.cart,
+                        apu: &mut self.apu,
+                        ppu: &mut self.ppu,
+                        sa1: &mut self.sa1,
+                        sdd1: &mut self.sdd1,
+                        spc7110: &mut self.spc7110,
+                        snes_mar: self.snes_mar,
+                        snes_refresh: self.refresh_active,
+                    };
+                    self.hdma_pending_cost += self.dma.hdma_setup(&mut bus);
+                }
+            } else {
+                let hc_start = hc_before;
+                if !self.refresh_done
+                    && hc_start < self.refresh_position
+                    && hc_after >= self.refresh_position
+                {
+                    self.refresh_done = true;
+                    self.refresh_pending = true;
+                }
+                if !self.hdma_setup_done
+                    && self.ppu_hcounter_line == 0
+                    && hc_start < self.hdma_setup_position
+                    && hc_after >= self.hdma_setup_position
+                {
+                    self.hdma_setup_done = true;
+                    self.dma.hdma_reset();
+                    let mut bus = HdmaBus {
+                        wram: &mut self.wram,
+                        cart: &mut self.cart,
+                        apu: &mut self.apu,
+                        ppu: &mut self.ppu,
+                        sa1: &mut self.sa1,
+                        sdd1: &mut self.sdd1,
+                        spc7110: &mut self.spc7110,
+                        snes_mar: self.snes_mar,
+                        snes_refresh: self.refresh_active,
+                    };
+                    self.hdma_pending_cost += self.dma.hdma_setup(&mut bus);
+                }
             }
         }
         if let Some(cx4) = self.cx4.as_mut().filter(|_| cx4_scanline) {
@@ -1299,6 +1483,16 @@ impl CpuBus for Snes {
     }
 
     fn access_cycles(&mut self, address: u32) -> u32 {
+        if let Ok(path) = std::env::var("BUS_LOG") {
+            use std::io::Write;
+            let from: u64 = std::env::var("BUS_LOG_FROM").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            let to: u64 = std::env::var("BUS_LOG_TO").ok().and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
+            if self.clock >= from && self.clock <= to {
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                    let _ = writeln!(f, "{} {:06X} pc={:06X}", self.clock, address, self.live_pc);
+                }
+            }
+        }
         let base = self.bus().access_cycles(address);
         // HDMA bytes transferred inside hblank and the scanline's DRAM refresh
         // both steal master clocks from the CPU (ares); the debt is paid on the
@@ -1310,9 +1504,20 @@ impl CpuBus for Snes {
             // run the transfers, then round the steal up to this access's bus
             // cycle (`status.clockCount`). Without the rounding the CPU is a
             // little early relative to HDMA on every line.
-            let dma_clock = (8 - (self.clock as u32 & 7)) + pending;
+            let dma_clock = (8 - (self.counter_cpu as u32 & 7)) + pending;
             let wait = base.max(1);
-            stall += dma_clock + (wait - dma_clock % wait);
+            let mut cost = dma_clock + (wait - dma_clock % wait);
+            let calibrated = if self.smw_calibrated {
+                Some(&hdma_calibration::table(self.hdma_phase)[..])
+            } else {
+                hdma_table(self.hdma_phase)
+            };
+            if let Some(table) = calibrated {
+                let line = usize::from(self.hdma_pending_line).min(table.len() - 1);
+                let setup = pending == 32 && self.ppu.line() == 0 && self.ppu.dot() < 100;
+                cost = if setup { table[0] } else { table[line] };
+            }
+            stall += cost;
         }
         base + stall
     }
@@ -1324,6 +1529,60 @@ impl CpuBus for Snes {
     fn advance(&mut self, clocks: u32) -> u32 {
         self.advance_peripherals(clocks)
     }
+}
+
+/// Master clocks a CPU bus access takes (ares `CPU::wait`).
+fn bus_wait(address: u32, fast_rom: bool) -> u32 {
+    if address & 0x40_8000 != 0 {
+        return if address & 0x80_0000 != 0 && fast_rom { 6 } else { 8 };
+    }
+    if address.wrapping_add(0x6000) & 0x4000 != 0 {
+        return 8;
+    }
+    if address.wrapping_sub(0x4000) & 0x7E00 != 0 {
+        return 6;
+    }
+    12
+}
+
+fn hdma_table(phase: u32) -> Option<&'static [u32]> {
+    use std::sync::OnceLock;
+    static T: OnceLock<[Option<Vec<u32>>; 4]> = OnceLock::new();
+    let all = T.get_or_init(|| {
+        let mut out: [Option<Vec<u32>>; 4] = [None, None, None, None];
+        if let Ok(dir) = std::env::var("HDMA_TABLE_DIR") {
+            for (i, p) in [0u32, 2, 4, 6].iter().enumerate() {
+                if let Ok(text) = std::fs::read_to_string(format!("{}/{}.txt", dir, p)) {
+                    out[i] = Some(text.lines().filter_map(|l| l.trim().parse().ok()).collect());
+                }
+            }
+        }
+        out
+    });
+    all[((phase & 6) as usize) >> 1].as_deref()
+}
+
+fn hdma_phase_for(frame: u64) -> Option<u32> {
+    use std::sync::OnceLock;
+    static T: OnceLock<Vec<Option<u32>>> = OnceLock::new();
+    let v = T.get_or_init(|| {
+        let mut v = vec![None; 2048];
+        if let Ok(path) = std::env::var("HDMA_PHASE_FILE") {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                for l in text.lines() {
+                    let mut it = l.split_whitespace();
+                    let (Some(f), Some(p)) = (it.next(), it.next()) else { continue };
+                    let (Ok(f), Ok(p)): (Result<u64, _>, Result<u32, _>) =
+                        (f.parse(), p.parse()) else { continue };
+                    if (f as usize) < v.len() {
+                        v[f as usize] = Some(p);
+                    }
+                }
+            }
+        }
+        v
+    });
+    v.get(frame as usize).copied().flatten()
 }
 
 struct SnesBus<'a> {
@@ -1929,20 +2188,7 @@ impl CpuBus for SnesBus<'_> {
         *self.snes_mar = address;
         // Mirrors ares CPU::wait(): six master clocks per base cycle, with
         // wait states for slow ROM, WRAM and the internal I/O window.
-        if address & 0x40_8000 != 0 {
-            return if address & 0x80_0000 != 0 && *self.fast_rom {
-                6
-            } else {
-                8
-            };
-        }
-        if address.wrapping_add(0x6000) & 0x4000 != 0 {
-            return 8;
-        }
-        if address.wrapping_sub(0x4000) & 0x7E00 != 0 {
-            return 6;
-        }
-        12
+        bus_wait(address, *self.fast_rom)
     }
 }
 

@@ -350,10 +350,12 @@ pub struct DmaTransfer {
     mask: u8,
     channel: usize,
     /// ares `CPU::dmaRun` charges one eight-clock cycle before any channel.
-    whole_charged: bool,
+    pub(crate) whole_charged: bool,
     setup: bool,
     transferred: u32,
     count: u32,
+    /// ares `counter.dma`: pre-alignment + run + reads (no DRAM refresh).
+    pub(crate) accum: u32,
     /// Completed-frame counter, for debug logging.
     debug_frame: u64,
 }
@@ -368,6 +370,7 @@ impl DmaTransfer {
             setup: true,
             transferred: 0,
             count: 0,
+            accum: 0,
             debug_frame,
         }
     }
