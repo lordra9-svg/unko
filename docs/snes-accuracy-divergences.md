@@ -3120,11 +3120,18 @@ not change the result, so this is the CPU-write/HDMA-read order inside one dot.
 Recorded as an open item.
 
 **With scripted input** (`ARES_JOYPAD_SEGMENTS` / `JOYPAD0_SEGMENTS`), the two
-cores track exactly through the logo, title, file-select and level entry and
-then diverge persistently from present 542. Shifting every segment by +/-1
-frame changes the first divergence but not the 542 split, so it is not a
-segment-alignment artefact; it is an emulation difference in the level scene and
-is the next item to bisect.
+cores track through the logo, title, file-select and level entry. The present
+index then drifts quickly (the ratio reaches 1 present per ~2 emulated frames),
+so a hash window becomes misleading: windows of 25/120/300 falsely reported
+"misses" from present 542 onward. Dumping presents 600-820 and matching them
+against dumped frames shows **every one is pixel-identical (0 px)** to a frame
+in our run, so there is no emulation divergence. Input-driven sweeps instead
+need a state sample taken at the same vblank phase on both sides (ares samples
+at vcounter 240; our harness dumps at the frame boundary, so the two see
+different points while vblank DMA is in flight). That hook is the next
+instrumentation step.
+
+
 
 ### Coverage sweep against the calibrated oracle (2026-11-19, exhaustive)
 
