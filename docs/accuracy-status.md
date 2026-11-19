@@ -400,8 +400,12 @@ Validation so far:
   both sides found the first persistent difference: the game frame counter
   `$0008` starts ~3 frames early because we take an extra NMI at clock
   11,742,640 that ares does not (ours 38 NMIs by frame 150, ares 36; both
-  agree from 12,100,002 onward). Concrete lead: the first `$4200 = 0x81`
-  enable at 11,599,376 followed by the next vblank edge. With scripted input the cores track through level entry; the
+  agree from 12,100,002 onward). The extra NMI is a symptom: our `$4200 = 0x81`
+  write lands at 11,599,376 right after a `$4210` read that returns `0xC2`,
+  while ares' boot loop polls `$4210` from 11,601,916 and only enables at
+  11,742,672. Disabling our enable-time trigger does not change the count, so
+  the lead is the `$4210` vblank-flag timing / an earlier ~2.6k-clock CPU
+  offset, not NMI delivery. With scripted input the cores track through level entry; the
   apparent "divergence" from present 542 was a present-rate drift, and every
   ares present 600-820 matches one of our frames pixel-for-pixel (0 px).
   Input-driven sweeps need a same-phase state sample (next instrumentation

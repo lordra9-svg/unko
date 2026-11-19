@@ -3160,10 +3160,18 @@ ours: 38 NMIs, first at clock 11,742,640
 ares: 36 NMIs, first at clock 12,100,002  (= our second)
 ```
 
-The first NMI enable is `$4200 = 0x81` at clock 11,599,376 (just after a
-`$4210` read); the next vblank is the 11,742,640 edge, where we take an NMI
-that ares does not. This is a `$4200`-enable / vblank-edge NMI difference in
-the boot sequence, and is the concrete lead for the next bisect.
+The first NMI enable is `$4200 = 0x81` at clock 11,599,376 in our run, just
+50 clocks after a `$4210` read that returned `0xC2` (vblank flag set). ares
+does not enable NMI until 11,742,672: its boot loop polls `$4210` every 42
+clocks from 11,601,916 (log shows `line=0`) and only proceeds on the *next*
+vblank. Because our enable lands one vblank earlier, we take the 11,742,640
+NMI that ares does not.
+
+Disabling our `$4200`-enable trigger (`NO_NMI_ENABLE_EDGE`) does not change
+the count, so the NMI logic is not the fault: the cores already differ at the
+`$4210` poll around 11.6M (our read sees the vblank flag; ares' loop waits for
+the following vblank). The lead is therefore the `$4210` vblank-flag timing
+(and an earlier ~2.6k-clock CPU offset), not the NMI delivery path.
 
 **Donkey Kong Country (USA), presents 0-1199:** 1200 exact.
 
