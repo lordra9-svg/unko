@@ -313,7 +313,9 @@ Validation so far:
   the edge arrived at least one CPU cycle before the instruction ended
   (`lastCycle`). Neutral on MMX2 (spin 45/45, frames 3300/3480/3500/3700/3900
   100.000%, baseline 212/212); the first-NMI landing still differs by one wait
-  loop instruction (~24 clocks), which is a CPU phase, not the latch.
+  loop instruction, which is a CPU phase, not the latch: polling the edge
+  directly shows it matching ares within 2-4 master clocks at every vblank
+  (306,906/306,904; 664,270/664,272; 1,021,634/1,021,638).
 - The apparent divergence from frame 3980 is a **capture-lag artefact**: ours
   3977 and 3978 both match ares' capture labelled 3980 at 100.000%, and the
   per-pixel DAC log shows both cores computing the same final pixel

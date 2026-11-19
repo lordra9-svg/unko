@@ -1019,6 +1019,23 @@ impl Snes {
         // The $4210 flag latches at vblank regardless of $4200 bit 7; only the
         // CPU interrupt output is gated by NMI enable.
         if self.ppu.take_nmi() {
+            if let Some(path) = std::env::var_os("NMI_POLL") {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                {
+                    let _ = writeln!(
+                        f,
+                        "{} pc={:06X} line={} dot={}",
+                        self.clock + u64::from(clocks),
+                        self.live_pc,
+                        self.ppu.line(),
+                        self.ppu.dot()
+                    );
+                }
+            }
             self.nmi_flag = true;
             if self.nmi_enable {
                 self.nmi_hold = 4;

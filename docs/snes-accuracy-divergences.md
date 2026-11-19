@@ -2938,12 +2938,22 @@ spin at first job: 45 (ares 45)   dispatch clock 21,766,698 (ares 21,766,684)
 frames 3300/3480/3500/3700/3900: 100.000%, baseline 212/212
 ```
 
-The `$02FD` landing at the *first* NMI (frame ~1.9) is still ours `$8103`
-(pushed PCL 0x03) where ares has `$8100` (0x00): that difference is one loop
-instruction (~24 clocks), not the 4-clock hold, so it is a CPU-phase difference
-at that early frame rather than the latch shape. A later NMI (t=2,451,162)
-flipped in the opposite direction, which also indicates jitter rather than a
-systematic shift.
+Polling the NMI edge directly (`NMI_POLL` / `ARES_NMI_POLL`: the master clock
+and S-CPU PC at every rising `vcounter(2) >= vdisp`):
+
+```
+edge   ares t     ares pc    ours t     ours pc    delta
+  0     306,906   008083     306,904    008083     -2
+  1     664,270   008104     664,272    008100     +2
+  2   1,021,634   00B308   1,021,638    00B303     +4
+```
+
+So the NMI **edge** now matches ares within 2-4 master clocks at every vblank.
+The `$02FD` pushed-PCL difference ($8103 vs $8100) is therefore not a timing
+error: our `live_pc` is the instruction start while ares logs `r.pc.d` (the
+current byte), and the interrupted instruction is simply a different iteration
+of the same 42-clock `$8100` wait loop. Both cores enter the same NMI within
+one loop instruction, and the wait loop is a pure spin (no state consequence).
 
 ### Frame 3980 onward is a capture-lag artefact, not a divergence
 
