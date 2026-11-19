@@ -309,10 +309,11 @@ Validation so far:
   96.706%, 3700 96.594%, 4000 94.877%; 3300/3400/3479 unchanged at 100.000%,
   baseline 212/212).
 - Coverage sweep with the calibrated oracle: Mega Man X2 40/40 samples exact
-  (0-3900), Mega Man X3 25/25 exact (0-600), Star Fox exact through present
-  650 (our ~640) but a real divergence from present 675 onward (~98.5% best,
-  no exact match in +/-10 frames). ares skips presents via `runAhead()`, so its
-  index lags ours by up to ~10 and comparisons must use a content window.
+  (0-3900), Mega Man X3 25/25 exact (0-600), and Star Fox exact at every
+  present 630-690 except a single transient frame (present 677 / our ~665:
+  625 scattered pixels flipping bright/black, one animation step; 676 and 678
+  are exact). ares skips presents via `runAhead()`, so its index lags ours by
+  up to ~12 and comparisons must use a content window.
 - The compositor changes from 20564dc (colour-window zeroing, sub-backdrop
   fixed colour, OBJ1/OBJ2 split) were **reverted**: against the calibrated
   presentation oracle the original code is 100.000% at frames 3979/3980/3990/
