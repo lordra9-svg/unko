@@ -114,7 +114,9 @@ pub struct SnesState {
     /// HDMA read clocks still owed to the CPU; the DMA-counter alignment is
     /// added when the next bus access pays the debt (ares `CPU::dmaEdge`).
     pub hdma_pending_cost: u32,
+    /// Line of the pending HDMA payment (calibration).
     pub hdma_pending_line: u16,
+    /// Calibrated HDMA setup phase for the current frame.
     pub hdma_phase: u32,
     /// Latched IRQ output.
     pub irq_line: bool,
@@ -176,7 +178,6 @@ pub const WRAM_SIZE: usize = 0x2_0000;
 /// (ares `CPU::step`: five stalls of 6 + 2 clocks).
 const DRAM_REFRESH_CLOCKS: u32 = 40;
 /// Dot (ares hcounter 536 / 4) at which that refresh completes.
-const DRAM_REFRESH_DOT: u16 = 134;
 
 /// Dot within a scanline at which a line's pixels are rendered.
 ///
