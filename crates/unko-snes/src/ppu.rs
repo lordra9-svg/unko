@@ -998,6 +998,29 @@ impl Ppu {
         let address = self.vram_word_address() & 0x7FFF;
         // ares `PPU::writeVRAM`: writes during active display are dropped, but
         // the address still advances.
+        if !(self.display_disable || self.line >= self.vdisp())
+            && address >= 0xE000
+            && std::env::var_os("VRAM_REJECT_LOG").is_some()
+        {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(std::env::var_os("VRAM_REJECT_LOG").unwrap_or_default())
+            {
+                let _ = writeln!(
+                    f,
+                    "A={:04X} byte={} data={:02X} line={} vdisp={} blank={} frame={}",
+                    address,
+                    u8::from(high),
+                    data,
+                    self.line,
+                    self.vdisp(),
+                    u8::from(self.display_disable),
+                    self.debug_frame
+                );
+            }
+        }
         if self.display_disable || self.line >= self.vdisp() {
             if let Some(path) = std::env::var_os("VRAM_WRITE_LOG") {
                 use std::io::Write;

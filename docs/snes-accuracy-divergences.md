@@ -3361,8 +3361,18 @@ vram    65536/65536  5230 differing (first at $E000: ares $0B01, ours $0000)
 wram    131072       6 differing (scratch)
 ```
 
-The SuperFX work RAM is now byte-identical, so the frame-153 GSU discrepancy is
-gone. The remaining VRAM difference is concentrated at `$E000`+ and has the
-shape of a CPU/GSU upload that has not landed at the boundary sample; it needs
-a content-anchored (job or DMA completion) comparison rather than a frame
-boundary to judge.
+The VRAM write stream explains it: both cores perform the same 11,520 writes
+(compared after masking ares' unmasked `addressVRAM()` word addresses), and
+replaying that stream reproduces **ares' dump exactly (0 differing)**. The
+write that fills `$E000` (word 0x7000, data 0x010B) happens at **frame 153**,
+after our frame-boundary sample point but before ares'.
+
+Sampling one frame later resolves it:
+
+```
+ares frame 153 vs ours frame 154:  vram 89 differing, gsuram 0
+ares frame 154 vs ours frame 154:  vram 2872, gsuram 15696   (one frame apart)
+```
+
+So the frame-153 GSU discrepancy is gone (0 bytes) and the `$E000` VRAM delta is
+a **boundary-sampling offset of one frame**, not an upload difference.
