@@ -22,7 +22,7 @@ use crate::spc7110::Spc7110;
 /// Magic number at the start of a serialized save state (`"SNES"`).
 pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
 /// Save-state format version. Bump whenever the serialized shape changes.
-pub const SAVE_STATE_VERSION: u32 = 9;
+pub const SAVE_STATE_VERSION: u32 = 10;
 
 /// A complete `unko-snes` snapshot.
 ///
@@ -94,6 +94,8 @@ pub struct SnesState {
     pub refresh_done: bool,
     /// ares `status.dramRefreshPosition`.
     pub refresh_position: u32,
+    /// ares `counter.cpu`: master clocks advanced in 2-clock ticks.
+    pub counter_cpu: u64,
     /// ares `status.hdmaSetupPosition` for line 0.
     pub hdma_setup_position: u32,
     /// Whether line 0's HDMA setup has run.
@@ -246,6 +248,8 @@ pub struct Snes {
     refresh_done: bool,
     /// ares `status.dramRefreshPosition` (`538 - counter.cpu & 7`).
     refresh_position: u32,
+    /// ares `counter.cpu`: master clocks advanced in 2-clock ticks.
+    counter_cpu: u64,
     /// ares `status.hdmaSetupPosition` (`12 + counter.cpu & 7` on line 0).
     hdma_setup_position: u32,
     /// Whether line 0's HDMA setup has run.
@@ -341,6 +345,7 @@ impl Snes {
             cpu_stall: 0,
             refresh_done: false,
             refresh_position: 538,
+            counter_cpu: 0,
             hdma_setup_position: 12,
             hdma_setup_done: true,
             refresh_pending: false,
@@ -434,6 +439,7 @@ impl Snes {
             cpu_stall: self.cpu_stall,
             refresh_done: self.refresh_done,
             refresh_position: self.refresh_position,
+            counter_cpu: self.counter_cpu,
             hdma_setup_position: self.hdma_setup_position,
             hdma_setup_done: self.hdma_setup_done,
             refresh_pending: self.refresh_pending,
@@ -509,6 +515,7 @@ impl Snes {
         self.cpu_stall = state.cpu_stall;
         self.refresh_done = state.refresh_done;
         self.refresh_position = state.refresh_position;
+        self.counter_cpu = state.counter_cpu;
         self.hdma_setup_position = state.hdma_setup_position;
         self.hdma_setup_done = state.hdma_setup_done;
         self.refresh_pending = state.refresh_pending;
@@ -766,7 +773,7 @@ impl Snes {
                 let pre = if transfer.whole_charged {
                     0
                 } else {
-                    8 - (self.clock as u32 & 7)
+                    8 - (self.counter_cpu as u32 & 7)
                 };
                 let clocks = {
                     let vblank = self.ppu.in_vblank();
@@ -971,6 +978,17 @@ impl Snes {
             }
         }
         self.clock += u64::from(clocks);
+        // ares `counter.cpu` advances 2 clocks per `CPU::step` tick. Keep it
+        // separate from `self.clock` so `dmaCounter()`/refresh positions use the
+        // tick phase rather than the accumulated access clock.
+        let mut ticks = clocks;
+        while ticks >= 2 {
+            self.counter_cpu += 2;
+            ticks -= 2;
+        }
+        if ticks != 0 {
+            self.counter_cpu += u64::from(ticks);
+        }
         // One PPU dot is four master clocks in both regions; the PAL frame is
         // longer because it has 312 lines (and one 342-dot line), not because
         // the line clock differs.
@@ -1016,7 +1034,7 @@ impl Snes {
             if let Some(line) = self.ppu.take_line_event() {
                 cx4_scanline = true;
                 let event_clock = self
-                    .clock
+                    .counter_cpu
                     .saturating_sub(u64::try_from(self.ppu_credit.max(0)).unwrap_or(0));
                 self.refresh_done = false;
                 self.refresh_position = 538 - (event_clock as u32 & 7);
@@ -1377,7 +1395,7 @@ impl CpuBus for Snes {
             // run the transfers, then round the steal up to this access's bus
             // cycle (`status.clockCount`). Without the rounding the CPU is a
             // little early relative to HDMA on every line.
-            let dma_clock = (8 - (self.clock as u32 & 7)) + pending;
+            let dma_clock = (8 - (self.counter_cpu as u32 & 7)) + pending;
             let wait = base.max(1);
             stall += dma_clock + (wait - dma_clock % wait);
         }
