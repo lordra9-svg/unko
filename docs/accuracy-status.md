@@ -322,6 +322,13 @@ Validation so far:
   the CX4 idle, and the CX4 instruction count per dispatch is identical
   (+1,029 then +43,700), so the difference is the game's dispatch cadence on
   the S-CPU side, not coprocessor work.
+- The skipped frames are a frame-pacing near-tie: `$09CE`/`$09CF` match on
+  every frame (frame-aligned), ares' per-frame instruction count alternates
+  12,106/12,691 (state machine only on the long frames) while ours is a steady
+  ~12,370, and our cumulative S-CPU instruction count is +1.16 % by frame
+  3000, appearing in steps rather than linearly. Our bus wait-state model is a
+  verbatim match of ares' `CPU::wait()`, so the excess is spin time waiting on
+  an event (the CX4 busy loops on `$7F5E` bit 6).
 - Separately, the interrupt phase is measurable: at the same job the WRAM
   differs by 5 bytes only (interrupt stack byte `$02FD` = pushed PCL, counter
   `$09CF`, three scratch values ~0x2F apart), and watching `$02FD` shows ares

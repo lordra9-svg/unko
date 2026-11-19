@@ -261,11 +261,14 @@ fn main() -> ExitCode {
                     {
                         let _ = writeln!(
                             f,
-                            "{} {} {}",
+                            "{} {} {} {} {} {}",
                             frames,
                             unko_snes::cx4::DEBUG_JOB_STARTS
                                 .load(std::sync::atomic::Ordering::Relaxed),
-                            unko_snes::cx4::DEBUG_HALTS.load(std::sync::atomic::Ordering::Relaxed)
+                            unko_snes::cx4::DEBUG_HALTS.load(std::sync::atomic::Ordering::Relaxed),
+                            system.wram()[0x9CE],
+                            system.wram()[0x9CF],
+                            unko_snes::cx4::DEBUG_INSTR.load(std::sync::atomic::Ordering::Relaxed)
                         );
                     }
                 }

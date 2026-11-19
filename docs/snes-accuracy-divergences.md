@@ -2824,6 +2824,40 @@ machine. Both cores' stacks match at every dispatch (the return frame is
 two cores run the same handler when the machine is called; they simply call it
 a different number of times in frames 3324/3326/3328/3330.
 
+### The skipped frames are a frame-pacing near-tie, not different game state
+
+Per-frame counters (`CX4_JOBS_LOG` / `ARES_CX4_JOBS`, now also exporting
+`$09CE`, `$09CF` and a cumulative S-CPU instruction count):
+
+```
+frame   ares_instr  ours_instr   ares_jobs  ours_jobs
+3322      12,185      12,371        2316       2316
+3323      12,691      12,372        2319       2319
+3324      12,106      12,373        2319       2322
+3325      12,692      12,374        2322       2325
+3326      12,107      12,376        2322       2328
+```
+
+- `$09CE` (frame flag, set by the NMI at `$08:8034`, consumed by the main loop
+  at `$00:8125/$812B`) and `$09CF` (NMI counter, `INC $09CF` in the NMI) match
+  **on every frame**: 215 at frame 3324 in both. The cores are frame-aligned;
+  the earlier apparent one-frame capture offset was a static scene.
+- The state machine at `$88C6` is entered once per frame with `$3A = $1C` in
+  both cores - ares simply has **no entry at all** on 3324/3326/3328/3330.
+- ares' instruction count alternates 12,106 / 12,691 per frame in this window
+  (the state machine and its dispatch only on the long frames), while ours is a
+  steady 12,330-12,379. The game's per-frame work is close enough to a full
+  frame that a ~300-instruction difference decides whether the update fits.
+
+Cumulatively our S-CPU executes **+1.16 %** more instructions than ares by
+frame 3000, and the difference appears in *steps* (0.37 % at frame 1000,
+1.04 % at 2000) rather than linearly - so it is not a per-instruction cycle
+difference (our `access_cycles` is a verbatim match of ares' `CPU::wait()`:
+6/8 clocks per access, 12 for `$4000-$41FF`). It is extra *spinning* while
+waiting for an event, of which the CX4 busy loops in the dispatcher
+(`$7E2696`, `$7E26B8`, `$7E26C5` spin on `$7F5E` bit 6) are the prime
+candidate in exactly these windows.
+
 ### Tested: a non-atomic (interruptible) reload (falsified)
 
 The diagnosis above suggested making the reload interruptible - one byte per

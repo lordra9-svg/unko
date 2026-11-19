@@ -606,6 +606,29 @@ impl Snes {
     /// the machine.
     pub fn step(&mut self) -> u32 {
         self.live_pc = self.cpu.pc_address();
+        if crate::cx4::sm_logging() && self.live_pc == 0x88C6 {
+            // Debug: the game's frame state machine (`LDX $3A; JMP ($88C9,X)`).
+            use std::io::Write;
+            let frame = self.ppu.debug_frame;
+            let from: u64 = std::env::var("CX4_SM_FROM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            let to: u64 = std::env::var("CX4_SM_TO")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(u64::MAX);
+            if (from..=to).contains(&frame) {
+                let index = (usize::from(self.cpu.d).wrapping_add(0x3A)) & 0x1FFF;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(std::env::var_os("CX4_SM_LOG").unwrap_or_default())
+                {
+                    let _ = writeln!(f, "{} {:02X}", frame, self.wram[index]);
+                }
+            }
+        }
         if crate::cx4::job_logging() {
             crate::cx4::DEBUG_PC.store(
                 u64::from(self.live_pc),
@@ -624,6 +647,9 @@ impl Snes {
         let mut cpu = std::mem::take(&mut self.cpu);
         let cpu_cycles = cpu.step(self);
         self.cpu = cpu;
+        if crate::cx4::instr_logging() {
+            crate::cx4::DEBUG_INSTR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         self.apply_interrupts();
         let mut cycles = cpu_cycles;
         let mut dma_clocks = 0u32;

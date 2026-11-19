@@ -1614,6 +1614,20 @@ pub static DEBUG_SP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 /// Debug: eight S-CPU stack bytes at the most recent job request.
 pub static DEBUG_STACK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Debug: S-CPU instructions executed since power-on (`CX4_JOBS_LOG`).
+pub static DEBUG_INSTR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Whether the per-frame instruction counter is enabled (cached once).
+pub fn instr_logging() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("CX4_JOBS_LOG").is_some())
+}
+
+/// Whether the `$88C6` state-machine entry log is enabled (cached once).
+pub fn sm_logging() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("CX4_SM_LOG").is_some())
+}
+
 /// Whether the `$7F4F` job-request log is enabled (cached once).
 pub fn job_logging() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
