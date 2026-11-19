@@ -1027,15 +1027,24 @@ impl Snes {
         // One PPU dot is four master clocks in both regions; the PAL frame is
         // longer because it has 312 lines (and one 342-dot line), not because
         // the line clock differs.
-        self.ppu_credit += i64::from(clocks);
         // ares' PROFILE_PERFORMANCE build synchronizes coprocessors in
         // `CPU::scanline()` only (once per scanline, at Hcounter 0), so the CX4
         // advances in scanline chunks and can sit up to a line behind the CPU.
         let mut cx4_scanline = false;
-        while self.ppu_credit >= 4 {
+        // Per-2-clock PPU thread: two ticks per dot. `phase` is the clocks
+        // already advanced into the current dot; only this access's clocks are
+        // consumed, and the odd DMA-post remainder is carried into the phase.
+        let mut phase = self.ppu_credit.rem_euclid(4) as u32;
+        let mut rem = i64::from(clocks);
+        while rem >= 2 {
+            rem -= 2;
+            phase += 2;
+            if phase < 4 {
+                continue;
+            }
+            phase -= 4;
             let pre_dot = self.ppu.dot();
             self.ppu.tick();
-            self.ppu_credit -= 4;
             // Sample the comparator at the midpoint of the dot just completed;
             // ares polls every two master clocks with `hcounter(10)`.
             self.irq_line = self
@@ -1086,6 +1095,7 @@ impl Snes {
                 self.ppu.render_current_line();
             }
         }
+        self.ppu_credit = ((phase + rem as u32) & 3) as i64;
         if !self.refresh_active {
             let hc_after = self.ppu_hcounter;
             if wrapped {
