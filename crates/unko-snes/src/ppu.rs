@@ -597,6 +597,41 @@ impl Ppu {
     /// always vblank. Background and sprite fetches therefore use the line
     /// number itself, not the framebuffer row.
     pub fn render_current_line(&mut self) {
+        // Debug: per-scanline background scroll, to compare with ares'
+        // `BG::scanline` inputs (`ARES_HSCROLL_LOG`).
+        if let Some(path) = std::env::var_os("PPU_HSCROLL_LOG") {
+            use std::io::Write;
+            let want: Option<u64> = std::env::var("PPU_HSCROLL_FRAME")
+                .ok()
+                .and_then(|v| v.parse().ok());
+            if want.is_none_or(|frame| frame == self.debug_frame) {
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                {
+                    let ((h0, v0), (h1, v1), (h2, v2)) =
+                        (self.bg_scroll(0), self.bg_scroll(1), self.bg_scroll(2));
+                    let _ = writeln!(
+                        f,
+                        "frame={} line={} mode={} tm={:02X} h0={:03X} v0={:03X} h1={:03X} v1={:03X} h2={:03X} v2={:03X} sc2={:04X} td2={:04X} mos={:02X}",
+                        self.debug_frame,
+                        self.line,
+                        self.bg_mode & 0x07,
+                        self.tm,
+                        h0,
+                        v0,
+                        h1,
+                        v1,
+                        h2,
+                        v2,
+                        (u16::from(self.bg_sc(2) & 0xFC)) << 8,
+                        u16::from(self.bg_nba(2)) << 12,
+                        self.mosaic
+                    );
+                }
+            }
+        }
         if let Some(path) = std::env::var_os("PPU_LINE_LOG") {
             use std::io::Write;
             if (498..=501).contains(&self.debug_frame) {
@@ -949,7 +984,15 @@ impl Ppu {
         if self.display_disable || self.line >= self.vdisp() {
             if let Some(path) = std::env::var_os("VRAM_WRITE_LOG") {
                 use std::io::Write;
-                if self.debug_frame >= 300 {
+                let from: u64 = std::env::var("VRAM_WRITE_FROM")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(300);
+                let to: u64 = std::env::var("VRAM_WRITE_TO")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(u64::MAX);
+                if (from..=to).contains(&self.debug_frame) {
                     if let Ok(mut f) = std::fs::OpenOptions::new()
                         .create(true)
                         .append(true)

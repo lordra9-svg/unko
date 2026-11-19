@@ -2620,6 +2620,55 @@ take the interrupt one instruction earlier. That is the source of the residual
 counter phase, and the candidate mechanism for the per-line scroll difference at
 frame 3480.
 
+### Where the frame-3480 difference comes from: a copied CX4 snapshot
+
+Per-scanline probe (`PPU_HSCROLL_LOG` / `ARES_HSCROLL_LOG`, logged inside
+`render_current_line` and `DAC::render`) for the first differing frame:
+
+```
+differing lines: 0 of 224
+ares/ours: mode=1 tm=04 h0=000 v0=000 h1=000 v1=000 h2=3B0 v2=3D0
+           sc2=3000 td2=1000 mos=00   (168 lines)
+           sc2=0800 td2=0000 mos=00   (56 lines)
+```
+
+Every per-line register is identical, and only BG3 is enabled (`tm=04`), so the
+difference is not scroll, layer enable, map base, tile base or mosaic.
+
+The VRAM dumps at the aligned frames (ares 3480 == ours 3479, both with a
+100.000% identical picture) differ in 239 words; at the first differing frame
+(ares 3481 vs ours 3480) in 691 words. Almost all of them are BG3 character
+data at `$1000`, and **104 of the 145 tiles the visible map uses** have
+different data (the map itself, at `$3000`, is identical).
+
+That data is a straight copy of the coprocessor:
+
+```
+VRAM words $1000..$147F  ==  CX4 data RAM[$300..$B00]   (2048/2048 bytes)
+```
+
+and each core is self-consistent about which snapshot it copied:
+
+```
+ours frame 3480 VRAM block == ours   CX4 RAM at 3479[$300]
+ares frame 3481 VRAM block == ares   CX4 RAM at 3480/3481[$300]
+ours 3479 CX4 RAM vs ares 3480 CX4 RAM: 1295 bytes differ
+```
+
+So the picture difference is the **CX4 data-RAM snapshot the S-CPU copies into
+VRAM**. Every completed job still matches: the job-start data-RAM hash is
+identical for 2747/2747 jobs through frame 3600, so the HG51B executes the same
+program on the same data. What differs is the RAM state sampled at the frame
+boundary / copy instant - i.e. how far the coprocessor has progressed relative
+to the S-CPU when the copy runs, which is the scheduling question the earlier
+experiments were circling.
+
+The VRAM write stream confirms the same thing from the other side
+(`VRAM_WRITE_LOG` / `ARES_VRAM_LOG`, now frame-windowed): the **first** write to
+each of the 2304 `(address, byte)` keys is identical in both cores, while the
+later passes differ - the CPU rewrites the BG3 tile block during the frame and
+the second copy reads a different CX4 RAM state.
+
 ### Tested: a non-atomic (interruptible) reload (falsified)
 
 The diagnosis above suggested making the reload interruptible - one byte per

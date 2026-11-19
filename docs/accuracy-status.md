@@ -292,15 +292,26 @@ Validation so far:
   artefact: the two cores' boundaries are ~1,400 clocks apart and the boot code
   runs a visible GPR-scratch loop; the full CX4 register-write streams are
   identical write-for-write.
-- The first genuinely different picture frame is our 3480: a BG band
-  (x 80-168, y 59-181) sits 1-2 pixels off, with BG1 horizontal scroll 0 at the
-  frame boundary in both cores, i.e. a **mid-frame/per-line scroll** difference.
-  At the same job the WRAM differs by 5 bytes only: the interrupt stack byte
-  `$02FD` (pushed PCL), the wait-loop counter `$09CF`, and three 16-bit scratch
-  values ~0x2F apart. Watching `$02FD` shows ares takes the NMI before `$8100`
-  while we take it before `$8103`: ares pipelines NMI through `nmiPoll`
-  (`vcounter(2)`, 4-clock grid) + a 4-clock hold + `lastCycle()`. Reproducing
-  that latch is the open item.
+- The first genuinely different picture frame is our 3480. All 224 scanlines'
+  PPU state is identical (`mode=1 tm=04`, the same BG1/2/3 scroll, BG3 map
+  `$3000`, tile base `$1000`, mosaic) and only BG3 is enabled, so this is not a
+  scroll or layer difference. The differing pixels are BG3 character data:
+  **104 of the 145 tiles the visible map uses** differ, and the VRAM block at
+  `$1000` is a byte-for-byte copy of **CX4 data RAM `$300..$B00`** (2048/2048).
+  Each core is self-consistent about the snapshot it copied (ours frame 3480
+  VRAM = our CX4 RAM at 3479; ares frame 3481 VRAM = ares CX4 RAM at
+  3480/3481), and our 3479 CX4 RAM differs from ares' 3480 CX4 RAM by 1,295
+  bytes. Since every *completed* job still matches (2,747/2,747 job starts),
+  the remaining difference is the CX4 RAM state at the copy instant - i.e.
+  the coprocessor's progress relative to the S-CPU during the copy. The VRAM
+  write stream shows the same: the first write to each address is identical in
+  both cores, later passes differ.
+- Separately, the interrupt phase is measurable: at the same job the WRAM
+  differs by 5 bytes only (interrupt stack byte `$02FD` = pushed PCL, counter
+  `$09CF`, three scratch values ~0x2F apart), and watching `$02FD` shows ares
+  takes the NMI before `$8100` while we take it before `$8103`. ares pipelines
+  NMI through `nmiPoll` (`vcounter(2)`, 4-clock grid) + a 4-clock hold +
+  `lastCycle()`; reproducing that latch is still open.
 - The `EXSPC7110-` (7 MiB) layout is implemented: 1 MiB program + 5 MiB data +
   1 MiB expansion, with the expansion ROM at `$40-$4F:$0000-$FFFF` (20-bit
   offset across sixteen 64 KiB banks) on both the CPU and HDMA buses. It is now
