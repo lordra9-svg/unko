@@ -395,22 +395,20 @@ Validation so far:
   (its title switches Mode 7 -> 1 -> 5 mid-frame) and making `PRESENT_HASH`
   width-aware for 512-wide frames. Super Metroid and Super Castlevania IV are
   1200/1200 exact too. Chrono Trigger is exact through ares present 1073 and
-  then open: the WRAM images already differ by ~52 bytes and the cores hold
-  different BG1 scrolls at the split. Bisection with a frame-boundary dump on
-  both sides found the first persistent difference: the game frame counter
-  `$0008` starts ~3 frames early because we take an extra NMI at clock
-  11,742,640 that ares does not (ours 38 NMIs by frame 150, ares 36; both
-  agree from 12,100,002 onward). The extra NMI is a symptom: our `$4200 = 0x81`
-  write lands at 11,599,376 right after a `$4210` read that returns `0xC2`,
-  while ares' boot loop polls `$4210` from 11,601,916 and only enables at
-  11,742,672. Root cause: ares clears the `$4210`/`nmiLine` bit 7 on the
-  vblank *falling* edge, we kept it until read. Fixed, and the NMI lists and
-  game frame counter now match (0x08 203/203 at frame 600; WRAM 1 byte differs,
-  was 54). The 1200-present sweep is still 1075/1200: a second state divergence
-  appears between frames 600 and 800 (WRAM 1 -> 53 bytes) and is the next
-  bisect. With scripted input the cores track through level entry; the
-  apparent "divergence" from present 542 was a present-rate drift, and every
-  ares present 600-820 matches one of our frames pixel-for-pixel (0 px).
+  then open. Bisection with a line-240 state dump on both sides (our
+  `frame_ready` fires at line 240, matching ares' dump) found the first
+  divergence: the game frame counter `$0008` ran ~3 frames early because we
+  took an extra NMI at clock 11,742,640 that ares did not. Root cause: ares
+  clears the `$4210`/`nmiLine` bit 7 on the vblank *falling* edge, we kept it
+  until read. Fixed; the NMI lists and `$0008` now match, and frame 400 is
+  byte-identical. A second divergence remains: from frame 430 the intro stream
+  buffer at `$6DC` is two bytes further in our run (the feeding loop ran two
+  extra iterations), and the 1200-present sweep is still 1075/1200. That
+  polled-flag loop timing is the next lead.
+
+  With scripted input the cores track through level entry; the apparent
+  "divergence" from present 542 was a present-rate drift, and every ares
+  present 600-820 matches one of our frames pixel-for-pixel (0 px).
   Input-driven sweeps need a same-phase state sample (next instrumentation
   step).
 - Save-state round-trip re-verified after the PPU changes: `hvdma` 60+60 video

@@ -3184,10 +3184,31 @@ frame 200: 0x08 ares 59  ours 59   (WRAM 29 bytes differ, was 55)
 frame 600: 0x08 ares 203 ours 203  (WRAM 1 byte differs, was 54)
 ```
 
-The 1200-present sweep is still 1075/1200 (first miss at 1074): the renderer
-never shows ares' post-1074 animation, and WRAM differences grow again between
-frames 600 and 800 (1 -> 53 bytes), so a second state divergence remains. That
-window is the next bisect.
+The 1200-present sweep is still 1075/1200 (first miss at 1074); a 3000-frame
+run also finds no frame matching ares 1074-1199, so this is a real second
+divergence.
+
+Bisecting it needed the right sample phase: our `frame_ready` fires at line 240,
+the same phase as ares' original `ARES_PPU_DUMP` dump, while the temporary
+vcounter-0 dump was the wrong phase and produced misleading 40-70 byte diffs
+(ares' own state differs by one between its 240 and 0 dumps). At the correct
+phase:
+
+```
+frame 400  : 0 bytes differ
+frame 410  : 1 byte  ($6FD, a sampled timer byte)
+frame 420  : 1 byte  ($6FD)
+frame 430  : 7 bytes ($6DC.. is an intro stream buffer)
+frame 500  : 29 bytes
+frame 800  : 9 bytes
+```
+
+From frame 430 the intro stream buffer at `$6DC` is advanced **two bytes
+further in our run** (ares `... 90 00 10 00 02 05 00 27`, ours
+`10 00 02 00 05 27 ...`; the tail matches shifted), i.e. the loop feeding that
+buffer has run two extra iterations by the same frame. That is a polled-flag
+loop timing difference (the same sub-dot class as the SMW window-HDMA race) and
+is the concrete next lead; the buffer data itself matches.
 
 **Donkey Kong Country (USA), presents 0-1199:** 1200 exact.
 
