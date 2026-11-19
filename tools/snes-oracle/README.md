@@ -428,6 +428,11 @@ The CX4 has env-gated debug hooks used to localise divergence against ares:
   blank) and `ARES_CM_LOG` + `ARES_CM_FRAME` (per line: fixed colour,
   `blendMode`, mode/halve, brightness, blank). These are how the
   colour-math/sub-screen and brightness discrepancies were pinned.
+- `PPU_PX_LOG=<path>` + `PPU_PX_FRAME`/`PPU_PX_LINE`/`PPU_PX_X0`/`PPU_PX_X1`:
+  the winning main/sub layer, priority and palette index per DAC column, next
+  to the ares side's `ARES_PX_LOG` + `ARES_PX_FRAME`/`ARES_PX_LINE`/
+  `ARES_PX_X0`/`ARES_PX_X1` (which prints the same columns with the layers'
+  CGRAM colours). This is how the object/background priority merge was pinned.
 - `FRAME_FROM=<n>` limits our `FRAME_DIR`/`FRAME_EVERY` dumps to frames `>= n`,
   so a bisect window costs a few MB instead of the whole run.
 - `NMI_POLL=<path>` / `ARES_NMI_POLL`: the master clock and S-CPU PC at every
