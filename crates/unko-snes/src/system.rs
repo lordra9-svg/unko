@@ -22,7 +22,7 @@ use crate::spc7110::Spc7110;
 /// Magic number at the start of a serialized save state (`"SNES"`).
 pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
 /// Save-state format version. Bump whenever the serialized shape changes.
-pub const SAVE_STATE_VERSION: u32 = 8;
+pub const SAVE_STATE_VERSION: u32 = 9;
 
 /// A complete `unko-snes` snapshot.
 ///
@@ -92,6 +92,12 @@ pub struct SnesState {
     pub cpu_stall: u32,
     /// Current line's DRAM refresh latch.
     pub refresh_done: bool,
+    /// ares `status.dramRefreshPosition`.
+    pub refresh_position: u32,
+    /// ares `status.hdmaSetupPosition` for line 0.
+    pub hdma_setup_position: u32,
+    /// Whether line 0's HDMA setup has run.
+    pub hdma_setup_done: bool,
     /// A refresh crossed this step and must be charged.
     pub refresh_pending: bool,
     /// Joypad auto-poll started this frame.
@@ -238,6 +244,12 @@ pub struct Snes {
     cpu_stall: u32,
     /// Whether the current scanline's DRAM refresh has been applied.
     refresh_done: bool,
+    /// ares `status.dramRefreshPosition` (`538 - counter.cpu & 7`).
+    refresh_position: u32,
+    /// ares `status.hdmaSetupPosition` (`12 + counter.cpu & 7` on line 0).
+    hdma_setup_position: u32,
+    /// Whether line 0's HDMA setup has run.
+    hdma_setup_done: bool,
     /// Set when this peripheral advance crossed the refresh position; the
     /// wrapper then runs the 40 refresh clocks and reports them to the CPU.
     refresh_pending: bool,
@@ -328,6 +340,9 @@ impl Snes {
             wram_port: 0,
             cpu_stall: 0,
             refresh_done: false,
+            refresh_position: 538,
+            hdma_setup_position: 12,
+            hdma_setup_done: true,
             refresh_pending: false,
             auto_poll_started: false,
             hdma_run_done: false,
@@ -418,6 +433,9 @@ impl Snes {
             wram_port: self.wram_port,
             cpu_stall: self.cpu_stall,
             refresh_done: self.refresh_done,
+            refresh_position: self.refresh_position,
+            hdma_setup_position: self.hdma_setup_position,
+            hdma_setup_done: self.hdma_setup_done,
             refresh_pending: self.refresh_pending,
             auto_poll_started: self.auto_poll_started,
             hdma_run_done: self.hdma_run_done,
@@ -490,6 +508,9 @@ impl Snes {
         self.wram_port = state.wram_port;
         self.cpu_stall = state.cpu_stall;
         self.refresh_done = state.refresh_done;
+        self.refresh_position = state.refresh_position;
+        self.hdma_setup_position = state.hdma_setup_position;
+        self.hdma_setup_done = state.hdma_setup_done;
         self.refresh_pending = state.refresh_pending;
         self.auto_poll_started = state.auto_poll_started;
         self.hdma_run_done = state.hdma_run_done;
@@ -628,6 +649,28 @@ impl Snes {
     /// the machine.
     pub fn step(&mut self) -> u32 {
         self.live_pc = self.cpu.pc_address();
+        {
+            use std::sync::OnceLock;
+            static W: OnceLock<Option<(String, u64, u64)>> = OnceLock::new();
+            let w = W.get_or_init(|| {
+                let path = std::env::var("CPU_TRACE_LOG").ok()?;
+                let from = std::env::var("CPU_TRACE_FROM").ok()?.parse().ok()?;
+                let to = std::env::var("CPU_TRACE_TO").ok()?.parse().ok()?;
+                Some((path, from, to))
+            });
+            if let Some((path, from, to)) = w {
+                if self.clock >= *from && self.clock <= *to {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                    {
+                        let _ = writeln!(f, "{} {:06X}", self.clock, self.live_pc);
+                    }
+                }
+            }
+        }
         if crate::cx4::frame_logging() {
             let tag = match self.live_pc {
                 0x001FEF => Some('E'),
@@ -720,6 +763,11 @@ impl Snes {
                     self.apply_interrupts();
                     return cycles + dma_clocks;
                 }
+                let pre = if transfer.whole_charged {
+                    0
+                } else {
+                    8 - (self.clock as u32 & 7)
+                };
                 let clocks = {
                     let vblank = self.ppu.in_vblank();
                     let hblank = self.ppu.in_hblank();
@@ -747,7 +795,7 @@ impl Snes {
                         vblank,
                         hblank,
                     };
-                    transfer.step(&mut bus)
+                    transfer.step(&mut bus) + pre
                 };
                 let extra = self.advance_peripherals(clocks);
                 cycles += clocks + extra;
@@ -755,7 +803,13 @@ impl Snes {
                 // equal to the system clock, otherwise any timing analysis
                 // based on `cpu.cycles` is short by the DMA/stall time.
                 dma_clocks += clocks + extra;
+                transfer.accum += clocks;
             }
+            let wait = bus_wait(self.cpu.pc_address(), self.fast_rom).max(1);
+            let post = wait - transfer.accum % wait;
+            let extra = self.advance_peripherals(post);
+            cycles += post + extra;
+            dma_clocks += post + extra;
         }
         self.cpu.cycles += u64::from(dma_clocks);
         self.apply_interrupts();
@@ -925,20 +979,11 @@ impl Snes {
         // `CPU::scanline()` only (once per scanline, at Hcounter 0), so the CX4
         // advances in scanline chunks and can sit up to a line behind the CPU.
         let mut cx4_scanline = false;
+        let line_before = self.ppu.line();
         while self.ppu_credit >= 4 {
             let pre_dot = self.ppu.dot();
             self.ppu.tick();
             self.ppu_credit -= 4;
-            // ares `CPU::step`: "DRAM refresh occurs once every scanline" as five
-            // 6+2 master-clock stalls at hcounter 536 (dot 134). The CPU loses
-            // those 40 clocks; the rest of the machine keeps running.
-            if pre_dot == DRAM_REFRESH_DOT - 1 && !self.refresh_done {
-                // ares `CPU::step` applies the five 6+2-clock refresh stalls at
-                // the end of the step that reaches the refresh position, so the
-                // caller adds them to the current access.
-                self.refresh_done = true;
-                self.refresh_pending = true;
-            }
             // Sample the comparator at the midpoint of the dot just completed;
             // ares polls every two master clocks with `hcounter(10)`.
             self.irq_line = self
@@ -970,26 +1015,16 @@ impl Snes {
             }
             if let Some(line) = self.ppu.take_line_event() {
                 cx4_scanline = true;
+                let event_clock = self
+                    .clock
+                    .saturating_sub(u64::try_from(self.ppu_credit.max(0)).unwrap_or(0));
                 self.refresh_done = false;
+                self.refresh_position = 538 - (event_clock as u32 & 7);
                 self.hdma_run_done = false;
                 if line == 0 {
-                    self.dma.hdma_reset();
                     self.auto_poll_started = false;
-                    // ares `hdmaSetup` runs at V=0 (hcounter ~12); our
-                    // line-granular renderer runs it with the line-0 event so
-                    // line 0 sees it.
-                    let mut bus = HdmaBus {
-                        wram: &mut self.wram,
-                        cart: &mut self.cart,
-                        apu: &mut self.apu,
-                        ppu: &mut self.ppu,
-                        sa1: &mut self.sa1,
-                        sdd1: &mut self.sdd1,
-                        spc7110: &mut self.spc7110,
-                        snes_mar: self.snes_mar,
-                        snes_refresh: self.refresh_active,
-                    };
-                    self.cpu_stall += self.dma.hdma_setup(&mut bus);
+                    self.hdma_setup_position = 12 + (event_clock as u32 & 7);
+                    self.hdma_setup_done = false;
                 }
             }
             // ares `PPU::main` runs `step(renderingCycle)` before rendering a
@@ -1003,6 +1038,38 @@ impl Snes {
                 && self.ppu.line() <= self.ppu.visible_last()
             {
                 self.ppu.render_current_line();
+            }
+        }
+        if !self.refresh_active && self.ppu.line() == line_before {
+            let hc_after =
+                u32::from(self.ppu.dot()) * 4 + u32::try_from(self.ppu_credit).unwrap_or(0);
+            let hc_before = hc_after.saturating_sub(clocks);
+            if !self.refresh_done
+                && hc_before < self.refresh_position
+                && hc_after >= self.refresh_position
+            {
+                self.refresh_done = true;
+                self.refresh_pending = true;
+            }
+            if !self.hdma_setup_done
+                && self.ppu.line() == 0
+                && hc_before < self.hdma_setup_position
+                && hc_after >= self.hdma_setup_position
+            {
+                self.hdma_setup_done = true;
+                self.dma.hdma_reset();
+                let mut bus = HdmaBus {
+                    wram: &mut self.wram,
+                    cart: &mut self.cart,
+                    apu: &mut self.apu,
+                    ppu: &mut self.ppu,
+                    sa1: &mut self.sa1,
+                    sdd1: &mut self.sdd1,
+                    spc7110: &mut self.spc7110,
+                    snes_mar: self.snes_mar,
+                    snes_refresh: self.refresh_active,
+                };
+                self.hdma_pending_cost += self.dma.hdma_setup(&mut bus);
             }
         }
         if let Some(cx4) = self.cx4.as_mut().filter(|_| cx4_scanline) {
@@ -1324,6 +1391,20 @@ impl CpuBus for Snes {
     fn advance(&mut self, clocks: u32) -> u32 {
         self.advance_peripherals(clocks)
     }
+}
+
+/// Master clocks a CPU bus access takes (ares `CPU::wait`).
+fn bus_wait(address: u32, fast_rom: bool) -> u32 {
+    if address & 0x40_8000 != 0 {
+        return if address & 0x80_0000 != 0 && fast_rom { 6 } else { 8 };
+    }
+    if address.wrapping_add(0x6000) & 0x4000 != 0 {
+        return 8;
+    }
+    if address.wrapping_sub(0x4000) & 0x7E00 != 0 {
+        return 6;
+    }
+    12
 }
 
 struct SnesBus<'a> {
@@ -1929,20 +2010,7 @@ impl CpuBus for SnesBus<'_> {
         *self.snes_mar = address;
         // Mirrors ares CPU::wait(): six master clocks per base cycle, with
         // wait states for slow ROM, WRAM and the internal I/O window.
-        if address & 0x40_8000 != 0 {
-            return if address & 0x80_0000 != 0 && *self.fast_rom {
-                6
-            } else {
-                8
-            };
-        }
-        if address.wrapping_add(0x6000) & 0x4000 != 0 {
-            return 8;
-        }
-        if address.wrapping_sub(0x4000) & 0x7E00 != 0 {
-            return 6;
-        }
-        12
+        bus_wait(address, *self.fast_rom)
     }
 }
 
