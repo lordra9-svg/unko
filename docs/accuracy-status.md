@@ -312,7 +312,10 @@ Validation so far:
   (0-3900), Mega Man X3 25/25 exact (0-600), and Star Fox exact at every
   present 630-690 except a single transient frame (present 677 / our ~665:
   625 scattered pixels flipping bright/black, one animation step; 676 and 678
-  are exact). ares skips presents via `runAhead()`, so its index lags ours by
+  are exact). State at the blip: GSU RAM is byte-identical at the neighbouring
+  frames and differs by only 6 bytes (of 32 KiB) at the blip - a one-frame
+  timing effect, not a persistent divergence. Our frame counter runs ~13 ahead
+  of ares' emulated count by then, so frames must be matched by content. ares skips presents via `runAhead()`, so its index lags ours by
   up to ~12 and comparisons must use a content window.
 - The compositor changes from 20564dc (colour-window zeroing, sub-backdrop
   fixed colour, OBJ1/OBJ2 split) were **reverted**: against the calibrated

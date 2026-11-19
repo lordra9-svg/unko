@@ -2981,6 +2981,21 @@ So the Star Fox "divergence from 675" is a **single transient frame**, present
 flipping between bright and black, i.e. one animation/flash step, not a
 persistent drift. Every other sampled frame around it matches exactly.
 
+State at the blip, aligned by GSU-RAM content (our frame counter runs ~13 ahead
+of ares' emulated frame count by this point, so frames are matched by content):
+
+```
+ares GSU frame -> best our frame   differing bytes
+674 -> 662   8      677 -> 664   6     679 -> 666   0
+675 -> 662 152      678 -> 665   1
+676 -> 663   0
+```
+
+Neighbouring frames are byte-identical (0 and 0 at 676/679) and the blip frame
+differs by only **6 GSU-RAM bytes** from its best match, i.e. the blip is a
+one-frame timing effect in the GSU/CPU interaction (a few bytes in flight at
+the sample), not a persistent state divergence.
+
 ### Resolved: presentation-time oracle calibrated (ares `Screen::refresh`)
 
 The frame the UI actually shows is `_output` at the end of
