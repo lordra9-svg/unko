@@ -105,6 +105,21 @@ tools/snes-oracle/diff-audio.py /tmp/ours-cap/audio.f32 /tmp/ares-cap/audio.f32
 offset (the two DSP phases can differ by a sample), then reports the first
 sample above the tolerance, RMS and peak levels.
 
+For a **bit-exact** PCM check, capture ares with `ARES_RAW_AUDIO=<path>` and
+compare its pre-resampler i16 stream to our f32 dump:
+
+```sh
+ARES_RAW_AUDIO=/tmp/ares-cap/raw.i16 tools/snes-oracle/ares-capture.sh \
+  test-roms/snes/jonasquinn-test-roms/blargg_near_cd_quality.smc 1202 /tmp/ares-cap
+FRAMES=1200 AUDIO_OUT=/tmp/ours-cap/audio.f32 \
+  target/release/examples/snes-info ROM.sfc "$IPL"
+tools/snes-oracle/diff-audio-raw.py /tmp/ours-cap/audio.f32 /tmp/ares-cap/raw.i16
+# offset -2: 0 differing samples over 639700 stereo frames
+```
+
+Our f32 stream is `i16 / 32768.0`, so `diff-audio-raw.py` recovers the integers
+exactly; any non-zero count is a real DSP divergence, not a resampler artifact.
+
 ## DSP-1 firmware
 
 `unko-snes` never embeds the copyrighted NEC uPD7725 firmware. Point
