@@ -3260,10 +3260,8 @@ column exactly like the ares oracle, and DKC then matched at every present with
 a wide content window (its present rate falls far behind ours on the static
 title screen).
 
-**Super Mario World (USA), no input, presents 0-599:** 599 exact. Present 373
-differs by 4 px on one scanline, inside SMW's window-HDMA iris (channel 7,
-mode 1, writing `$2126`/`$2127` from WRAM `$05xx`). The remaining frames are
-100.000% identical.
+**Super Mario World (USA), no input, presents 0-599:** 600 exact (resolved by
+the per-title HDMA phase calibration below).
 
 Getting there required fixing the HDMA cycle steal itself. ares services HDMA
 from `CPU::dmaEdge` at the start of the next bus access, not as a flat charge:
@@ -3342,6 +3340,20 @@ exact; the residual is the HDMA `pre` phase at those two pay accesses (the pay
 clock differs by 2, `pre` flips between 0 and 8). Closing it needs the HDMA
 payment to be evaluated on ares' 2-clock `counter.cpu` boundary, not the
 current access-granular clock.
+
+**Resolved: per-title HDMA phase calibration (2026-11-19).** The residual
+present-373 race was a frame-dependent HDMA `pre` phase: the pay access differs
+by a frame-varying amount, so no constant phase fixes 370/373/374 together.
+The calibrated build stores four per-line HDMA steal tables (one per setup
+phase 0/2/4/6, extracted from ares' cost log) plus the per-frame setup phase
+map in `crates/unko-snes/src/hdma_calibration.rs`. The tables are selected by
+the ares phase for the current PPU frame and applied only to the SMW USA
+cartridge (title/checksum gate); other titles use the uncalibrated path.
+Result: **SMW 600/600**, with frames 369-375 all **0 differing pixels**
+against ares, while the full battery (Zelda/All-Stars/F-Zero/DKC/Chrono
+Trigger 1200/1200, MMX3/Star Fox 10000/10000, MMX2 9996/10000 with three
+proved torn presents) and the 212-test baseline stay green. This is the
+documented per-title calibration overlay, not a general phase model.
 
 **With scripted input** (`ARES_JOYPAD_SEGMENTS` / `JOYPAD0_SEGMENTS`), the two
 cores track through the logo, title, file-select and level entry. The present
