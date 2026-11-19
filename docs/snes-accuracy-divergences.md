@@ -2955,6 +2955,29 @@ current byte), and the interrupted instruction is simply a different iteration
 of the same 42-clock `$8100` wait loop. Both cores enter the same NMI within
 one loop instruction, and the wait loop is a pure spin (no state consequence).
 
+### Frame-locked oracle: the pixel buffer is unusable, but state is decisive
+
+Two ways to get a frame-locked ares reference were tested at the PPU frame
+boundary (ppu-performance/ppu.cpp):
+
+* `ARES_FLHASH`/`ARES_FLFRAME` read `screen->pixels()`. The dumps are not the
+  picture: frame 3980's buffer is a uniform `0x078000` fill (99.5% of pixels,
+  four distinct colours), i.e. the presentation surface is not the render
+  target at that instant. This confirms the earlier note that a pixel-level
+  frame-locked oracle is unavailable this way.
+* **State** at the same boundary is exact. Dumping VRAM/CGRAM/OAM/CX4 RAM at
+  ares' frame boundary and comparing with our frame N:
+
+```
+frame 3980   VRAM 0   CGRAM 0   OAM hash equal   CX4 RAM 0   WRAM 15
+frame 4000   VRAM 0   CGRAM 0   OAM hash equal   CX4 RAM 0   WRAM 15
+```
+
+So MMX2 is **state-exact at frames 3980 and 4000** (the 15 WRAM bytes are the
+same counters/scratch seen earlier), and the pixel differences at those frames
+are the presentation lag, not an emulation gap. The 23-pixel "residual" at the
+best offset is inside that lag.
+
 ### Frame 3980 onward is a capture-lag artefact, not a divergence
 
 Per-pixel logging (`PX_LOG` / `ARES_PX_LOG`, above/below colour, fixed colour,
@@ -3326,3 +3349,20 @@ artificial `0xFFFF` (contradictory D-pad) differs, which no game produces.
   checksums match.
 - 250-image random No-Intro sample: 237 parsed; all 13 failures are
   headerless/beta/pirate dumps rather than clean retail images.
+
+
+## Star Fox frame 153: GSU RAM identical, VRAM differs at $E000
+
+Same state-based comparison for Star Fox at frame 153:
+
+```
+gsuram  32768/32768  0 differing
+vram    65536/65536  5230 differing (first at $E000: ares $0B01, ours $0000)
+wram    131072       6 differing (scratch)
+```
+
+The SuperFX work RAM is now byte-identical, so the frame-153 GSU discrepancy is
+gone. The remaining VRAM difference is concentrated at `$E000`+ and has the
+shape of a CPU/GSU upload that has not landed at the boundary sample; it needs
+a content-anchored (job or DMA completion) comparison rather than a frame
+boundary to judge.
