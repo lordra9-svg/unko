@@ -89,10 +89,21 @@ MSU1_DATA=.../msu1.data.rom MSU1_TRACK=1:.../track-1.pcm \
   target/release/examples/snes-info msu1-test.sfc ipl.rom
 ```
 
-`MSU1_AUDIO_OUT=<path>` writes the 44.1 kHz stereo track stream as
-interleaved `i16`. ares' `--dump-audio` covers only the S-DSP stream, so MSU1
-PCM is currently verified by the status fixture and unit tests rather than a
-sample diff.
+`MSU1_AUDIO_OUT=<path>` writes the 44.1 kHz stereo track stream as interleaved
+`i16`. The local ares build has an oracle-only `ARES_MSU1_AUDIO=<path>` hook
+(the same i16 layout) and `ARES_MSU1_UNMUTE=1` to bypass the S-DSP mute flag,
+because the fixture has no S-SMP driver to clear `$6C`. Compare with:
+
+```sh
+MSU1_UNMUTE=1 MSU1_AUDIO_OUT=/tmp/ours.i16 ... snes-info msu1-test.sfc ipl.rom
+ARES_MSU1_UNMUTE=1 ARES_MSU1_AUDIO=/tmp/ares.i16 ...
+  tools/snes-oracle/ares-capture.sh msu1-test.sfc 32 /tmp/ares-cap
+tools/snes-oracle/diff-audio-raw.py /tmp/ours.i16 /tmp/ares.i16 \
+  --ours-i16 --window 40000
+```
+
+The fixture at volume `0x80` is bit-exact: 0 differing samples over 20,000
+stereo frames.
 
 ## Audio alignment
 

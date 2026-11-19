@@ -65,7 +65,7 @@ def build() -> bytes:
         ("lda #$01", bytes([0xA9, 0x01])),
         ("sta $2004", bytes([0x8D, 0x04, 0x20])),
         ("stz $2005", bytes([0x9C, 0x05, 0x20])),
-        ("lda #$ff", bytes([0xA9, 0xFF])),
+        ("lda #$80", bytes([0xA9, 0x80])),
         ("sta $2006", bytes([0x8D, 0x06, 0x20])),
         ("lda #$03", bytes([0xA9, 0x03])),
         ("sta $2007", bytes([0x8D, 0x07, 0x20])),
@@ -119,8 +119,13 @@ def main() -> None:
     open("msu1.data.rom", "wb").write(data)
     pcm = bytearray(b"MSU1")
     pcm += struct.pack("<I", 0)  # loop sector 0 -> byte 8
-    for _ in range(64):
-        pcm += struct.pack("<hh", 1000, -1000)
+    # A deterministic two-channel ladder so volume scaling and looping are
+    # exercised across the full 16-bit range.
+    for index in range(4096):
+        sample = ((index * 977) % 65536) - 32768
+        left = sample // 4
+        right = -sample // 4
+        pcm += struct.pack("<hh", left, right)
     open("track-1.pcm", "wb").write(pcm)
     open(out, "wb").write(build())
     print(f"wrote {out}, msu1.data.rom, track-1.pcm")

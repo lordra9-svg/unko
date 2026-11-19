@@ -182,6 +182,12 @@ fn main() -> ExitCode {
         system.load_state(&bytes).expect("load save state");
         println!("state load:  {}", path.to_string_lossy());
     }
+    if std::env::var_os("MSU1_UNMUTE").is_some() {
+        // Test hook: the DSP powers up muted (as on ares), so an MSU1 fixture
+        // that never runs an S-SMP driver needs the mute flag cleared to make
+        // the stream comparable.
+        system.apu.dsp_mut().write(0x6C, 0x00);
+    }
     if std::env::var_os("DSP_TRACE_OUT").is_some() {
         system.apu.dsp_mut().enable_trace();
     }

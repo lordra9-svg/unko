@@ -66,12 +66,25 @@ struct Clock {
     sample: bool,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 struct MainVol {
     reset: bool,
     mute: bool,
     volume: [i8; 2],
     output: [i32; 2],
+}
+
+impl Default for MainVol {
+    fn default() -> Self {
+        // ares `MainVol { n1 reset = 1; n1 mute = 1; }`: the DSP powers up
+        // muted and in reset until the sound driver writes `$6C`.
+        Self {
+            reset: true,
+            mute: true,
+            volume: [0; 2],
+            output: [0; 2],
+        }
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]

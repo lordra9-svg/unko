@@ -622,7 +622,12 @@ Validation so far:
   `Snes::set_msu1_track` and drains the 44.1 kHz stream with
   `Snes::drain_msu1_samples`. `tools/snes-oracle/gen-msu1-rom.py` builds a
   first-party fixture whose `$2001` data-read colour (`0x2211`) and
-  play+repeat status colour (`0x0032`) are both identical to ares.
+  play+repeat status colour (`0x0032`) are both identical to ares, and whose
+  44.1 kHz PCM stream is **bit-exact** (0 differing samples over 20,000 stereo
+  frames, volume scaling and five loop passes included).
+- The S-DSP now powers up with `reset` and `mute` set, matching ares'
+  `MainVol { reset = 1, mute = 1 }`; this gates the pre-`$6C` output and the
+  MSU1 stream. No measured pixel or retail-audio parity changed.
 - Retail audio parity was measured for the first time across the reference
   battery with the improved `tools/snes-oracle/diff-audio-raw.py` (loud-probe
   alignment, 700,000 interleaved samples = 350,000 stereo frames): Zelda 1175

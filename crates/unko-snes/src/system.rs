@@ -2650,6 +2650,9 @@ mod tests {
             assert_ne!(bus.read(0x00_2000, 0) & 0x10, 0);
         }
 
+        // The S-DSP powers up muted (ares `MainVol { mute = 1 }`), and MSU1
+        // output follows that mute flag; clear `$6C` as a sound driver does.
+        system.apu.dsp_mut().write(0x6C, 0x00);
         // One 44.1 kHz sample is one master-clock period / 44,100 clocks.
         let clocks = (system.region().master_clock() / 44_100) as u32 + 1;
         system.advance_peripherals(clocks);

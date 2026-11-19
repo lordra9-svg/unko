@@ -3927,9 +3927,23 @@ first-party fixture `tools/snes-oracle/gen-msu1-rom.py` writes the two data
 bytes read through `$2001` into CGRAM colour 0 (phase 1) and the status byte
 after selecting and playing track 1 (phase 2). Both frames are identical to
 ares: colour `0x2211` for the data read and `0x0032` (revision 2 + playing +
-repeat) for the status. The fixture also produced the current 44.1 kHz sample
-path but ares' capture hooks only record the S-DSP stream, so MSU1 PCM is not
-yet diffed sample-by-sample.
+repeat) for the status.
+
+The 44.1 kHz PCM is also **bit-exact**: the fixture's 4,096-sample stereo
+ladder at volume `0x80` loops five times while ares and this core produce the
+same interleaved i16 stream. `diff-audio-raw.py --ours-i16 --window 40000`
+reports **0 differing samples over 20,000 stereo frames** at offset 2 (the same
+two-sample lead the S-DSP stream shows). ares' MSU1 stream is behind its DSP
+mute flag and the fixture has no S-SMP driver to clear it, so the comparison
+uses an oracle-only `ARES_MSU1_UNMUTE` hook and the harness' matching
+`MSU1_UNMUTE` test switch; the mute passthrough itself is unit-tested and now
+matches ares' power-on state (see below).
+
+**Related S-DSP power-on fix.** ares `MainVol` powers up with `reset = 1` and
+`mute = 1`; this core defaulted both to false. The flags gate `echo27` output
+and the MSU1 stream, so the first samples before a driver writes `$6C` differed.
+Both now default to true in `Dsp::new`, matching ares. No measured video or
+retail audio parity changed (drivers clear `$6C` before any nonzero output).
 
 ## Retail audio parity (2026-11-19, open)
 

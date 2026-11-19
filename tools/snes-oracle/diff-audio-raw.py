@@ -44,6 +44,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("ours")
     parser.add_argument("ares")
+    parser.add_argument(
+        "--ours-i16",
+        action="store_true",
+        help="the 'ours' file is already interleaved i16 (MSU1 stream) "
+        "instead of the S-DSP f32 stream",
+    )
     parser.add_argument("--max-offset", type=int, default=256)
     parser.add_argument(
         "--window",
@@ -54,7 +60,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    ours = load_f32_as_i16(args.ours)
+    ours = load_i16(args.ours) if args.ours_i16 else load_f32_as_i16(args.ours)
     ares = load_i16(args.ares)
     print(f"ours samples: {len(ours)} ({len(ours) // 2} stereo frames)")
     print(f"ares samples: {len(ares)} ({len(ares) // 2} stereo frames)")
