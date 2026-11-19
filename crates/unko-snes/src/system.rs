@@ -20,12 +20,14 @@ use crate::ppu::Ppu;
 use crate::rom::{Cartridge, Region};
 use crate::sa1::Sa1;
 use crate::sdd1::Sdd1;
+use crate::sharprtc::SharpRtc;
 use crate::spc7110::Spc7110;
+use crate::sufamiturbo::SufamiTurbo;
 
 /// Magic number at the start of a serialized save state (`"SNES"`).
 pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
 /// Save-state format version. Bump whenever the serialized shape changes.
-pub const SAVE_STATE_VERSION: u32 = 13;
+pub const SAVE_STATE_VERSION: u32 = 15;
 
 /// A complete `unko-snes` snapshot.
 ///
@@ -71,6 +73,12 @@ pub struct SnesState {
     pub msu1: Option<Msu1>,
     /// Carried MSU1 sample credit.
     pub msu1_credit: i64,
+    /// Sharp S-RTC, when the cartridge has one.
+    pub sharp_rtc: Option<SharpRtc>,
+    /// Carried Sharp RTC clock credit (master clocks).
+    pub rtc_credit: i64,
+    /// Sufami Turbo slots, when the base cartridge is one.
+    pub sufami_turbo: Option<SufamiTurbo>,
     /// Carried SA-1 instruction credit (master clocks).
     pub sa1_credit: i64,
     /// Last S-CPU bus address, for SA-1 bus-conflict penalties.
@@ -230,6 +238,12 @@ pub struct Snes {
     pub msu1: Option<Msu1>,
     /// Carried MSU1 sample credit.
     msu1_credit: i64,
+    /// Sharp S-RTC, when the cartridge has one.
+    pub sharp_rtc: Option<SharpRtc>,
+    /// Carried Sharp RTC clock credit (master clocks).
+    rtc_credit: i64,
+    /// Sufami Turbo slots, when the base cartridge is one.
+    pub sufami_turbo: Option<SufamiTurbo>,
     /// Carried SA-1 instruction credit (master clocks).
     sa1_credit: i64,
     /// Last S-CPU bus address, for SA-1 bus-conflict penalties.
@@ -323,6 +337,12 @@ impl Snes {
         let has_sa1 = cart.header().has_sa1();
         let has_spc7110 = cart.header().has_spc7110();
         let has_obc1 = cart.header().has_obc1();
+        let has_sharp_rtc = cart.header().has_sharp_rtc();
+        let sufami_turbo = if cart.is_sufami_turbo() {
+            Some(SufamiTurbo::default())
+        } else {
+            None
+        };
         let smw_calibrated =
             cart.header().title.trim() == "SUPER MARIOWORLD" && cart.header().checksum == 0xA0DA;
         // Built before `cart` moves into the machine below.
@@ -359,6 +379,13 @@ impl Snes {
             obc1: if has_obc1 { Some(Obc1::new()) } else { None },
             msu1: None,
             msu1_credit: 0,
+            sharp_rtc: if has_sharp_rtc {
+                Some(SharpRtc::new())
+            } else {
+                None
+            },
+            rtc_credit: 0,
+            sufami_turbo,
             sa1_credit: 0,
             snes_mar: 0,
             refresh_active: false,
@@ -466,6 +493,9 @@ impl Snes {
             obc1: self.obc1,
             msu1: self.msu1.clone(),
             msu1_credit: self.msu1_credit,
+            sharp_rtc: self.sharp_rtc,
+            rtc_credit: self.rtc_credit,
+            sufami_turbo: self.sufami_turbo.clone(),
             sa1_credit: self.sa1_credit,
             snes_mar: self.snes_mar,
             dma: self.dma.clone(),
@@ -555,6 +585,15 @@ impl Snes {
             self.msu1 = state.msu1.clone();
         }
         self.msu1_credit = state.msu1_credit;
+        self.sharp_rtc = state.sharp_rtc;
+        self.rtc_credit = state.rtc_credit;
+        if let (Some(current), Some(saved)) =
+            (self.sufami_turbo.as_mut(), state.sufami_turbo.as_ref())
+        {
+            current.restore_state(saved);
+        } else {
+            self.sufami_turbo = state.sufami_turbo.clone();
+        }
         self.sa1_credit = state.sa1_credit;
         self.snes_mar = state.snes_mar;
         self.dma = state.dma.clone();
@@ -661,6 +700,39 @@ impl Snes {
         }
     }
 
+    /// Set the Sharp S-RTC calendar from a Unix timestamp.
+    ///
+    /// The core has no host clock; hosts that want wall-clock time call this
+    /// before starting the machine (the default is 2000-01-01 00:00:00 UTC).
+    pub fn set_sharp_rtc_time(&mut self, unix: i64) {
+        if let Some(rtc) = self.sharp_rtc.as_mut() {
+            rtc.set_unix(unix);
+        }
+    }
+
+    /// The Sharp S-RTC calendar, `(second, minute, hour, day, month, year,
+    /// weekday)` with an absolute year and 0 = Sunday.
+    pub fn sharp_rtc_calendar(&self) -> Option<(u32, u32, u32, u32, u32, u32, u32)> {
+        self.sharp_rtc.as_ref().map(SharpRtc::calendar)
+    }
+
+    /// Attach a Sufami Turbo slot cartridge (0 = A, 1 = B).
+    ///
+    /// Returns `false` when the inserted cartridge is not a Sufami Turbo base
+    /// cartridge, in which case the slots do not exist.
+    pub fn set_sufami_turbo_slot(&mut self, slot: usize, rom: Vec<u8>, ram: Vec<u8>) -> bool {
+        let Some(sufami) = self.sufami_turbo.as_mut() else {
+            return false;
+        };
+        sufami.set_slot(slot, rom, ram);
+        true
+    }
+
+    /// Whether the inserted cartridge provides Sufami Turbo slots.
+    pub const fn has_sufami_turbo(&self) -> bool {
+        self.sufami_turbo.is_some()
+    }
+
     /// Take the MSU1 stereo samples produced since the last drain (44.1 kHz).
     pub fn drain_msu1_samples(&mut self) -> Vec<crate::msu1::Msu1Sample> {
         self.msu1
@@ -707,6 +779,10 @@ impl Snes {
             msu1.power();
         }
         self.msu1_credit = 0;
+        if let Some(rtc) = self.sharp_rtc.as_mut() {
+            rtc.power();
+        }
+        self.rtc_credit = 0;
         self.sa1_credit = 0;
         self.snes_mar = 0;
         self.refresh_active = false;
@@ -738,6 +814,8 @@ impl Snes {
             spc7110: &mut self.spc7110,
             obc1: &mut self.obc1,
             msu1: &mut self.msu1,
+            sharp_rtc: &mut self.sharp_rtc,
+            sufami_turbo: &mut self.sufami_turbo,
             snes_mar: &mut self.snes_mar,
             snes_refresh: self.refresh_active,
             apu: &mut self.apu,
@@ -898,6 +976,8 @@ impl Snes {
                         spc7110: &mut self.spc7110,
                         obc1: &mut self.obc1,
                         msu1: &mut self.msu1,
+                        sharp_rtc: &mut self.sharp_rtc,
+                        sufami_turbo: &mut self.sufami_turbo,
                         snes_mar: &mut self.snes_mar,
                         snes_refresh: self.refresh_active,
                         apu: &mut self.apu,
@@ -1088,6 +1168,17 @@ impl Snes {
                 self.sa1_credit -= i64::from(cost.max(2));
             }
         }
+        // The Sharp S-RTC ticks once per emulated second.
+        if self.sharp_rtc.is_some() {
+            let den = self.region.master_clock() as i64;
+            self.rtc_credit += i64::from(clocks);
+            if let Some(rtc) = self.sharp_rtc.as_mut() {
+                while self.rtc_credit >= den {
+                    rtc.tick();
+                    self.rtc_credit -= den;
+                }
+            }
+        }
         // MSU1 audio runs at 44.1 kHz on a rational master-clock credit.
         if self.msu1.is_some() {
             let muted = self.apu.dsp().muted();
@@ -1180,6 +1271,8 @@ impl Snes {
                     spc7110: &mut self.spc7110,
                     obc1: &mut self.obc1,
                     msu1: &mut self.msu1,
+                    sharp_rtc: &mut self.sharp_rtc,
+                    sufami_turbo: &mut self.sufami_turbo,
                     snes_mar: self.snes_mar,
                     snes_refresh: self.refresh_active,
                 };
@@ -1248,6 +1341,8 @@ impl Snes {
                         spc7110: &mut self.spc7110,
                         obc1: &mut self.obc1,
                         msu1: &mut self.msu1,
+                        sharp_rtc: &mut self.sharp_rtc,
+                        sufami_turbo: &mut self.sufami_turbo,
                         snes_mar: self.snes_mar,
                         snes_refresh: self.refresh_active,
                     };
@@ -1279,6 +1374,8 @@ impl Snes {
                         spc7110: &mut self.spc7110,
                         obc1: &mut self.obc1,
                         msu1: &mut self.msu1,
+                        sharp_rtc: &mut self.sharp_rtc,
+                        sufami_turbo: &mut self.sufami_turbo,
                         snes_mar: self.snes_mar,
                         snes_refresh: self.refresh_active,
                     };
@@ -1382,6 +1479,8 @@ impl Snes {
             spc7110: &mut self.spc7110,
             obc1: &mut self.obc1,
             msu1: &mut self.msu1,
+            sharp_rtc: &mut self.sharp_rtc,
+            sufami_turbo: &mut self.sufami_turbo,
             snes_mar: &mut self.snes_mar,
             snes_refresh: self.refresh_active,
             apu: &mut self.apu,
@@ -1715,6 +1814,8 @@ struct SnesBus<'a> {
     spc7110: &'a mut Option<Spc7110>,
     obc1: &'a mut Option<Obc1>,
     msu1: &'a mut Option<Msu1>,
+    sharp_rtc: &'a mut Option<SharpRtc>,
+    sufami_turbo: &'a mut Option<SufamiTurbo>,
     snes_mar: &'a mut u32,
     snes_refresh: bool,
     dma: &'a mut Dma,
@@ -2007,6 +2108,15 @@ impl CpuBus for SnesBus<'_> {
                 return obc1.read(self.cart.sram(), address);
             }
         }
+        if let Some(sufami) = self.sufami_turbo.as_ref() {
+            if let Some((slot, is_rom, offset)) = SufamiTurbo::window(address) {
+                return match sufami.slots[slot].as_ref() {
+                    Some(slot) if is_rom => slot.read_rom(offset).unwrap_or(mdr),
+                    Some(slot) => slot.read_ram(offset).unwrap_or(mdr),
+                    None => mdr,
+                };
+            }
+        }
         if bank <= 0x3F || (0x80..=0xBF).contains(&bank) {
             if offset < 0x2000 {
                 return self.wram[offset & 0x1FFF];
@@ -2015,6 +2125,11 @@ impl CpuBus for SnesBus<'_> {
                 if (0x2000..=0x2007).contains(&offset) {
                     if let Some(msu1) = self.msu1.as_mut() {
                         return msu1.read(offset as u32, mdr);
+                    }
+                }
+                if SharpRtc::window(address) {
+                    if let Some(rtc) = self.sharp_rtc.as_mut() {
+                        return rtc.read(offset as u32, mdr);
                     }
                 }
                 if (0x2100..=0x213F).contains(&offset) {
@@ -2215,6 +2330,16 @@ impl CpuBus for SnesBus<'_> {
                 return;
             }
         }
+        if let Some(sufami) = self.sufami_turbo.as_mut() {
+            if let Some((slot, is_rom, slot_offset)) = SufamiTurbo::window(address) {
+                if !is_rom {
+                    if let Some(slot) = sufami.slots[slot].as_mut() {
+                        slot.write_ram(slot_offset, value);
+                    }
+                }
+                return;
+            }
+        }
         if bank <= 0x3F || (0x80..=0xBF).contains(&bank) {
             if offset < 0x2000 {
                 self.wram[offset & 0x1FFF] = value;
@@ -2225,6 +2350,12 @@ impl CpuBus for SnesBus<'_> {
                 if (0x2000..=0x2007).contains(&offset) {
                     if let Some(msu1) = self.msu1.as_mut() {
                         msu1.write(offset as u32, value);
+                        return;
+                    }
+                }
+                if SharpRtc::window(address) {
+                    if let Some(rtc) = self.sharp_rtc.as_mut() {
+                        rtc.write(offset as u32, value);
                         return;
                     }
                 }
@@ -2345,6 +2476,8 @@ struct HdmaBus<'a> {
     spc7110: &'a mut Option<Spc7110>,
     obc1: &'a mut Option<Obc1>,
     msu1: &'a mut Option<Msu1>,
+    sharp_rtc: &'a mut Option<SharpRtc>,
+    sufami_turbo: &'a mut Option<SufamiTurbo>,
     snes_mar: u32,
     snes_refresh: bool,
 }
@@ -2413,6 +2546,20 @@ impl HdmaBus<'_> {
                 return msu1.read(offset as u32, 0);
             }
         }
+        if SharpRtc::window(address) {
+            if let Some(rtc) = self.sharp_rtc.as_mut() {
+                return rtc.read(offset as u32, 0);
+            }
+        }
+        if let Some(sufami) = self.sufami_turbo.as_ref() {
+            if let Some((slot, is_rom, slot_offset)) = SufamiTurbo::window(address) {
+                return match sufami.slots[slot].as_ref() {
+                    Some(slot) if is_rom => slot.read_rom(slot_offset).unwrap_or(0),
+                    Some(slot) => slot.read_ram(slot_offset).unwrap_or(0),
+                    None => 0,
+                };
+            }
+        }
         self.cart.read(address).unwrap_or(0)
     }
 
@@ -2444,6 +2591,12 @@ impl HdmaBus<'_> {
             let low = bank <= 0x3F || (0x80..=0xBF).contains(&bank);
             if low && (0x2000..=0x2007).contains(&offset) {
                 msu1.write(offset as u32, value);
+                return;
+            }
+        }
+        if SharpRtc::window(address) {
+            if let Some(rtc) = self.sharp_rtc.as_mut() {
+                rtc.write(offset as u32, value);
                 return;
             }
         }
@@ -2577,6 +2730,8 @@ mod tests {
             spc7110: &mut system.spc7110,
             obc1: &mut system.obc1,
             msu1: &mut system.msu1,
+            sharp_rtc: &mut system.sharp_rtc,
+            sufami_turbo: &mut system.sufami_turbo,
             snes_mar: &mut system.snes_mar,
             snes_refresh: system.refresh_active,
             apu: &mut system.apu,
@@ -2662,6 +2817,89 @@ mod tests {
     }
 
     #[test]
+    fn sharp_rtc_maps_and_ticks_through_the_bus() {
+        let mut image = build_lorom(&[0xDB]);
+        let header = Mapping::LoRom.header_offset();
+        image[header + 0x16] = 0x55; // Sharp S-RTC board (type high nibble $5)
+        image[header + 0x18] = 5;
+        let cart = Cartridge::from_bytes(&image).expect("valid Sharp RTC LoROM");
+        assert!(cart.header().has_sharp_rtc());
+
+        let mut system = Snes::new(cart);
+        system.set_sharp_rtc_time(946_775_145); // 2000-01-02 01:05:45
+        assert_eq!(system.sharp_rtc_calendar(), Some((45, 5, 1, 2, 1, 2000, 0)));
+        {
+            let mut bus = system.bus();
+            bus.write(0x00_2801, 0x0D);
+            assert_eq!(bus.read(0x00_2800, 0), 15);
+            for value in [5, 4, 5, 0, 1, 0, 2, 0, 1, 0, 0, 10, 0] {
+                assert_eq!(bus.read(0x80_2800, 0), value);
+            }
+            assert_eq!(bus.read(0x00_2800, 0), 15);
+        }
+
+        // One second of master clocks advances the calendar by one second.
+        // Advance in small slices: a single second exceeds the PPU's u32 dot
+        // budget.
+        let den = system.region().master_clock() as u32;
+        let slice = 1000;
+        for _ in 0..den / slice {
+            system.advance_peripherals(slice);
+        }
+        system.advance_peripherals(den % slice);
+        assert_eq!(system.sharp_rtc_calendar(), Some((46, 5, 1, 2, 1, 2000, 0)));
+    }
+
+    #[test]
+    fn sufami_turbo_slots_map_and_survive_a_state_restore() {
+        let mut image = build_lorom(&[0xDB]);
+        image[..14].copy_from_slice(crate::sufamiturbo::SUFAMI_TURBO_SIGNATURE);
+        let cart = Cartridge::from_bytes(&image).expect("valid Sufami Turbo LoROM");
+        assert!(cart.is_sufami_turbo());
+
+        let mut rom_a = vec![0u8; 0x1_0000];
+        rom_a[0] = 0xA0;
+        rom_a[0x8000] = 0xA1;
+        rom_a[0xFFFF] = 0xA2;
+        let mut rom_b = vec![0u8; 0x2_0000];
+        rom_b[0] = 0xB0;
+        rom_b[0x1_0000] = 0xB1;
+
+        let mut system = Snes::new(cart);
+        assert!(system.has_sufami_turbo());
+        assert!(system.set_sufami_turbo_slot(0, rom_a.clone(), vec![0u8; 8]));
+        assert!(system.set_sufami_turbo_slot(1, rom_b.clone(), vec![0u8; 8]));
+        {
+            let mut bus = system.bus();
+            // Slot A ROM folds its 32 KiB window: $20 -> 0, $21 -> $8000.
+            assert_eq!(bus.read(0x20_8000, 0), 0xA0);
+            assert_eq!(bus.read(0x21_8000, 0), 0xA1);
+            assert_eq!(bus.read(0x3F_FFFF, 0), 0xA2);
+            // Slot B ROM is linear from $40:0000.
+            assert_eq!(bus.read(0x40_0000, 0), 0xB0);
+            assert_eq!(bus.read(0x41_0000, 0), 0xB1);
+            bus.write(0x60_0000, 0x5A);
+            assert_eq!(bus.read(0x60_0000, 0), 0x5A);
+            bus.write(0x70_0001, 0xA5);
+            assert_eq!(bus.read(0x70_0001, 0), 0xA5);
+            // Mask-ROM writes are ignored.
+            bus.write(0x20_8000, 0xFF);
+            assert_eq!(bus.read(0x20_8000, 0), 0xA0);
+        }
+
+        let state = system.save_state();
+        let mut fresh = Snes::new(Cartridge::from_bytes(&image).expect("valid copy"));
+        assert!(fresh.set_sufami_turbo_slot(0, rom_a, vec![0u8; 8]));
+        assert!(fresh.set_sufami_turbo_slot(1, rom_b, vec![0u8; 8]));
+        fresh.load_state(&state).expect("load state");
+        let mut bus = fresh.bus();
+        assert_eq!(bus.read(0x60_0000, 0), 0x5A);
+        assert_eq!(bus.read(0x70_0001, 0), 0xA5);
+        // The host-attached slot ROMs are preserved across the restore.
+        assert_eq!(bus.read(0x20_8000, 0), 0xA0);
+    }
+
+    #[test]
     fn unmapped_reads_return_the_open_bus_mdr() {
         // ares maps unmapped addresses to `[](n24, n8 data) { return data; }`,
         // where `data` is the CPU's memory data register.
@@ -2680,6 +2918,8 @@ mod tests {
             spc7110: &mut system.spc7110,
             obc1: &mut system.obc1,
             msu1: &mut system.msu1,
+            sharp_rtc: &mut system.sharp_rtc,
+            sufami_turbo: &mut system.sufami_turbo,
             snes_mar: &mut system.snes_mar,
             snes_refresh: system.refresh_active,
             apu: &mut system.apu,
@@ -2720,6 +2960,8 @@ mod tests {
             spc7110: &mut system.spc7110,
             obc1: &mut system.obc1,
             msu1: &mut system.msu1,
+            sharp_rtc: &mut system.sharp_rtc,
+            sufami_turbo: &mut system.sufami_turbo,
             snes_mar: &mut system.snes_mar,
             snes_refresh: system.refresh_active,
             apu: &mut system.apu,
@@ -3082,6 +3324,8 @@ mod tests {
                 spc7110: &mut system.spc7110,
                 obc1: &mut system.obc1,
                 msu1: &mut system.msu1,
+                sharp_rtc: &mut system.sharp_rtc,
+                sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 dma: &mut system.dma,
@@ -3270,6 +3514,8 @@ mod tests {
                 spc7110: &mut system.spc7110,
                 obc1: &mut system.obc1,
                 msu1: &mut system.msu1,
+                sharp_rtc: &mut system.sharp_rtc,
+                sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -3356,6 +3602,8 @@ mod tests {
                 spc7110: &mut system.spc7110,
                 obc1: &mut system.obc1,
                 msu1: &mut system.msu1,
+                sharp_rtc: &mut system.sharp_rtc,
+                sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -3393,6 +3641,8 @@ mod tests {
                 spc7110: &mut system.spc7110,
                 obc1: &mut system.obc1,
                 msu1: &mut system.msu1,
+                sharp_rtc: &mut system.sharp_rtc,
+                sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -3430,6 +3680,8 @@ mod tests {
                 spc7110: &mut system.spc7110,
                 obc1: &mut system.obc1,
                 msu1: &mut system.msu1,
+                sharp_rtc: &mut system.sharp_rtc,
+                sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -3483,6 +3735,8 @@ mod tests {
                 spc7110: &mut system.spc7110,
                 obc1: &mut system.obc1,
                 msu1: &mut system.msu1,
+                sharp_rtc: &mut system.sharp_rtc,
+                sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -3546,6 +3800,8 @@ mod tests {
                 spc7110: &mut system.spc7110,
                 obc1: &mut system.obc1,
                 msu1: &mut system.msu1,
+                sharp_rtc: &mut system.sharp_rtc,
+                sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -3595,6 +3851,8 @@ mod tests {
                 spc7110: &mut system.spc7110,
                 obc1: &mut system.obc1,
                 msu1: &mut system.msu1,
+                sharp_rtc: &mut system.sharp_rtc,
+                sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -3635,6 +3893,8 @@ mod tests {
                 spc7110: &mut system.spc7110,
                 obc1: &mut system.obc1,
                 msu1: &mut system.msu1,
+                sharp_rtc: &mut system.sharp_rtc,
+                sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -3725,6 +3985,8 @@ mod tests {
                 spc7110: &mut system.spc7110,
                 obc1: &mut system.obc1,
                 msu1: &mut system.msu1,
+                sharp_rtc: &mut system.sharp_rtc,
+                sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
@@ -3763,6 +4025,8 @@ mod tests {
                 spc7110: &mut system.spc7110,
                 obc1: &mut system.obc1,
                 msu1: &mut system.msu1,
+                sharp_rtc: &mut system.sharp_rtc,
+                sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,

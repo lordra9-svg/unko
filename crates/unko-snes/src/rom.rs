@@ -148,6 +148,14 @@ impl RomHeader {
         matches!(self.cartridge_type, 0xf9)
     }
 
+    /// Whether the cartridge carries a Sharp S-RTC.
+    ///
+    /// mia selects an `EXHIROM-RAM-SHARPRTC` board when the cartridge type's
+    /// high nibble is `$5` and its low nibble is at least `$3`.
+    pub const fn has_sharp_rtc(&self) -> bool {
+        self.cartridge_type >> 4 == 0x5 && self.cartridge_type & 0x0F >= 0x3
+    }
+
     /// Whether the cartridge carries an OBC1 coprocessor.
     ///
     /// mia selects an `OBC1-` board when the cartridge type's high nibble is
@@ -289,6 +297,13 @@ impl Cartridge {
             sram: vec![0xFF; sram_size],
             has_copier_header,
         })
+    }
+
+    /// Whether this is a Sufami Turbo base cartridge (`BANDAI SFC-ADX` at
+    /// offset 0). The two slot cartridges are attached separately.
+    pub fn is_sufami_turbo(&self) -> bool {
+        self.rom
+            .starts_with(crate::sufamiturbo::SUFAMI_TURBO_SIGNATURE)
     }
 
     /// Parse a ROM image, falling back to a synthesized LoROM/HiROM header when

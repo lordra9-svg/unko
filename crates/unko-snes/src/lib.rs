@@ -37,8 +37,10 @@ pub mod random;
 pub mod rom;
 pub mod sa1;
 pub mod sdd1;
+pub mod sharprtc;
 pub mod spc700;
 pub mod spc7110;
+pub mod sufamiturbo;
 pub mod system;
 
 pub use apu::{Apu, PortEvent, PortEventKind};
@@ -60,6 +62,8 @@ pub use rom::{
 };
 pub use sa1::Sa1;
 pub use sdd1::{Sdd1, Sdd1Banks, Sdd1Dma};
+pub use sharprtc::{SharpRtc, DEFAULT_RTC_UNIX};
 pub use spc700::{Flags as Spc700Flags, Spc700, SpcBus};
 pub use spc7110::{Spc7110, Spc7110Decompressor};
+pub use sufamiturbo::{SufamiTurbo, SufamiTurboSlot, SUFAMI_TURBO_SIGNATURE};
 pub use system::{Snes, SnesState, StateError, SAVE_STATE_MAGIC, SAVE_STATE_VERSION};

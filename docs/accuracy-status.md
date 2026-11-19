@@ -625,6 +625,17 @@ Validation so far:
   play+repeat status colour (`0x0032`) are both identical to ares, and whose
   44.1 kHz PCM stream is **bit-exact** (0 differing samples over 20,000 stereo
   frames, volume scaling and five loop passes included).
+- The Sharp S-RTC (`sharprtc.rs`, `EXHIROM-RAM-SHARPRTC` boards, window
+  `$2800-$2801`) implements the nibble protocol (`$0D` read, `$0E` command,
+  `$00` write, `$04` reset), the 13-nibble BCD record, ares' weekday
+  calculation, leap years and the one-second clock credit. The host sets the
+  calendar with `Snes::set_sharp_rtc_time`; the default is 2000-01-01.
+- The Sufami Turbo (`sufamiturbo.rs`) is implemented: the `BANDAI SFC-ADX`
+  base-cartridge detection, slot A/B ROM windows (`$20-$3F/$A0-$BF:$8000+`,
+  `$40-$5F/$C0-$DF:0000+` with the 32 KiB fold on slot A), slot RAM windows
+  (`$60-$6F/$E0-$EF`, `$70-$7D/$F0-$FF`), power-of-two wrapping, mask-ROM write
+  ignores, host attach via `Snes::set_sufami_turbo_slot` and slot-RAM save
+  state that keeps the attached ROMs.
 - The S-DSP now powers up with `reset` and `mute` set, matching ares'
   `MainVol { reset = 1, mute = 1 }`; this gates the pre-`$6C` output and the
   MSU1 stream. No measured pixel or retail-audio parity changed.

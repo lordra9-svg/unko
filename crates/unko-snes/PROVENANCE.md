@@ -178,6 +178,24 @@ material used to implement it. No GPL emulator source is translated or copied.
 - The host-attached media API is original to this crate; no ares code is
   copied.
 
+## `src/sharprtc.rs`
+
+- ISC-licensed ares `ares/sfc/coprocessor/sharprtc` (`sharprtc.cpp`,
+  `memory.cpp`, `time.cpp`) for the `$2800-$2801` nibble protocol, the 13-nibble
+  BCD record, the calendar tick rules and the Sharp-epoch weekday algorithm.
+- ares `ares/System/Super Famicom/boards.bml` (`EXHIROM-RAM-SHARPRTC`) for the
+  board type and window.
+- The host-settable time base and the `civil_from_days` conversion are original
+  to this crate; no ares code is copied.
+
+## `src/sufamiturbo.rs`
+
+- ISC-licensed ares `ares/sfc/slot/sufamiturbo` and the `ST-LOROM` entry in
+  `ares/System/Super Famicom/boards.bml` for the `BANDAI SFC-ADX` signature,
+  the two ROM/RAM windows, the 32 KiB slot-A fold and the power-of-two wrap.
+- The host-attached slot API and the save-state split (ROMs re-attached, RAM
+  serialized) are original to this crate.
+
 ## Forthcoming modules
 
 MesenCE remains a black-box compatibility oracle and must not be read while

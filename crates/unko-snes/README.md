@@ -33,8 +33,9 @@ in another Rust project. A future `unko-snes-host` crate will provide the
 - S-CPU general-purpose DMA, HDMA, controller ports/auto-poll and the
   hardware multiply/divide unit
 - Coprocessors: SuperFX (GSU), SA-1, S-DD1, SPC7110 (+EXSPC7110 expansion),
-  CX4, NEC DSP-1/2/3/4, OBC1 and MSU1 (data ROM seek/read plus 44.1 kHz
-  streaming audio)
+  CX4, NEC DSP-1/2/3/4, OBC1, MSU1 (data ROM seek/read plus 44.1 kHz
+  streaming audio), the Sharp S-RTC and the two-slot Sufami Turbo base
+  cartridge
 - Versioned save states (S-CPU, S-SMP/S-DSP, PPU, DMA/HDMA, WRAM, SRAM and
   every coprocessor) with a round-trip continuation test
 - Minimal S-CPU memory map: WRAM mirrors, cartridge windows, SRAM, reset,

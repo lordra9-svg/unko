@@ -3999,3 +3999,55 @@ Until then, retail audio is **not** claimed bit-exact; the per-title numbers
 above are the measured baseline, and dense music (F-Zero, Super Metroid, Donkey
 Kong Country) shows the largest deviation. None of this affects the video
 parity, save states or the test-ROM baseline.
+
+## Sharp S-RTC and Sufami Turbo (2026-11-19)
+
+Both were the last missing non-hard coprocessors in the board set.
+
+**Sharp S-RTC** (`sharprtc.rs`). Selected by cartridge-type high nibble `$5`
+(the `EXHIROM-RAM-SHARPRTC` boards, e.g. type `$55`) and mapped at
+`$00-$3F/$80-$BF:$2800-$2801`. The protocol is a direct behavioural port of the
+ISC-licensed ares `sfc/coprocessor/sharprtc` source:
+
+- odd writes: `$0D` enters read mode, `$0E` enters command mode, `$0F` is
+  ignored; in command mode `$00` starts a 12-nibble write and `$04` resets the
+  calendar;
+- even reads after `$0D` return the `$0F` preamble, then the 13 BCD nibbles
+  (second, minute, hour, day, month, year low/mid/high, weekday) and the `$0F`
+  epilogue;
+- after a write the weekday is recalculated with ares' Sharp-epoch
+  (1000-01-01) algorithm; like ares, ticks do not update the weekday register.
+
+The core has no host clock, so the calendar defaults to 2000-01-01 00:00:00 UTC
+and the host can set it with `Snes::set_sharp_rtc_time(unix)`. It advances once
+per emulated second on a master-clock credit. Unit tests cover the default
+calendar, Unix conversion (including the weekday), the read/write command
+streams, the `$04` reset, minute/hour/day rollover and February 29 in a leap
+year; a system test drives the nibble protocol through the S-CPU bus and checks
+the one-second tick. No local S-RTC title is available, so the oracle sweep is
+a coverage request.
+
+**Sufami Turbo** (`sufamiturbo.rs`). The base cartridge is an ordinary LoROM
+image whose first 14 bytes are `BANDAI SFC-ADX`; the core detects it with
+`Cartridge::is_sufami_turbo` and then exposes two host-attached slots through
+`Snes::set_sufami_turbo_slot(slot, rom, ram)`. Address routing mirrors ares'
+`ST-LOROM` board:
+
+| Window | Contents |
+|---|---|
+| `$00-$1F/$80-$9F:$8000-$FFFF` | base cartridge ROM (ordinary LoROM map) |
+| `$20-$3F/$A0-$BF:$8000-$FFFF` | slot A ROM, 32 KiB-folded (`mask=0x8000`) |
+| `$40-$5F/$C0-$DF:$0000-$FFFF` | slot B ROM, linear 2 MiB window |
+| `$60-$6F/$E0-$EF:$0000-$FFFF` | slot A RAM |
+| `$70-$7D/$F0-$FF:$0000-$FFFF` | slot B RAM |
+
+Slot ROM/RAM accesses wrap by the attached size (ares `mirror`), ROM writes are
+ignored (mask ROM), and the slot RAM is part of the save state. A state restore
+keeps the host-attached ROMs and restores only the RAM, so a fresh machine can
+attach the same media and resume. Unit tests cover the window table, the
+32 KiB folding, wrapping, open-bus behaviour and RAM restore; a system test
+drives all five windows through the bus and round-trips a save state.
+
+Neither device has a local reference ROM, so both are verified by the protocol
+unit/system suites rather than an oracle pixel/audio sweep. They do not affect
+any existing title (they only activate on their board types or attached media).
