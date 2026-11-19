@@ -1843,17 +1843,21 @@ impl Ppu {
         fixed: u16,
     ) -> [u8; 4] {
         let (colour_above, colour_below) = self.colour_window(x);
-        let enable = (if backdrop {
+        // ares `DAC::pixel`: the colour window off first zeroes the main-screen
+        // colour, then the below window off disables colour math entirely.
+        let mut color = if colour_above { color } else { 0 };
+        let enable = if backdrop {
             self.cgadsub & 0x20 != 0
         } else {
             self.cgadsub & (1 << layer) != 0
-        }) && colour_above
-            && colour_below;
-        let mut color = color;
-        if enable {
-            let use_sub = self.cgwsel & 0x02 != 0 && !other_transparent;
+        };
+        if colour_below && enable {
+            // Operand selection is coarse (`$2130` bit 1); halving stays on for
+            // the fixed-colour path and is only suppressed for a transparent
+            // subscreen (`Source::COL`). ares `DAC::blend`.
+            let use_sub = self.cgwsel & 0x02 != 0;
             let operand = if use_sub { other } else { fixed };
-            let halve = self.cgadsub & 0x40 != 0 && use_sub;
+            let halve = self.cgadsub & 0x40 != 0 && (!use_sub || !other_transparent);
             color = blend(color, operand, halve, self.cgadsub & 0x80 != 0);
         }
         let (num, den) = luma;
@@ -2496,6 +2500,30 @@ mod tests {
         ppu.write(0x2123, 0x0A); // BG1 window 1 + window 2
         assert!(!ppu.window_masks(0, 17));
         assert!(ppu.window_masks(0, 12));
+    }
+
+    #[test]
+    fn fixed_colour_blend_halves_when_cgadsub_bit6_is_set() {
+        let mut ppu = Ppu::new();
+        // Fixed-colour add ($2130 bit 1 clear), BG1 enabled, halve on.
+        ppu.write(0x2130, 0x00);
+        ppu.write(0x2131, 0x41);
+        ppu.write(0x2132, 0x20 | 30); // red 30
+        ppu.write(0x2132, 0x40 | 30); // green 30
+        ppu.write(0x2132, 0x80 | 19); // blue 19
+        let fixed = ppu.fixed_color();
+        assert_eq!(fixed, 0x4FDE);
+        // ares `DAC::blend(0x1802, 0x4fde, halve=true)` = 0x31f0.
+        assert_eq!(
+            ppu.dac_pixel(0, 0x1802, 0, false, 0x0000, false, (16, 16), fixed),
+            [132, 123, 99, 0xFF]
+        );
+        // Without halving the same add saturates to 0x7bfa.
+        ppu.write(0x2131, 0x01);
+        assert_eq!(
+            ppu.dac_pixel(0, 0x1802, 0, false, 0x0000, false, (16, 16), fixed),
+            [255, 247, 206, 0xFF]
+        );
     }
 
     #[test]

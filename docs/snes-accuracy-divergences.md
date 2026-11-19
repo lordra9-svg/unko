@@ -2955,6 +2955,37 @@ current byte), and the interrupted instruction is simply a different iteration
 of the same 42-clock `$8100` wait loop. Both cores enter the same NMI within
 one loop instruction, and the wait loop is a pure spin (no state consequence).
 
+### Fixed: colour math did not halve fixed-colour adds ($2131 bit 6)
+
+Mega Man X3 was exact at every present through 906 and then diverged by a
+handful of pixels in an expanding wedge at the top-right corner (2 px at 907,
+10 at 908, 29 at 909), staying wrong until present 972. State was identical
+(VRAM, CGRAM, OAM and CX4 RAM 0 bytes different), so it was a compositor
+decision. Dumping ares' DAC inputs at the corner gave:
+
+```
+frame 909 vc16 x247 above=1802 below=1802 fixed=4fde
+  layer=1 backdrop=0 sub=0 halve=1 add=0 result=31f0
+```
+
+`blend(0x1802, 0x4fde, halve=true)` is exactly ares' add formula
+`(x + y - ((x ^ y) & 0x0421)) >> 1` = `0x31f0`; our pixel was the same add
+without halving (`0x7bfa`, i.e. 0xfff7ce), because our halve flag was written as
+`colorHalve && useSub` where `useSub` already required `$2130` bit 1 *and* a
+non-transparent subscreen. ares halves in the fixed-colour path too:
+
+```cpp
+if(!io.blendMode) return blend(above.color, fixedColor(), io.colorHalve && windowAbove[x]);
+return blend(above.color, below.color, io.colorHalve && windowAbove[x] && below.source != COL);
+```
+
+`dac_pixel` now selects the operand from `$2130` bit 1 alone and halves unless
+that path is the transparent-subscreen one, and it also zeroes the main colour
+when the above colour window is off (ares sets `above.color = 0` before the
+below-window early return). The fix makes 907-972 exact and takes MMX3 from
+1184/1801 to **1800/1801** (present 1800 is one past our last frame). Pinned by
+`ppu::tests::fixed_colour_blend_halves_when_cgadsub_bit6_is_set`.
+
 ### Coverage sweep against the calibrated oracle (2026-11-19, exhaustive)
 
 The sweep was upgraded from sampling to **every present**. Each ares present is
@@ -2964,7 +2995,7 @@ compared against our frames with a content window (ares skips presents via
 ```
 title        presents   exact      notes
 Mega Man X2     4001    3999/4001  two torn captures (816, 3172)
-Mega Man X3      601     601/601
+Mega Man X3     1801    1800/1801  present 1800 is past our last frame
 Star Fox         901     901/901   0-900, plus 880-919 re-run
 ```
 

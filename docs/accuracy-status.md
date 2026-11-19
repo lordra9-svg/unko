@@ -309,8 +309,9 @@ Validation so far:
   96.706%, 3700 96.594%, 4000 94.877%; 3300/3400/3479 unchanged at 100.000%,
   baseline 212/212).
 - Coverage sweep with the calibrated oracle is now **exhaustive, every present**:
-  Mega Man X2 3999/4001 exact over 0-4000, Mega Man X3 601/601 exact over
-  0-600, Star Fox 901/901 exact over 0-900 (and 880-919 re-run: exact). The two
+  Mega Man X2 3999/4001 exact over 0-4000, Mega Man X3 1800/1801 exact over
+  0-1800 (the one miss is present 1800, past our last frame), Star Fox 901/901
+  exact over 0-900 (and 880-919 re-run: exact). The two
   MMX2 outliers (presents 816, 3172) are torn presentations, not emulation:
   ares' state at 816 is byte-identical to ours (WRAM/VRAM/CX4 RAM all 0 bytes
   different) and at 3172 VRAM/CGRAM/OAM are identical, while the frames are
@@ -320,6 +321,12 @@ Validation so far:
   with the window widened it matches our 664 at 100.000%. ares skips presents
   via `runAhead()`, so its index lags ours by 0 at the start and ~22 by frame
   900; comparisons must use a content window that grows with the run.
+- Fixed a colour-math bug (MMX3 presents 907-972): `$2131` bit 6 (halve) was
+  gated on `$2130` bit 1 (subscreen operand selection), so fixed-colour adds
+  were not halved. ares halves that path too (`blend(main, fixed, colorHalve &&
+  windowAbove)`); the corner pixel was `0x7bfa` instead of `0x31f0`. The
+  operand is now selected by `$2130` bit 1 alone and halving is suppressed only
+  for a transparent subscreen, matching ares `DAC::pixel`/`blend`.
 - The compositor changes from 20564dc (colour-window zeroing, sub-backdrop
   fixed colour, OBJ1/OBJ2 split) were **reverted**: against the calibrated
   presentation oracle the original code is 100.000% at frames 3979/3980/3990/
