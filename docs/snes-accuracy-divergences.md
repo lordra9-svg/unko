@@ -3307,11 +3307,16 @@ window-table loop entry exact to the clock (loop entry 133274180 on both).
 It does not yet settle the race, because the per-line HDMA steal still depends
 on the CPU phase at the *paying* bus access: the pay clock differs by 0-10
 clocks, and `pre = 8 - (clock & 7)` turns a 2-clock difference into a 6-clock
-cost difference. Aligning the HDMA setup and the DRAM-refresh position moved
-the boundary frames instead (SMW 596-598/600), so those experiments were
-reverted; the committed tree stays at 599/600. The remaining lead is the mod-8
-pay-access phase (2-clock refresh/DMA scheduling resolution), not the steal
-formula. Moving the HDMA trigger dot over 274-276 does not change the result.
+cost difference.
+
+Implementing ares' exact refresh comparator (`dramRefreshPosition = 538 -
+clock & 7` at the line event, charged when the step's hcounter crosses it)
+makes the refresh events match ares to within one 4-clock dot, but the HDMA pay
+clock still differs by 0-8 clocks and SMW stays at 599/600. The residual is in
+the CPU access-boundary phase, not the refresh position. Aligning the HDMA
+setup and the general-DMA pre/post moved the boundary frames instead (SMW
+596-598/600), so those experiments were reverted; the committed tree stays at
+599/600. Moving the HDMA trigger dot over 274-276 does not change the result.
 
 **With scripted input** (`ARES_JOYPAD_SEGMENTS` / `JOYPAD0_SEGMENTS`), the two
 cores track through the logo, title, file-select and level entry. The present
