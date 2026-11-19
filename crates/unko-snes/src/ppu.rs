@@ -1277,7 +1277,10 @@ impl Ppu {
     /// `Background::fetchOffset`): `y_off` is 0 for the horizontal word and 8
     /// for the vertical one, and the horizontal position is snapped to the
     /// tile column.
-    fn opt_word(&self, x_col: u32, y_off: u32) -> u16 {
+    /// BG3 tilemap word at an absolute BG3 pixel column/row (ares
+    /// `bg3.getTile(col, row)`; the caller has already added BG3's aligned
+    /// horizontal offset and its vertical offset).
+    fn opt_word(&self, col: u32, row: u32) -> u16 {
         let layer = 2usize;
         let sc = self.bg_sc[layer];
         let tile_size = u32::from((self.bg_mode >> (4 + layer)) & 1);
@@ -1285,8 +1288,8 @@ impl Ppu {
         let screen_v = 32u32 << (((sc as u32) >> 1) & 1);
         let hsize = (screen_h * 8) << tile_size;
         let vsize = (screen_v * 8) << tile_size;
-        let h = (x_col + (u32::from(self.bg_h[layer]) & !7)) & (hsize - 1);
-        let v = (y_off + u32::from(self.bg_v[layer])) & (vsize - 1);
+        let h = col & (hsize - 1);
+        let v = row & (vsize - 1);
         let htile = h >> (3 + tile_size);
         let vtile = v >> (3 + tile_size);
         let mut offset = (htile & 0x1F) | ((vtile & 0x1F) << 5);
@@ -1374,31 +1377,41 @@ impl Ppu {
 
         // One background pixel: ares `Background::fetchNameTable` +
         // `fetchCharacter`, returning the palette entry and priority bit.
-        let fetch = |h: u32, v: u32| -> Option<(u8, u8)> {
+        let fetch = |h: u32, v: u32, screen_col: u32| -> Option<(u8, u8)> {
             let mut h = h;
             let mut v = v;
-            // Offset per tile (ares `Background::fetchNameTable`): modes 2, 4
-            // and 6 take their per-column offsets from BG3's tilemap. The
-            // valid bit is 13 + layer; mode 4 packs both directions into one
-            // word, selected by bit 15.
+            // Offset per tile (ares `Background::fetchNameTable`, confirmed by
+            // the MiSTer RTL `PPU.vhd`): modes 2, 4 and 6 take their per-column
+            // offsets from BG3's tilemap. The lookup column is the *screen*
+            // column shifted by `hscroll & 7` and one tile back, plus BG3's
+            // aligned scroll; the resulting offset is applied to that same
+            // screen-derived column, never to the BG coordinate (which already
+            // contains the full scroll). The valid bit is 13 + layer; mode 4
+            // packs both directions into one word, selected by bit 15.
             if matches!(mode, 2 | 4 | 6) {
-                let hlookup = self.opt_word(h, 0);
-                let vlookup = self.opt_word(h, 8);
-                let valid = 1u16 << (13 + layer as u16);
-                if mode == 4 {
-                    if hlookup & valid != 0 {
-                        if hlookup & 0x8000 == 0 {
-                            h = (h + (u32::from(hlookup) & !7) + (hscroll & 7)) & (hsize - 1);
-                        } else {
+                let tile_width = 1u32 << (3 + tile_size);
+                let opt_x = screen_col + (hscroll & 7);
+                if opt_x >= tile_width {
+                    let col =
+                        opt_x - tile_width + ((u32::from(self.bg_h[2]) & !7) << u32::from(hires));
+                    let hlookup = self.opt_word(col, u32::from(self.bg_v[2]));
+                    let valid = 1u16 << (13 + layer as u16);
+                    if mode == 4 {
+                        if hlookup & valid != 0 {
+                            if hlookup & 0x8000 == 0 {
+                                h = (opt_x + (u32::from(hlookup) & !7)) & (hsize - 1);
+                            } else {
+                                v = (mosaic_y + u32::from(hlookup)) & (vsize - 1);
+                            }
+                        }
+                    } else {
+                        let vlookup = self.opt_word(col, u32::from(self.bg_v[2]).wrapping_add(8));
+                        if hlookup & valid != 0 {
+                            h = (opt_x + (u32::from(hlookup) & !7)) & (hsize - 1);
+                        }
+                        if vlookup & valid != 0 {
                             v = (mosaic_y + u32::from(vlookup)) & (vsize - 1);
                         }
-                    }
-                } else {
-                    if hlookup & valid != 0 {
-                        h = (h + (u32::from(hlookup) & !7) + (hscroll & 7)) & (hsize - 1);
-                    }
-                    if vlookup & valid != 0 {
-                        v = (mosaic_y + u32::from(vlookup)) & (vsize - 1);
                     }
                 }
             }
@@ -1480,9 +1493,20 @@ impl Ppu {
             };
             let v = (vbase + vscroll) & (vsize - 1);
             let (below, above) = if hires {
-                (fetch(h_below, v), fetch(h_above, v))
+                (
+                    fetch(h_below, v, mosaic_x << 1),
+                    fetch(
+                        h_above,
+                        v,
+                        if mosaic {
+                            mosaic_x << 1
+                        } else {
+                            (mosaic_x << 1) + 1
+                        },
+                    ),
+                )
             } else {
-                let pixel = fetch(h_below, v);
+                let pixel = fetch(h_below, v, mosaic_x);
                 (pixel, pixel)
             };
             if let Some((color, layer_priority)) = above {
@@ -2548,15 +2572,28 @@ mod tests {
         ppu.write(0x2121, 0x02);
         ppu.write(0x2122, 0xE0); // colour 2: green
         ppu.write(0x2122, 0x03);
-        // BG3 column 1 horizontal word: valid for BG1 (bit 13) with offset 8.
-        ppu.vram[0x801] = 0x2008;
+        // ares `Background::fetchNameTable` looks the offset up one tile
+        // behind: screen column 1 reads BG3's *first* word. Word 0 valid for
+        // BG1 (bit 13) with offset 8 shifts column 1 onto tile 2 (red).
+        ppu.vram[0x800] = 0x2008;
 
         ppu.render_line(0, 0);
-        assert_eq!(&ppu.framebuffer[0..4], &[255, 0, 0, 255], "column 0");
+        assert_eq!(&ppu.framebuffer[0..4], &[255, 0, 0, 255], "column 0 exempt");
         assert_eq!(
             &ppu.framebuffer[8 * 4..8 * 4 + 4],
             &[255, 0, 0, 255],
             "column 1 shifted onto tile 2"
+        );
+
+        // Setting BG3's *second* word instead must not affect column 1: it is
+        // that word which screen column 2 reads.
+        ppu.vram[0x800] = 0x0000;
+        ppu.vram[0x801] = 0x2008;
+        ppu.render_line(0, 0);
+        assert_eq!(
+            &ppu.framebuffer[8 * 4..8 * 4 + 4],
+            &[0, 255, 0, 255],
+            "column 1 stays on its own (green) tile"
         );
 
         // Clearing the lookup word disables the shift: column 1 shows tile 1.

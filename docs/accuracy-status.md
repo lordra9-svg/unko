@@ -403,8 +403,13 @@ Validation so far:
   until read. Fixed; the NMI lists and `$0008` now match, and frame 400 is
   byte-identical. A second divergence remains: from frame 430 the intro stream
   buffer at `$6DC` is two bytes further in our run (the feeding loop ran two
-  extra iterations), and the 1200-present sweep is still 1075/1200. That
-  polled-flag loop timing is the next lead.
+  extra iterations). That was the offset-per-tile formula: we applied the
+  offset to the BG coordinate (which already contains the full scroll) and used
+  the same tile's BG3 word, where ares/RTL use the screen-derived column and
+  look the word up one tile behind (mode 4 also reuses the same word for the
+  vertical offset). Fixed against a hand-assembled fixture and the MiSTer RTL;
+  **Chrono Trigger is now 1200/1200 exact** and the unit test pins both
+  directions of the lookup.
 
   With scripted input the cores track through level entry; the apparent
   "divergence" from present 542 was a present-rate drift, and every ares

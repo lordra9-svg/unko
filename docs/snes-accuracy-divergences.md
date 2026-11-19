@@ -3135,6 +3135,36 @@ re-run at 10000 presents with no change (9997 + three torn / 10000 / 10000).
 initially looked like misses because our frame was one ahead; a symmetric
 window resolves them.
 
+### Fixed: offset-per-tile uses the screen column, one tile behind
+
+The MiSTer SNES RTL (`refs/mister-snes/rtl/PPU.vhd`) and ares agree on the
+mode 2/4/6 offset-per-tile formula:
+
+```vhdl
+OFFSET_X := (SCREEN_X(8 downto 3) & "000") + (OPT_HOFS(9 downto 3) & BG_HOFS(2 downto 0));
+```
+```cpp
+u32 offsetX = x + (hscroll & 7);
+u32 hlookup = bg3.getTile((offsetX - (1 << tileWidth)) + ((bg3.hoffset & ~7) << hires), ...);
+hoffset = offsetX + (hlookup & ~7);
+```
+
+Two points we had wrong: the offset is applied to the **screen-derived**
+column (`screen_x + hscroll & 7`), never to the BG coordinate (which already
+contains the full scroll), and the BG3 word is looked up **one tile behind**
+(the first tile column is exempt). Mode 4 also takes its vertical offset from
+the same word (`$8000` set), not a second word at +8.
+
+A hand-assembled fixture (`tools/snes-oracle/gen-opt-rom.py`) settles the
+lookup: BG1 columns 0/1/2 are red/green/red and BG3 word 0 is `$0000` while
+word 1 is `$2008`. ares shows column 1 **green**, i.e. it read word 0; setting
+word 0 to `$2008` shifts column 1 onto tile 2 (red). Our implementation now
+matches, and the unit test encodes both directions.
+
+This was Chrono Trigger's second divergence: its intro uses mode-2 OPT with a
+nonzero scroll, and the old formula added the full scroll twice. Presents
+0-1199 are now **1200/1200 exact**, with every other title unchanged.
+
 **Super Metroid (Japan, USA), presents 0-1199:** 1200 exact.
 **Super Castlevania IV (USA), presents 0-1199:** 1200 exact.
 
