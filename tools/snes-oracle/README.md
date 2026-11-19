@@ -396,7 +396,8 @@ The CX4 has env-gated debug hooks used to localise divergence against ares:
   dumped as 564x242 RGBA - the correct frame-locked pixel reference.
   `ARES_PHASH=<path>` writes a matching 256x224 RGBA hash per present.
   Two caveats: ares' present index lags the emulated frame count (0 early,
-  ~22 by frame 900 on Star Fox, because `runAhead()` skips presents), so match
+  ~22 by frame 900 and ~40 by frame 1800 on Star Fox, because `runAhead()`
+  skips presents), so match
   by *content* with a window that grows with the run; and the hook reads the
   PPU buffer while the emulator thread renders, so a present can be **torn**
   (rows from two adjacent frames). A torn present has no exact match and

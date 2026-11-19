@@ -2996,7 +2996,7 @@ compared against our frames with a content window (ares skips presents via
 title        presents   exact      notes
 Mega Man X2     4001    3999/4001  two torn captures (816, 3172)
 Mega Man X3     1801    1800/1801  present 1800 is past our last frame
-Star Fox         901     901/901   0-900, plus 880-919 re-run
+Star Fox        1801    1801/1801  0-1800
 ```
 
 MMX2 was captured twice at every present and the two runs are byte-identical
@@ -3040,8 +3040,8 @@ A longer Star Fox capture (920 presents) also matches the tail that the earlier
 ares 885 -> ours 861   889 -> 865   893 -> 869   897 -> 873
 ```
 
-The lag grows from 0 to ~22 present frames over the run, so the content window
-must grow with it. Star Fox is exact at every present from 0 to 919.
+The lag grows from 0 to ~40 present frames by frame 1800, so the content window
+must grow with it. Star Fox is exact at every present from 0 to 1800.
 
 ### Resolved: presentation-time oracle calibrated (ares `Screen::refresh`)
 

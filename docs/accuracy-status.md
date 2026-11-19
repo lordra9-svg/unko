@@ -310,8 +310,8 @@ Validation so far:
   baseline 212/212).
 - Coverage sweep with the calibrated oracle is now **exhaustive, every present**:
   Mega Man X2 3999/4001 exact over 0-4000, Mega Man X3 1800/1801 exact over
-  0-1800 (the one miss is present 1800, past our last frame), Star Fox 901/901
-  exact over 0-900 (and 880-919 re-run: exact). The two
+  0-1800 (the one miss is present 1800, past our last frame), Star Fox 1801/1801
+  exact over 0-1800. The two
   MMX2 outliers (presents 816, 3172) are torn presentations, not emulation:
   ares' state at 816 is byte-identical to ours (WRAM/VRAM/CX4 RAM all 0 bytes
   different) and at 3172 VRAM/CGRAM/OAM are identical, while the frames are
@@ -319,8 +319,9 @@ Validation so far:
   our 3168, rows 19-167 from our 3172). The Star Fox "present 677" earlier
   reported as transient was a matcher-window artefact (window 12 vs lag 13);
   with the window widened it matches our 664 at 100.000%. ares skips presents
-  via `runAhead()`, so its index lags ours by 0 at the start and ~22 by frame
-  900; comparisons must use a content window that grows with the run.
+  via `runAhead()`, so its index lags ours by 0 at the start, ~22 by frame 900
+  and ~40 by frame 1800; comparisons must use a content window that grows with
+  the run.
 - Fixed a colour-math bug (MMX3 presents 907-972): `$2131` bit 6 (halve) was
   gated on `$2130` bit 1 (subscreen operand selection), so fixed-colour adds
   were not halved. ares halves that path too (`blend(main, fixed, colorHalve &&
