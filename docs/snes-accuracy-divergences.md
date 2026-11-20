@@ -5008,3 +5008,32 @@ the first branch divergence is `$FFDC` (`BNE` taken by us, not by ares) - and th
 next step is to trace where the 22 clocks are lost in that handshake loop
 (S-CPU write instruction vs S-SMP poll phase, cycle by cycle), not to change the
 sample ordering.
+
+## CV4 $F4 sample sits one access before ares (2026-11-20)
+
+With the local ares `SMP::readIO($F4)` hook logging the latch value, the same
+handshake window reads:
+
+```
+ares  28,991,350  apu0=ff  (x5)
+ares  28,991,506  apu0=00     <- first read after the $2140=00 write at 28,991,500
+ours  28,991,478  val=ff      (sample in the write's own access)
+ours  28,991,709  val=00
+```
+
+So ares resolves the sample in the access *after* the write (CPU clock
+28,991,506 vs the write at 28,991,500), while ours resolves it in the write's
+own access, before the write request is delivered. The S-SMP instruction clocks
+match one-for-one up to the divergence (the ares clock column only jumps when
+the scheduler reduces all thread clocks together, which preserves differences),
+so this is a pure one-access ordering offset.
+
+Both CV4 and SMW write port 0 ~40k times each during their IPL uploads, so
+filtering the hold by port cannot discriminate either. The clock-window
+distribution is also identical across titles (min 32, median 34, max 72).
+
+The remaining option is to resolve *every* deferred `$F4-$F7` sample at the
+start of the following access (which is ares' natural position) rather than at
+the end of the current one, and re-measure: this differs from the rejected
+"hold" experiments in that it applies uniformly and unconditionally, matching
+the trace rather than conditionally delivering a write.
