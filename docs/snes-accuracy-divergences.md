@@ -5501,3 +5501,31 @@ which is why it broke DKC/Zelda/F-Zero/SMW even though SMAS and CV4 became exact
 The remaining fix must therefore reorder only the latch application and keep the
 drain at the same clock: apply the access's `$2140-$2143` write, then resolve the
 pending sample at the same master clock, without changing the credit window.
+
+## Timing-preserving sample reorder (2026-11-20)
+
+Implemented the reorder with the clock/credit held fixed: when the drain reaches
+a deferred `$F4-$F7` sample within the access (`port_read_near`, 48-clock
+window), the actor yields `Sample` without consuming the unit; the driver
+delivers the access's `$2140-$2143` write (if the next request is one) and then
+resumes with `ResolveSample`, which sets the master clock to the same value,
+drains exactly the held unit and subtracts exactly one credit unit. The rest of
+the credit drains afterwards as before, so no boundary move occurs.
+
+Measured (600 frames, 639,656-sample window):
+
+```
+dkc     173,620  72.8573%     zelda   1,449  99.7735%     fzero 0 100.0000%
+metroid 136,553  78.6521%     smw    45,880  92.8274%     cv4   0 100.0000%
+smas          0 100.0000%     ct    439,377  31.3104%
+```
+
+CV4 and SMAS become bit-exact and F-Zero stays exact, but DKC/Zelda/Super
+Metroid/SMW regress with the *same* numbers as every earlier hold variant. So the
+regressions are not caused by the boundary clock or credit (both held fixed
+here): the four exact drivers must resolve their colliding polls with the
+opposite order (sample before the CPU's write), while CV4 and SMAS resolve them
+write-first. A single global ordering cannot satisfy both; the discriminator has
+to come from something driver-specific that we have not identified.
+
+Reverted; the per-access model is restored and all five exact titles re-verified.
