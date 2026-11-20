@@ -4170,3 +4170,36 @@ resolve it at the exact thread-clock point (the CPU thread yields mid-instructio
 in ares, while this core runs the S-CPU as a non-resumable call stack). That
 resumable-CPU refinement is the next audio item; DKC and Zelda remain bit-exact
 and no other title moved.
+
+## Required scheduler port: resumable S-CPU (2026-11-19)
+
+The remaining retail PCM gap is a one-sample KON/KOFF shift in the sound
+driver, not DSP arithmetic. The forward-sync machinery parks a `$F4-$F7` read
+until the S-CPU catches the frozen S-SMP clock, but it can only resume the read
+after the **current S-CPU instruction** returns: `Snes::step` does
+`let mut cpu = std::mem::take(&mut self.cpu); cpu.step(self);` and the 65C816
+interpreter is a recursive call stack, so a bus access cannot resume the CPU
+mid-instruction. ares can: its S-CPU is a cooperative thread that yields inside
+an APU access and resumes there when `SMP::readIO` calls `synchronize(cpu)`.
+The granularity difference is what leaves SMAS voice 4 two envelope steps
+behind, F-Zero's KOFF one sample late, and the Chrono Trigger/Super Metroid
+streams shifted.
+
+The exact fix is one of:
+
+1. **Resumable 65C816 interpreter.** Make `Cpu::step` a state machine that
+   executes one bus access per activation (or an `async` interpreter awaited by
+   the bus), store the continuation in `Cpu`, and let the parked port read drive
+   the S-CPU access-by-access up to the frozen S-SMP clock. This touches every
+   opcode handler and the CPU oracle tests; it is a multi-file, multi-turn port
+   and must not be half-landed (the CPU is the timing anchor for the whole
+   machine).
+2. **ares scheduler port.** Replace the CPU/PPU/SMP cooperative credits with
+   the `Scheduler`/`Thread` model (scaled thread clocks, `synchronize`),
+   including a cothread or equivalent resumable execution for the CPU.
+
+Until that lands, the shipped state keeps the exact DSP clocks, the 186-clock
+reset phase, the `$F4-$F7` parked-read sync and the bit-exact DKC/Zelda
+streams; the other titles' first differences are the driver KON/KOFF placement
+documented above. A per-title phase calibration (like the SMW HDMA overlay) is
+possible but would repeat that overlay's maintenance cost and is not applied.
