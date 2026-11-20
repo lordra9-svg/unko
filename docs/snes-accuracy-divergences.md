@@ -5071,3 +5071,34 @@ ordering (the conditional hold moved CV4 to 0 but broke the exact titles).
 The remaining work is therefore per-driver clock accounting in the handshake
 loops (IPL upload for CV4, the driver's init sections for CT/SMAS), not another
 global sample-order rule.
+
+## MMX2 with the canonical CX4 firmware (2026-11-20)
+
+The No-Intro/batocera CX4 dump (`cx4.data.rom`, 3 KiB, sha256
+`ae8d4d19…`) is byte-identical to the libretro coprocessor archive, so the
+earlier 99.44% figure is not reproducible with the canonical firmware:
+Mega Man X2 measures **63.2951%** (256,934 differing over 700,000, best offset
+-221, first audio difference **6.909 s**). A fresh ares capture made with the
+same `cx4.rom` installed is byte-identical to the archived reference, so the
+capture is sound.
+
+DSP write logs (480 frames, 2,686 ares / 2,672 ours) diverge in sequence at
+4.264 s: ours emits `$5C = $FF` (KOFF all voices) where ares continues a note
+setup (`$77/$75/$67/$65/$57/$55`), then the registers realign shifted by one
+write. The S-CPU sound-command stream (`$2140` command / `$2141` data from
+`$83EB-$83F6`) is the same but runs a **constant ~104 master clocks ahead** of
+ares (offsets are -104 for most commands, not growing), and ours issues 46 more
+`$2140` writes over the run.
+
+The APU access ordering is not the cause: the S-SMP bus already matches ares
+(`wait` before read/write, `$F4-$F7` split into halves). A constant ~104-clock
+lead is about one SPC700 instruction - the same handshake-phase class measured
+for CV4 (+22 micro-steps) and CT (+20/+133/+111 ticks), i.e. the S-SMP's echo
+reaches the S-CPU one instruction early, and the driver then takes an extra
+command branch.
+
+ST018 is now verifiable end-to-end as well: the firmware (`st018.program.rom`
+131,072 B + `st018.data.rom` 32,768 B) concatenates to the No-Intro dump
+(`6df209ab…`) and `Hayazashi Nidan Morita Shougi 2 (Japan)` is in the
+Minerva_Myrient set; ares has no ST018 core, so that implementation has no
+first-party reference.
