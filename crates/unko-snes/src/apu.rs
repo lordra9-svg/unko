@@ -465,10 +465,13 @@ impl Apu {
         if !self.master_clock_valid {
             return false;
         }
-        let Some(crate::spc700::Pending::DirectRead { address, .. }) = self.spc.pending else {
-            return false;
+        let effective = match self.spc.pending {
+            Some(crate::spc700::Pending::DirectRead { address, .. }) => {
+                (u16::from(self.spc.flags.page) << 8) | u16::from(address)
+            }
+            Some(crate::spc700::Pending::AbsoluteRead { address, .. }) => address,
+            None => return false,
         };
-        let effective = (u16::from(self.spc.flags.page) << 8) | u16::from(address);
         if !(0x00F4..=0x00F7).contains(&effective) {
             return false;
         }
@@ -554,23 +557,28 @@ impl Apu {
             };
             self.spc.step(&mut recorder);
         }
-        let deferred =
-            if let Some(crate::spc700::Pending::DirectRead { address, .. }) = self.spc.pending {
-                let effective = (u16::from(self.spc.flags.page) << 8) | u16::from(address);
-                // ares `SMP::wait`: the I/O window uses the internal wait selector.
-                const CYCLE_WAIT: [u8; 4] = [1, 2, 5, 10];
-                let clocks = CYCLE_WAIT[usize::from(self.internal_wait.min(3))] * 2;
-                let split = effective & 0xFFFC == 0x00F4;
-                plan.push(PlanStep {
-                    clocks,
-                    port_write: None,
-                    deferred: true,
-                    split,
-                });
-                true
-            } else {
-                false
-            };
+        let pending_address = match self.spc.pending {
+            Some(crate::spc700::Pending::DirectRead { address, .. }) => {
+                Some((u16::from(self.spc.flags.page) << 8) | u16::from(address))
+            }
+            Some(crate::spc700::Pending::AbsoluteRead { address, .. }) => Some(address),
+            None => None,
+        };
+        let deferred = if let Some(effective) = pending_address {
+            // ares `SMP::wait`: the I/O window uses the internal wait selector.
+            const CYCLE_WAIT: [u8; 4] = [1, 2, 5, 10];
+            let clocks = CYCLE_WAIT[usize::from(self.internal_wait.min(3))] * 2;
+            let split = effective & 0xFFFC == 0x00F4;
+            plan.push(PlanStep {
+                clocks,
+                port_write: None,
+                deferred: true,
+                split,
+            });
+            true
+        } else {
+            false
+        };
         if plan.is_empty() && !deferred {
             plan.push(PlanStep {
                 clocks: 2,

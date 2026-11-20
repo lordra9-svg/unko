@@ -69,6 +69,13 @@ pub enum Pending {
         /// Direct-page operand (the page is taken from the P flag).
         address: u8,
     },
+    /// An absolute read whose operand has been fetched.
+    AbsoluteRead {
+        /// Opcode whose ALU/transfer step is still pending.
+        opcode: u8,
+        /// Absolute address.
+        address: u16,
+    },
 }
 
 /// SPC700 processor status flags.
@@ -201,10 +208,18 @@ impl Spc700 {
     /// Execute one instruction. Returns the number of bus cycles retired.
     pub fn step(&mut self, bus: &mut impl SpcBus) -> u32 {
         let start = self.cycles;
-        if let Some(Pending::DirectRead { opcode, address }) = self.pending.take() {
-            let value = self.load(bus, address);
-            self.apply_read(bus, opcode, value);
-            return (self.cycles - start) as u32;
+        match self.pending.take() {
+            Some(Pending::DirectRead { opcode, address }) => {
+                let value = self.load(bus, address);
+                self.apply_read(bus, opcode, value);
+                return (self.cycles - start) as u32;
+            }
+            Some(Pending::AbsoluteRead { opcode, address }) => {
+                let value = self.read(bus, address);
+                self.apply_read(bus, opcode, value);
+                return (self.cycles - start) as u32;
+            }
+            None => {}
         }
         if self.wait || self.stop {
             self.idle(bus);
@@ -733,6 +748,11 @@ impl Spc700 {
 
     fn absolute_read(&mut self, bus: &mut impl SpcBus, opcode: u8) {
         let address = self.fetch16(bus);
+        if bus.defer_io_reads() && address & 0xFFF0 == 0x00F0 {
+            // Sample at the access's own clock (ares `SMP::read` + readIO).
+            self.pending = Some(Pending::AbsoluteRead { opcode, address });
+            return;
+        }
         let value = self.read(bus, address);
         self.apply_read(bus, opcode, value);
     }
