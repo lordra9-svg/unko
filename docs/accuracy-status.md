@@ -647,7 +647,8 @@ Validation so far:
   **Donkey Kong Country, Zelda: A Link to the Past, F-Zero and Super Metroid
   are all 0 differing samples (100.0000%)**, Super Mario World 73,874
   (89.4466%), Super Mario All-Stars 313,782 (55.1740%), Chrono Trigger 416,332
-  (40.5240%, first difference 2.357 s) and Mega Man X2 256,334 (63.3809%).
+  (40.5240%, first difference 2.357 s) and Mega Man X2 3,903 (99.4424%, first
+  difference 7.313 s, with the CX4 firmware installed).
   The exact model matches ares' DSP tick count write-for-write, the reset
   phase matches ares' H=186 first fetch, and the `$F4-$F7` port read now parks
   and runs the S-CPU forward to the S-SMP clock.
@@ -661,12 +662,14 @@ Validation so far:
   F-Zero moves from 25.12% to **100.0000%** and Super Metroid from 71.44% to
   **100.0000%**; DKC/Zelda stay exact. See the divergence ledger.
 
-- **Mega Man X2 still produces no audio at all** (all-zero stream) at both
-  `f03c442` and `677b85a`, with or without the APU power-on fill, so its
-  63.38% is ares' music against our silence. Its IPL upload is never reached:
-  the first CPU divergence is a `bne` on the uninitialised WRAM byte `$1F53`
-  at `$13FA75` (ares falls through, ours branches). That data divergence is the
-  next Mega Man X2 audio item.
+- **Mega Man X2 needs its CX4 firmware to boot its sound driver.** The
+  harness installs the coprocessor only when `CX4_ROM` points at the local
+  3 KiB dump. Without it, `$7C00-$7FFF` is unmapped, the game's CX4 self-test
+  at `$13F8BC` fails, and the IPL sound upload is never reached (silent
+  output). With `CX4_ROM` set the title plays and measures 3,903 differing
+  samples (99.4424%, first difference 7.313 s). An earlier sweep without the
+  firmware reported 63.38% and was a harness omission, not an emulation
+  regression.
 
 The PPU is line-based rather than dot-scheduled. **Interlace is implemented**
 (448-line output, odd field on the odd output rows, sprite and hires BG vertical

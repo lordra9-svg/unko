@@ -5,6 +5,10 @@
 #        <outdir>/audio.f32  interleaved stereo f32 at the native 32 kHz
 #
 # Set IPL to a 64-byte SPC IPL ROM (required for the real boot protocol).
+# Coprocessor titles also need their firmware supplied through the environment:
+# CX4_ROM=<cx4.rom> for Mega Man X2/X3 and DSP1_ROM=<dsp1.rom> for the NEC DSP
+# games. Without CX4_ROM a CX4 title's self-test fails and it never uploads its
+# sound driver (silent output).
 set -euo pipefail
 
 rom=${1:?usage: ours-capture.sh <rom> <frames> <outdir>}

@@ -4131,21 +4131,23 @@ Super Mario All-Stars 313,782             55.1740%  (was 345,375 / 50.66%)
 Super Mario World      73,874             89.4466%  (unchanged)
 Castlevania IV         70,913             89.8696%  (unchanged)
 Chrono Trigger        416,332             40.5240%  (first diff 2.357 s, unchanged)
-Mega Man X2           256,334             63.3809%  (our stream is silent; see below)
+Mega Man X2             3,903             99.4424%  (CX4 firmware; first diff 7.313 s)
 ```
 
-**Mega Man X2 has never produced music in this core.** The stream is all zeros
-at both `f03c442` (the commit that recorded the earlier "3,912 differing,
-99.4411%" figure) and `677b85a`, with or without the APU power-on fill, so the
-63.38% is ares' music measured against our silence rather than a regression from
-this change. The game's IPL sound upload starts at 3.87 s in ares via
-`$0083F6` (`sta $2140`); ours never executes that routine. The first S-CPU
-divergence is earlier, at `$13FA75`: `bne +$0A` on `$1F53` (X=0). ares falls
-through because `$1F53 == 0`; ours branches because `$1F53 != 0`. The CPU and
-S-SMP instruction streams are otherwise identical up to that point, so this is
-a data divergence in the game's boot/task code (written earlier by
-`$13F8D3`/`$13F850`), not an APU scheduling issue. It is the next Mega Man X2
-audio item.
+Mega Man X2 is a CX4 title, and the harness only installs the coprocessor when
+`CX4_ROM` points at the local 3 KiB `cx4.rom` dump (`Snes::set_cx4_firmware`).
+Without it the `$6C00-$6FFF`/`$7C00-$7FFF` window is unmapped: the game's CX4
+self-test at `$13F8BC` compares `$7F49-$7F6F` against its expected reset values
+(cache base `$028000`, wait `$44`, IRQ `1`, ROM `0`, vectors), sees a mismatch,
+sets the handler flag `$1F53`, and takes the `bne` at `$13FA75` instead of
+starting the IPL sound upload - the output is silence. With `CX4_ROM` set the
+whole path matches ares and the stream is non-silent.
+
+A rerun of the sweep that omitted `CX4_ROM` produced 256,334 differing samples
+for Mega Man X2; that was a harness omission, not a regression from the
+power-on APU change. The 3,903-sample residual has the same signature as the
+other DSP-placement residuals: the first difference is at 7.313 s and is a few
+LSBs on individual samples (253 vs 263), not a missing note.
 
 ## Sharp S-RTC and Sufami Turbo (2026-11-19)
 
