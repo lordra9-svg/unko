@@ -4945,3 +4945,38 @@ sample held until then *conditionally*, i.e. the actor yields at the sample, the
 driver runs the S-CPU's next bus request, and only if it is a `$2140-$2143`
 write is the latch applied before the sample resumes; otherwise the sample
 resolves with the old ordering.
+
+## Conditional sample hold (2026-11-20)
+
+Implemented the per-request hold: at a deferred `$F4-$F7` sample the actor yields
+`ApuOutput::Sample` (handing the `Apu` back); the driver runs exactly the
+S-CPU's next bus request and applies the latch only if it is a `$2140-$2143`
+write, then resumes the sample with `ApuInput::ResolveSample` (one unit,
+`Apu::resolve_held_sample`). Any other request resolves the sample with the old
+ordering. `DrainStop::{Done, Parked, Held}` distinguishes the three exits.
+
+Result (600 frames, 639,656-sample window):
+
+```
+dkc     173,620  72.8573%
+zelda     1,449  99.7735%
+fzero         0 100.0000%
+metroid 136,553  78.6521%
+smw      45,880  92.8274%
+cv4           0 100.0000%   <- CV4 becomes bit-exact
+```
+
+CV4 is now exact, confirming the ordering rule, but the four gate titles regress
+with numbers identical to the unconditional deferral. The condition "the next
+request is a `$2140-$2143` write" is therefore necessary for CV4 but not
+sufficient to discriminate: DKC/Zelda/Super Metroid/SMW require the sample to
+*not* observe the in-flight write even when the next request is a port write.
+
+The remaining discriminator is ares' `synchronize(cpu)` condition
+(`cpu.clock() < smp.clock()` on the scheduler's reduced clocks): the S-CPU is
+run inside the read only when it is behind the S-SMP at that instant. Our
+driver keeps the two level and compares absolute clocks, which cannot separate
+the two cases. Reproducing the reduced-clock comparison (or the scheduler's
+per-thread step order) is the next step; the gate and CV4-exact result bracket
+it: any rule must hold the sample for CV4's `$FFDA` polls and not for the four
+exact drivers' polls.
