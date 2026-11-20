@@ -4166,6 +4166,13 @@ can overshoot by one), whereas the exact credit loop advances exactly the lag.
 Both are visible in the per-port deltas and are the remaining difference for
 SMW/CV4/SMAS/CT.
 
+Correcting the overshoot bookkeeping (`apu_last_clock` set to the S-SMP's real
+clock after a whole-instruction run, not the target) and using that catch-up at
+ports, DMA and scanline still gave DKC/Zelda 100.0000% but F-Zero 25.1196% and
+Super Metroid 74.2183%. So F-Zero/Metroid require exact per-port catch-up and
+reject the overshoot regardless of bookkeeping; the remaining titles' fix
+cannot be a catch-up-granularity change and must be in the DSP tick phase.
+
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
 DSP is already ticked one micro-step per two S-SMP clocks inside the access's
