@@ -4638,3 +4638,40 @@ after the instruction that *crosses* it. The remaining experiment is to let the
 forward loop run to the first instruction whose end clock is strictly greater
 than the sample clock (ares' `synchronize` loop condition is `cpu.clock() <
 smp.clock()` re-checked after each whole step), then re-run the sweep.
+
+## S-SMP scheduler granularity experiments (2026-11-20, negative results)
+
+After the synchronization-instant fix the remaining SMW difference is a single
+port-value race: at `$F4` read 81,063 of 81,190 (1.122 s) ours reads `$1f`
+where ares reads `$23`, and ares' S-CPU clock at that read is ~78 master clocks
+ahead of ours. Four variants were measured against `ARES_SMPIO_LOG`
+(90 frames, port-0 read count; ares = 81,190):
+
+| variant | `$F4` reads | value race |
+|---|---|---|
+| committed (per-access flush, post-step clock) | 81,191 | read 81,063 |
+| flush at S-CPU instruction boundaries (+ port accesses) | 81,191 | unchanged |
+| one-instruction lead at the park (`crossed` flag) | 24,106 | over-corrected |
+| strict-greater tie (`flush` only when `clock > target`) | 81,191 | unchanged |
+
+All variants kept the four gate titles at 0 differing and left the sweep
+unchanged, so none was kept.
+
+**What the numbers imply.** ares' scheduler runs each thread one *step* at a
+time (`Thread::Enter` calls `scheduler.synchronize()` then `entryPoint()`), so
+the S-SMP advances in whole SPC700 instructions and stops at the first
+instruction end at or past the S-CPU clock. The CPU therefore leads by up to
+one S-SMP instruction (~84 master clocks), which is the ~65-80 clock delta
+measured at the reads. Our `Apu::advance_master_clock` drains the plan
+*mid-instruction* while the credit covers another S-SMP clock, so our S-SMP
+stops exactly on the S-CPU clock instead of at the instruction end: it is
+systematically a few clocks *behind* ares at arbitrary instants (the -4 tick
+note lag at 1.447 s) and occasionally sees a port write one poll late.
+
+**Next experiment.** Advance the scheduler's S-SMP to the end of the current
+SPC700 instruction (ares' thread step) while keeping the `$F4-$F7` park
+mid-instruction, and carry the overshoot in the credit. The earlier
+whole-instruction experiments (ledger above) applied the overshoot at the port
+and scanline catch-up, not as the scheduler's step with the actor park; the
+target is 0 divergences in the `$F4` value sequence, then 0 differing samples
+on SMW/CV4.
