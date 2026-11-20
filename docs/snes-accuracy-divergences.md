@@ -4066,6 +4066,17 @@ SMAS 38.6331%, CT 26.7160% and MMX2 99.4424% - worse than the per-access model
 for every divergent title. The scanline base is therefore not a better carrier
 for the remaining drivers by itself; the per-access model is restored.
 
+**True suspended-read unit (implemented and measured).** The deferred
+`$F4-$F7` plan step was split into first half-step (clock + timers), sample,
+second half-step and ALU application, with the pending-read application
+exposed from `Spc700` and the mid-read state carried in `Apu`; the top-level
+scheduler sampled once the S-CPU clock reached the read. Result: F-Zero stayed
+100.0000%, but DKC fell to 75.1971%, Zelda to 97.3031% and Super Metroid to
+75.4491%. The split moves the sample one S-SMP clock relative to the current
+per-access replay, which is exactly the phase those titles depend on. Reverted;
+the per-access model is restored. The unit itself is now written and can be
+revisited together with a matching change to the DSP sample phase.
+
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
 DSP is already ticked one micro-step per two S-SMP clocks inside the access's
