@@ -5246,3 +5246,32 @@ instruction/access), not in when the threads are synchronized. That is the next
 bounded experiment: replicate `SMP::step`'s `Thread::step(clocks)` exactly per
 access and compare the resulting `smp.clock()` with `ARES_SCANLINE_LOG`'s `smp=`
 values at H=0.
+
+## Per-access S-SMP clock vs ares at every H=0 (2026-11-20)
+
+Logged our executed S-SMP clock (`Apu::smp_cycles`, the step-granular position)
+at every Hcounter-0 point and aligned it with ares' `ARES_SCANLINE_LOG` `smp=`
+column (B lines), which prints the S-SMP clock at each line's synchronization.
+Both are 2.050560 MHz cycles; ares' values are periodically reduced by the
+scheduler, so only the line-to-line change of the relative phase
+(`smp - cpu * 2050560/21477272`) is meaningful.
+
+Super Mario World, 60 frames, 15,678 matched H=0 points; Donkey Kong Country,
+10,136 matched (its boot DMA has no actor-side log):
+
+```
+                 matched   mean d(phase)   median
+smw              15,678    -0.004 cycles    0.0
+dkc              10,136    +0.003 cycles    0.2
+```
+
+There is **no systematic drift**: the per-access clock advance matches ares to
+rounding (residual spread ±2-12 cycles is alignment/rounding noise, mean zero).
+The per-access S-SMP trajectory is therefore correct at line granularity, and
+the residual audio difference in CV4/SMAS/CT/MMX2 is **not** in the clock
+accounting or in the synchronization points, both of which are now verified.
+
+That leaves the sub-line interaction: the exact master clock at which an S-SMP
+port access commits relative to an S-CPU port access within the same line, and
+the DSP's register-write micro-step. CV4/CT's piecewise-constant per-note tick
+offsets and MMX2's boot-path difference are the concrete instances.
