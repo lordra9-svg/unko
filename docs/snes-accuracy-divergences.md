@@ -4035,11 +4035,24 @@ SMP artificially locked to the CPU.
 
 A scanline+port-only model was implemented and measured: **DKC stayed
 100.0000%**, but Zelda fell to 58.8231%, F-Zero to 25.1250%, Super Metroid to
-57.4057%, SMW to 47.1934% and SMAS to 38.6331%. It fails because the
-scanline-only model also needs the *S-SMP to run the S-CPU forward* when it
-gets ahead (the mutual part); without it the SMP misses port writes. That is
-the exact unit the actor scheduler provides: per-access advancement is the
-workaround that currently matches four titles.
+57.4057%, SMW to 47.1934% and SMAS to 38.6331%. The missing piece was the
+DMA-to-APU handshake: once `DmaTransfer::writes_apu_port()` synchronizes the
+S-SMP before each A->B byte to `$2140-$2143` (`CPU::writeAPU`'s
+`synchronize(smp)`), **all four exact titles stay 100.0000%** under the
+scanline model:
+
+```
+dkc 0, zelda 0, fzero 0, metroid 0
+smw 47.1934%, cv4 81.4670%, smas 38.6331%, ct 26.7160%, mmx2 99.4424%
+```
+
+So the four exact titles do not depend on per-access advancement; the
+scanline model reproduces them. It is still worse for the others because it
+also needs the *S-SMP to run the S-CPU forward* when it gets ahead (the
+mutual part). Letting `sync_apu_to` finish whole instructions instead
+(ares' overshoot) then regressed F-Zero to 25.1196% and Super Metroid to
+74.2183%. The per-access model remains the best measured parity and was
+restored; the actor scheduler is the unit that can express the mutual run.
 
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
