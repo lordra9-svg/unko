@@ -4211,6 +4211,15 @@ phase is step-exact. The true fix is therefore to move the clock/timer/DSP
 advancement out of eager recording and into `drain_unit` (the coroutine), so
 `smp_clock` is step-granular.
 
+That move was implemented: `$F3` DSP writes and timer steps were deferred into
+`PlanStep`, and `drain_unit` advanced the SMP clock and DSP one access at a
+time. It regressed every exact title: DKC 69.0283%, Zelda 58.3454%, F-Zero
+25.1047%, Super Metroid 56.9824%. Reverted. So the eager instruction-granular
+advancement is *required* for the four exact titles; it is not the cause of
+their exactness being accidental - it genuinely matches ares for those drivers.
+The remaining five titles' residual is therefore in the CPU/SMP interleaving
+(DSP phase at the port catch-up), not in when the S-SMP clock advances.
+
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
 DSP is already ticked one micro-step per two S-SMP clocks inside the access's
