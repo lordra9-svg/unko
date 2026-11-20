@@ -1111,6 +1111,9 @@ impl Snes {
                     if peer.waiting.is_none() {
                         break;
                     }
+                    // Keep the debug PC on the instruction about to run: the
+                    // forward loop executes extra instructions in this step.
+                    self.live_pc = self.cpu.pc_address();
                     input = crate::cpu_coroutine::CpuInput::Start(std::mem::take(&mut self.cpu));
                 }
                 corosensei::CoroutineResult::Return(()) => {

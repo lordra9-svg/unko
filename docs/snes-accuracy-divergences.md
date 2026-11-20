@@ -5384,3 +5384,44 @@ Reliable evidence therefore remains the port event values and clocks (ares
 `ARES_APU_LOG` vs our port log) and the audio/DSP-write comparisons; the PC-based
 path comparisons need the access PC carried in the bus request (or tracked in
 the CPU coroutine) before they can be used. No emulation change was made.
+
+## Correct access PCs and the CV4 upload entry point (2026-11-20)
+
+`Snes::step` now refreshes `live_pc` before each forward-loop re-entry, so a port
+access in an extra instruction is logged with its own instruction address
+(emulation unchanged; 3 lines).
+
+With correct PCs, the CV4 first-handshake comparison becomes meaningful:
+
+```
+ours  CR 4,165,004 $2140=AA  pc=028596   <- CMP $2140; BNE $8596 (wait loop)
+ours  CW 4,165,098 $2141=01  pc=02859F
+ours  CW 4,165,144 $2140=CC  pc=0285A4
+
+ares                                W1 01  pc=0285A2
+ares                                W0 cc  pc=0285A7
+```
+
+The ROM at the LoROM mapping (bank 2, offset 0x1058F) is:
+
+```
+$02858F: C2 20      SEP #$20
+$028591: A9 AA      LDA #$AA
+$028593: BB         TYX
+$028594: 64 20      STZ $20
+$028596: CD 40 21   CMP $2140
+$028599: D0 FB      BNE $8596
+$02859B: E2 20      SEP #$20
+$02859D: A9 01      LDA #$01
+$02859F: 8D 41 21   STA $2141
+$0285A2: A9 CC      LDA #$CC
+$0285A4: 8D 40 21   STA $2140
+```
+
+Ours executes the documented wait loop at `$8596`; ares' first port access is the
+`STA $2141` at `$859F`, i.e. it enters the routine **past the wait**. The write
+clocks and values otherwise match exactly (4,165,098 / 4,165,144, `01`/`CC`).
+So CV4's divergence begins with the CPU entering the upload routine at `$859B`
+rather than `$858F`; no `JSR $858F`/`JSR $859B` exists in the ROM, so the entry is
+through a computed jump or a different caller branch that still needs to be
+located. That is the concrete remaining question for CV4.
