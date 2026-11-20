@@ -48,10 +48,13 @@ Donkey Kong Country / Chrono Trigger 1200/1200, Mega Man X3 and Star Fox
 10000/10000, and Mega Man X2 9996/10000 with only three proved torn presents
 excluded. The 212-entry test-ROM baseline and the whole crate test suite pass.
 
-Open items: retail-music S-DSP audio is not yet sample-exact (the residual is a
-register-write micro-step placement difference; see
-`docs/snes-accuracy-divergences.md`), and ST018, Satellaview/BS-X, Sufami Turbo
-and the Sharp RTC are not implemented.
+Retail-music S-DSP audio is sample-exact for Donkey Kong Country, Zelda,
+F-Zero and Super Metroid over 350,000 stereo frames (ares' power-on APU RAM and
+DSP-register pattern is reproduced); Super Mario World, Super Mario All-Stars
+and Chrono Trigger still differ. Mega Man X2 emits silence because its IPL
+driver upload is never reached (first CPU divergence at `$13FA75`, a `bne` on
+`$1F53`). ST018 and Satellaview/BS-X are not implemented; Sufami Turbo and the
+Sharp S-RTC are. See `docs/snes-accuracy-divergences.md`.
 
 ## Accuracy sources
 

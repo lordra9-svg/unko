@@ -309,6 +309,20 @@ impl Apu {
         apu
     }
 
+    /// Install ares' deterministic power-on APU RAM and DSP register pattern.
+    ///
+    /// ares randomises both at power-on (`DSP::power`), and the S-DSP's
+    /// `registers[]` is a plain file that is *not* derived from the decoded
+    /// voice state, so a driver polling an unwritten register sees these bytes.
+    /// A soft reset keeps them (`DSP::power(reset = true)` does not refill).
+    pub fn load_power_on_state(&mut self, ram: &[u8], dsp_registers: &[u8]) {
+        if ram.len() == APU_RAM_SIZE {
+            self.ram.copy_from_slice(ram);
+        }
+        let count = dsp_registers.len().min(crate::dsp::DSP_REGISTERS);
+        self.dsp.registers[..count].copy_from_slice(&dsp_registers[..count]);
+    }
+
     /// Install a 64-byte IPL ROM.
     pub fn set_ipl(&mut self, ipl: [u8; IPL_SIZE]) {
         self.ipl = ipl;

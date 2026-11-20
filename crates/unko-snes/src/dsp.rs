@@ -335,10 +335,16 @@ impl Dsp {
         }
     }
 
-    /// Reset the DSP state and register file.
+    /// Reset the DSP's decoded state.
+    ///
+    /// ares `DSP::power(reset = true)` clears the voice/echo/noise state but
+    /// leaves the raw `registers[]` file (and the power-on random pattern)
+    /// intact, so a soft reset must not zero it here either.
     pub fn reset(&mut self) {
+        let registers = self.registers;
         self.step = 0;
         *self = Self::new();
+        self.registers = registers;
     }
 
     /// Whether the global mute flag (`$6C` bit 6) is set.
@@ -1275,5 +1281,16 @@ mod tests {
         for _ in 0..32 {
             assert_eq!(dsp.run_sample(&mut ram), (0, 0));
         }
+    }
+
+    #[test]
+    fn reset_preserves_the_register_file() {
+        // ares `DSP::power(reset = true)` clears the decoded voice/echo/noise
+        // state but does not refill or zero `registers[]`, so a soft reset
+        // keeps the power-on random pattern (and any driver-written value).
+        let (mut dsp, _ram) = setup();
+        dsp.write(0x4C, 0xA5);
+        dsp.reset();
+        assert_eq!(dsp.read(0x4C), 0xA5);
     }
 }

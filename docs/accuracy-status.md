@@ -71,14 +71,15 @@ proved torn presents excluded; item 3 is bit-exact on the blargg
 title below; item 4 is covered by the state round-trip and continuation tests.
 
 Definition-of-done item 3 is the one place where the reference titles are not
-yet 100%: the S-DSP sample stream matches ares exactly for sparse music (Zelda
-99.83%, Mega Man X2 99.87%) but dense soundtracks still differ at note and
-echo boundaries (Super Mario World 89.44%, Chrono Trigger 78.29%, Donkey Kong
-Country 67.60%, Super Metroid 64.49%, F-Zero 25.12% over 350,000 stereo frames).
-The residual is traced to register writes landing on a slightly different
-32-step DSP micro-step, so a KON/EDL/EVOL write takes effect one sample earlier
-or later; one such difference (EDL at driver init) shifts the echo buffer by one
-sample for the rest of the run. This is a known open item, not a rendering or
+yet 100%. Donkey Kong Country, Zelda, F-Zero and Super Metroid are **0
+differing samples over 350,000 stereo frames** with the exact ares DSP thread
+clocks, the 186-clock reset phase and ares' power-on APU RAM/DSP-register
+pattern (see the divergence ledger). Super Mario World (89.45%), Castlevania IV
+(89.87%), Super Mario All-Stars (55.17%) and Chrono Trigger (40.52%) still
+differ at note and echo boundaries, so the register-write micro-step placement
+remains open for those drivers. Mega Man X2 emits silence because its IPL driver upload is never
+reached; the first CPU divergence is a `bne` on the uninitialised `$1F53` at
+`$13FA75`, not a DSP issue. This is a known open item, not a rendering or
 CPU-timing failure; the PCM of the blargg oracle remains bit-exact.
 
 `unko-snes` is a new isolated crate with no `unko-core` or shell dependency.
@@ -643,16 +644,29 @@ Validation so far:
   battery with the improved `tools/snes-oracle/diff-audio-raw.py` (loud-probe
   alignment, 700,000 interleaved samples = 350,000 stereo frames) with the
   exact ares DSP thread clocks and the 186-clock S-CPU reset phase:
-  **Donkey Kong Country and Zelda: A Link to the Past are both 0 differing
-  samples (100.0000%)**, Mega Man X2 3,912 (99.4411%), Super Mario World
-  73,874 (89.4466%), Super Castlevania IV 70,913 (89.8696%) and Super Metroid
-  199,925 (71.4393%). Chrono Trigger, Super Mario All-Stars and F-Zero still
-  diverge (first difference at 2.36 s, 3.51 s and 2.87 s). The exact model
-  matches ares' DSP tick count write-for-write, the reset phase matches ares'
-  H=186 first fetch, and the `$F4-$F7` port read now parks and runs the S-CPU
-  forward to the S-SMP clock (the clocked trace's first IPL divergence moved
-  from instruction 4,298 to 72,244). The remaining retail divergence is a later
-  driver poll, recorded in the divergence ledger as the next audio item.
+  **Donkey Kong Country, Zelda: A Link to the Past, F-Zero and Super Metroid
+  are all 0 differing samples (100.0000%)**, Super Mario World 73,874
+  (89.4466%), Super Mario All-Stars 313,782 (55.1740%), Chrono Trigger 416,332
+  (40.5240%, first difference 2.357 s) and Mega Man X2 256,334 (63.3809%).
+  The exact model matches ares' DSP tick count write-for-write, the reset
+  phase matches ares' H=186 first fetch, and the `$F4-$F7` port read now parks
+  and runs the S-CPU forward to the S-SMP clock.
+
+- Power-on APU RAM and the S-DSP register file now reproduce ares' low-entropy
+  `Random` pattern (the same deterministic stream that fills work RAM, drawn in
+  ares' order: 128 KiB WRAM, 64 KiB APU RAM, 128 DSP registers), verified
+  byte-for-byte against ares' `DSP::power` state. F-Zero's driver reads the
+  uninitialised `$03A9` handler flag; the zeroed image made the S-SMP skip a
+  three-instruction handler and shift every later DSP write by 10 micro-steps.
+  F-Zero moves from 25.12% to **100.0000%** and Super Metroid from 71.44% to
+  **100.0000%**; DKC/Zelda stay exact. See the divergence ledger.
+
+- **Mega Man X2 still produces no audio at all** (all-zero stream) at both
+  `f03c442` and `677b85a`, with or without the APU power-on fill, so its
+  63.38% is ares' music against our silence. Its IPL upload is never reached:
+  the first CPU divergence is a `bne` on the uninitialised WRAM byte `$1F53`
+  at `$13FA75` (ares falls through, ours branches). That data divergence is the
+  next Mega Man X2 audio item.
 
 The PPU is line-based rather than dot-scheduled. **Interlace is implemented**
 (448-line output, odd field on the odd output rows, sprite and hires BG vertical

@@ -99,6 +99,27 @@ pub fn power_on_wram() -> Vec<u8> {
     wram
 }
 
+/// The APU RAM and S-DSP register file ares presents at power-on.
+///
+/// ares seeds one deterministic stream in `System::power`, fills work RAM
+/// first (`CPU::power`), then APU RAM and the DSP register file
+/// (`DSP::power`). A driver that reads APU RAM before initialising it - F-Zero
+/// reads `$03A9` this way - observes that data, so the fills must be taken
+/// from the same stream and in the same order.
+///
+/// Returns `(apu_ram, dsp_registers)`.
+pub fn power_on_apu() -> (Vec<u8>, [u8; 0x80]) {
+    let mut random = Random::seed(0, 0);
+    // `CPU::power` draws the work RAM pattern first.
+    let mut wram = vec![0u8; 0x2_0000];
+    random.array_low(&mut wram);
+    let mut apu_ram = vec![0u8; 0x1_0000];
+    random.array_low(&mut apu_ram);
+    let mut dsp_registers = [0u8; 0x80];
+    random.array_low(&mut dsp_registers);
+    (apu_ram, dsp_registers)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,6 +143,34 @@ mod tests {
             "expected a repetitive pattern, got {} distinct bytes",
             distinct.len()
         );
+    }
+
+    #[test]
+    fn power_on_apu_is_deterministic_and_sized() {
+        let (ram, registers) = power_on_apu();
+        let (ram2, registers2) = power_on_apu();
+        assert_eq!(ram, ram2);
+        assert_eq!(registers, registers2);
+        assert_eq!(ram.len(), 0x1_0000);
+        assert_eq!(registers.len(), 0x80);
+        // The fill must actually replace the zero initialised buffers: a
+        // driver reading an unwritten byte has to see ares' pattern.
+        assert!(ram.iter().any(|&byte| byte != 0));
+        assert!(registers.iter().any(|&byte| byte != 0));
+    }
+
+    #[test]
+    fn power_on_apu_follows_the_work_ram_fill_in_the_same_stream() {
+        // ares fills work RAM first, then APU RAM, then the DSP register file.
+        // Recompute the stream by hand and check the APU slice starts where the
+        // 128 KiB work-RAM fill ends, rather than restarting the generator.
+        let mut random = Random::seed(0, 0);
+        let mut wram = vec![0u8; 0x2_0000];
+        random.array_low(&mut wram);
+        let mut expected = vec![0u8; 0x1_0000];
+        random.array_low(&mut expected);
+        let (ram, _) = power_on_apu();
+        assert_eq!(ram, expected);
     }
 
     #[test]

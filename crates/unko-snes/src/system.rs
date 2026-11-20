@@ -359,11 +359,16 @@ impl Snes {
         };
         let mut ppu = Ppu::new();
         ppu.set_region(region);
+        // ares randomises APU RAM and the S-DSP register file from the same
+        // deterministic power-on stream that fills work RAM.
+        let (apu_ram, dsp_registers) = crate::random::power_on_apu();
+        let mut apu = Apu::new();
+        apu.load_power_on_state(&apu_ram, &dsp_registers);
         Self {
             cpu: Cpu::new(),
             cpu_coroutine: crate::cpu_coroutine::CpuCoroutineSlot::default(),
             cart,
-            apu: Apu::new(),
+            apu,
             ppu,
             region,
             gsu: if has_superfx { Some(Gsu::new()) } else { None },
