@@ -1636,7 +1636,9 @@ impl SpcBus for CoroApuBus<'_> {
                         self.apu_ports[usize::from(port & 3)] = value;
                     }
                     ApuInput::PortRead { port } => {
-                        let value = self.apu_ports[usize::from(port & 3)];
+                        // CPU-side read of `$2140-$2143`: the S-SMP output latch
+                        // (`io.cpu0-3`), not the CPU->SMP input latch.
+                        let value = self.cpu_ports[usize::from(port & 3)];
                         match self.yielder.suspend(ApuOutput::PortValue { value }) {
                             ApuInput::Sync => done = true,
                             ApuInput::PortWrite { port, value } => {
@@ -1768,6 +1770,7 @@ mod actor_port_tests {
         let mut apu = Apu::new();
         apu.ram[0x200..0x205].copy_from_slice(&[0xE4, 0xF4, 0xC4, 0x00, 0xFF]);
         apu.spc.pc = 0x0200;
+        apu.cpu_ports[0] = 0x33;
         let mut coro = new_apu_coroutine();
         let a = match step(&mut coro, ApuInput::Start(Box::new(apu))) {
             ApuOutput::Stopped(a) => a,
@@ -1792,7 +1795,7 @@ mod actor_port_tests {
             ApuOutput::PortValue { value } => value,
             other => panic!("{other:?}"),
         };
-        assert_eq!(value, 0x77);
+        assert_eq!(value, 0x33);
         let a = match step(&mut coro, ApuInput::Sync) {
             ApuOutput::Stopped(a) => a,
             other => panic!("{other:?}"),
