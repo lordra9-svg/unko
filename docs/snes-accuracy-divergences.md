@@ -4051,8 +4051,13 @@ scanline model reproduces them. It is still worse for the others because it
 also needs the *S-SMP to run the S-CPU forward* when it gets ahead (the
 mutual part). Letting `sync_apu_to` finish whole instructions instead
 (ares' overshoot) then regressed F-Zero to 25.1196% and Super Metroid to
-74.2183%. The per-access model remains the best measured parity and was
-restored; the actor scheduler is the unit that can express the mutual run.
+74.2183%. Adding a per-request mutual resume (after every S-CPU bus request,
+resolve a parked `$F4-$F7` read once the S-CPU clock passes it) on top of the
+scanline+credit+DMA base regressed the gate itself: DKC 40.9101%, Zelda
+58.0477%, F-Zero 25.1156%, Super Metroid 75.6453%. The per-access model
+remains the best measured parity and was restored; the mutual run cannot be
+approximated at request granularity and needs the coroutine that can suspend
+the S-SMP inside the read.
 
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
