@@ -244,6 +244,12 @@ pub struct Apu {
     /// ares `DSP::_clock` in the same base. A micro-step advances it by
     /// `DSP_TICK` (24 DSP clocks) and a step runs while it is behind.
     dsp_clock: u128,
+    /// S-CPU master clock at the current S-SMP access (set by the system).
+    cpu_master_clock: u64,
+    /// Master clock rate paired with `cpu_master_clock`.
+    master_clock_rate: u64,
+    /// Whether `cpu_master_clock`/`master_clock_rate` are valid.
+    master_clock_valid: bool,
     samples: VecDeque<Sample>,
     /// Debug: S-CPU/S-SMP port handshake trace.
     pub debug: PortDebug,
@@ -288,6 +294,9 @@ impl Apu {
             // uniqueID (CPU 0, SMP 1, DSP 2).
             smp_clock: 1,
             dsp_clock: 2,
+            cpu_master_clock: 0,
+            master_clock_rate: 0,
+            master_clock_valid: false,
             samples: VecDeque::new(),
             debug: PortDebug::default(),
         }
@@ -350,6 +359,9 @@ impl Apu {
         self.plan_sub = 0;
         self.smp_clock = 1;
         self.dsp_clock = 2;
+        self.cpu_master_clock = 0;
+        self.master_clock_rate = 0;
+        self.master_clock_valid = false;
         self.samples.clear();
         self.apu_ports = [0; 4];
         self.cpu_ports = [0; 4];
@@ -382,6 +394,38 @@ impl Apu {
     /// Whether the port handshake log is capturing.
     pub fn port_logging_enabled(&self) -> bool {
         self.debug.enabled
+    }
+
+    /// Record the S-CPU master clock for the current access. ares
+    /// `SMP::readIO($F4-$F7)` calls `synchronize(cpu)`, so the port read waits
+    /// until the S-CPU has reached this clock.
+    pub fn set_master_clock(&mut self, clock: u64, rate: u64) {
+        self.cpu_master_clock = clock;
+        self.master_clock_rate = rate;
+        self.master_clock_valid = true;
+    }
+
+    /// The S-SMP's scaled clock converted to master clocks.
+    fn smp_master_clock(&self, master_clock: u64) -> u64 {
+        let cycles = self.smp_clock / SMP_SCALAR;
+        (cycles * u128::from(master_clock) / 2_050_560) as u64
+    }
+
+    /// Whether the pending deferred read is a `$F4-$F7` port read whose clock
+    /// is ahead of the S-CPU, i.e. ares would run the S-CPU forward first.
+    pub fn port_read_waiting(&self) -> bool {
+        if !self.master_clock_valid {
+            return false;
+        }
+        let Some(crate::spc700::Pending::DirectRead { address, .. }) = self.spc.pending else {
+            return false;
+        };
+        let effective = (u16::from(self.spc.flags.page) << 8) | u16::from(address);
+        if !(0x00F4..=0x00F7).contains(&effective) {
+            return false;
+        }
+        let smp_master = self.smp_master_clock(self.master_clock_rate);
+        smp_master > self.cpu_master_clock
     }
 
     /// Value currently visible to the SPC700 on `$F4-$F7`.
@@ -541,8 +585,19 @@ impl Apu {
         if self.plan_pos >= self.plan.len() {
             self.record_instruction();
         }
-        self.units += 1;
         let step = self.plan[self.plan_pos];
+        if step.deferred {
+            let clocks = u32::from(step.clocks);
+            let resume_at = if step.split { clocks / 2 } else { clocks };
+            // ares `SMP::readIO($F4-$F7)` synchronizes the S-CPU forward to
+            // the S-SMP clock before sampling the port. Park the read until
+            // the S-CPU catches up; the system runs CPU instructions in the
+            // meantime (the S-SMP clock is frozen, so this terminates).
+            if self.plan_sub + 1 == resume_at && self.port_read_waiting() {
+                return 0;
+            }
+        }
+        self.units += 1;
         self.plan_sub += 1;
         if step.deferred {
             let clocks = u32::from(step.clocks);

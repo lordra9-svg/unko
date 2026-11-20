@@ -4053,16 +4053,29 @@ F-Zero                 * first difference 2.87 s
 (`*` whole-window counts for the still-divergent titles are alignment-sensitive
 once the stream has drifted; the first-difference time is the stable metric.)
 
-The remaining idle difference is the **S-CPU port-read race**. With the reset
-phase fixed, the clocked S-SMP trace first diverges at IPL `$FFD8` (`ldy $F4;
-bne $FFD6` in the byte-upload loop): ours sees `$F4` as zero one poll iteration
-before ares does. In ares an S-SMP read of `$F4-$F7` calls `synchronize(cpu)`,
-which can run the S-CPU *forward* to the SMP's clock and let a write commit
-inside the read's window. Our per-access model resolves the latch only through
-CPU-side advancement, so the poll race is off by up to one S-SMP instruction.
-That is the remaining architectural item (`$F4-$F7`/`$F3` read visibility),
-not the DSP clocks; the exact thread model and reset phase are kept because
-they make DKC and Zelda bit-exact.
+**S-CPU port-read forward synchronization (2026-11-19).** ares
+`SMP::readIO($F4-$F7)` calls `synchronize(cpu)` before sampling the latch, so
+the read can run the S-CPU forward to the S-SMP clock. This is now implemented
+as a parked read:
+
+- `Apu::set_master_clock` records the S-CPU's master clock for the access;
+- `drain_unit` parks a deferred `$F4-$F7` read while the S-SMP clock is ahead
+  (`port_read_waiting`) and consumes no APU time;
+- the system's APU credit loop breaks on a parked tick (credit keeps
+  accumulating);
+- after the current S-CPU instruction, `Snes::step` executes further S-CPU
+  instructions until the CPU catches the frozen S-SMP clock (bounded to 64
+  instructions), then the read resolves and the S-SMP drains the accumulated
+  credit in a burst.
+
+The clocked S-SMP trace confirms the effect: the first IPL divergence moved
+from instruction **4,298** (`$FFD8`, the byte-upload poll) to **72,244**
+(`$FFE9`, a later `bpl` after `inc $01`). DKC and Zelda remain 100.0000%
+bit-exact, and the rest of the audio sweep is unchanged, so the remaining
+retail divergence is not the initial port race but a later driver poll/state
+difference. The full per-title numbers and the residual `$FFE9` trace are the
+next audio item; the DSP clocks, reset phase and port-read sync now all match
+ares' model.
 
 Until then, retail audio is **not** claimed bit-exact; the per-title numbers
 above are the measured baseline, and dense music (F-Zero, Super Metroid, Donkey

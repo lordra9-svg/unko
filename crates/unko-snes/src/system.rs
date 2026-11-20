@@ -27,7 +27,7 @@ use crate::sufamiturbo::SufamiTurbo;
 /// Magic number at the start of a serialized save state (`"SNES"`).
 pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
 /// Save-state format version. Bump whenever the serialized shape changes.
-pub const SAVE_STATE_VERSION: u32 = 16;
+pub const SAVE_STATE_VERSION: u32 = 17;
 
 /// A complete `unko-snes` snapshot.
 ///
@@ -949,6 +949,24 @@ impl Snes {
         }
         self.apply_interrupts();
         let mut cycles = cpu_cycles;
+        // ares' `$F4-$F7` read synchronization: if the S-SMP is polling a CPU
+        // port at a clock beyond the S-CPU, run S-CPU instructions until it
+        // catches up, then let the read resolve. The S-SMP clock is frozen
+        // while the read is parked, so this terminates.
+        let mut forward_guard = 0u32;
+        loop {
+            self.apu
+                .set_master_clock(self.clock, self.region.master_clock());
+            if !self.apu.port_read_waiting() || forward_guard >= 64 {
+                break;
+            }
+            forward_guard += 1;
+            let mut cpu = std::mem::take(&mut self.cpu);
+            let extra = cpu.step(self);
+            self.cpu = cpu;
+            self.apply_interrupts();
+            cycles += extra;
+        }
         let mut dma_clocks = 0u32;
         self.dma.debug_frame = self.ppu.debug_frame;
         if self.dma_transfer.is_none() {
@@ -1102,6 +1120,11 @@ impl Snes {
         // poll must observe every SMP write up to that instant and no further.
         const APU_UNIT_NUM: i64 = 2_050_560;
         let apu_unit_den = self.region.master_clock() as i64;
+        // ares `SMP::readIO($F4-$F7)` synchronizes the S-CPU forward to the
+        // S-SMP clock before sampling the port. The S-SMP runs inside this
+        // access, so its clock cannot exceed the access end.
+        self.apu
+            .set_master_clock(self.clock, self.region.master_clock());
         if self.apu.port_logging_enabled() {
             // Resolve every access unit to the master clock it starts on, so the
             // port handshake log can be compared event-for-event with a
@@ -1119,14 +1142,18 @@ impl Snes {
                 spent += need;
                 credit += i64::from(need) * APU_UNIT_NUM - apu_unit_den;
                 self.apu.debug.set_clock(self.clock + u64::from(spent));
-                self.apu.tick();
+                if self.apu.tick() == 0 {
+                    break;
+                }
             }
             credit += i64::from(clocks - spent) * APU_UNIT_NUM;
             self.apu_credit = credit;
         } else {
             self.apu_credit += i64::from(clocks) * APU_UNIT_NUM;
             while self.apu_credit >= apu_unit_den {
-                self.apu.tick();
+                if self.apu.tick() == 0 {
+                    break;
+                }
                 self.apu_credit -= apu_unit_den;
             }
         }

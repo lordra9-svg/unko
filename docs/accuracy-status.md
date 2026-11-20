@@ -648,10 +648,11 @@ Validation so far:
   73,874 (89.4466%), Super Castlevania IV 70,913 (89.8696%) and Super Metroid
   199,925 (71.4393%). Chrono Trigger, Super Mario All-Stars and F-Zero still
   diverge (first difference at 2.36 s, 3.51 s and 2.87 s). The exact model
-  matches ares' DSP tick count write-for-write and the reset phase matches
-  ares' H=186 first fetch; the remaining divergence is the S-CPU port-read
-  race (`$F4-$F7`/`$F3` visibility), recorded in the divergence ledger as the
-  next scheduler item.
+  matches ares' DSP tick count write-for-write, the reset phase matches ares'
+  H=186 first fetch, and the `$F4-$F7` port read now parks and runs the S-CPU
+  forward to the S-SMP clock (the clocked trace's first IPL divergence moved
+  from instruction 4,298 to 72,244). The remaining retail divergence is a later
+  driver poll, recorded in the divergence ledger as the next audio item.
 
 The PPU is line-based rather than dot-scheduled. **Interlace is implemented**
 (448-line output, odd field on the odd output rows, sprite and hires BG vertical
