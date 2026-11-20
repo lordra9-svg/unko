@@ -45,9 +45,10 @@ HDMA phase calibration), Zelda / Super Mario All-Stars / F-Zero / Donkey Kong
 Country / Chrono Trigger 1200/1200, Mega Man X3 and Star Fox 10000/10000, and
 Mega Man X2 9996/10000 with only three proved torn presents excluded. The 212
 test-ROM baseline and the `unko-snes` test suite are green. Retail-music audio
-parity is measured per title (Zelda 99.83% and Mega Man X2 99.87% identical
-samples; denser soundtracks lower) and the residual one-sample register-write
-phase is tracked in the SNES ledger.
+parity is measured per title with the exact ares DSP thread clocks and the
+186-clock S-CPU reset phase: Donkey Kong Country and Zelda are bit-exact,
+Mega Man X2 99.44%, Super Mario World 89.45%, and denser soundtracks lower; the
+remaining S-CPU port-read race is tracked in the SNES ledger.
 
 Reference gates:
 
