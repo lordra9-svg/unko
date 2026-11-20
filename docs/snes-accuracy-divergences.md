@@ -5448,3 +5448,27 @@ completes on both sides with identical CPU code.
 
 This closes the CPU-path line for CV4: the difference is downstream of the
 driver upload, in the S-DSP/S-SMP phase, not in the S-CPU.
+
+## CV4: instruction durations match; the divergence is the $FFDA sample value (2026-11-20)
+
+Compared the S-SMP instruction streams of ares (`ARES_SPC_TRACE`, clock column)
+and our core (`SPC_TRACE`) around CV4's first divergence:
+
+- The PC sequences and **per-instruction durations are identical** for the first
+  371,351 instructions (checked only where the ares clock delta is a normal
+  positive value; reductions excluded). The apparent +676-cycle "lead" earlier
+  derived from accumulating positive deltas is an artefact of the scheduler's
+  clock reductions, not a real timing difference.
+- At instruction 371,351 (`$FFDA: CMP Y,$F4` in the IPL upload loop) ares takes
+  the equality path to `$FFDE` while ours loops back to `$FFE9`: the S-SMP read
+  a different `$F4` value at that poll.
+- The S-CPU `$2140-$2143` write clocks are identical at that point (port log), so
+  the difference is the **sub-clock instant at which the S-SMP samples `$F4`
+  relative to the CPU's write within the same access**. Every global change to
+  that instant (deferral, hold, burst, overshoot) either broke the five exact
+  titles or left the failing ones unchanged.
+
+So CV4's residual is confined to a single sub-access ordering question: which of
+the S-SMP sample and the S-CPU port write wins when they land in the same
+master-clock window. The available logs bound it (both happen within ~20 master
+clocks at 1.35 s) but do not expose the ordering inside ares' `readIO`.
