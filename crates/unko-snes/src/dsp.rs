@@ -250,6 +250,9 @@ pub struct Dsp {
     /// Optional all-voice per-sample trace used to diff the DSP pipeline.
     #[serde(skip)]
     pub full_trace: Option<std::collections::VecDeque<[i32; 195]>>,
+    /// S-SMP PC of the instruction issuing the current register write (debug).
+    #[serde(skip)]
+    pub debug_pc: u16,
 }
 
 /// Bounded S-DSP debug trace used to diff the voice pipeline against another
@@ -261,8 +264,8 @@ pub struct DspTrace {
     /// brr_address, brr_offset, gaussian_offset, latch_pitch, header, byte,
     /// latch_output, voice_pitch]` for voice 0.
     pub rows: std::collections::VecDeque<[i32; 12]>,
-    /// `(sample, register, value, micro-step)` for every S-SMP S-DSP write.
-    pub writes: std::collections::VecDeque<(u64, u8, u8, u64)>,
+    /// `(sample, register, value, micro-step, S-SMP PC)` for every write.
+    pub writes: std::collections::VecDeque<(u64, u8, u8, u64, u16)>,
 }
 
 impl Default for Dsp {
@@ -300,7 +303,13 @@ impl Dsp {
             samples_run: 0,
             trace: None,
             full_trace: None,
+            debug_pc: 0,
         }
+    }
+
+    /// Record the S-SMP PC of the instruction issuing the next write (debug).
+    pub fn set_debug_pc(&mut self, pc: u16) {
+        self.debug_pc = pc;
     }
 
     /// Start recording the bounded debug trace.
@@ -347,6 +356,7 @@ impl Dsp {
                 address,
                 data,
                 self.samples_run * 32 + u64::from(self.step),
+                self.debug_pc,
             ));
             if trace.writes.len() > 2_000_000 {
                 trace.writes.pop_front();

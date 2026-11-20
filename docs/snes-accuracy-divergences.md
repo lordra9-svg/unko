@@ -3978,6 +3978,15 @@ ares checkout; the ares hook is not part of this repository).
   `$7D` (EDL) write one sample earlier, which starts the echo buffer one sample
   earlier for the rest of the run. So the divergence is **register-write
   placement inside the 32-step DSP sample**, not a mix/echo arithmetic bug.
+- **Donkey Kong Country, first divergence at stereo sample 80,672 (2.52 s).**
+  Voice 3's envelope is already in Release (`envx 69 / envelope 1106` vs ares
+  `70 / 1122`); pitch, BRR address/offset and the BRR buffer match. The driver
+  writes KOFF (`$5C = $08`) at the same physical DSP position in both (ours
+  micro-step 2,581,438, ares 2,581,439, a constant one-tick counter offset from
+  ares' power-on tick), but the release begins two samples earlier here. That
+  points at `clock.sample` parity for the `misc30` KOFF latch rather than at
+  the write position; the same class of one-sample latch timing is the open
+  item below.
 - **Super Mario World, first divergence at stereo sample 142,492 (4.45 s).**
   The KON (`$4C`) write lands at micro-step 4,559,360 vs ares' 4,559,357, and
   the new voice's `gaussianOffset`/`brrAddress` are one pitch accumulation /

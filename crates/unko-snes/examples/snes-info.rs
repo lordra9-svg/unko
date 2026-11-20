@@ -860,8 +860,10 @@ fn main() -> ExitCode {
             }
             let _ = std::fs::write(path, out);
             let mut wout = String::new();
-            for (sample, address, value, micro) in &trace.writes {
-                wout.push_str(&format!("{sample} {address:02X} {value:02X} {micro}\n"));
+            for (sample, address, value, micro, pc) in &trace.writes {
+                wout.push_str(&format!(
+                    "{sample} {address:02X} {value:02X} {micro} {pc:04X}\n"
+                ));
             }
             let wpath = std::env::var_os("DSP_WRITES_OUT")
                 .map(PathBuf::from)

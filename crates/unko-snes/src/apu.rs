@@ -801,7 +801,10 @@ impl SpcBus for ApuBus<'_> {
                 }
             }
             0xF2 => *self.dsp_address = value,
-            0xF3 => self.dsp.write(*self.dsp_address, value),
+            0xF3 => {
+                self.dsp.set_debug_pc(self.spc_pc);
+                self.dsp.write(*self.dsp_address, value);
+            }
             0xF4..=0xF7 => self.cpu_ports[usize::from(address - 0xF4)] = value,
             0xF8 => *self.aux4 = value,
             0xF9 => *self.aux5 = value,
