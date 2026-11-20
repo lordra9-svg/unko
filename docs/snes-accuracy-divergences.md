@@ -4853,3 +4853,37 @@ CV4's first DSP write is already 22 micro-steps late at the first register write
 ares 2,313, so its driver's boot handshake still diverges; that is the next
 lead. SMAS moved slightly worse (its stream now starts from the same corrected
 sample point but still differs), and CT is unchanged.
+
+## Castlevania IV IPL handshake (2026-11-20)
+
+CV4's DSP write sequence is now identical one-for-one with ares (2,313 writes
+over 300 frames, same registers/values), but the tick phase splits into two
+regimes: the first write is +22 micro-steps late (3,557,684 vs 3,557,662) and
+1,788 later writes are -6. The first stream divergence is inside the IPL
+upload, not in the driver: at `$FFDA` (`CMP Y,$F4`, direct-page, deferred) ares
+falls through to `$FFDE` while ours takes the `$FFE9` branch, i.e. the S-SMP
+sampled the previous latch.
+
+Port logs around the first divergence (clock, write):
+
+```
+ares  W1 00 28,991,350   W0 00 28,991,500   W1 00 28,991,506   W1 ff 28,991,912
+ours  W1 00 28,991,350   W0 00 28,991,500   W1 00 28,991,506   W1 ff 28,992,172
+ours  $F4 sample @28,991,500 = FF   (the CPU's $2140=00 lands at the same clock)
+ours  $F4 sample @28,991,734 = 00   (echo reaches the S-CPU ~30 clocks later)
+```
+
+The CPU's poll of `$2140` therefore runs one extra iteration (~260 clocks),
+delaying every subsequent byte. Two variants were measured and are neutral:
+synchronizing the S-SMP to the S-CPU clock before `$2140-$2143` reads (ares
+`readAPU`) and parking when the sample is within 12 master clocks of the CPU
+clock. Gate and SMW stay exact; CV4 stays 70,913 / 89.8696% over 700,000
+samples.
+
+The remaining difference is the same-clock ordering at the deferral boundary: a
+direct-page `$F4` sample resolving a few clocks *before* the access that
+commits the CPU's write. The next experiment is to resolve the deferred sample
+only after the S-CPU delivers the write for the access that contains the sample
+(the write arrives as the next bus request), i.e. treat the sample as pending
+until the access's `$2140-$2143` write is delivered, without shifting the
+non-I/O slices.
