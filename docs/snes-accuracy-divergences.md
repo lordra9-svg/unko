@@ -4073,8 +4073,11 @@ exposed from `Spc700` and the mid-read state carried in `Apu`; the top-level
 scheduler sampled once the S-CPU clock reached the read. Result: F-Zero stayed
 100.0000%, but DKC fell to 75.1971%, Zelda to 97.3031% and Super Metroid to
 75.4491%. The split moves the sample one S-SMP clock relative to the current
-per-access replay, which is exactly the phase those titles depend on. Reverted;
-the per-access model is restored. The unit itself is now written and can be
+per-access replay, which is exactly the phase those titles depend on. Skipping
+the DSP tick on the first half-step (so the old DSP tick distribution is
+preserved) gave the identical gate failure (DKC 75.1971%, Zelda 97.3031%,
+Metroid 75.4491%, F-Zero exact), so the cause is the port sample/S-CPU run
+point, not the DSP tick split. Reverted; the per-access model is restored. The unit itself is now written and can be
 revisited together with a matching change to the DSP sample phase.
 
 Landing the suspended read **together with** the measured scanline+port+DMA
