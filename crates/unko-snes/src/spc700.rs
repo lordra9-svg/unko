@@ -760,10 +760,16 @@ impl Spc700 {
     fn absolute_indexed_read(&mut self, bus: &mut impl SpcBus, opcode: u8, register: Register) {
         let address = self.fetch16(bus);
         self.idle(bus);
-        let value = self.read(
-            bus,
-            address.wrapping_add(u16::from(self.register(register))),
-        );
+        let effective = address.wrapping_add(u16::from(self.register(register)));
+        if bus.defer_io_reads() && effective & 0xFFF0 == 0x00F0 {
+            // Sample at the access's own clock like the other I/O reads.
+            self.pending = Some(Pending::AbsoluteRead {
+                opcode,
+                address: effective,
+            });
+            return;
+        }
+        let value = self.read(bus, effective);
         self.apply_read(bus, opcode, value);
     }
 

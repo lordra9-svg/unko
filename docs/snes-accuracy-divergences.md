@@ -5037,3 +5037,37 @@ start of the following access (which is ares' natural position) rather than at
 the end of the current one, and re-measure: this differs from the rejected
 "hold" experiments in that it applies uniformly and unconditionally, matching
 the trace rather than conditionally delivering a write.
+
+## Absolute-indexed I/O reads (2026-11-20)
+
+`absolute_indexed_read` was the last read form that sampled `$F0-$FF` eagerly
+while the instruction was recorded. Super Mario All-Stars and Super Mario World
+use it for `$F4-$F7` (886 and 792 hits in 120 frames; CV4 and CT do not). It now
+defers through `Pending::AbsoluteRead` like the absolute and direct-page forms,
+so the sample resolves at its access clock with the same park/synchronize
+behaviour.
+
+Measured: five exact titles still 0 differing, CV4 70,913, SMAS 325,801, CT
+444,363 (700,000-sample window) - byte-identical to the previous build, so the
+change is a completeness/correctness fix with no measurable audio effect. 204
+tests, fmt/clippy clean, 212/212 baseline identical.
+
+## Remaining audio gaps are per-note phase offsets (2026-11-20)
+
+DSP write streams for CV4 and CT match ares register-for-register (2,313 and
+12,517 writes over 300 frames) but the `dspTicks` offset is piecewise constant:
+
+```
+CV4  +22 at the first write, then -6 for 1,788 writes
+CT   +20, then +133, then +111 ... (constant within each section)
+```
+
+Each offset appears at a driver section boundary and stays constant, i.e. the
+same class as SMW's old one-poll drift: our S-SMP reaches the section's writes a
+fixed number of clocks early or late, set by the driver's timing loop at that
+boundary. It is not a clock-rate drift (no linear growth) and not the sample
+ordering (the conditional hold moved CV4 to 0 but broke the exact titles).
+
+The remaining work is therefore per-driver clock accounting in the handshake
+loops (IPL upload for CV4, the driver's init sections for CT/SMAS), not another
+global sample-order rule.
