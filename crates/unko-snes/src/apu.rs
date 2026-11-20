@@ -419,9 +419,31 @@ impl Apu {
         self.master_clock_valid = true;
     }
 
+    /// S-SMP clock at the current plan position.
+    ///
+    /// `record_instruction` advances `smp_clock` by the whole instruction
+    /// eagerly. The executed position is derived by subtracting the plan
+    /// clocks that have not been drained yet, so the clock is step-granular
+    /// (ares' S-SMP is suspended mid-instruction at a port read).
+    fn smp_clock_at_position(&self) -> u128 {
+        if self.plan.is_empty() {
+            return self.smp_clock;
+        }
+        let total: u32 = self.plan.iter().map(|step| u32::from(step.clocks)).sum();
+        let start = self.smp_clock - u128::from(total) * SMP_SCALAR;
+        let mut elapsed: u32 = self.plan[..self.plan_pos]
+            .iter()
+            .map(|step| u32::from(step.clocks))
+            .sum();
+        if let Some(step) = self.plan.get(self.plan_pos) {
+            elapsed += self.plan_sub.min(u32::from(step.clocks));
+        }
+        start + u128::from(elapsed) * SMP_SCALAR
+    }
+
     /// The S-SMP's scaled clock converted to master clocks.
     fn smp_master_clock(&self, master_clock: u64) -> u64 {
-        let cycles = self.smp_clock / SMP_SCALAR;
+        let cycles = self.smp_clock_at_position() / SMP_SCALAR;
         (cycles * u128::from(master_clock) / 2_050_560) as u64
     }
 
