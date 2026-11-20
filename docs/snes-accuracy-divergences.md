@@ -5300,3 +5300,34 @@ gate (DKC only), so the true ares behaviour lies between the two and cannot be
 reached with the current scheduler abstraction: it needs the exact
 `co_switch`/`Thread::step` instants within a line, which the existing hooks do
 not expose.
+
+## ares co_switch order trace, CV4 (2026-11-20)
+
+Added a switch-order hook to the local ares `Thread::synchronize` (logging
+caller/target uniqueIDs and both thread clocks before each `co_switch`) and ran
+Castlevania IV for 110 frames. Switch counts by pair:
+
+```
+DSP -> SMP  1,862,761      CPU -> SMP   253,330      CPU -> PPU  30,133
+SMP -> DSP  1,862,760      SMP -> CPU   253,129      PPU -> CPU  30,133
+```
+
+So the S-SMP and S-DSP synchronize **mutually at every S-SMP access** (2 per
+access, ~34k per frame), while the S-CPU synchronizes the S-SMP ~2,300 times per
+frame (scanline plus port accesses where the S-SMP is behind) and the PPU ~274
+times per frame. That per-access SMP/DSP mutual synchronization is exactly what
+`Apu::step_dsp_clock` models, which explains why the DSP write streams match
+register-for-register for every title.
+
+In the CV4 1.35 s window (cumulative CPU clock 28.986-28.996M) the trace contains
+only one CPU -> SMP switch per line (the scanline sync) and **none at the
+`$2140-$2143` writes**: `synchronize(smp)` short-circuits there because the S-SMP
+is already ahead of the S-CPU, so no execution happens at those accesses. Our
+per-access model is level and therefore also does nothing there, i.e. the two
+models agree at those writes; the earlier apparent "sample before the write"
+difference must be re-derived from the exact poll sequence rather than from the
+aggregate clocks.
+
+This leaves the remaining CV4/CT/SMAS/MMX2 difference in the CPU -> SMP switch
+count per frame (2,300) and where those switches land inside a line - the only
+quantity the trace exposes that the current model does not reproduce.
