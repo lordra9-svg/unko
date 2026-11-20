@@ -4181,6 +4181,25 @@ F-Zero 100.0000%, Super Metroid 73.1599%. It improves the overshoot model but
 still fails the gate, confirming that the exact-catch-up model remains the only
 one that preserves all four exact titles.
 
+**Our per-port distribution vs ares (2026-11-20).** Instrumenting this core's
+own `$2140-$2143` accesses gives a clearly different schedule. Over 320 frames:
+
+```
+ours SMW dsmp: 0 (168,973), 14 (46,450), 8 (43,368), 10 (41,530), 4 (38,032) ...
+ours DKC dsmp: 8 (90,222), 0 (83,869), 4 (51,224), 14 (24,092), 10 (21,851) ...
+ares SMW dsmp: 4 (98,015), 6 (96,080), 5 (45,926), 18 (28,237), 0 (9,406) ...
+ares DKC dsmp: 6 (167,710), 4 (25,553), 7 (12,090), 5 (11,030), 8 (10,943) ...
+```
+
+This core advances the S-SMP on every bus access in even chunks and is often
+already caught up at a port (`dsmp = 0` for half of SMW's accesses). Ares
+advances only at the port and catches up whole instructions, so its deltas are
+2-6 (often odd) SMP cycles. The per-access model is therefore not equivalent to
+ares' schedule even though it matches four titles; the port-only
+whole-instruction model has the right distribution but regresses F-Zero and
+Super Metroid, so a remaining piece (DSP tick phase or the exact instruction
+boundary) is still missing.
+
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
 DSP is already ticked one micro-step per two S-SMP clocks inside the access's
