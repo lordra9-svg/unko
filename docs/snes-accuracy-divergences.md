@@ -4200,6 +4200,17 @@ whole-instruction model has the right distribution but regresses F-Zero and
 Super Metroid, so a remaining piece (DSP tick phase or the exact instruction
 boundary) is still missing.
 
+The port-only variant was instrumented too. Its deltas are still **even**
+(8, 0, 4, 14, ...) with an 85,491-event `dsmp = 0` spike, not ares' 2-6/odd
+distribution. The reason is structural: `Apu::record_instruction` executes the
+whole SPC700 instruction eagerly and advances `smp_clock`/`dsp_clock` by its
+full cycle count there, so this core's S-SMP clock only ever sits on an
+instruction boundary. Ares' clock is sampled mid-instruction (the S-SMP is
+suspended at the port read), which is why its deltas are odd and its DSP write
+phase is step-exact. The true fix is therefore to move the clock/timer/DSP
+advancement out of eager recording and into `drain_unit` (the coroutine), so
+`smp_clock` is step-granular.
+
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
 DSP is already ticked one micro-step per two S-SMP clocks inside the access's
