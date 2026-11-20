@@ -442,7 +442,7 @@ impl Apu {
     }
 
     /// The S-SMP's scaled clock converted to master clocks.
-    fn smp_master_clock(&self, master_clock: u64) -> u64 {
+    pub fn smp_master_clock(&self, master_clock: u64) -> u64 {
         let cycles = self.smp_clock_at_position() / SMP_SCALAR;
         (cycles * u128::from(master_clock) / 2_050_560) as u64
     }
@@ -922,7 +922,17 @@ impl SpcBus for ApuBus<'_> {
                 self.dsp.set_debug_clock(*self.smp_clock);
                 self.dsp.write(*self.dsp_address, value);
             }
-            0xF4..=0xF7 => self.cpu_ports[usize::from(address - 0xF4)] = value,
+            0xF4..=0xF7 => {
+                self.cpu_ports[usize::from(address - 0xF4)] = value;
+                if std::env::var_os("APU_ACTOR_LOG").is_some() {
+                    eprintln!(
+                        "AW {:04X} -> {:02X} smp={}",
+                        address,
+                        value,
+                        (*self.smp_clock / SMP_SCALAR)
+                    );
+                }
+            }
             0xF8 => *self.aux4 = value,
             0xF9 => *self.aux5 = value,
             0xFA..=0xFC => {
@@ -1437,6 +1447,9 @@ mod clock_position_tests {
 // boundary the actor yields the `Apu` back so the scheduler owns it.
 // ---------------------------------------------------------------------------
 
+/// The S-SMP actor coroutine type.
+pub type ApuCoroutine = corosensei::Coroutine<ApuInput, ApuOutput, ()>;
+
 /// Input to the S-SMP actor coroutine.
 #[derive(Debug)]
 pub enum ApuInput {
@@ -1490,6 +1503,7 @@ pub fn new_apu_coroutine() -> corosensei::Coroutine<ApuInput, ApuOutput, ()> {
         loop {
             let rate = apu.master_clock_rate;
             let spc_pc = apu.spc.pc;
+            let page_flag = apu.spc.flags.page;
             let mut bus = CoroApuBus {
                 ram: &mut apu.ram[..],
                 ipl: &apu.ipl,
@@ -1512,11 +1526,13 @@ pub fn new_apu_coroutine() -> corosensei::Coroutine<ApuInput, ApuOutput, ()> {
                 aux4: &mut apu.aux4,
                 aux5: &mut apu.aux5,
                 timer_targets: &mut apu.timer_targets,
+                page_flag,
                 spc_pc,
                 yielder,
                 master_clock_rate: rate,
             };
             apu.spc.step(&mut bus);
+            apu.instructions += 1;
             input = yielder.suspend(ApuOutput::Stopped(apu));
             apu = match input {
                 ApuInput::Resume(apu) | ApuInput::Start(apu) => apu,
@@ -1556,6 +1572,7 @@ struct CoroApuBus<'a> {
     aux4: &'a mut u8,
     aux5: &'a mut u8,
     timer_targets: &'a mut [u8; 3],
+    page_flag: bool,
     spc_pc: u16,
     yielder: &'a corosensei::Yielder<ApuInput, ApuOutput>,
     master_clock_rate: u64,
@@ -1621,6 +1638,14 @@ impl SpcBus for CoroApuBus<'_> {
 
     fn read(&mut self, address: u16) -> u8 {
         if (0xF4..=0xF7).contains(&address) {
+            if std::env::var_os("APU_ACTOR_LOG").is_some() {
+                eprintln!(
+                    "AR {:04X} <- {:02X} smp={} ",
+                    address,
+                    self.apu_ports[usize::from(address - 0xF4)],
+                    (*self.smp_clock / SMP_SCALAR)
+                );
+            }
             let target = (*self.smp_clock / SMP_SCALAR) as u64 * self.master_clock_rate / 2_050_560;
             // Suspend at the sample point; the scheduler runs the S-CPU to
             // `target`. Port commands may arrive while suspended: a write
@@ -1680,6 +1705,40 @@ impl SpcBus for CoroApuBus<'_> {
             self.ram[usize::from(address)] = value;
         }
         match address {
+            0xF0 => {
+                if self.page_flag {
+                    return;
+                }
+                *self.timers_disable = value & 0x01 != 0;
+                *self.ram_writable = value & 0x02 != 0;
+                *self.ram_disable = value & 0x04 != 0;
+                *self.timers_enable = value & 0x08 != 0;
+                *self.external_wait = (value >> 4) & 0x03;
+                *self.internal_wait = (value >> 6) & 0x03;
+                for timer in self.timers.iter_mut() {
+                    timer.synchronize(*self.timers_enable, *self.timers_disable);
+                }
+            }
+            0xF1 => {
+                for (index, timer) in self.timers.iter_mut().enumerate() {
+                    let enable = value & (1 << index) != 0;
+                    let rising = enable && !timer.enable;
+                    timer.enable = enable;
+                    if rising != (index == 2) {
+                        timer.stage2 = 0;
+                        timer.stage3 = 0;
+                    }
+                }
+                if value & 0x10 != 0 {
+                    self.apu_ports[0] = 0;
+                    self.apu_ports[1] = 0;
+                }
+                if value & 0x20 != 0 {
+                    self.apu_ports[2] = 0;
+                    self.apu_ports[3] = 0;
+                }
+                *self.iplrom_enable = value & 0x80 != 0;
+            }
             0xF2 => *self.dsp_address = value,
             0xF3 => {
                 self.dsp.set_debug_pc(self.spc_pc);

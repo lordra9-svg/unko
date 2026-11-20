@@ -165,3 +165,23 @@ impl CpuBus for CoroBus<'_> {
         }
     }
 }
+
+/// Slot for the S-SMP actor coroutine (transient execution machinery).
+#[derive(Default)]
+pub struct ApuActorSlot(pub Option<crate::apu::ApuCoroutine>);
+impl Clone for ApuActorSlot {
+    fn clone(&self) -> Self {
+        Self(None)
+    }
+}
+impl PartialEq for ApuActorSlot {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+impl Eq for ApuActorSlot {}
+impl std::fmt::Debug for ApuActorSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ApuActor")
+    }
+}
