@@ -4980,3 +4980,31 @@ the two cases. Reproducing the reduced-clock comparison (or the scheduler's
 per-thread step order) is the next step; the gate and CV4-exact result bracket
 it: any rule must hold the sample for CV4's `$FFDA` polls and not for the four
 exact drivers' polls.
+
+## ares never runs the S-CPU inside an SMP $F4 read (2026-11-20)
+
+Instrumented `SMP::readIO($F4)` in the local ares build to log the S-CPU thread
+clock before/after its `synchronize(cpu)`, for 60-frame runs:
+
+```
+dkc  reads 64,048   dcpu > 0 on 0 reads   max 0
+cv4  reads 94,573   dcpu > 0 on 0 reads   max 0
+```
+
+The S-CPU is **never** advanced inside a `$F4-$F7` read for either title, so the
+"in-flight write is completed inside the read" model is wrong. The conditional
+sample hold that made CV4 bit-exact was correcting the *phase* (delaying the
+sample past the CPU's write), not reproducing ares' ordering - which is why it
+also broke the four exact titles. That leaves the tree as recorded.
+
+The hold's clock window cannot discriminate either: the gap between the deferred
+sample position and the S-CPU clock at the deferral check has the same
+distribution for DKC, SMW and CV4 (min 32, median 34, p90 36, max 72).
+
+CV4's actual discrepancy is therefore a phase: our S-SMP samples ~22 clocks
+before the S-CPU's `$2140` write (28,990,085 vs 28,990,120 in the `$FFDA` poll),
+while ares' sample falls after it. That phase enters during the IPL handshake -
+the first branch divergence is `$FFDC` (`BNE` taken by us, not by ares) - and the
+next step is to trace where the 22 clocks are lost in that handshake loop
+(S-CPU write instruction vs S-SMP poll phase, cycle by cycle), not to change the
+sample ordering.
