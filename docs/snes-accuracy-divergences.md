@@ -4907,3 +4907,41 @@ Next: place the hold at the sample-taking site itself (inside the unit that
 would call `resume_deferred_read`) rather than one unit earlier, and verify the
 `HLD` log fires before measuring. The five-title gate remains the acceptance
 condition.
+
+**Sample-hold with both pending variants (2026-11-20).** The earlier hold never
+fired because `port_read_near` only matched `DirectRead`; `port_read_waiting`
+handles both variants, so the hold is now applied to `AbsoluteRead` too.
+
+At CV4's `$FFDA` loop the pre-sample check shows:
+
+```
+pos=28,990,085 cpu=28,990,120 near=false wait=false
+pending=Some(DirectRead { opcode: 0x7E, address: 0xF4 })
+```
+
+The gap at the check is ~35 master clocks (not the 22 seen at resolution), so a
+24-clock window never fires. With a 48-clock window the hold fires 129,396
+times and:
+
+```
+dkc     186,952  70.7730%
+zelda    29,913  95.3236%
+fzero         0 100.0000%
+metroid 168,052  73.7278%
+smw     110,220  82.7689%
+cv4       6,431  98.9946%   (improved from 11,269)
+```
+
+CV4 moves substantially (11,269 -> 6,431) but the five exact titles break: the
+hold is unconditional for every sample within the window, while the four exact
+drivers require the opposite ordering (their sample must not observe the
+in-flight write). The clock alone does not distinguish them, so the variant was
+reverted.
+
+The remaining discriminator has to come from the S-CPU side: whether the access
+that ends at the sample's clock actually writes `$2140-$2143`. The driver knows
+this only when the write request arrives; a correct implementation needs the
+sample held until then *conditionally*, i.e. the actor yields at the sample, the
+driver runs the S-CPU's next bus request, and only if it is a `$2140-$2143`
+write is the latch applied before the sample resumes; otherwise the sample
+resolves with the old ordering.
