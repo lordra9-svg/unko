@@ -1391,3 +1391,38 @@ mod timer_tests {
         assert!(apu.timers[0].stage3 > 0);
     }
 }
+
+#[cfg(test)]
+mod clock_position_tests {
+    use super::*;
+
+    #[test]
+    fn smp_clock_tracks_the_plan_position() {
+        // record_instruction advances smp_clock to the instruction end; the
+        // executed clock must instead follow the drained plan position.
+        let mut apu = Apu::new();
+        apu.plan = vec![
+            PlanStep {
+                clocks: 4,
+                port_write: None,
+                deferred: false,
+                split: false,
+            },
+            PlanStep {
+                clocks: 6,
+                port_write: None,
+                deferred: false,
+                split: false,
+            },
+        ];
+        apu.smp_clock = 10 * SMP_SCALAR;
+        assert_eq!(apu.smp_clock_at_position() / SMP_SCALAR, 0);
+        apu.plan_sub = 2;
+        assert_eq!(apu.smp_clock_at_position() / SMP_SCALAR, 2);
+        apu.plan_pos = 1;
+        apu.plan_sub = 0;
+        assert_eq!(apu.smp_clock_at_position() / SMP_SCALAR, 4);
+        apu.plan_sub = 5;
+        assert_eq!(apu.smp_clock_at_position() / SMP_SCALAR, 9);
+    }
+}
