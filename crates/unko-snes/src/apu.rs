@@ -1446,6 +1446,18 @@ pub enum ApuInput {
     Sync,
     /// Resume after `Stopped`: the scheduler hands the APU back.
     Resume(Box<Apu>),
+    /// S-CPU write to a `$2140-$2143` latch while the read is suspended.
+    PortWrite {
+        /// Port index 0-3.
+        port: u8,
+        /// Value written.
+        value: u8,
+    },
+    /// S-CPU read of a `$2140-$2143` latch while the read is suspended.
+    PortRead {
+        /// Port index 0-3.
+        port: u8,
+    },
     /// Stop the actor (the scheduler drops it).
     Stop,
 }
@@ -1458,6 +1470,11 @@ pub enum ApuOutput {
     SyncCpu {
         /// Master clock the S-CPU must reach.
         target: u64,
+    },
+    /// Value of a `$2140-$2143` latch requested with `PortRead`.
+    PortValue {
+        /// Value of the requested port.
+        value: u8,
     },
     /// An instruction completed; the actor hands the APU back.
     Stopped(Box<Apu>),
@@ -1503,7 +1520,10 @@ pub fn new_apu_coroutine() -> corosensei::Coroutine<ApuInput, ApuOutput, ()> {
             input = yielder.suspend(ApuOutput::Stopped(apu));
             apu = match input {
                 ApuInput::Resume(apu) | ApuInput::Start(apu) => apu,
-                ApuInput::Stop | ApuInput::Sync => {
+                ApuInput::Stop
+                | ApuInput::Sync
+                | ApuInput::PortWrite { .. }
+                | ApuInput::PortRead { .. } => {
                     unreachable!("APU actor resumed without an APU")
                 }
             };
@@ -1603,9 +1623,29 @@ impl SpcBus for CoroApuBus<'_> {
         if (0xF4..=0xF7).contains(&address) {
             let target = (*self.smp_clock / SMP_SCALAR) as u64 * self.master_clock_rate / 2_050_560;
             // Suspend at the sample point; the scheduler runs the S-CPU to
-            // `target` and resumes this same read.
-            match self.yielder.suspend(ApuOutput::SyncCpu { target }) {
-                ApuInput::Sync | ApuInput::Resume(_) | ApuInput::Stop | ApuInput::Start(_) => {}
+            // `target`. Port commands may arrive while suspended: a write
+            // latches immediately, a read reports the latch value and the
+            // scheduler resumes with `Sync`.
+            let mut done = false;
+            while !done {
+                match self.yielder.suspend(ApuOutput::SyncCpu { target }) {
+                    ApuInput::Sync | ApuInput::Resume(_) | ApuInput::Stop | ApuInput::Start(_) => {
+                        done = true
+                    }
+                    ApuInput::PortWrite { port, value } => {
+                        self.apu_ports[usize::from(port & 3)] = value;
+                    }
+                    ApuInput::PortRead { port } => {
+                        let value = self.apu_ports[usize::from(port & 3)];
+                        match self.yielder.suspend(ApuOutput::PortValue { value }) {
+                            ApuInput::Sync => done = true,
+                            ApuInput::PortWrite { port, value } => {
+                                self.apu_ports[usize::from(port & 3)] = value;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
             return self.apu_ports[usize::from(address - 0xF4)];
         }
@@ -1706,5 +1746,61 @@ mod actor_tests {
             other => panic!("expected Stopped, got {other:?}"),
         };
         assert_eq!(a.ram[0], 0x5A);
+    }
+}
+
+#[cfg(test)]
+mod actor_port_tests {
+    use super::*;
+
+    fn step(
+        coro: &mut corosensei::Coroutine<ApuInput, ApuOutput, ()>,
+        input: ApuInput,
+    ) -> ApuOutput {
+        match coro.resume(input) {
+            corosensei::CoroutineResult::Yield(out) => out,
+            corosensei::CoroutineResult::Return(()) => panic!("actor returned"),
+        }
+    }
+
+    #[test]
+    fn port_commands_apply_while_the_read_is_suspended() {
+        let mut apu = Apu::new();
+        apu.ram[0x200..0x205].copy_from_slice(&[0xE4, 0xF4, 0xC4, 0x00, 0xFF]);
+        apu.spc.pc = 0x0200;
+        let mut coro = new_apu_coroutine();
+        let a = match step(&mut coro, ApuInput::Start(Box::new(apu))) {
+            ApuOutput::Stopped(a) => a,
+            other => panic!("{other:?}"),
+        };
+        assert!(matches!(
+            step(&mut coro, ApuInput::Resume(a)),
+            ApuOutput::SyncCpu { .. }
+        ));
+        // The CPU writes the latch while the S-SMP is suspended at the sample.
+        assert!(matches!(
+            step(
+                &mut coro,
+                ApuInput::PortWrite {
+                    port: 0,
+                    value: 0x77
+                }
+            ),
+            ApuOutput::SyncCpu { .. }
+        ));
+        let value = match step(&mut coro, ApuInput::PortRead { port: 0 }) {
+            ApuOutput::PortValue { value } => value,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(value, 0x77);
+        let a = match step(&mut coro, ApuInput::Sync) {
+            ApuOutput::Stopped(a) => a,
+            other => panic!("{other:?}"),
+        };
+        let a = match step(&mut coro, ApuInput::Resume(a)) {
+            ApuOutput::Stopped(a) => a,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(a.ram[0], 0x77);
     }
 }
