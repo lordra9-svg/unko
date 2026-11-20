@@ -5587,3 +5587,35 @@ the suspended S-CPU and completes `portWrite`, and only then does the sample
 read. Reproducing that needs the driver to suspend the S-CPU *inside* the write
 and let the actor resume it at the sample - a scheduler/protocol change, not a
 request-order tweak. Reverted; the five exact titles are re-verified.
+
+## Faithful writeAPU recursion emulation (2026-11-20)
+
+Implemented the ares recursion directly: `Cpu::write` announces an APU port write
+before its access advance (`CpuBus::notice_port_write` -> `BusRequest::Notice`),
+the driver forwards the announced value with the access's `Advance`, and
+`drain_unit` applies the latch **at the `$F4-$F7` sample inside that access** -
+i.e. exactly when ares' `writeAPU` synchronize lets the SMP's `readIO` complete
+the in-flight write before sampling.
+
+Measured (600 frames, 639,656 window):
+
+```
+dkc 173,620 72.8573%   zelda 1,449 99.7735%   fzero 0 100.0000%
+metroid 136,553 78.6521%   smw 45,880 92.8274%
+cv4 0 100.0000%        smas 0 100.0000%       ct 439,377 31.3104%
+```
+
+This is the *same* split as every simpler variant (hold, deferral,
+write-before-drain): CV4/SMAS/F-Zero exact; DKC/Zelda/Super Metroid/SMW at the
+identical regressed percentages. The ordering hypothesis is therefore
+exhausted: applying ares' write-before-sample rule at the sample breaks the four
+exact titles no matter how faithfully it is implemented.
+
+Conclusion: the four titles' exactness in the current model must rest on a
+different aspect of the interleaving that every write-ordering change also
+perturbs (most likely how the S-SMP's park/credit interacts with the CPU's
+request stream), and the analysis of the write/sample ordering cannot be
+extended further without restructuring the driver as a true cooperative
+scheduler (S-CPU suspendable inside `writeAPU`, S-SMP suspendable inside
+`readIO`, both resumable from the other side) rather than the request/response
+loop.
