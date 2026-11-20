@@ -5425,3 +5425,26 @@ So CV4's divergence begins with the CPU entering the upload routine at `$859B`
 rather than `$858F`; no `JSR $858F`/`JSR $859B` exists in the ROM, so the entry is
 through a computed jump or a different caller branch that still needs to be
 located. That is the concrete remaining question for CV4.
+
+## Correction: CV4's CPU path matches in the upload window (2026-11-20)
+
+With the corrected access PCs, the S-CPU instruction traces of ares and our core
+in the CV4 upload window (4,163,000-4,166,500, 115 instructions) are **identical
+PC for PC**, including `CMP $2140` at `$028596` / `BNE` / `STA $2141` / `STA
+$2140`. Both cores therefore enter and execute the documented upload routine the
+same way.
+
+The earlier "ares enters past the wait" observation was an artefact of the
+`ARES_APU_LOG` file: `writeAPU` opens it with `"a"` and `readAPU` with `"w"`,
+so a read truncates whatever was written, and the resulting log is not a
+faithful event sequence at boot. Read/sequence conclusions from that log are
+unsound; `ARES_PORT_SYNC_LOG` (which logs both directions from one place) is the
+trustworthy source.
+
+CV4's real divergence therefore remains the measured DSP write phase: the first
+register write is +22 micro-steps late (3,557,684 vs 3,557,662), then 1,788
+writes are -6. The audio first difference is at 9.033 s; the IPL upload (3.47 s)
+completes on both sides with identical CPU code.
+
+This closes the CPU-path line for CV4: the difference is downstream of the
+driver upload, in the S-DSP/S-SMP phase, not in the S-CPU.
