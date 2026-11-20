@@ -4674,3 +4674,37 @@ drain }`) keeps DKC at 0 but moves SMW from 91.5118% to **90.1613%** on the
 639,656-sample window, so the overshoot is also wrong for SMW and was
 reverted. The mid-instruction exact stop remains the best measured model; the
 1.122 s port race is still open.
+
+## ares cooperative-scheduler model (2026-11-20, rejected)
+
+Implemented the scheduler from the ares source directly:
+
+- `Thread::synchronize` semantics: the S-SMP runs **whole SPC700 instructions**
+  until `smp.clock() >= cpu.clock()` (overshoot carried).
+- Synchronization points only at `$2140-$2143` (`CPU::readAPU`/`writeAPU`), at
+  Hcounter 0 (`CPU::scanline`), and at DMA-to-APU bytes
+  (`DmaTransfer::writes_apu_port`, added for the experiment).
+- `$F4-$F7` reads park and run the S-CPU to the sample clock.
+
+Result (600 frames, 639,656-sample window):
+
+```
+dkc            0 differing  319,828 frames  100.0000%
+zelda     69,787 differing  89.0898%
+fzero    446,989 differing  30.1204%
+metroid  142,854 differing  77.6668%
+smw       62,934 differing  90.1613%
+```
+
+Changing the scanline sync instant from the access end to the exact Hcounter-0
+wrap clock, and adding the DMA-to-APU synchronization, produced **byte-identical
+numbers** - the port synchronizations already leave the S-SMP ahead, so the line
+and DMA syncs are no-ops in this model. The gate fails decisively (three of the
+four exact titles regress), so the experiment was reverted.
+
+This reproduces the earlier scanline-model result independently and closes the
+"scheduler granularity" line: the per-access exact-credit model (DKC/Zelda/
+F-Zero/Super Metroid 0 differing; SMW 91.5118% on the same window) remains the
+best measured model, even though ares' source-level synchronization points are
+coarser. The remaining SMW race at 1.122 s is a sub-instruction port ordering,
+not a scheduler-granularity effect.
