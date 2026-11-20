@@ -4129,6 +4129,24 @@ port/DMA and exact at the scanline - kept DKC and Zelda exact but broke F-Zero
 granularity to the known sync points satisfies the gate: F-Zero/Metroid reject
 port overshoot and DKC/Zelda reject scanline overshoot.
 
+**Exact H=0 sync instants (ares, 2026-11-20).** A local `ARES_SCANLINE_LOG`
+hook in `CPU::scanline()` records `(cpu_master, vcounter, smp_cycles, smp_pc,
+dspTicks, cpu_pc)` at every Hcounter-0 sync. Around SMW's KON:
+
+```
+B clock 95,509,478 v=68 smp 11,590 smppc $1694 dsp 4,559,357 cpupc $47493
+B clock 95,510,842 v=69 smp 11,722 smppc $1473 dsp 4,559,423 cpupc $47493
+```
+
+The KON at `dspTicks 4,559,357` coincides with the scanline sync, and at that
+instant the S-SMP is only ~1-8 master clocks behind the S-CPU (both are caught
+up); the S-SMP then advances ~132 SMP cycles (1,382 master clocks) over the
+1,364-clock line. So the scanline sync itself is exact and the CPU's ~1,366
+clock lead accumulates *between* scanlines, not at the sync. The plain
+scanline+port+DMA model with exact catch-up has the right instants; its
+remaining error for SMW/CV4/SMAS/CT is therefore in the per-port sync or the
+DSP tick phase, not the H=0 instant.
+
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
 DSP is already ticked one micro-step per two S-SMP clocks inside the access's
