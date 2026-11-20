@@ -4173,6 +4173,14 @@ Super Metroid 74.2183%. So F-Zero/Metroid require exact per-port catch-up and
 reject the overshoot regardless of bookkeeping; the remaining titles' fix
 cannot be a catch-up-granularity change and must be in the DSP tick phase.
 
+A further bug in the overshoot helper was found and fixed: `run_until_master`
+checked the eagerly recorded S-SMP clock after draining only one plan unit, so
+it could return with the instruction half-drained. Draining the whole recorded
+instruction before testing the clock gives DKC 73.2926%, Zelda 98.5206%,
+F-Zero 100.0000%, Super Metroid 73.1599%. It improves the overshoot model but
+still fails the gate, confirming that the exact-catch-up model remains the only
+one that preserves all four exact titles.
+
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
 DSP is already ticked one micro-step per two S-SMP clocks inside the access's
