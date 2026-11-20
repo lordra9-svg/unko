@@ -5472,3 +5472,32 @@ So CV4's residual is confined to a single sub-access ordering question: which of
 the S-SMP sample and the S-CPU port write wins when they land in the same
 master-clock window. The available logs bound it (both happen within ~20 master
 clocks at 1.35 s) but do not expose the ordering inside ares' `readIO`.
+
+## Sub-access ordering at the CV4 upload trigger (2026-11-20)
+
+Added a single monotonic event log to the local ares covering `SMP::portWrite`
+(CPU->SMP latch), `readIO($F4-$F7)` and `writeIO($F4-$F7)` (SMP->CPU latch).
+Around CV4's upload trigger:
+
+```
+R 0 00  (x9)      <- S-SMP polls $F4 = 00
+C 1 01            <- S-CPU writes $2141 = 01
+C 0 CC            <- S-CPU writes $2140 = CC
+R 0 CC            <- S-SMP reads $F4 = CC   (sees the write)
+R 2 00 / R 3 00
+R 0 CC / R 1 01 / R 0 CC
+S 0 CC            <- S-SMP echoes CC
+C 0 00            <- S-CPU writes $2140 = 00
+...
+```
+
+So ares applies the **S-CPU writes first**, then the S-SMP's `$F4` sample reads the
+new value. Our deferred model resolves the sample during the access's `Advance`,
+i.e. **before** the CPU's port-write requests are delivered - the opposite order.
+
+The earlier conditional-hold attempt did reorder exactly these two, but it also
+moved the drain's clock/credit to the instruction boundary (and to `clock_end`),
+which is why it broke DKC/Zelda/F-Zero/SMW even though SMAS and CV4 became exact.
+The remaining fix must therefore reorder only the latch application and keep the
+drain at the same clock: apply the access's `$2140-$2143` write, then resolve the
+pending sample at the same master clock, without changing the credit window.
