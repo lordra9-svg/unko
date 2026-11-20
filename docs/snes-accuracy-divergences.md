@@ -4107,6 +4107,19 @@ therefore the S-SMP clock at the write (4 DSP ticks earlier, at step 29 with
 Per-title offsets differ (SMW +4 ticks, Mega Man X2 +1), so a single global
 phase shift cannot fix them; the SMP schedule must match ares per driver.
 
+**Instruction-level run point (ares, 2026-11-20).** The same thread log with
+PCs shows the S-SMP frozen at PC `$069E` (the DSP write routine tail) at SMP
+cycle 11,590 / CPU master clock 121,392 while the S-CPU runs its
+`$00B8E4-$00B992` polling loop all the way to 122,758; only then does the S-SMP
+advance to 11,592 and continue at `$069E`. So the S-CPU legitimately runs
+~1,366 master clocks ahead in this window. Our scanline model implemented the
+sync points but stopped the S-SMP exactly at the CPU clock (credit loop)
+instead of allowing ares' whole-instruction catch-up; the whole-instruction
+variant in turn broke F-Zero/Metroid. The remaining delta is therefore the
+*combination*: scanline-only sync points **and** a whole-instruction S-SMP
+catch-up that does not regress F-Zero/Metroid. That combination has not yet
+been measured successfully.
+
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
 DSP is already ticked one micro-step per two S-SMP clocks inside the access's
