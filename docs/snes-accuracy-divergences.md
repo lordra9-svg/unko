@@ -5102,3 +5102,43 @@ ST018 is now verifiable end-to-end as well: the firmware (`st018.program.rom`
 (`6df209ab…`) and `Hayazashi Nidan Morita Shougi 2 (Japan)` is in the
 Minerva_Myrient set; ares has no ST018 core, so that implementation has no
 first-party reference.
+
+## MMX2 boot-handshake path (2026-11-20)
+
+The first S-CPU port accesses already differ, before any DSP write:
+
+```
+ares 83,229,850 W3 0D  pc=00842c
+ares 83,229,936 W2 A0  pc=008438
+ares 83,230,160 R0 AA  pc=00844a
+
+ours 83,229,326 R0 AA  pc=0083C5     <- first access is a CMP $2140 wait
+ours 83,229,332 R1 BB  pc=0083C5
+ours 83,229,838 W3 0D  pc=008429
+ours 83,229,924 W2 A0  pc=008435
+```
+
+The ROM code (LoROM) is:
+
+```
+$83C5: CD 40 21   CMP $2140        <- wait loop entry ours takes first
+$83C8: E2 20      SEP #$20
+$83CA: D0 EF      BNE $83C5
+...
+$842C: ...        upload address setup
+$843E: 8D 41 21   STA $2141
+$8444: 8D 40 21   STA $2140
+$8447: CD 40 21   CMP $2140
+$844A: D0 FB      BNE $8447        <- echo wait
+```
+
+Our CPU enters the `$83C5` wait ~524 master clocks before ares reaches the
+upload setup, i.e. it arrives at the handshake from a different point in the
+boot. The later command stream is a constant ~104 clocks ahead and diverges at
+4.264 s (`$5C=$FF` extra KOFF), but that is a consequence of this earlier
+difference, not an APU phase error.
+
+So MMX2's residual starts in the CPU/CX4 boot path (the code before `$83C5`,
+which depends on the CX4 self-test state), unlike CV4/CT where the divergence is
+inside the IPL upload loop itself. The next MMX2 step is to compare the boot
+path and CX4 status reads before `$83C5` between ares and ours.
