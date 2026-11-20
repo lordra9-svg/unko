@@ -4203,3 +4203,27 @@ reset phase, the `$F4-$F7` parked-read sync and the bit-exact DKC/Zelda
 streams; the other titles' first differences are the driver KON/KOFF placement
 documented above. A per-title phase calibration (like the SMW HDMA overlay) is
 possible but would repeat that overlay's maintenance cost and is not applied.
+
+## Resumable S-CPU execution (2026-11-19)
+
+The S-CPU now executes inside a stackful coroutine
+(`crates/unko-snes/src/cpu_coroutine.rs`, `corosensei` 0.3, MIT OR
+Apache-2.0). Every `CpuBus` operation is yielded to `Snes::step`, which performs
+it against the real machine and resumes the interpreter with the result, so the
+65C816 can be suspended and resumed at **bus-access granularity** without
+rewriting the opcode handlers. The coroutine is parked at `Done` between
+instructions and owns no CPU state while suspended; cloning/equality ignore it
+and save states remain unchanged.
+
+With the resumable CPU in place, the ares `synchronize(smp)` scheduling was
+tried: the S-SMP advanced only at `$2140-$2143` port accesses with burst
+catch-up. Result: **Zelda stayed bit-exact but DKC regressed to 17.67%** and
+SMAS/F-Zero were unchanged, so the experiment was reverted; the per-access APU
+advancement (which keeps DKC/Zelda exact) is retained. The resumable CPU is
+kept as verified groundwork: 196 lib tests, SMW 600/600, baseline 212/212 and
+DKC/Zelda 0-diff are unchanged by it.
+
+The remaining mismatch is therefore not merely "make the CPU resumable": the
+S-SMP advancement schedule must be derived from ares' `Thread`/`Scheduler`
+clock ordering (including when the scheduler runs the aux threads), which is
+the next scheduler task.

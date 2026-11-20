@@ -22,6 +22,7 @@
 
 pub mod apu;
 pub mod cpu;
+pub mod cpu_coroutine;
 pub mod cx4;
 pub mod dma;
 pub mod dsp;

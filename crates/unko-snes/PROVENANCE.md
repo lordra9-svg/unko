@@ -196,6 +196,13 @@ material used to implement it. No GPL emulator source is translated or copied.
 - The host-attached slot API and the save-state split (ROMs re-attached, RAM
   serialized) are original to this crate.
 
+## `src/cpu_coroutine.rs`
+
+- `corosensei` 0.3 (MIT OR Apache-2.0) provides the stackful coroutine that
+  makes one `Cpu::step` call resumable at bus-access granularity. It is a
+  general-purpose coroutine crate, not an emulator source; no emulator code is
+  taken from it.
+
 ## Forthcoming modules
 
 MesenCE remains a black-box compatibility oracle and must not be read while

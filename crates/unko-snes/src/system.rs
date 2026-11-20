@@ -206,6 +206,8 @@ pub const PPU_RENDER_DOT: u16 = 128;
 pub struct Snes {
     /// The S-CPU.
     pub cpu: Cpu,
+    /// Resumable S-CPU execution (ares cooperative-thread equivalent).
+    cpu_coroutine: crate::cpu_coroutine::CpuCoroutineSlot,
     /// The inserted cartridge.
     pub cart: Cartridge,
     /// The S-SMP/S-DSP audio unit.
@@ -359,6 +361,7 @@ impl Snes {
         ppu.set_region(region);
         Self {
             cpu: Cpu::new(),
+            cpu_coroutine: crate::cpu_coroutine::CpuCoroutineSlot::default(),
             cart,
             apu: Apu::new(),
             ppu,
@@ -783,6 +786,7 @@ impl Snes {
             rtc.power();
         }
         self.rtc_credit = 0;
+        self.cpu_coroutine = crate::cpu_coroutine::CpuCoroutineSlot::default();
         self.sa1_credit = 0;
         self.snes_mar = 0;
         self.refresh_active = false;
@@ -941,9 +945,37 @@ impl Snes {
             sa1.snes_live_pc = self.cpu.pc_address();
             sa1.master_clock = self.clock;
         }
-        let mut cpu = std::mem::take(&mut self.cpu);
-        let cpu_cycles = cpu.step(self);
-        self.cpu = cpu;
+        // Run one S-CPU instruction in the resumable coroutine. Every bus
+        // access yields to this driver, so a future scheduler can interleave
+        // the S-SMP at access granularity.
+        let cpu = std::mem::take(&mut self.cpu);
+        let mut coroutine = self
+            .cpu_coroutine
+            .0
+            .take()
+            .unwrap_or_else(crate::cpu_coroutine::new_coroutine);
+        let mut input = crate::cpu_coroutine::CpuInput::Start(cpu);
+        let cpu_cycles = loop {
+            match coroutine.resume(input) {
+                corosensei::CoroutineResult::Yield(crate::cpu_coroutine::CpuOutput::Request(
+                    request,
+                )) => {
+                    input =
+                        crate::cpu_coroutine::CpuInput::Response(self.handle_cpu_request(request));
+                }
+                corosensei::CoroutineResult::Yield(crate::cpu_coroutine::CpuOutput::Done(
+                    cpu,
+                    cycles,
+                )) => {
+                    self.cpu = cpu;
+                    break cycles;
+                }
+                corosensei::CoroutineResult::Return(()) => {
+                    unreachable!("S-CPU coroutine never returns")
+                }
+            }
+        };
+        self.cpu_coroutine.0 = Some(coroutine);
         if crate::cx4::instr_logging() {
             crate::cx4::DEBUG_INSTR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
@@ -1068,6 +1100,33 @@ impl Snes {
                     );
                 }
             }
+        }
+    }
+
+    /// Perform one bus request yielded by the resumable S-CPU.
+    fn handle_cpu_request(
+        &mut self,
+        request: crate::cpu_coroutine::BusRequest,
+    ) -> crate::cpu_coroutine::BusResponse {
+        use crate::cpu::CpuBus;
+        use crate::cpu_coroutine::{BusRequest, BusResponse};
+        match request {
+            BusRequest::Read { address, mdr } => {
+                BusResponse::Byte(CpuBus::read(self, address, mdr))
+            }
+            BusRequest::Write { address, value } => {
+                CpuBus::write(self, address, value);
+                BusResponse::None
+            }
+            BusRequest::AccessCycles { address } => {
+                BusResponse::Clocks(CpuBus::access_cycles(self, address))
+            }
+            BusRequest::IdleCycles => BusResponse::Clocks(CpuBus::idle_cycles(self)),
+            BusRequest::Idle => {
+                CpuBus::idle(self);
+                BusResponse::None
+            }
+            BusRequest::Advance { clocks } => BusResponse::Clocks(CpuBus::advance(self, clocks)),
         }
     }
 
