@@ -4077,6 +4077,14 @@ per-access replay, which is exactly the phase those titles depend on. Reverted;
 the per-access model is restored. The unit itself is now written and can be
 revisited together with a matching change to the DSP sample phase.
 
+Landing the suspended read **together with** the measured scanline+port+DMA
+base was also measured: Zelda and F-Zero stayed 100.0000%, but DKC fell to
+44.0159% and Super Metroid to 78.7613%. Reverted. DKC and Super Metroid are
+therefore sensitive to the read's sample phase in a way that neither the
+per-access replay nor the ares-faithful scanline+split ordering matches; the
+remaining correction is in the DSP/interrupt phase, not the port-read split
+alone.
+
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
 DSP is already ticked one micro-step per two S-SMP clocks inside the access's
