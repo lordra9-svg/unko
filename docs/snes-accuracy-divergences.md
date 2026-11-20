@@ -5367,3 +5367,20 @@ difference must be in the *DSP-side* application of the register writes at the
 switch instants (the S-DSP thread runs one `DSP::main` per synchronize, and our
 `step_dsp_clock` advances it while behind the S-SMP, not in the same switch
 cadence).
+
+## Correction: our port-log PC is the step-start PC (2026-11-20)
+
+The earlier "MMX2/CV4 boot path differs at $83C5" conclusion is retracted. Our
+harness logs `Snes::live_pc`, which is set once per `Snes::step`; when the park's
+forward loop runs extra S-CPU instructions in the same step, the logged PC stays
+at the first instruction while the port access happens in a later one. ares logs
+`r.pc.d` at the `readAPU`/`writeAPU` call itself, i.e. the access instruction.
+
+Disassembly confirms the mismatch: $83C5 is `8D 2D 21` (`STA $212D`, a PPU
+register write), not a `$2140` access, so it cannot be the instruction that read
+the port in our log.
+
+Reliable evidence therefore remains the port event values and clocks (ares
+`ARES_APU_LOG` vs our port log) and the audio/DSP-write comparisons; the PC-based
+path comparisons need the access PC carried in the bus request (or tracked in
+the CPU coroutine) before they can be used. No emulation change was made.
