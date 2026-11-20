@@ -5560,3 +5560,30 @@ the port write is a later request than the advance that contains the sample: it
 needs the write to be applied inside the sample's synchronize, i.e. the CPU
 request stream must let the driver complete the in-flight write while the actor
 is at the sample.
+
+## Write-before-drain protocol experiment (2026-11-20)
+
+Applied the S-CPU `$2140-$2143` write before its access's APU drain (instead of
+after, ares' literal `step`-then-`write` order), so an S-SMP sample in that
+access observes the new latch without any hold/deferral machinery:
+
+```
+dkc 173,620 72.8573%   zelda 1,449 99.7735%   fzero 0 100.0000%
+metroid 136,553 78.6521%   smw 45,880 92.8274%
+cv4 0 100.0000%        smas 0 100.0000%       ct 438,456 31.4544%
+```
+
+Identical to every previous variant: CV4 and SMAS exact, the four gate titles at
+the same percentages. Combined with the port-order result (ares is uniformly
+write-first and its latch does not move relative to the sample), this isolates
+the cause of the regressions: they react to the **write's clock** (it now commits
+at the access start instead of the access end), not to the sample ordering.
+
+So the four exact titles depend on the write committing *after* the access's
+clock advance, while CV4/SMAS require the sample to see that write. ares gets
+both from its cooperative recursion: the write is stepped at the access end,
+`writeAPU` then synchronizes the S-SMP, the S-SMP's `readIO` recursively resumes
+the suspended S-CPU and completes `portWrite`, and only then does the sample
+read. Reproducing that needs the driver to suspend the S-CPU *inside* the write
+and let the actor resume it at the sample - a scheduler/protocol change, not a
+request-order tweak. Reverted; the five exact titles are re-verified.
