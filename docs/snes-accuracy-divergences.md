@@ -4147,6 +4147,25 @@ scanline+port+DMA model with exact catch-up has the right instants; its
 remaining error for SMW/CV4/SMAS/CT is therefore in the per-port sync or the
 DSP tick phase, not the H=0 instant.
 
+**Per-port synchronize amount (ares, 2026-11-20).** A local
+`ARES_PORT_SYNC_LOG` hook in `readAPU`/`writeAPU` records
+`(cpu, smp0, smp1, dsmp, dsp0, dsp1, ddsp, pc)` around `synchronize(smp)`.
+Over 320 frames the catch-up at a port is small and skews to a few cycles:
+
+```
+SMW  dsmp: 4 (98,015), 6 (96,080), 5 (45,926), 18 (28,237), 0 (9,406) ...
+     ddsp: 2 (124,299), 3 (116,888), 9 (30,610), 0 (9,573) ...
+DKC  dsmp: 6 (167,710), 4 (25,553), 7 (12,090), 5 (11,030) ...
+     ddsp: 3 (188,653), 2 (27,023), 5 (12,876) ...
+```
+
+So ares lets the S-SMP lag between port accesses and catches it up only when a
+port is touched (a few SMP cycles / 1-3 DSP ticks), while this core advances it
+on every bus access. Also, ares' catch-up runs whole S-SMP instructions (which
+can overshoot by one), whereas the exact credit loop advances exactly the lag.
+Both are visible in the per-port deltas and are the remaining difference for
+SMW/CV4/SMAS/CT.
+
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
 DSP is already ticked one micro-step per two S-SMP clocks inside the access's
