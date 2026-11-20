@@ -5340,3 +5340,30 @@ that (`cx4_scanline` is set at the H=0 dot and the CX4 is advanced in one chunk
 per line to the end of the access), so MMX2's residual is not a CX4 stepping
 difference. The only other `PROFILE_PERFORMANCE` conditional in the SNES core is
 that one, so the S-SMP/S-DSP schedule is unaffected by the build profile.
+
+## Exact-H=0 burst model with whole-instruction overshoot (2026-11-20)
+
+Implemented the switch cadence observed in the co_switch trace as literally as
+possible: no per-access S-SMP advance; `synchronize_to` at `$2140-$2143` and at
+the **exact Hcounter-0 instant** (`event_clock`, not the access end); the
+synchronize runs to the S-CPU clock and then **finishes the current
+instruction** (ares switches whole steps).
+
+Measured, 120 frames, offset 0:
+
+```
+dkc   0 differing over 127,858 (100.0000%)   <- exact
+smw  23,326 differing (81.7563%)             <- worse than per-access
+```
+
+The committed per-access model at the same window gives DKC and SMW both 0.
+
+So the literal ares cadence reproduces DKC exactly but not SMW, confirming the
+pattern from every burst-model variant: DKC is insensitive to the within-line
+SMP execution instant, the other titles are not, and the per-access model is the
+only one that satisfies all of them. The co_switch distribution alone is
+therefore not enough to reconstruct ares' audio behaviour; the remaining
+difference must be in the *DSP-side* application of the register writes at the
+switch instants (the S-DSP thread runs one `DSP::main` per synchronize, and our
+`step_dsp_clock` advances it while behind the S-SMP, not in the same switch
+cadence).
