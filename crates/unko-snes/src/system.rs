@@ -3194,6 +3194,33 @@ mod tests {
         assert_eq!(restored.snapshot(), system.snapshot());
     }
 
+    #[test]
+    fn power_on_apu_pattern_survives_a_save_state() {
+        // ares randomises APU RAM and the S-DSP register file at power-on and
+        // `DSP::power(reset = true)` keeps them. A state saved before the
+        // driver has touched them must restore the same bytes.
+        let code = [0x4Cu8, 0x00, 0x80];
+        let mut system = Snes::new(cartridge(&code));
+        system.reset();
+        assert!(
+            system.apu.ram().iter().any(|&byte| byte != 0),
+            "APU RAM was not power-on filled"
+        );
+        assert!(
+            system.apu.dsp().registers.iter().any(|&byte| byte != 0),
+            "DSP register file was not power-on filled"
+        );
+        let ram = system.apu.ram().to_vec();
+        let registers = system.apu.dsp().registers;
+        let saved = system.save_state();
+
+        let mut restored = Snes::new(cartridge(&code));
+        restored.reset();
+        restored.load_state(&saved).expect("load state");
+        assert_eq!(restored.apu.ram(), &ram[..]);
+        assert_eq!(restored.apu.dsp().registers, registers);
+    }
+
     fn superfx_cartridge(code: &[u8]) -> Cartridge {
         let mut rom = build_lorom(code);
         let header = Mapping::LoRom.header_offset();
