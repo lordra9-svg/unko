@@ -5181,3 +5181,36 @@ scheduler's fixed-point base. The next step is to log both at the same port
 accesses (`ARES_PORT_SYNC_LOG` already prints `smp0`/`smp1` per access) and
 align the comparison; the prize is SMAS plus near-exact CV4/CT without losing
 the four exact titles.
+
+## Full ares schedule with the read deferrals (2026-11-20)
+
+The ares clock data settles the unit question: `System::information.apuFrequency`
+is `32040 * 768 = 24,606,720`, the DSP is created at that rate and the S-SMP at
+`apuFrequency / 12 = 2,050,560`. `smp.clock()/smp.scalar()` is periodically
+reduced by the scheduler, so absolute alignment from the logs is impossible;
+only deltas are meaningful. `ARES_PORT_SYNC_LOG` shows the S-SMP lagging the
+S-CPU by up to ~68 SMP cycles at a port read (`dsmp`), i.e. the S-SMP really is
+advanced only at the synchronization points.
+
+Implemented that schedule on top of all the read deferrals: no per-access
+advance, `synchronize_to` (whole-step forward run) at `$2140-$2143`, and the
+same at Hcounter 0.
+
+```
+dkc            0 differing  100.0000%
+zelda     69,787             89.0898%
+fzero    446,989             30.1204%
+metroid  142,854             77.6668%
+smw       16,177             97.4710%
+cv4       14,683             97.7045%
+smas     308,432             51.7813%
+ct       450,384             29.5875%
+```
+
+The lagging model matches DKC only; the four other exact titles require the
+no-lag per-access advance. SMAS does *not* become exact in this model - it only
+does with the per-access advance **plus** the port synchronize, which breaks the
+four exact titles. So the two observed behaviours bracket the true ares
+behaviour and the remaining error is in the scheduler clock accounting itself
+(how much the S-SMP is behind at each sync), not in the sync points or the I/O
+read forms. Reverted; the per-access model remains the best measured.
