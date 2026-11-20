@@ -4708,3 +4708,60 @@ F-Zero/Super Metroid 0 differing; SMW 91.5118% on the same window) remains the
 best measured model, even though ares' source-level synchronization points are
 coarser. The remaining SMW race at 1.122 s is a sub-instruction port ordering,
 not a scheduler-granularity effect.
+
+## Port-latch visibility instrumentation (2026-11-20)
+
+Instrumented both sides at access granularity for Super Mario World, 90 frames:
+the S-CPU's `$2140-$2143` writes (`CW <master clock> <port> <value> <pc>`) and
+the S-SMP's `$F4-$F7` reads, against ares' `ARES_APU_LOG` and
+`ARES_PORT_SYNC_LOG`.
+
+**The S-CPU writes match ares exactly.** Around the 1.122 s race:
+
+```
+ares  W1 00 cpu=24,091,518 pc=0080cd      ours  CW 24,091,518 1 00 0080CA
+ares  W0 23 cpu=24,091,592 pc=0080d3      ours  CW 24,091,592 0 23 0080D0
+```
+
+The PC differs by 3 only because ours records the instruction start. The write
+instants are identical to the master clock, so the S-CPU side is exact.
+
+The difference is the S-SMP poll read. ares' reads bracket the write:
+
+```
+ares  $F4 read #81,062  cpu=24,091,412  apu=1f
+ares  W0 23              cpu=24,091,592
+ares  $F4 read #81,063  cpu=24,091,670  apu=23
+```
+
+Ours resolves a poll in the advance of the write access itself, before the
+`$2140` write commits:
+
+```
+ours  $F4 read #81,062  sync clock=24,091,336  apu=1f
+ours  W0 23             clock=24,091,592
+ours  $F4 read #81,063  sync clock=24,091,592  apu=1f   <- one poll early
+ours  $F4 read #81,064  ...                    apu=23
+```
+
+**One-access lag experiment.** Draining the S-SMP only to the *start* clock of
+each access (so it lags the S-CPU by one access, and the poll lands after the
+write) gives:
+
+```
+dkc  0 differing  100.0000%
+zelda 47,415      92.5873%
+fzero 384,470     39.8939%
+metroid 0 differing 100.0000%
+smw  54,295       91.5118%   (unchanged)
+```
+
+So the lag keeps DKC and Super Metroid exact but regresses Zelda and F-Zero, and
+does not move Super Mario World at all. Reverted. Combined with the scheduler
+experiments, the latch-visibility phase cannot be shifted globally: each of the
+four exact titles pins a different aspect of the per-access schedule, and the
+SMW poll race is a sub-access ordering that the current model cannot express
+without changing the others.
+
+The per-access model remains the best measured: gate 0 differing, SMW 91.5118%
+(639,656 samples) / 89.4466% (700,000).
