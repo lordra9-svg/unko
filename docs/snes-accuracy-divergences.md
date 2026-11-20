@@ -4668,10 +4668,9 @@ stops exactly on the S-CPU clock instead of at the instruction end: it is
 systematically a few clocks *behind* ares at arbitrary instants (the -4 tick
 note lag at 1.447 s) and occasionally sees a port write one poll late.
 
-**Next experiment.** Advance the scheduler's S-SMP to the end of the current
-SPC700 instruction (ares' thread step) while keeping the `$F4-$F7` park
-mid-instruction, and carry the overshoot in the credit. The earlier
-whole-instruction experiments (ledger above) applied the overshoot at the port
-and scanline catch-up, not as the scheduler's step with the actor park; the
-target is 0 divergences in the `$F4` value sequence, then 0 differing samples
-on SMW/CV4.
+**Whole-instruction scheduler step (measured).** Advancing the S-SMP to the
+end of the current SPC700 instruction per call (`while smp_pos < cpu_fixed {
+drain }`) keeps DKC at 0 but moves SMW from 91.5118% to **90.1613%** on the
+639,656-sample window, so the overshoot is also wrong for SMW and was
+reverted. The mid-instruction exact stop remains the best measured model; the
+1.122 s port race is still open.
