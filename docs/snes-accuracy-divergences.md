@@ -5619,3 +5619,36 @@ extended further without restructuring the driver as a true cooperative
 scheduler (S-CPU suspendable inside `writeAPU`, S-SMP suspendable inside
 `readIO`, both resumable from the other side) rather than the request/response
 loop.
+
+## Invariant across every write-order implementation (2026-11-20)
+
+Five independent implementations of ares' write-before-sample rule now exist and
+have all been measured:
+
+1. per-request sample hold (unit-granular);
+2. whole-slice advance deferral;
+3. write-before-drain (CPU side);
+4. announced write applied at the sample (notice protocol);
+5. the same with the announced write cleared at the end of its access (fixing a
+   stale-notice path).
+
+Every one produces exactly:
+
+```
+cv4 0 100.0000%   smas 0 100.0000%   fzero 0 100.0000%
+dkc 173,620 72.8573%   zelda 1,449 99.7735%
+metroid 136,553 78.6521%   smw 45,880 92.8274%   ct 439,377 31.3104%
+```
+
+The percentages are identical to the digit across mechanisms, so the effect is a
+deterministic consequence of the ordering change itself, not an implementation
+artefact. Since ares' port-order log shows write-before-sample uniformly
+(80,769 write->read pairs, all write-first), the four exact titles cannot be
+explained by the pre-write latch: their exactness in our model must depend on how
+the write ordering interacts with the rest of the interleaving (park, credit and
+the request stream), which only a true cooperative scheduler reproduces as a
+whole.
+
+That scheduler - S-CPU suspendable inside `writeAPU`, S-SMP suspendable inside
+`readIO`, each resumed from the other side - is the remaining work; the current
+model is the best measured and is preserved.
