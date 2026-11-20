@@ -4123,7 +4123,11 @@ only at the scanline gave DKC 79.5990%, Zelda 92.2410%, F-Zero 25.1196% and
 Super Metroid 75.4490% - the gate fails. So the overshoot at the scanline is
 wrong for these titles even when the port syncs are exact; the plain
 scanline+port+DMA model with exact catch-up (which preserves all four) remains
-the closest carrier.
+the closest carrier. The mirror permutation - whole-instruction catch-up at
+port/DMA and exact at the scanline - kept DKC and Zelda exact but broke F-Zero
+(25.1196%) and Super Metroid (74.2183%). So no assignment of catch-up
+granularity to the known sync points satisfies the gate: F-Zero/Metroid reject
+port overshoot and DKC/Zelda reject scanline overshoot.
 
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
