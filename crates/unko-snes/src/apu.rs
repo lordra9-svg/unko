@@ -9,6 +9,16 @@
 use std::collections::VecDeque;
 
 use crate::dsp::{Dsp, Sample};
+
+/// ares `Thread::Second`: the fixed-point base of the scheduler clocks.
+const SCHEDULER_SECOND: u128 = (1u128 << 62) - 1;
+/// ares `Thread::setFrequency`: `_scalar = Second / frequency`.
+const DSP_FREQUENCY: u128 = 24_606_720;
+const SMP_FREQUENCY: u128 = 2_050_560;
+const DSP_SCALAR: u128 = SCHEDULER_SECOND / DSP_FREQUENCY;
+const SMP_SCALAR: u128 = SCHEDULER_SECOND / SMP_FREQUENCY;
+/// One DSP `tick()` steps the thread by `3 * 8` DSP clocks.
+const DSP_TICK: u128 = 24 * DSP_SCALAR;
 use crate::spc700::{Spc700, SpcBus};
 
 /// Which side produced a port event and in which direction.
@@ -229,10 +239,11 @@ pub struct Apu {
     plan: Vec<PlanStep>,
     plan_pos: usize,
     plan_sub: u32,
-    /// S-SMP clocks not yet converted into S-DSP micro-steps. The DSP runs one
-    /// micro-step per two S-SMP clocks; split `$F4-$F7` reads advance it by one
-    /// clock on each side of the access, so the remainder persists.
-    dsp_clock_credit: i64,
+    /// ares `SMP::_clock` in the scheduler's fixed-point base.
+    smp_clock: u128,
+    /// ares `DSP::_clock` in the same base. A micro-step advances it by
+    /// `DSP_TICK` (24 DSP clocks) and a step runs while it is behind.
+    dsp_clock: u128,
     samples: VecDeque<Sample>,
     /// Debug: S-CPU/S-SMP port handshake trace.
     pub debug: PortDebug,
@@ -273,7 +284,10 @@ impl Apu {
             plan: Vec::new(),
             plan_pos: 0,
             plan_sub: 0,
-            dsp_clock_credit: 0,
+            // ares `Scheduler::power`: clocks start at each thread's
+            // uniqueID (CPU 0, SMP 1, DSP 2).
+            smp_clock: 1,
+            dsp_clock: 2,
             samples: VecDeque::new(),
             debug: PortDebug::default(),
         }
@@ -334,7 +348,8 @@ impl Apu {
         self.plan.clear();
         self.plan_pos = 0;
         self.plan_sub = 0;
-        self.dsp_clock_credit = 0;
+        self.smp_clock = 1;
+        self.dsp_clock = 2;
         self.samples.clear();
         self.apu_ports = [0; 4];
         self.cpu_ports = [0; 4];
@@ -424,7 +439,8 @@ impl Apu {
                 timers: &mut self.timers,
                 dsp_address: &mut self.dsp_address,
                 dsp: &mut self.dsp,
-                dsp_clock_credit: &mut self.dsp_clock_credit,
+                smp_clock: &mut self.smp_clock,
+                dsp_clock: &mut self.dsp_clock,
                 samples: &mut self.samples,
                 apu_ports: &mut self.apu_ports,
                 cpu_ports: &mut self.cpu_ports,
@@ -498,7 +514,8 @@ impl Apu {
             timers: &mut self.timers,
             dsp_address: &mut self.dsp_address,
             dsp: &mut self.dsp,
-            dsp_clock_credit: &mut self.dsp_clock_credit,
+            smp_clock: &mut self.smp_clock,
+            dsp_clock: &mut self.dsp_clock,
             samples: &mut self.samples,
             apu_ports: &mut self.apu_ports,
             cpu_ports: &mut self.cpu_ports,
@@ -614,7 +631,8 @@ struct ApuBus<'a> {
     timers: &'a mut [Timer; 3],
     dsp_address: &'a mut u8,
     dsp: &'a mut Dsp,
-    dsp_clock_credit: &'a mut i64,
+    smp_clock: &'a mut u128,
+    dsp_clock: &'a mut u128,
     samples: &'a mut VecDeque<Sample>,
     apu_ports: &'a mut [u8; 4],
     cpu_ports: &'a mut [u8; 4],
@@ -629,21 +647,28 @@ struct ApuBus<'a> {
 }
 
 impl ApuBus<'_> {
-    /// Advance the S-DSP by `clocks` S-SMP clocks (ares `Thread::step` +
-    /// `synchronize(dsp)` inside `SMP::wait`). The DSP executes one micro-step
-    /// per two S-SMP clocks. ares' `DSP::main` ticks once and then synchronizes
-    /// with the SMP, which yields back mid-sample as soon as the DSP clock
-    /// catches up, so a register write can land between two micro-steps.
+    /// Advance the S-DSP by `clocks` S-SMP clocks (ares `SMP::step` +
+    /// `Thread::synchronize(dsp)`).
+    ///
+    /// Advance the S-DSP by `clocks` S-SMP clocks (ares `SMP::step` +
+    /// `Thread::synchronize(dsp)`).
+    ///
+    /// Both thread clocks use the ares fixed-point base and integer scalars,
+    /// and a micro-step runs while the DSP clock is behind the S-SMP clock.
+    /// This derives the DSP phase instead of assuming two S-SMP clocks per
+    /// micro-step: because `24 * DSP_SCALAR` is four fixed-point units less
+    /// than two `SMP_SCALAR`s, the first synchronization runs one extra tick
+    /// and the DSP stays one micro-step ahead, exactly as ares does.
     fn step_dsp_clock(&mut self, clocks: u32) {
-        *self.dsp_clock_credit += i64::from(clocks);
-        while *self.dsp_clock_credit >= 2 {
-            *self.dsp_clock_credit -= 2;
+        *self.smp_clock += u128::from(clocks) * SMP_SCALAR;
+        while *self.dsp_clock < *self.smp_clock {
             if let Some(sample) = self.dsp.tick(self.ram) {
                 self.samples.push_back(sample);
                 if self.samples.len() > 16_384 {
                     self.samples.pop_front();
                 }
             }
+            *self.dsp_clock += DSP_TICK;
         }
     }
 
@@ -803,6 +828,7 @@ impl SpcBus for ApuBus<'_> {
             0xF2 => *self.dsp_address = value,
             0xF3 => {
                 self.dsp.set_debug_pc(self.spc_pc);
+                self.dsp.set_debug_clock(*self.smp_clock);
                 self.dsp.write(*self.dsp_address, value);
             }
             0xF4..=0xF7 => self.cpu_ports[usize::from(address - 0xF4)] = value,
@@ -956,7 +982,8 @@ mod tests {
                 timers: &mut apu.timers,
                 dsp_address: &mut apu.dsp_address,
                 dsp: &mut apu.dsp,
-                dsp_clock_credit: &mut apu.dsp_clock_credit,
+                smp_clock: &mut apu.smp_clock,
+                dsp_clock: &mut apu.dsp_clock,
                 samples: &mut apu.samples,
                 apu_ports: &mut apu.apu_ports,
                 cpu_ports: &mut apu.cpu_ports,
@@ -1004,7 +1031,8 @@ mod tests {
                 timers: &mut apu.timers,
                 dsp_address: &mut apu.dsp_address,
                 dsp: &mut apu.dsp,
-                dsp_clock_credit: &mut apu.dsp_clock_credit,
+                smp_clock: &mut apu.smp_clock,
+                dsp_clock: &mut apu.dsp_clock,
                 samples: &mut apu.samples,
                 apu_ports: &mut apu.apu_ports,
                 cpu_ports: &mut apu.cpu_ports,
@@ -1033,7 +1061,8 @@ mod tests {
                 timers: &mut apu.timers,
                 dsp_address: &mut apu.dsp_address,
                 dsp: &mut apu.dsp,
-                dsp_clock_credit: &mut apu.dsp_clock_credit,
+                smp_clock: &mut apu.smp_clock,
+                dsp_clock: &mut apu.dsp_clock,
                 samples: &mut apu.samples,
                 apu_ports: &mut apu.apu_ports,
                 cpu_ports: &mut apu.cpu_ports,
@@ -1072,7 +1101,8 @@ mod tests {
             timers: &mut apu.timers,
             dsp_address: &mut apu.dsp_address,
             dsp: &mut apu.dsp,
-            dsp_clock_credit: &mut apu.dsp_clock_credit,
+            smp_clock: &mut apu.smp_clock,
+            dsp_clock: &mut apu.dsp_clock,
             samples: &mut apu.samples,
             apu_ports: &mut apu.apu_ports,
             cpu_ports: &mut apu.cpu_ports,
@@ -1109,7 +1139,8 @@ mod tests {
             timers: &mut apu.timers,
             dsp_address: &mut apu.dsp_address,
             dsp: &mut apu.dsp,
-            dsp_clock_credit: &mut apu.dsp_clock_credit,
+            smp_clock: &mut apu.smp_clock,
+            dsp_clock: &mut apu.dsp_clock,
             samples: &mut apu.samples,
             apu_ports: &mut apu.apu_ports,
             cpu_ports: &mut apu.cpu_ports,
@@ -1206,7 +1237,8 @@ mod wait_state_tests {
             timers: &mut apu.timers,
             dsp_address: &mut apu.dsp_address,
             dsp: &mut apu.dsp,
-            dsp_clock_credit: &mut apu.dsp_clock_credit,
+            smp_clock: &mut apu.smp_clock,
+            dsp_clock: &mut apu.dsp_clock,
             samples: &mut apu.samples,
             apu_ports: &mut apu.apu_ports,
             cpu_ports: &mut apu.cpu_ports,

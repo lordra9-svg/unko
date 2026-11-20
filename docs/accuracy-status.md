@@ -641,16 +641,17 @@ Validation so far:
   MSU1 stream. No measured pixel or retail-audio parity changed.
 - Retail audio parity was measured for the first time across the reference
   battery with the improved `tools/snes-oracle/diff-audio-raw.py` (loud-probe
-  alignment, 700,000 interleaved samples = 350,000 stereo frames): Zelda 1175
-  differing samples (99.8321%), Mega Man X2 915 (99.8693%), Super Mario
-  All-Stars 31,593 (95.4867%), Super Mario World 73,895 (89.4436%), Super
-  Castlevania IV 76,746 (89.0363%), Chrono Trigger 151,957 (78.2919%), Donkey
-  Kong Country 226,813 (67.5981%), Super Metroid 248,565 (64.4907%) and F-Zero
-  524,169 (25.1187%). The DSP-trace diff (see the divergence ledger) shows the
-  voice envelope/pitch state matching at the first Zelda divergence while the
-  echo volume/offset and voice `gaussianOffset`/`brrAddress` differ by one
-  sample, i.e. a register-write micro-step placement difference rather than an
-  arithmetic difference.
+  alignment, 700,000 interleaved samples = 350,000 stereo frames) with the
+  exact ares DSP thread clocks: **Donkey Kong Country 0 differing samples
+  (100.0000%)**, Zelda 1,449 (99.7930%), Mega Man X2 3,912 (99.4411%), Super
+  Mario World 73,874 (89.4466%), Super Castlevania IV 76,730 (89.0386%),
+  Chrono Trigger 80,562 (88.4911%), Super Metroid 199,927 (71.4390%), Super
+  Mario All-Stars 345,375 (50.6607%) and F-Zero 524,167 (25.1190%). The exact
+  model matches ares' DSP tick count write-for-write and makes DKC bit-exact;
+  the four remaining regressions versus the previous calibration-free phase are
+  traced to the `$F3` DSP-data read visibility feeding the sound driver's poll
+  loop (16 S-SMP cycles per extra poll iteration), recorded in the divergence
+  ledger as the next scheduler item.
 
 The PPU is line-based rather than dot-scheduled. **Interlace is implemented**
 (448-line output, odd field on the odd output rows, sprite and hires BG vertical

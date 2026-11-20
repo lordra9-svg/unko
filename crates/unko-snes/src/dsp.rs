@@ -253,6 +253,9 @@ pub struct Dsp {
     /// S-SMP PC of the instruction issuing the current register write (debug).
     #[serde(skip)]
     pub debug_pc: u16,
+    /// S-SMP clock at the current register write (debug).
+    #[serde(skip)]
+    pub debug_clock: u128,
 }
 
 /// Bounded S-DSP debug trace used to diff the voice pipeline against another
@@ -264,8 +267,8 @@ pub struct DspTrace {
     /// brr_address, brr_offset, gaussian_offset, latch_pitch, header, byte,
     /// latch_output, voice_pitch]` for voice 0.
     pub rows: std::collections::VecDeque<[i32; 12]>,
-    /// `(sample, register, value, micro-step, S-SMP PC)` for every write.
-    pub writes: std::collections::VecDeque<(u64, u8, u8, u64, u16)>,
+    /// `(sample, register, value, micro-step, S-SMP PC, S-SMP clock)` per write.
+    pub writes: std::collections::VecDeque<(u64, u8, u8, u64, u16, u128)>,
 }
 
 impl Default for Dsp {
@@ -304,12 +307,18 @@ impl Dsp {
             trace: None,
             full_trace: None,
             debug_pc: 0,
+            debug_clock: 0,
         }
     }
 
-    /// Record the S-SMP PC of the instruction issuing the next write (debug).
+    /// Record the S-SMP PC/clock of the instruction issuing the next write.
     pub fn set_debug_pc(&mut self, pc: u16) {
         self.debug_pc = pc;
+    }
+
+    /// Record the S-SMP clock at the next register write (debug).
+    pub fn set_debug_clock(&mut self, clock: u128) {
+        self.debug_clock = clock;
     }
 
     /// Start recording the bounded debug trace.
@@ -357,6 +366,7 @@ impl Dsp {
                 data,
                 self.samples_run * 32 + u64::from(self.step),
                 self.debug_pc,
+                self.debug_clock,
             ));
             if trace.writes.len() > 2_000_000 {
                 trace.writes.pop_front();

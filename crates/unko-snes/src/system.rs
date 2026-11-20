@@ -27,7 +27,7 @@ use crate::sufamiturbo::SufamiTurbo;
 /// Magic number at the start of a serialized save state (`"SNES"`).
 pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
 /// Save-state format version. Bump whenever the serialized shape changes.
-pub const SAVE_STATE_VERSION: u32 = 15;
+pub const SAVE_STATE_VERSION: u32 = 16;
 
 /// A complete `unko-snes` snapshot.
 ///

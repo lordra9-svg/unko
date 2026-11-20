@@ -4004,15 +4004,42 @@ micro-step that leaves. Candidate fixes are to derive the yield from the ares
 scheduler clocks rather than a per-access credit, or to calibrate the DSP
 micro-step phase at reset and at each `$F0` divider change.
 
-**Phase experiment (2026-11-19).** Giving our DSP one extra tick of lead at
-reset (an initial two-clock credit) makes **Donkey Kong Country bit-exact**
-(0 differing samples over 350,000 stereo frames, up from 226,813), improves
-Chrono Trigger (151,957 -> 80,562) and Super Metroid (248,565 -> 199,927), and
-leaves Super Mario World/Castlevania/F-Zero unchanged, but regresses Super
-Mario All-Stars (31,593 -> 345,375) and Zelda (1,175 -> 1,449). A single global
-phase is therefore not the correct model: the ares DSP's thread clock can be
-one tick ahead at some writes and level at others. The experiment is recorded
-as evidence for the scheduler port; the shipped build keeps the level phase.
+**Exact ares thread model (2026-11-19, shipped).** `Apu` now keeps both thread
+clocks in ares' fixed-point base (`Thread::Second = 2^62-1`) with the integer
+scalars `Second / 24,606,720` and `Second / 2,050,560`, starts them at the
+scheduler uniqueIDs (`SMP = 1`, `DSP = 2`), and runs a micro-step while
+`dsp_clock < smp_clock`. Because `24 * DSP_SCALAR` is four fixed-point units
+less than `2 * SMP_SCALAR`, the first synchronization runs one extra tick and
+the DSP carries a one-micro-step lead -- derived, not calibrated. The DSP
+register-write trace now matches ares' `dspTicks` **exactly (delta 0 on every
+write)** for Donkey Kong Country, and DKC's PCM becomes **100.0000% identical
+(0 differing samples over 350,000 stereo frames)**.
+
+Re-running the whole battery with the exact model gives:
+
+```
+Donkey Kong Country       0 differing  100.0000%   (was 226,813 / 67.5981%)
+Chrono Trigger        80,562            88.4911%   (was 151,957 / 78.2919%)
+Super Metroid        199,927            71.4390%   (was 248,565 / 64.4907%)
+Super Mario World     73,874            89.4466%   (was 73,895 / 89.4436%)
+Castlevania IV        76,730            89.0386%   (was 76,746 / 89.0363%)
+F-Zero               524,167            25.1190%   (was 524,169 / 25.1187%)
+Zelda                  1,449            99.7930%   (was 1,175 / 99.8321%)
+Mega Man X2            3,912            99.4411%   (was 915 / 99.8693%)
+Super Mario All-Stars 345,375           50.6607%   (was 31,593 / 95.4867%)
+```
+
+The four regressions are not a phase error: DKC's write micro-steps match ares
+exactly, and in SMAS the first audio difference is a voice-4 attack already two
+envelope steps ahead in ares. The write trace shows our DSP tick count is one
+ahead of ares at that KON, and the elapsed S-SMP time between two driver writes
+differs by **16 S-SMP cycles** (ours 3,854, ares 3,870). The driver polls the
+DSP data register (`$F3`) in that loop, so one extra poll iteration (16 cycles)
+is the DSP read-visibility phase feeding back into the driver: with the DSP one
+tick ahead, the poll exits one iteration early and the next KON lands a sample
+off. Matching ares' `$F3` read/burst timing (the same scheduler port, now for
+read visibility) is the next step; the exact thread model itself is kept
+because it is the Ares-exact scheduler and makes DKC bit-exact.
 
 Until then, retail audio is **not** claimed bit-exact; the per-title numbers
 above are the measured baseline, and dense music (F-Zero, Super Metroid, Donkey
