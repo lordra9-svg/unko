@@ -4117,8 +4117,13 @@ sync points but stopped the S-SMP exactly at the CPU clock (credit loop)
 instead of allowing ares' whole-instruction catch-up; the whole-instruction
 variant in turn broke F-Zero/Metroid. The remaining delta is therefore the
 *combination*: scanline-only sync points **and** a whole-instruction S-SMP
-catch-up that does not regress F-Zero/Metroid. That combination has not yet
-been measured successfully.
+catch-up that does not regress F-Zero/Metroid. That combination has now been
+measured: exact credit catch-up at ports/DMA plus whole-instruction overshoot
+only at the scanline gave DKC 79.5990%, Zelda 92.2410%, F-Zero 25.1196% and
+Super Metroid 75.4490% - the gate fails. So the overshoot at the scanline is
+wrong for these titles even when the port syncs are exact; the plain
+scanline+port+DMA model with exact catch-up (which preserves all four) remains
+the closest carrier.
 
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
