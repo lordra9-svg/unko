@@ -5214,3 +5214,35 @@ four exact titles. So the two observed behaviours bracket the true ares
 behaviour and the remaining error is in the scheduler clock accounting itself
 (how much the S-SMP is behind at each sync), not in the sync points or the I/O
 read forms. Reverted; the per-access model remains the best measured.
+
+## Scanline sync rate and fixed-point base (2026-11-20, negative results)
+
+Two suspected errors in the rejected full-schedule model were corrected and
+measured:
+
+**Scanline H=0 rate.** ares performs 2,613 synchronizations in 10 frames
+(261/frame). Our hook fired only 1,410 (141/frame): the boot DMA spends ~1.6M
+master clocks (1,190 lines) with the actor parked, and the scanline sync was
+skipped there. Adding a direct `synchronize_to` on the real APU in the DMA path
+raises the count to 2,598/10 frames (260/frame, matching ares). The audio of the
+full-schedule model is **byte-identical** with and without that fix, so the
+missing DMA syncs were not the cause of its gate failure.
+
+**Fixed-point base.** ares `Thread::Second` is `(u64)-1 >> 1 = 2^63-1`; ours was
+`2^62-1`. Correcting the constant leaves DKC and SMW bit-exact on the committed
+per-access model, and leaves every full-schedule result byte-identical as well:
+the base is not the discriminator either.
+
+With both corrections the full ares schedule still gives:
+
+```
+dkc 0 · zelda 89.09% · fzero 30.12% · metroid 77.67% · smw 97.47%
+```
+
+So the synchronization points, their rate, and the clock base are all now
+verified to match ares; the residual difference must be in the per-step clock
+advance inside `SMP::step` (how the S-SMP's own clock moves within an
+instruction/access), not in when the threads are synchronized. That is the next
+bounded experiment: replicate `SMP::step`'s `Thread::step(clocks)` exactly per
+access and compare the resulting `smp.clock()` with `ARES_SCANLINE_LOG`'s `smp=`
+values at H=0.
