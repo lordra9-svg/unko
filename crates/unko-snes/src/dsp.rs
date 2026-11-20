@@ -249,7 +249,7 @@ pub struct Dsp {
     pub trace: Option<DspTrace>,
     /// Optional all-voice per-sample trace used to diff the DSP pipeline.
     #[serde(skip)]
-    pub full_trace: Option<std::collections::VecDeque<[i32; 195]>>,
+    pub full_trace: Option<std::collections::VecDeque<[i32; 204]>>,
     /// S-SMP PC of the instruction issuing the current register write (debug).
     #[serde(skip)]
     pub debug_pc: u16,
@@ -1080,39 +1080,12 @@ impl Dsp {
         // captured here (not at the end of the 32-step cycle) to compare the
         // voice pipeline at the same point.
         if let Some(trace) = &mut self.full_trace {
-            let mut row = [0i32; 195];
+            let mut row = [0i32; 204];
             row[0] = self.samples_run as i32;
             row[1] = i32::from(left as i16);
             row[2] = i32::from(right);
-            row[163] = i32::from(self.brr._header);
-            row[164] = i32::from(self.brr._byte);
-            row[165] = i32::from(self.mainvol.volume[0]);
-            row[166] = i32::from(self.mainvol.volume[1]);
-            row[167] = self.mainvol.output[0];
-            row[168] = self.mainvol.output[1];
-            row[169] = i32::from(self.echo.feedback);
-            row[170] = i32::from(self.echo.volume[0]);
-            row[171] = i32::from(self.echo.volume[1]);
-            row[172] = self.echo.input[0];
-            row[173] = self.echo.input[1];
-            row[174] = self.echo.output[0];
-            row[175] = self.echo.output[1];
-            row[176] = i32::from(self.echo.page);
-            row[177] = i32::from(self.echo.delay);
-            row[178] = i32::from(self.echo._page);
-            row[179] = i32::from(self.echo._offset);
-            row[180] = i32::from(self.echo._length);
-            row[181] = i32::from(self.echo._history_offset);
-            row[182] = i32::from(self.noise.frequency);
-            row[183] = i32::from(self.noise.lfsr);
-            row[184] = self.latch.output;
-            row[185] = i32::from(self.echo._readonly);
-            row[186] = i32::from(self.mainvol.mute);
-            for (index, coefficient) in self.echo.fir.iter().enumerate() {
-                row[187 + index] = i32::from(*coefficient);
-            }
             for (index, voice) in self.voice.iter().enumerate() {
-                let base = 3 + index * 20;
+                let base = 3 + index * 21;
                 row[base] = i32::from(voice.envx);
                 row[base + 1] = i32::from(voice.envelope);
                 row[base + 2] = i32::from(voice.pitch);
@@ -1124,7 +1097,36 @@ impl Dsp {
                 for (n, sample) in voice.buffer.iter().enumerate() {
                     row[base + 8 + n] = i32::from(*sample);
                 }
+                row[base + 20] = i32::from(voice._keyoff);
             }
+            row[171] = i32::from(self.brr._header);
+            row[172] = i32::from(self.brr._byte);
+            row[173] = i32::from(self.mainvol.volume[0]);
+            row[174] = i32::from(self.mainvol.volume[1]);
+            row[175] = self.mainvol.output[0];
+            row[176] = self.mainvol.output[1];
+            row[177] = i32::from(self.echo.feedback);
+            row[178] = i32::from(self.echo.volume[0]);
+            row[179] = i32::from(self.echo.volume[1]);
+            row[180] = self.echo.input[0];
+            row[181] = self.echo.input[1];
+            row[182] = self.echo.output[0];
+            row[183] = self.echo.output[1];
+            row[184] = i32::from(self.echo.page);
+            row[185] = i32::from(self.echo.delay);
+            row[186] = i32::from(self.echo._page);
+            row[187] = i32::from(self.echo._offset);
+            row[188] = i32::from(self.echo._length);
+            row[189] = i32::from(self.echo._history_offset);
+            row[190] = i32::from(self.noise.frequency);
+            row[191] = i32::from(self.noise.lfsr);
+            row[192] = self.latch.output;
+            row[193] = i32::from(self.echo._readonly);
+            row[194] = i32::from(self.mainvol.mute);
+            for (index, coefficient) in self.echo.fir.iter().enumerate() {
+                row[195 + index] = i32::from(*coefficient);
+            }
+            row[203] = i32::from(self.clock.sample);
             trace.push_back(row);
             if trace.len() > 600_000 {
                 trace.pop_front();

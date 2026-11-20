@@ -4004,6 +4004,16 @@ micro-step that leaves. Candidate fixes are to derive the yield from the ares
 scheduler clocks rather than a per-access credit, or to calibrate the DSP
 micro-step phase at reset and at each `$F0` divider change.
 
+**Phase experiment (2026-11-19).** Giving our DSP one extra tick of lead at
+reset (an initial two-clock credit) makes **Donkey Kong Country bit-exact**
+(0 differing samples over 350,000 stereo frames, up from 226,813), improves
+Chrono Trigger (151,957 -> 80,562) and Super Metroid (248,565 -> 199,927), and
+leaves Super Mario World/Castlevania/F-Zero unchanged, but regresses Super
+Mario All-Stars (31,593 -> 345,375) and Zelda (1,175 -> 1,449). A single global
+phase is therefore not the correct model: the ares DSP's thread clock can be
+one tick ahead at some writes and level at others. The experiment is recorded
+as evidence for the scheduler port; the shipped build keeps the level phase.
+
 Until then, retail audio is **not** claimed bit-exact; the per-title numbers
 above are the measured baseline, and dense music (F-Zero, Super Metroid, Donkey
 Kong Country) shows the largest deviation. None of this affects the video
