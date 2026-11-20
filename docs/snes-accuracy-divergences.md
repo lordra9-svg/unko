@@ -4019,6 +4019,28 @@ This trace is local-only (patched reference ares, not committed): set
 `ARES_THREAD_LOG=<path>` and run ares; the window is `dspTicks`
 4,558,000-4,561,500.
 
+**The decisive ares rule (from the same trace).** `CPU::step` does *not*
+synchronize the S-SMP: `CPU::peripherals` is populated only by optional
+controller devices and the expansion port, never by `smp` or the PPU. The
+S-SMP is caught up only:
+
+- in `CPU::readAPU`/`writeAPU` (`synchronize(smp)`) on `$2140-$2143`, and
+- in `CPU::scanline()` (`Thread::synchronize(smp, ppu.thread())`) once per
+  scanline, which is the ~1,366-master-clock CPU burst in the trace.
+
+Between those points the S-CPU runs ahead of the S-SMP, and the S-SMP's own
+`Thread::synchronize(cpu)` runs the CPU forward only when the SMP has passed
+it. This core instead advances the APU on every bus access, which keeps the
+SMP artificially locked to the CPU.
+
+A scanline+port-only model was implemented and measured: **DKC stayed
+100.0000%**, but Zelda fell to 58.8231%, F-Zero to 25.1250%, Super Metroid to
+57.4057%, SMW to 47.1934% and SMAS to 38.6331%. It fails because the
+scanline-only model also needs the *S-SMP to run the S-CPU forward* when it
+gets ahead (the mutual part); without it the SMP misses port writes. That is
+the exact unit the actor scheduler provides: per-access advancement is the
+workaround that currently matches four titles.
+
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
 DSP is already ticked one micro-step per two S-SMP clocks inside the access's
