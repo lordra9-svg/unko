@@ -4765,3 +4765,55 @@ without changing the others.
 
 The per-access model remains the best measured: gate 0 differing, SMW 91.5118%
 (639,656 samples) / 89.4466% (700,000).
+
+## ares co-switch order at the 1.122 s port race (2026-11-20)
+
+The shared scheduler cannot reference the SNES clock (each core is a separate
+namespace), so the switch trace was taken at `CPU::main`/`SMP::main` entry with
+a shared global sequence counter (local ares hooks, not committed). Merging the
+two traces by sequence shows the exact order around the race:
+
+```
+C 0080ca @ 24,091,488
+S 131E   @ 24,091,518        (BPL of the poll loop)
+C 0080cd @ 24,091,518        ($2141 = 00)
+C 0080cf @ 24,091,534
+C 0080d0 @ 24,091,562
+S 130A   @ 24,091,592        ($F4 poll: CMP Y,$F4)
+C 0080d3 @ 24,091,592        ($2140 = 23)
+C 0080d6 @ 24,091,622
+C 0080d3 @ 24,091,644
+S 130D   @ 24,091,670
+```
+
+At the same oracle clock the S-SMP instruction runs **first**; inside its
+`$F4` read, `synchronize(cpu)` resumes the suspended S-CPU and completes the
+in-flight `$2140` write, so the sample reads `$23`. The S-SMP then continues
+four instructions later than in our model.
+
+**Deferred-slice experiment.** Implementing that as "latch the `$2140` write
+before the pending slice's S-SMP advance" (one-request deferral of every S-SMP
+advance, with `$2140` written before the flush and `$2141-$2143` after):
+
+```
+dkc     173,620   72.8573%
+zelda     1,449   99.7735%
+fzero         0  100.0000%
+metroid 136,552   78.6523%
+smw      45,880   92.8274%   (improved from 91.5118%)
+```
+
+Narrowing the rule to `$2140` only produced byte-identical numbers. SMW moves in
+the right direction (the poll now samples the in-flight write), but DKC and
+Super Metroid regress because their handshakes depend on the old value being
+sampled; the unconditional deferral also shifts every S-SMP advance by one bus
+slice. Reverted.
+
+**Next experiment indicated by the trace.** The in-flight write is only
+completed inside the read when `synchronize(cpu)` actually runs the S-CPU
+(`cpu.clock < smp.clock`). Our park already models that case; the remaining
+work is to apply the in-flight completion *only* when the pending slice's drain
+reaches a `$F4-$F7` sample while parked, leaving non-parked slices at the
+current per-access ordering. That requires the drain to call back into the
+driver at the sample (a per-sample "deliver the pending write" hook), which the
+actor can support by yielding `Parked` before the write and resuming after it.
