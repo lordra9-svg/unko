@@ -5529,3 +5529,34 @@ write-first. A single global ordering cannot satisfy both; the discriminator has
 to come from something driver-specific that we have not identified.
 
 Reverted; the per-access model is restored and all five exact titles re-verified.
+
+## The write-before-sample order is uniform across titles (2026-11-20)
+
+Captured the ares port-order log for CV4, DKC and SMW (100 frames each) and
+checked every S-CPU `$2140` write against the next S-SMP `$F4` read:
+
+```
+           C0 writes followed by R0    sees written value    sees another value
+cv4                 24,013                  24,013                   0
+dkc                 16,237                  16,237                   0
+smw                 40,519                  40,519                   0
+```
+
+So ares is **uniformly write-first**: in all three titles the S-SMP sample
+observes the S-CPU's write, at the IPL upload and everywhere else. The ordering
+is not the discriminator between the exact titles and the failing ones.
+
+Therefore the regressions produced by our reorder (DKC 72.86%, Zelda 99.77%,
+Metroid 78.65%, SMW 92.83% - identical in the hold variant and in the
+whole-advance deferral variant) are an artefact of *how* we defer the advance,
+not evidence that those drivers want the opposite order. Both our variants move
+the S-SMP's execution point relative to the following bus request (the hold
+defers one unit, the deferral variant moves a whole slice), which can change the
+park/timeout interactions even when the latch value is identical.
+
+The fix must preserve the advance's execution point exactly and only reorder the
+latch application. That is not expressible in the current driver protocol, where
+the port write is a later request than the advance that contains the sample: it
+needs the write to be applied inside the sample's synchronize, i.e. the CPU
+request stream must let the driver complete the in-flight write while the actor
+is at the sample.
