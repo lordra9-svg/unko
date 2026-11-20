@@ -27,7 +27,7 @@ use crate::sufamiturbo::SufamiTurbo;
 /// Magic number at the start of a serialized save state (`"SNES"`).
 pub const SAVE_STATE_MAGIC: u32 = 0x534E_4553;
 /// Save-state format version. Bump whenever the serialized shape changes.
-pub const SAVE_STATE_VERSION: u32 = 17;
+pub const SAVE_STATE_VERSION: u32 = 18;
 
 /// A complete `unko-snes` snapshot.
 ///
@@ -209,6 +209,8 @@ pub struct Snes {
     /// Resumable S-CPU execution (ares cooperative-thread equivalent).
     cpu_coroutine: crate::cpu_coroutine::CpuCoroutineSlot,
     apu_actor: crate::cpu_coroutine::ApuActorSlot,
+    /// Whether the APU actor is driving the S-SMP (inside [`Snes::step`]).
+    apu_actor_driven: bool,
     /// The inserted cartridge.
     pub cart: Cartridge,
     /// The S-SMP/S-DSP audio unit.
@@ -334,101 +336,43 @@ pub struct Snes {
 struct ApuPeer<'a> {
     coro: &'a mut crate::apu::ApuCoroutine,
     apu: Option<Box<crate::apu::Apu>>,
+    /// Master clock at which the S-SMP parks at a `$F4-$F7` sample read.
     waiting: Option<u64>,
-    started: bool,
 }
 impl ApuPeer<'_> {
-    fn catch_up(&mut self, target: u64, rate: u64) {
-        if self.waiting.is_some() {
-            return;
-        }
-        let mut apu = self.apu.take().expect("actor is not idle");
-        loop {
-            let input = if self.started {
-                crate::apu::ApuInput::Resume(apu)
-            } else {
-                crate::apu::ApuInput::Start(apu)
-            };
-            self.started = true;
-            match self.coro.resume(input) {
-                corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Stopped(a)) => {
-                    apu = a;
-                    if apu.smp_master_clock(rate) >= target {
-                        self.apu = Some(apu);
-                        return;
-                    }
-                }
-                corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::SyncCpu { target }) => {
-                    self.waiting = Some(target);
-                    return;
-                }
-                _ => unreachable!(),
+    /// Advance the S-SMP by `clocks` master clocks at `clock` (ares
+    /// `Thread::synchronize`). The S-SMP stops exactly at the S-CPU clock.
+    fn advance(&mut self, clocks: u32, clock: u64, rate: u64) {
+        let apu = self.apu.take().expect("actor is not idle");
+        let input = crate::apu::ApuInput::Advance {
+            apu,
+            clocks,
+            clock,
+            rate,
+        };
+        match self.coro.resume(input) {
+            corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Stopped(apu)) => {
+                self.apu = Some(apu);
+                self.waiting = None;
             }
-        }
-    }
-    fn sync_if_ready(&mut self, clock: u64, _rate: u64) {
-        if let Some(target) = self.waiting {
-            if clock >= target {
-                match self.coro.resume(crate::apu::ApuInput::Sync) {
-                    corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Stopped(a)) => {
-                        self.apu = Some(a);
-                        self.waiting = None;
-                    }
-                    corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::SyncCpu {
-                        target,
-                    }) => self.waiting = Some(target),
-                    _ => unreachable!(),
-                }
+            corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Parked { apu, target }) => {
+                self.apu = Some(apu);
+                self.waiting = Some(target);
             }
+            _ => unreachable!(),
         }
     }
     fn port_read(&mut self, port: u8) -> u8 {
-        if self.waiting.is_some() {
-            let value = match self.coro.resume(crate::apu::ApuInput::PortRead { port }) {
-                corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::PortValue { value }) => {
-                    value
-                }
-                _ => unreachable!(),
-            };
-            match self.coro.resume(crate::apu::ApuInput::Sync) {
-                corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::SyncCpu { target }) => {
-                    self.waiting = Some(target)
-                }
-                corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Stopped(a)) => {
-                    self.apu = Some(a);
-                    self.waiting = None;
-                }
-                _ => unreachable!(),
-            }
-            value
-        } else {
-            self.apu
-                .as_ref()
-                .expect("actor is not idle")
-                .cpu_read(usize::from(port))
-        }
+        self.apu
+            .as_ref()
+            .expect("actor is not idle")
+            .cpu_read(usize::from(port))
     }
     fn port_write(&mut self, port: u8, value: u8) {
-        if self.waiting.is_some() {
-            match self
-                .coro
-                .resume(crate::apu::ApuInput::PortWrite { port, value })
-            {
-                corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::SyncCpu { target }) => {
-                    self.waiting = Some(target)
-                }
-                corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Stopped(a)) => {
-                    self.apu = Some(a);
-                    self.waiting = None;
-                }
-                _ => unreachable!(),
-            }
-        } else {
-            self.apu
-                .as_mut()
-                .expect("actor is not idle")
-                .cpu_write(usize::from(port), value);
-        }
+        self.apu
+            .as_mut()
+            .expect("actor is not idle")
+            .cpu_write(usize::from(port), value);
     }
 }
 impl Snes {
@@ -469,6 +413,7 @@ impl Snes {
             cpu: Cpu::new(),
             cpu_coroutine: crate::cpu_coroutine::CpuCoroutineSlot::default(),
             apu_actor: crate::cpu_coroutine::ApuActorSlot::default(),
+            apu_actor_driven: false,
             cart,
             apu,
             ppu,
@@ -736,6 +681,10 @@ impl Snes {
         self.nmi_lock = false;
         self.nmi_count = state.nmi_count;
         self.clock = state.clock;
+        // The coroutines are transient: the restored `Apu` (including the
+        // S-SMP plan position and clock credit) resumes the actor.
+        self.apu_actor = crate::cpu_coroutine::ApuActorSlot::default();
+        self.apu_actor_driven = false;
         Ok(())
     }
 
@@ -895,6 +844,7 @@ impl Snes {
         self.rtc_credit = 0;
         self.cpu_coroutine = crate::cpu_coroutine::CpuCoroutineSlot::default();
         self.apu_actor = crate::cpu_coroutine::ApuActorSlot::default();
+        self.apu_actor_driven = false;
         self.sa1_credit = 0;
         self.snes_mar = 0;
         self.refresh_active = false;
@@ -1068,26 +1018,25 @@ impl Snes {
             coro: &mut actor_coro,
             apu: Some(Box::new(std::mem::take(&mut self.apu))),
             waiting: None,
-            started: false,
         };
+        // The actor owns the S-SMP for this step; `advance_peripherals` must
+        // not tick it a second time.
+        self.apu_actor_driven = true;
+        let rate = self.region.master_clock();
         let mut input = crate::cpu_coroutine::CpuInput::Start(cpu);
         let mut cycles = 0u32;
         loop {
-            peer.sync_if_ready(self.clock, self.region.master_clock());
             match coroutine.resume(input) {
                 corosensei::CoroutineResult::Yield(crate::cpu_coroutine::CpuOutput::Request(
                     request,
                 )) => {
                     use crate::cpu_coroutine::{BusRequest, BusResponse};
-                    let is_advance = matches!(request, BusRequest::Advance { .. });
                     input = crate::cpu_coroutine::CpuInput::Response(match request {
                         BusRequest::Read { address, .. }
                             if address & 0x40_FF00 == 0x2100
                                 && (0x2140..=0x2143).contains(&(address & 0xFFFF)) =>
                         {
                             let port = ((address & 0xFFFF) - 0x2140) as u8;
-                            peer.catch_up(self.clock, self.region.master_clock());
-                            peer.sync_if_ready(self.clock, self.region.master_clock());
                             BusResponse::Byte(peer.port_read(port))
                         }
                         BusRequest::Write { address, value }
@@ -1095,16 +1044,28 @@ impl Snes {
                                 && (0x2140..=0x2143).contains(&(address & 0xFFFF)) =>
                         {
                             let port = ((address & 0xFFFF) - 0x2140) as u8;
-                            peer.catch_up(self.clock, self.region.master_clock());
-                            peer.sync_if_ready(self.clock, self.region.master_clock());
                             peer.port_write(port, value);
                             BusResponse::None
                         }
+                        BusRequest::Advance { clocks } => {
+                            // The APU is synchronized to the clock at the
+                            // *start* of this access (ares `Thread`), with the
+                            // access's clocks as credit. A DRAM refresh stall
+                            // advances it again at the post-access clock.
+                            let clock = self.clock;
+                            let extra =
+                                match self.handle_cpu_request(BusRequest::Advance { clocks }) {
+                                    BusResponse::Clocks(extra) => extra,
+                                    _ => unreachable!(),
+                                };
+                            peer.advance(clocks, clock, rate);
+                            if extra != 0 {
+                                peer.advance(extra, clock + u64::from(clocks), rate);
+                            }
+                            BusResponse::Clocks(extra)
+                        }
                         other => self.handle_cpu_request(other),
                     });
-                    if is_advance {
-                        peer.catch_up(self.clock, self.region.master_clock());
-                    }
                 }
                 corosensei::CoroutineResult::Yield(crate::cpu_coroutine::CpuOutput::Done(
                     cpu,
@@ -1113,6 +1074,8 @@ impl Snes {
                     self.cpu = cpu;
                     cycles += instruction_cycles;
                     self.apply_interrupts();
+                    // ares runs the S-CPU forward while an S-SMP `$F4-$F7`
+                    // sample is parked beyond the CPU clock.
                     if peer.waiting.is_none() {
                         break;
                     }
@@ -1123,6 +1086,7 @@ impl Snes {
                 }
             }
         }
+        self.apu_actor_driven = false;
         if crate::cx4::instr_logging() {
             crate::cx4::DEBUG_INSTR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
@@ -1303,7 +1267,13 @@ impl Snes {
                 std::sync::atomic::Ordering::Relaxed,
             );
         }
-        // The S-SMP is driven by the APU actor from `Snes::step`.
+        // The S-SMP is driven by the APU actor while `Snes::step` runs the
+        // S-CPU coroutine. The DMA loop and direct bus users advance it here
+        // with the same rational credit, one S-SMP clock at a time.
+        if !self.apu_actor_driven {
+            self.apu
+                .advance_master_clock(clocks, self.clock, self.region.master_clock());
+        }
         // The SuperFX oscillator runs at the S-CPU master clock on the boards
         // this core supports; run whole instructions against a clock credit.
         if let Some(gsu) = self.gsu.as_mut() {

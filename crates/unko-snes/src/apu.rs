@@ -250,6 +250,9 @@ pub struct Apu {
     master_clock_rate: u64,
     /// Whether `cpu_master_clock`/`master_clock_rate` are valid.
     master_clock_valid: bool,
+    /// Carried S-SMP master-clock credit: the fractional remainder of the
+    /// rational conversion from master clocks to S-SMP clocks.
+    apu_credit: i64,
     samples: VecDeque<Sample>,
     /// Debug: S-CPU/S-SMP port handshake trace.
     pub debug: PortDebug,
@@ -297,6 +300,7 @@ impl Apu {
             cpu_master_clock: 0,
             master_clock_rate: 0,
             master_clock_valid: false,
+            apu_credit: 0,
             samples: VecDeque::new(),
             debug: PortDebug::default(),
         }
@@ -376,6 +380,7 @@ impl Apu {
         self.cpu_master_clock = 0;
         self.master_clock_rate = 0;
         self.master_clock_valid = false;
+        self.apu_credit = 0;
         self.samples.clear();
         self.apu_ports = [0; 4];
         self.cpu_ports = [0; 4];
@@ -430,7 +435,11 @@ impl Apu {
             return self.smp_clock;
         }
         let total: u32 = self.plan.iter().map(|step| u32::from(step.clocks)).sum();
-        let start = self.smp_clock - u128::from(total) * SMP_SCALAR;
+        // The clock before the plan may be less than the plan length only at
+        // power-on (ares' SMP clock starts at 1 fixed-point unit); clamp there.
+        let start = self
+            .smp_clock
+            .saturating_sub(u128::from(total) * SMP_SCALAR);
         let mut elapsed: u32 = self.plan[..self.plan_pos]
             .iter()
             .map(|step| u32::from(step.clocks))
@@ -705,6 +714,29 @@ impl Apu {
             total += u64::from(self.drain_unit());
         }
         total
+    }
+
+    /// Advance the S-SMP by `clocks` master clocks, one S-SMP clock at a time.
+    ///
+    /// This is ares `Thread::synchronize` for the S-SMP: the credit is carried
+    /// as an exact rational (`clocks * 2_050_560 / rate`) so the S-SMP stops at
+    /// the precise master clock rather than at an instruction boundary.
+    ///
+    /// Returns `true` when the S-SMP parked at a `$F4-$F7` read whose sample
+    /// clock is ahead of the S-CPU. The remaining credit is carried, so the
+    /// next advance (after the S-CPU has caught up) resumes at the same sample.
+    pub fn advance_master_clock(&mut self, clocks: u32, clock: u64, rate: u64) -> bool {
+        const APU_UNIT_NUM: i64 = 2_050_560;
+        let den = rate as i64;
+        self.set_master_clock(clock, rate);
+        self.apu_credit += i64::from(clocks) * APU_UNIT_NUM;
+        while self.apu_credit >= den {
+            if self.drain_unit() == 0 {
+                return true;
+            }
+            self.apu_credit -= den;
+        }
+        false
     }
 }
 
@@ -1440,11 +1472,14 @@ mod clock_position_tests {
 // ---------------------------------------------------------------------------
 // Mutual S-CPU / S-SMP coroutine (ares `Thread` parity)
 //
-// The S-SMP runs one SPC700 instruction per `ApuInput::Start`/resume. Its bus
-// yields `ApuOutput::SyncCpu { target }` at a `$F4-$F7` sample, before the port
-// value is returned. The scheduler runs the S-CPU to `target` and resumes with
-// `ApuInput::CpuClock`; the same read then returns the latch. At an instruction
-// boundary the actor yields the `Apu` back so the scheduler owns it.
+// The actor advances the S-SMP with the same clock credit as the scheduler
+// ([`Apu::advance_master_clock`]): one S-SMP clock per unit of master-clock
+// credit, stopping exactly at the S-CPU clock. A `$F4-$F7` read whose sample
+// clock is ahead of the S-CPU parks the S-SMP and hands the `Apu` back
+// ([`ApuOutput::Parked`]); the scheduler owns the `Apu` while parked, so S-CPU
+// port accesses are ordinary bus accesses, and the next advance resolves the
+// read. The `Apu` is owned by the scheduler between advances, so save states
+// need no special case.
 // ---------------------------------------------------------------------------
 
 /// The S-SMP actor coroutine type.
@@ -1453,416 +1488,153 @@ pub type ApuCoroutine = corosensei::Coroutine<ApuInput, ApuOutput, ()>;
 /// Input to the S-SMP actor coroutine.
 #[derive(Debug)]
 pub enum ApuInput {
-    /// Hand the APU to the actor and run the first instruction.
-    Start(Box<Apu>),
-    /// Resume after `SyncCpu`: the S-CPU has reached the requested clock.
-    Sync,
-    /// Resume after `Stopped`: the scheduler hands the APU back.
-    Resume(Box<Apu>),
-    /// S-CPU write to a `$2140-$2143` latch while the read is suspended.
-    PortWrite {
-        /// Port index 0-3.
-        port: u8,
-        /// Value written.
-        value: u8,
+    /// Hand the APU to the actor and advance the S-SMP by `clocks` master
+    /// clocks, stopping exactly at the S-CPU clock.
+    Advance {
+        /// The APU, owned by the scheduler between advances.
+        apu: Box<Apu>,
+        /// Master clocks elapsed since the previous advance.
+        clocks: u32,
+        /// S-CPU master clock at the start of the access.
+        clock: u64,
+        /// Master clock rate paired with `clock`.
+        rate: u64,
     },
-    /// S-CPU read of a `$2140-$2143` latch while the read is suspended.
-    PortRead {
-        /// Port index 0-3.
-        port: u8,
-    },
-    /// Stop the actor (the scheduler drops it).
-    Stop,
 }
 
 /// Output from the S-SMP actor coroutine.
 #[derive(Debug)]
 pub enum ApuOutput {
-    /// The S-CPU must run to this master clock before the `$F4-$F7` read can
-    /// sample the port.
-    SyncCpu {
-        /// Master clock the S-CPU must reach.
+    /// The S-SMP stopped at a clock boundary (or mid-instruction after a
+    /// resolved `$F4-$F7` read); the actor hands the APU back.
+    Stopped(Box<Apu>),
+    /// The S-SMP is parked at a `$F4-$F7` read. Run the S-CPU until `target`,
+    /// then advance again to resolve the read.
+    Parked {
+        /// The APU, owned by the scheduler while parked.
+        apu: Box<Apu>,
+        /// Master clock the S-CPU must reach before the read can sample.
         target: u64,
     },
-    /// Value of a `$2140-$2143` latch requested with `PortRead`.
-    PortValue {
-        /// Value of the requested port.
-        value: u8,
-    },
-    /// An instruction completed; the actor hands the APU back.
-    Stopped(Box<Apu>),
 }
 
 /// Build the S-SMP actor coroutine.
-pub fn new_apu_coroutine() -> corosensei::Coroutine<ApuInput, ApuOutput, ()> {
-    corosensei::Coroutine::new(|yielder, mut input| {
-        let mut apu = match input {
-            ApuInput::Start(apu) => apu,
-            _ => unreachable!("APU actor resumed without an APU"),
-        };
+pub fn new_apu_coroutine() -> ApuCoroutine {
+    corosensei::Coroutine::new(|yielder, input| {
+        let ApuInput::Advance {
+            apu,
+            clocks,
+            clock,
+            rate,
+        } = input;
+        let mut apu = apu;
+        let (mut clocks, mut clock, mut rate) = (clocks, clock, rate);
         loop {
-            let rate = apu.master_clock_rate;
-            let spc_pc = apu.spc.pc;
-            let page_flag = apu.spc.flags.page;
-            let mut bus = CoroApuBus {
-                ram: &mut apu.ram[..],
-                ipl: &apu.ipl,
-                ipl_loaded: apu.ipl_loaded,
-                iplrom_enable: &mut apu.iplrom_enable,
-                ram_writable: &mut apu.ram_writable,
-                ram_disable: &mut apu.ram_disable,
-                timers_enable: &mut apu.timers_enable,
-                timers_disable: &mut apu.timers_disable,
-                internal_wait: &mut apu.internal_wait,
-                external_wait: &mut apu.external_wait,
-                timers: &mut apu.timers,
-                dsp_address: &mut apu.dsp_address,
-                dsp: &mut apu.dsp,
-                smp_clock: &mut apu.smp_clock,
-                dsp_clock: &mut apu.dsp_clock,
-                samples: &mut apu.samples,
-                apu_ports: &mut apu.apu_ports,
-                cpu_ports: &mut apu.cpu_ports,
-                aux4: &mut apu.aux4,
-                aux5: &mut apu.aux5,
-                timer_targets: &mut apu.timer_targets,
-                page_flag,
-                spc_pc,
-                yielder,
-                master_clock_rate: rate,
+            let output = if apu.advance_master_clock(clocks, clock, rate) {
+                let target = apu.smp_master_clock(rate);
+                ApuOutput::Parked { apu, target }
+            } else {
+                ApuOutput::Stopped(apu)
             };
-            apu.spc.step(&mut bus);
-            apu.instructions += 1;
-            input = yielder.suspend(ApuOutput::Stopped(apu));
-            apu = match input {
-                ApuInput::Resume(apu) | ApuInput::Start(apu) => apu,
-                ApuInput::Stop
-                | ApuInput::Sync
-                | ApuInput::PortWrite { .. }
-                | ApuInput::PortRead { .. } => {
-                    unreachable!("APU actor resumed without an APU")
-                }
-            };
+            let ApuInput::Advance {
+                apu: next,
+                clocks: c,
+                clock: k,
+                rate: r,
+            } = yielder.suspend(output);
+            apu = next;
+            clocks = c;
+            clock = k;
+            rate = r;
         }
     })
-}
-
-/// SPC700 bus used by the actor. Implements the same wait-state/timer/DSP
-/// ordering as [`ApuBus`], but yields at the `$F4-$F7` sample.
-#[allow(missing_docs)]
-struct CoroApuBus<'a> {
-    ram: &'a mut [u8],
-    ipl: &'a [u8; IPL_SIZE],
-    ipl_loaded: bool,
-    iplrom_enable: &'a mut bool,
-    ram_writable: &'a mut bool,
-    ram_disable: &'a mut bool,
-    timers_enable: &'a mut bool,
-    timers_disable: &'a mut bool,
-    internal_wait: &'a mut u8,
-    external_wait: &'a mut u8,
-    timers: &'a mut [Timer; 3],
-    dsp_address: &'a mut u8,
-    dsp: &'a mut Dsp,
-    smp_clock: &'a mut u128,
-    dsp_clock: &'a mut u128,
-    samples: &'a mut VecDeque<Sample>,
-    apu_ports: &'a mut [u8; 4],
-    cpu_ports: &'a mut [u8; 4],
-    aux4: &'a mut u8,
-    aux5: &'a mut u8,
-    timer_targets: &'a mut [u8; 3],
-    page_flag: bool,
-    spc_pc: u16,
-    yielder: &'a corosensei::Yielder<ApuInput, ApuOutput>,
-    master_clock_rate: u64,
-}
-
-impl CoroApuBus<'_> {
-    fn wait_selector(&self, address: Option<u16>) -> u8 {
-        match address {
-            None => *self.internal_wait,
-            Some(address)
-                if address & 0xFFF0 == 0x00F0 || (address >= 0xFFC0 && *self.iplrom_enable) =>
-            {
-                *self.internal_wait
-            }
-            _ => *self.external_wait,
-        }
-        .min(3)
-    }
-
-    fn step_dsp(&mut self, clocks: u32) {
-        *self.smp_clock += u128::from(clocks) * SMP_SCALAR;
-        while *self.dsp_clock < *self.smp_clock {
-            if let Some(sample) = self.dsp.tick(self.ram) {
-                self.samples.push_back(sample);
-                if self.samples.len() > 16_384 {
-                    self.samples.pop_front();
-                }
-            }
-            *self.dsp_clock += DSP_TICK;
-        }
-    }
-}
-
-impl SpcBus for CoroApuBus<'_> {
-    fn advance(&mut self, clocks: u32) {
-        for (index, timer) in self.timers.iter_mut().enumerate() {
-            let frequency = if index == 2 { 16 } else { 128 };
-            timer.step(clocks, frequency, *self.timers_enable, *self.timers_disable);
-        }
-    }
-
-    fn step_clock(&mut self, clocks: u32) {
-        self.step_dsp(clocks);
-    }
-
-    fn wait_cycles(&mut self, address: Option<u16>) -> u32 {
-        const CYCLE_WAIT: [u32; 4] = [1, 2, 5, 10];
-        CYCLE_WAIT[usize::from(self.wait_selector(address))]
-    }
-
-    fn timer_cycles(&mut self, address: Option<u16>) -> u32 {
-        const TIMER_WAIT: [u32; 4] = [2, 4, 8, 16];
-        TIMER_WAIT[usize::from(self.wait_selector(address))]
-    }
-
-    fn split_port_read(&mut self, address: u16) -> bool {
-        address & 0xFFFC == 0x00F4
-    }
-
-    fn defer_io_reads(&self) -> bool {
-        true
-    }
-
-    fn read(&mut self, address: u16) -> u8 {
-        if (0xF4..=0xF7).contains(&address) {
-            if std::env::var_os("APU_ACTOR_LOG").is_some() {
-                eprintln!(
-                    "AR {:04X} <- {:02X} smp={} ",
-                    address,
-                    self.apu_ports[usize::from(address - 0xF4)],
-                    (*self.smp_clock / SMP_SCALAR)
-                );
-            }
-            let target = (*self.smp_clock / SMP_SCALAR) as u64 * self.master_clock_rate / 2_050_560;
-            // Suspend at the sample point; the scheduler runs the S-CPU to
-            // `target`. Port commands may arrive while suspended: a write
-            // latches immediately, a read reports the latch value and the
-            // scheduler resumes with `Sync`.
-            let mut done = false;
-            while !done {
-                match self.yielder.suspend(ApuOutput::SyncCpu { target }) {
-                    ApuInput::Sync | ApuInput::Resume(_) | ApuInput::Stop | ApuInput::Start(_) => {
-                        done = true
-                    }
-                    ApuInput::PortWrite { port, value } => {
-                        self.apu_ports[usize::from(port & 3)] = value;
-                    }
-                    ApuInput::PortRead { port } => {
-                        // CPU-side read of `$2140-$2143`: the S-SMP output latch
-                        // (`io.cpu0-3`), not the CPU->SMP input latch.
-                        let value = self.cpu_ports[usize::from(port & 3)];
-                        match self.yielder.suspend(ApuOutput::PortValue { value }) {
-                            ApuInput::Sync => done = true,
-                            ApuInput::PortWrite { port, value } => {
-                                self.apu_ports[usize::from(port & 3)] = value;
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            return self.apu_ports[usize::from(address - 0xF4)];
-        }
-        match address {
-            0xF0 | 0xF1 | 0xFA | 0xFB | 0xFC => 0,
-            0xF2 => *self.dsp_address,
-            0xF3 => self.dsp.read(*self.dsp_address),
-            0xF8 => *self.aux4,
-            0xF9 => *self.aux5,
-            0xFD..=0xFF => {
-                let timer = &mut self.timers[usize::from(address - 0xFD)];
-                let value = timer.stage3;
-                timer.stage3 = 0;
-                value
-            }
-            _ => {
-                if self.ipl_loaded && *self.iplrom_enable && address >= 0xFFC0 {
-                    self.ipl[usize::from(address & 0x3F)]
-                } else if *self.ram_disable {
-                    0x5A
-                } else {
-                    self.ram[usize::from(address)]
-                }
-            }
-        }
-    }
-
-    fn write(&mut self, address: u16, value: u8) {
-        if *self.ram_writable && !*self.ram_disable {
-            self.ram[usize::from(address)] = value;
-        }
-        match address {
-            0xF0 => {
-                if self.page_flag {
-                    return;
-                }
-                *self.timers_disable = value & 0x01 != 0;
-                *self.ram_writable = value & 0x02 != 0;
-                *self.ram_disable = value & 0x04 != 0;
-                *self.timers_enable = value & 0x08 != 0;
-                *self.external_wait = (value >> 4) & 0x03;
-                *self.internal_wait = (value >> 6) & 0x03;
-                for timer in self.timers.iter_mut() {
-                    timer.synchronize(*self.timers_enable, *self.timers_disable);
-                }
-            }
-            0xF1 => {
-                for (index, timer) in self.timers.iter_mut().enumerate() {
-                    let enable = value & (1 << index) != 0;
-                    let rising = enable && !timer.enable;
-                    timer.enable = enable;
-                    if rising != (index == 2) {
-                        timer.stage2 = 0;
-                        timer.stage3 = 0;
-                    }
-                }
-                if value & 0x10 != 0 {
-                    self.apu_ports[0] = 0;
-                    self.apu_ports[1] = 0;
-                }
-                if value & 0x20 != 0 {
-                    self.apu_ports[2] = 0;
-                    self.apu_ports[3] = 0;
-                }
-                *self.iplrom_enable = value & 0x80 != 0;
-            }
-            0xF2 => *self.dsp_address = value,
-            0xF3 => {
-                self.dsp.set_debug_pc(self.spc_pc);
-                self.dsp.set_debug_clock(*self.smp_clock);
-                self.dsp.write(*self.dsp_address, value);
-            }
-            0xF4..=0xF7 => self.cpu_ports[usize::from(address - 0xF4)] = value,
-            0xF8 => *self.aux4 = value,
-            0xF9 => *self.aux5 = value,
-            0xFA..=0xFC => {
-                self.timer_targets[usize::from(address - 0xFA)] = value;
-                self.timers[usize::from(address - 0xFA)].target = value;
-            }
-            _ => {}
-        }
-    }
-
-    fn idle(&mut self) {}
 }
 
 #[cfg(test)]
 mod actor_tests {
     use super::*;
 
-    fn step(
-        coro: &mut corosensei::Coroutine<ApuInput, ApuOutput, ()>,
-        input: ApuInput,
-    ) -> (ApuOutput, bool) {
-        match coro.resume(input) {
-            corosensei::CoroutineResult::Yield(out) => (out, false),
-            corosensei::CoroutineResult::Return(()) => (ApuOutput::SyncCpu { target: 0 }, true),
-        }
-    }
-
-    #[test]
-    fn actor_yields_at_the_port_sample_and_resumes() {
+    /// Seed an APU whose `$200` program reads `$F4` and stores it at `$00`.
+    fn port_read_program() -> Apu {
         let mut apu = Apu::new();
         // E4 F4: mov a,$F4 ; C4 00: mov $00,a ; FF: stop
         apu.ram[0x200..0x205].copy_from_slice(&[0xE4, 0xF4, 0xC4, 0x00, 0xFF]);
         apu.spc.pc = 0x0200;
         apu.apu_ports[0] = 0x5A;
-
-        let mut coro = new_apu_coroutine();
-        // First instruction records the direct-page $F4 read as pending.
-        let (out, _) = step(&mut coro, ApuInput::Start(Box::new(apu)));
-        let a = match out {
-            ApuOutput::Stopped(a) => a,
-            other => panic!("expected Stopped, got {other:?}"),
-        };
-        // Draining the pending read yields at the sample point.
-        let (out, _) = step(&mut coro, ApuInput::Resume(a));
-        assert!(
-            matches!(out, ApuOutput::SyncCpu { .. }),
-            "expected SyncCpu, got {out:?}"
-        );
-        // Resume with the S-CPU having reached the sample; the read returns.
-        let (out, _) = step(&mut coro, ApuInput::Sync);
-        let a = match out {
-            ApuOutput::Stopped(a) => a,
-            other => panic!("expected Stopped, got {other:?}"),
-        };
-        // Next instruction stores A (the $F4 latch) into $00.
-        let (out, _) = step(&mut coro, ApuInput::Resume(a));
-        let a = match out {
-            ApuOutput::Stopped(a) => a,
-            other => panic!("expected Stopped, got {other:?}"),
-        };
-        assert_eq!(a.ram[0], 0x5A);
+        apu
     }
-}
 
-#[cfg(test)]
-mod actor_port_tests {
-    use super::*;
+    const RATE: u64 = 21_477_272;
 
-    fn step(
-        coro: &mut corosensei::Coroutine<ApuInput, ApuOutput, ()>,
-        input: ApuInput,
-    ) -> ApuOutput {
-        match coro.resume(input) {
-            corosensei::CoroutineResult::Yield(out) => out,
+    fn clocks() -> u32 {
+        // Enough master clocks for about 40 S-SMP clocks (the test program is
+        // shorter than that).
+        u32::try_from(RATE * 40 / 2_050_560).unwrap()
+    }
+
+    /// Run one advance, returning the `Apu` and the park target if parked.
+    fn park(coro: &mut ApuCoroutine, apu: Box<Apu>, clock: u64) -> (Box<Apu>, Option<u64>) {
+        match coro.resume(ApuInput::Advance {
+            apu,
+            clocks: clocks(),
+            clock,
+            rate: RATE,
+        }) {
+            corosensei::CoroutineResult::Yield(ApuOutput::Parked { apu, target }) => {
+                (apu, Some(target))
+            }
+            corosensei::CoroutineResult::Yield(ApuOutput::Stopped(apu)) => (apu, None),
             corosensei::CoroutineResult::Return(()) => panic!("actor returned"),
         }
     }
 
+    fn advance(coro: &mut ApuCoroutine, apu: Box<Apu>, clock: u64) -> Box<Apu> {
+        match coro.resume(ApuInput::Advance {
+            apu,
+            clocks: clocks(),
+            clock,
+            rate: RATE,
+        }) {
+            corosensei::CoroutineResult::Yield(ApuOutput::Stopped(apu)) => apu,
+            other => panic!("expected Stopped, got {other:?}"),
+        }
+    }
+
     #[test]
-    fn port_commands_apply_while_the_read_is_suspended() {
-        let mut apu = Apu::new();
-        apu.ram[0x200..0x205].copy_from_slice(&[0xE4, 0xF4, 0xC4, 0x00, 0xFF]);
-        apu.spc.pc = 0x0200;
-        apu.cpu_ports[0] = 0x33;
+    fn actor_parks_at_the_port_sample_and_resumes() {
         let mut coro = new_apu_coroutine();
-        let a = match step(&mut coro, ApuInput::Start(Box::new(apu))) {
-            ApuOutput::Stopped(a) => a,
-            other => panic!("{other:?}"),
-        };
-        assert!(matches!(
-            step(&mut coro, ApuInput::Resume(a)),
-            ApuOutput::SyncCpu { .. }
-        ));
-        // The CPU writes the latch while the S-SMP is suspended at the sample.
-        assert!(matches!(
-            step(
-                &mut coro,
-                ApuInput::PortWrite {
-                    port: 0,
-                    value: 0x77
-                }
-            ),
-            ApuOutput::SyncCpu { .. }
-        ));
-        let value = match step(&mut coro, ApuInput::PortRead { port: 0 }) {
-            ApuOutput::PortValue { value } => value,
-            other => panic!("{other:?}"),
-        };
-        assert_eq!(value, 0x33);
-        let a = match step(&mut coro, ApuInput::Sync) {
-            ApuOutput::Stopped(a) => a,
-            other => panic!("{other:?}"),
-        };
-        let a = match step(&mut coro, ApuInput::Resume(a)) {
-            ApuOutput::Stopped(a) => a,
-            other => panic!("{other:?}"),
-        };
-        assert_eq!(a.ram[0], 0x77);
+        let (apu, target) = park(&mut coro, Box::new(port_read_program()), 0);
+        let target = target.expect("the $F4 read must park the S-SMP");
+        // The next advance with the S-CPU at the sample resolves the read and
+        // runs the following instruction.
+        let apu = advance(&mut coro, apu, target);
+        assert_eq!(apu.ram[0], 0x5A);
+    }
+
+    #[test]
+    fn port_writes_apply_while_the_read_is_parked() {
+        let mut coro = new_apu_coroutine();
+        let (mut apu, target) = park(&mut coro, Box::new(port_read_program()), 0);
+        let target = target.expect("the $F4 read must park the S-SMP");
+        // The S-CPU writes the latch while the S-SMP is parked; the read
+        // samples it when the next advance resolves.
+        apu.cpu_write(0, 0x77);
+        assert_eq!(apu.cpu_read(0), 0x00);
+        let apu = advance(&mut coro, apu, target);
+        assert_eq!(apu.ram[0], 0x77);
+    }
+
+    #[test]
+    fn actor_resumes_a_serialized_mid_instruction_state() {
+        // Park mid-instruction, serialize, and rebuild the actor from the
+        // restored `Apu`: the S-SMP plan position must resume exactly.
+        let mut coro = new_apu_coroutine();
+        let (apu, target) = park(&mut coro, Box::new(port_read_program()), 0);
+        let target = target.expect("the $F4 read must park the S-SMP");
+        let bytes = bincode::serialize(&*apu).expect("serialize");
+        let restored: Apu = bincode::deserialize(&bytes).expect("deserialize");
+        let mut coro = new_apu_coroutine();
+        let apu = advance(&mut coro, Box::new(restored), target);
+        assert_eq!(apu.ram[0], 0x5A);
     }
 }
