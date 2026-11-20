@@ -4133,3 +4133,40 @@ drives all five windows through the bus and round-trips a save state.
 Neither device has a local reference ROM, so both are verified by the protocol
 unit/system suites rather than an oracle pixel/audio sweep. They do not affect
 any existing title (they only activate on their board types or attached media).
+
+## Residual driver phase after the port-read sync (2026-11-19)
+
+The parked `$F4-$F7` read moved the initial IPL divergence 17x later but did
+not change the retail PCM metrics, so the remaining differences were traced
+past the upload loop.
+
+**F-Zero** (first audio difference at stereo sample 91,947, 2.87 s) was
+re-traced with the all-voice DSP trace on both cores:
+
+```
+first state difference       row 84,786
+  all voices                 _keyoff: ours 0, ares 1
+first echo-input difference  row 86,374
+first echo-output difference row 89,380
+first audio difference       row 91,947
+```
+
+Every voice's envelope, pitch, BRR address/offset, Gaussian offset and 12-word
+BRR buffer match; only the KOFF latch appears one sample earlier in ares. That
+KOFF reaches the echo send path and finally the echo input/output, so the
+audible difference is a one-sample driver write placement, not an echo or voice
+arithmetic bug.
+
+**Super Mario All-Stars** (first audio difference 3.51 s) is the same class: the
+clocked upload trace's remaining divergence is IPL `$FFE9` (`bpl` after
+`inc $01`, the upload destination page count), and the first audio difference
+is a voice-4 attack already two envelope steps ahead in ares.
+
+So the remaining retail gap is the *runtime* sound-driver handshake: the IPL
+upload gets one instruction further but the driver's later CPU/S-SMP poll still
+shifts KON/KOFF by one sample. The forward sync currently resolves a parked
+`$F4-$F7` read at CPU-instruction granularity; ares' `synchronize(cpu)` can
+resolve it at the exact thread-clock point (the CPU thread yields mid-instruction
+in ares, while this core runs the S-CPU as a non-resumable call stack). That
+resumable-CPU refinement is the next audio item; DKC and Zelda remain bit-exact
+and no other title moved.
