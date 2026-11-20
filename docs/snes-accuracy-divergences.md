@@ -4059,6 +4059,13 @@ remains the best measured parity and was restored; the mutual run cannot be
 approximated at request granularity and needs the coroutine that can suspend
 the S-SMP inside the read.
 
+A credit-preserving mutual variant (resume through `sync_apu_to` so the owed
+master clocks are not duplicated) kept all four exact titles at 100.0000% on
+the scanline+port+DMA base, but still measured SMW 47.1934%, CV4 81.4670%,
+SMAS 38.6331%, CT 26.7160% and MMX2 99.4424% - worse than the per-access model
+for every divergent title. The scanline base is therefore not a better carrier
+for the remaining drivers by itself; the per-access model is restored.
+
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
 DSP is already ticked one micro-step per two S-SMP clocks inside the access's
