@@ -5142,3 +5142,42 @@ So MMX2's residual starts in the CPU/CX4 boot path (the code before `$83C5`,
 which depends on the CX4 self-test state), unlike CV4/CT where the divergence is
 inside the IPL upload loop itself. The next MMX2 step is to compare the boot
 path and CX4 status reads before `$83C5` between ares and ours.
+
+## Port synchronize (ares readAPU/writeAPU) (2026-11-20)
+
+Added ares' `Thread::synchronize(smp)` to the S-CPU port accesses: run the
+S-SMP forward to the S-CPU clock before `$2140-$2143` reads and writes
+(`Apu::synchronize_to`, `ApuInput::Synchronize`). The credit-based per-access
+advance can stop fractionally short of the clock, so a port write completed in
+the access may be missed; this was the MMX2 extra-`$8447`-poll mechanism.
+
+Measured (600 frames, 639,656-sample window):
+
+```
+                      credit (current)   both syncs     read-only sync
+dkc                   0 (100.0000%)      173,620 72.86%  173,620 72.86%
+zelda                 0                 29,913 95.32%    29,913 95.32%
+fzero                 0                355,081 44.49%   355,081 44.49%
+super metroid         0                 0 100.0000%     161,390 74.77%
+super mario world     0                 16,177 97.47%    16,177 97.47%
+castlevania iv        11,269            6,206 99.03%     27,273 95.74%
+super mario all-stars 308,432           0 100.0000%      0 100.0000%
+chrono trigger        384,266           270,213 57.76%   282,406 55.85%
+```
+
+With both syncs SMAS becomes **bit-exact** and CV4/CT improve substantially; the
+write sync also cancels the read sync's regression on Super Metroid
+(74.77 -> 100.0000%). But DKC/Zelda/F-Zero/SMW regress, so the gate forbids
+keeping it.
+
+A whole-instruction-overshoot variant (finish the current instruction after
+reaching the clock) was also built; it is pathologically slow at every port
+access (>30 minutes for the 8-title sweep without finishing) and was abandoned.
+
+The mechanism and instant match ares (`readAPU` at access start + wait - 4,
+`writeAPU` at the access end), so the regression must be in the clock values
+compared: our `smp_clock_at_position()` versus ares' `smp.clock()` in the
+scheduler's fixed-point base. The next step is to log both at the same port
+accesses (`ARES_PORT_SYNC_LOG` already prints `smp0`/`smp1` per access) and
+align the comparison; the prize is SMAS plus near-exact CV4/CT without losing
+the four exact titles.
