@@ -4817,3 +4817,39 @@ reaches a `$F4-$F7` sample while parked, leaving non-parked slices at the
 current per-access ordering. That requires the drain to call back into the
 driver at the sample (a per-sample "deliver the pending write" hook), which the
 actor can support by yielding `Parked` before the write and resuming after it.
+
+## Absolute S-SMP I/O reads (2026-11-20) - Super Mario World exact
+
+The 1.122 s port race is closed. The SPC700 deferred I/O reads only for
+*direct-page* operands (`effective & 0xFFF0 == 0x00F0` with P=0). Super Mario
+World's sound driver polls with `CMP Y,$00F4` (`0x5E`, absolute), which took the
+eager `absolute_read` path: the latch was sampled while the instruction was
+being recorded, before the access clock and before the S-CPU's in-flight
+`$2140` write, so the poll observed the previous byte and every subsequent DSP
+write ran one micro-step late.
+
+`Pending::AbsoluteRead` extends the same deferral to absolute `$F0-$FF` reads.
+The sample is then resolved by `drain_unit` at its own access clock, where the
+park/synchronize logic delivers the pending `$2140-$2143` write exactly as
+ares' `readIO` does.
+
+Result (1,500 frames, 700,000 interleaved samples / 350,000 stereo frames):
+
+```
+Donkey Kong Country       0 differing  100.0000%
+Zelda: A Link to the Past 0            100.0000%
+F-Zero                    0            100.0000%
+Super Metroid             0            100.0000%
+Super Mario World         0            100.0000%   (was 73,874 / 89.4466%)
+Super Castlevania IV  70,913             89.8696%  (unchanged)
+Super Mario All-Stars 325,801            53.4570%  (was 313,782)
+Chrono Trigger        444,363            36.5196%  (unchanged)
+```
+
+204 lib tests, fmt/clippy clean, 212/212 test-ROM baseline identical.
+
+CV4's first DSP write is already 22 micro-steps late at the first register write
+(3,557,684 vs ares 3,557,662) and its write count over 300 frames is 1,429 vs
+ares 2,313, so its driver's boot handshake still diverges; that is the next
+lead. SMAS moved slightly worse (its stream now starts from the same corrected
+sample point but still differs), and CT is unchanged.

@@ -47,10 +47,10 @@ Mega Man X2 9996/10000 with only three proved torn presents excluded. The 212
 test-ROM baseline and the `unko-snes` test suite are green. Retail-music audio
 parity is measured per title with the exact ares DSP thread clocks, the
 186-clock S-CPU reset phase and ares' power-on APU RAM/DSP-register pattern:
-Donkey Kong Country, Zelda, F-Zero and Super Metroid are bit-exact (0 differing
-samples over 350,000 stereo frames), Super Mario World 89.45%, Mega Man X2
-99.44% (its CX4 firmware must be supplied via `CX4_ROM`), Super Mario All-Stars
-55.17% and Chrono Trigger 36.52% (offset -4). The core runs the S-SMP in a
+Donkey Kong Country, Zelda, F-Zero, Super Metroid and Super Mario World are
+bit-exact (0 differing samples over 350,000 stereo frames); Mega Man X2 99.44%
+(its CX4 firmware must be supplied via `CX4_ROM`), Super Mario All-Stars 53.46%
+and Chrono Trigger 36.52% (offset -4). The core runs the S-SMP in a
 clock-granular peer coroutine that is bit-identical to the per-access model on
 every measured title. The remaining residuals are tracked in the SNES ledger.
 

@@ -49,7 +49,7 @@ Donkey Kong Country / Chrono Trigger 1200/1200, Mega Man X3 and Star Fox
 excluded. The 212-entry test-ROM baseline and the whole crate test suite pass.
 
 Retail-music S-DSP audio is sample-exact for Donkey Kong Country, Zelda,
-F-Zero and Super Metroid over 350,000 stereo frames (ares' power-on APU RAM and
+F-Zero, Super Metroid and Super Mario World over 350,000 stereo frames (ares' power-on APU RAM and
 DSP-register pattern is reproduced); Mega Man X2 is 99.44% with its CX4
 firmware installed, while Super Mario World, Super Mario All-Stars and Chrono
 Trigger still differ. The S-SMP runs in a clock-granular peer coroutine that
