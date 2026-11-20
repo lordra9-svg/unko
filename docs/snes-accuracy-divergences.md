@@ -3988,10 +3988,20 @@ ares checkout; the ares hook is not part of this repository).
   the write position; the same class of one-sample latch timing is the open
   item below.
 - **Super Mario World, first divergence at stereo sample 142,492 (4.45 s).**
-  The KON (`$4C`) write lands at micro-step 4,559,360 vs ares' 4,559,357, and
+  The KON (`$4C`) write lands at micro-step 4,559,361 vs ares' 4,559,357, and
   the new voice's `gaussianOffset`/`brrAddress` are one pitch accumulation /
   one BRR block apart, so the note attack starts one sample differently before
-  the streams converge again.
+  the streams converge again. Re-measured with the current exact clocks: the
+  full write address/value sequence is identical; only the micro-step phase
+  differs (ours `4,559,361 mod 32 = 1`, ares `4,559,357 mod 32 = 29`). A KON at
+  step 29 is consumed by the same sample's `misc30`, while step 1 is not, so
+  the attack slips by one sample. The offset is produced by the S-SMP/CPU
+  interleaving, not by the DSP arithmetic.
+  - Tested and reverted: letting the S-SMP run whole instructions and overshoot
+    the S-CPU clock (ares' `Thread::synchronize(smp)` granularity) kept DKC
+    exact but regressed F-Zero to 25.1250%, Super Mario World to 47.1934% and
+    Mega Man X2 to 67.4529%. The exact-clock model is the closest match; the
+    residual needs the full mutual coroutine, not a coarser step granularity.
 
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
