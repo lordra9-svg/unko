@@ -5331,3 +5331,12 @@ aggregate clocks.
 This leaves the remaining CV4/CT/SMAS/MMX2 difference in the CPU -> SMP switch
 count per frame (2,300) and where those switches land inside a line - the only
 quantity the trace exposes that the current model does not reproduce.
+
+**PROFILE_PERFORMANCE confirmed.** The reference ares build defines
+`PROFILE_PERFORMANCE` (`ares/CMakeLists.txt:29`), which disables
+`CPU::step`'s per-step coprocessor synchronization; coprocessors are then run
+only from `CPU::scanline()` at Hcounter 0. Our core already implements exactly
+that (`cx4_scanline` is set at the H=0 dot and the CX4 is advanced in one chunk
+per line to the end of the access), so MMX2's residual is not a CX4 stepping
+difference. The only other `PROFILE_PERFORMANCE` conditional in the SNES core is
+that one, so the S-SMP/S-DSP schedule is unaffected by the build profile.
