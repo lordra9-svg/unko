@@ -5275,3 +5275,28 @@ That leaves the sub-line interaction: the exact master clock at which an S-SMP
 port access commits relative to an S-CPU port access within the same line, and
 the DSP's register-write micro-step. CV4/CT's piecewise-constant per-note tick
 offsets and MMX2's boot-path difference are the concrete instances.
+
+## S-SMP PC at H=0: fetch pointer vs instruction start (2026-11-20)
+
+Logged our S-SMP PC at every Hcounter-0 point and compared it with ares'
+`ARES_SCANLINE_LOG` `smppc=`. The literal match rate is low (SMW 5,146 of
+15,678; DKC 70 of 10,136), but the offset distribution shows why: ours - ares is
+0 for 5,146 points, +1 for 4,034, +2 for 2,331, +3 for 637 on SMW. Our
+`Spc700::pc` is the fetch pointer, which advances past the opcode and operands
+during the instruction; ares `r.pc` is the instruction start. The comparison is
+therefore a logging-definition mismatch, not a divergence, and the previous
+line-granular clock comparison (mean drift ~0 over 15,678 points) already shows
+the instruction stream is timing-identical at every line.
+
+To make the PC comparison meaningful, `record_instruction`'s `entry_pc` must be
+exposed (it is currently only stored in the debug trace), or the H=0 point must
+be snapped to the next instruction boundary. Neither changes the emulation.
+
+This closes the line-granularity checks: clock, sync points, sync rate and base
+all match ares. The remaining difference is the within-line execution instant of
+the S-SMP (ares runs it in bursts at synchronization points, our per-access model
+runs it continuously). The lagging-burst model was implemented and fails the
+gate (DKC only), so the true ares behaviour lies between the two and cannot be
+reached with the current scheduler abstraction: it needs the exact
+`co_switch`/`Thread::step` instants within a line, which the existing hooks do
+not expose.
