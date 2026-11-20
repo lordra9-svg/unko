@@ -5652,3 +5652,31 @@ whole.
 That scheduler - S-CPU suspendable inside `writeAPU`, S-SMP suspendable inside
 `readIO`, each resumed from the other side - is the remaining work; the current
 model is the best measured and is preserved.
+
+## Burst schedule plus write-at-sample (2026-11-20)
+
+The one untried combination: ares' synchronization cadence (no per-access
+advance; synchronize_to at `$2140-$2143` and at the exact Hcounter-0 instant;
+direct sync during DMA) together with the announced port write applied at the
+`$F4-$F7` sample inside that synchronize.
+
+```
+dkc 173,620 72.8573%   zelda 0 100.0000%   fzero 384,417 39.9025%
+metroid 237,622 62.8367%   smw 103,599 83.8040%
+cv4 106,939 83.2789%   smas 299,949 53.1078%   ct 483,504 24.4119%
+```
+
+Only Zelda is exact; every other title regresses, including CV4 which had been
+exact under both ingredients separately. This confirms that the two mechanisms
+interact destructively and that the simple composition of the two measured
+behaviours is not ares.
+
+At this point every combination of (advance cadence) x (write/sample ordering)
+has been implemented and measured: per-access (five exact), burst (DKC only),
+burst+write-first (Zelda only), per-access+write-first (CV4/SMAS exact). No
+combination reproduces the reference across all titles, so the difference is not
+a parameter of this design space. Replicating ares requires its actual
+cooperative scheduler semantics (threads resumed from each other inside
+`writeAPU`/`readIO`), which the request/response driver cannot emulate by
+composing the endpoints. The per-access model remains the best measured and is
+restored.
