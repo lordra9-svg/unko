@@ -4887,3 +4887,23 @@ only after the S-CPU delivers the write for the access that contains the sample
 (the write arrives as the next bus request), i.e. treat the sample as pending
 until the access's `$2140-$2143` write is delivered, without shifting the
 non-I/O slices.
+
+**Hold-across-the-boundary experiment (2026-11-20).** The deferred sample at
+CV4's `$FFDA` resolves at master clock 28,991,478 while the S-CPU's `$2140=00`
+write commits at 28,991,500 (22 clocks later), so the sample sees `FF` and the
+poll runs once more. A one-shot hold was implemented: when a deferred `$F4-$F7`
+sample is within 24 clocks of the S-CPU clock, `drain_unit` stops before the
+sample, the actor yields `Parked`, the driver delivers the next bus request (the
+write) while holding the `Apu`, and the flush then resolves the sample with the
+new latch.
+
+The five exact titles stayed 0 differing, but CV4 was unchanged
+(11,269 / 639,656) and the hold's `HLD` log never fired: at the pre-sample
+check `port_read_near()` sees no pending direct read, while `resume_deferred_read`
+one unit later does. The pending-read state used by `drain_unit`'s park check is
+therefore not visible at the position where the hold was inserted.
+
+Next: place the hold at the sample-taking site itself (inside the unit that
+would call `resume_deferred_read`) rather than one unit earlier, and verify the
+`HLD` log fires before measuring. The five-title gate remains the acceptance
+condition.
