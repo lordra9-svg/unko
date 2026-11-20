@@ -450,10 +450,13 @@ impl Apu {
         start + u128::from(elapsed) * SMP_SCALAR
     }
 
-    /// The S-SMP's scaled clock converted to master clocks.
+    /// The S-SMP's scaled clock converted to master clocks, rounded up so the
+    /// S-CPU running to this clock is not behind the S-SMP (ares compares the
+    /// two thread clocks directly).
     pub fn smp_master_clock(&self, master_clock: u64) -> u64 {
-        let cycles = self.smp_clock_at_position() / SMP_SCALAR;
-        (cycles * u128::from(master_clock) / 2_050_560) as u64
+        let scalar = SCHEDULER_SECOND / u128::from(master_clock);
+        let fixed = self.smp_clock_at_position();
+        u64::try_from(fixed.div_ceil(scalar)).unwrap_or(u64::MAX)
     }
 
     /// Whether the pending deferred read is a `$F4-$F7` port read whose clock
@@ -469,8 +472,12 @@ impl Apu {
         if !(0x00F4..=0x00F7).contains(&effective) {
             return false;
         }
-        let smp_master = self.smp_master_clock(self.master_clock_rate);
-        smp_master > self.cpu_master_clock
+        // ares compares the fixed-point thread clocks (`cpu.clock()` against
+        // `smp.clock()`); flooring to master clocks can stop the S-CPU one
+        // clock early and change which instruction's writes the read sees.
+        let cpu_scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
+        let cpu_fixed = u128::from(self.cpu_master_clock) * cpu_scalar;
+        self.smp_clock_at_position() > cpu_fixed
     }
 
     /// Value currently visible to the SPC700 on `$F4-$F7`.
@@ -728,7 +735,7 @@ impl Apu {
     pub fn advance_master_clock(&mut self, clocks: u32, clock: u64, rate: u64) -> bool {
         const APU_UNIT_NUM: i64 = 2_050_560;
         let den = rate as i64;
-        self.set_master_clock(clock, rate);
+        self.set_master_clock(clock + u64::from(clocks), rate);
         self.apu_credit += i64::from(clocks) * APU_UNIT_NUM;
         while self.apu_credit >= den {
             if self.drain_unit() == 0 {
@@ -737,6 +744,13 @@ impl Apu {
             self.apu_credit -= den;
         }
         false
+    }
+
+    /// Test hook: pre-load master-clock credit so a `$F4-$F7` read parks with
+    /// the S-CPU behind the S-SMP (the only case ares synchronizes the S-CPU).
+    #[cfg(test)]
+    pub(crate) fn add_credit(&mut self, clocks: u32) {
+        self.apu_credit += i64::from(clocks) * 2_050_560;
     }
 }
 
@@ -1572,12 +1586,15 @@ mod actor_tests {
         u32::try_from(RATE * 40 / 2_050_560).unwrap()
     }
 
-    /// Run one advance, returning the `Apu` and the park target if parked.
-    fn park(coro: &mut ApuCoroutine, apu: Box<Apu>, clock: u64) -> (Box<Apu>, Option<u64>) {
+    /// Run one advance with the S-CPU held at clock 0, returning the `Apu` and
+    /// the park target if parked. The credit is pre-loaded because a park only
+    /// happens while the S-SMP is ahead of the S-CPU.
+    fn park(coro: &mut ApuCoroutine, mut apu: Box<Apu>) -> (Box<Apu>, Option<u64>) {
+        apu.add_credit(clocks());
         match coro.resume(ApuInput::Advance {
             apu,
-            clocks: clocks(),
-            clock,
+            clocks: 0,
+            clock: 0,
             rate: RATE,
         }) {
             corosensei::CoroutineResult::Yield(ApuOutput::Parked { apu, target }) => {
@@ -1603,7 +1620,7 @@ mod actor_tests {
     #[test]
     fn actor_parks_at_the_port_sample_and_resumes() {
         let mut coro = new_apu_coroutine();
-        let (apu, target) = park(&mut coro, Box::new(port_read_program()), 0);
+        let (apu, target) = park(&mut coro, Box::new(port_read_program()));
         let target = target.expect("the $F4 read must park the S-SMP");
         // The next advance with the S-CPU at the sample resolves the read and
         // runs the following instruction.
@@ -1614,7 +1631,7 @@ mod actor_tests {
     #[test]
     fn port_writes_apply_while_the_read_is_parked() {
         let mut coro = new_apu_coroutine();
-        let (mut apu, target) = park(&mut coro, Box::new(port_read_program()), 0);
+        let (mut apu, target) = park(&mut coro, Box::new(port_read_program()));
         let target = target.expect("the $F4 read must park the S-SMP");
         // The S-CPU writes the latch while the S-SMP is parked; the read
         // samples it when the next advance resolves.
@@ -1629,7 +1646,7 @@ mod actor_tests {
         // Park mid-instruction, serialize, and rebuild the actor from the
         // restored `Apu`: the S-SMP plan position must resume exactly.
         let mut coro = new_apu_coroutine();
-        let (apu, target) = park(&mut coro, Box::new(port_read_program()), 0);
+        let (apu, target) = park(&mut coro, Box::new(port_read_program()));
         let target = target.expect("the $F4 read must park the S-SMP");
         let bytes = bincode::serialize(&*apu).expect("serialize");
         let restored: Apu = bincode::deserialize(&bytes).expect("deserialize");

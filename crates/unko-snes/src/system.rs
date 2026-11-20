@@ -338,11 +338,36 @@ struct ApuPeer<'a> {
     apu: Option<Box<crate::apu::Apu>>,
     /// Master clock at which the S-SMP parks at a `$F4-$F7` sample read.
     waiting: Option<u64>,
+    /// Master clocks accumulated while parked. ares `Thread::synchronize(cpu)`
+    /// resumes the CPU at an instruction boundary, so the parked read must not
+    /// resolve mid-instruction: the credit is flushed when the S-CPU finishes
+    /// the instruction.
+    parked_clocks: u32,
 }
 impl ApuPeer<'_> {
     /// Advance the S-SMP by `clocks` master clocks at `clock` (ares
     /// `Thread::synchronize`). The S-SMP stops exactly at the S-CPU clock.
     fn advance(&mut self, clocks: u32, clock: u64, rate: u64) {
+        if self.waiting.is_some() {
+            self.parked_clocks = self.parked_clocks.saturating_add(clocks);
+            return;
+        }
+        self.resume_with(clocks, clock, rate);
+    }
+
+    /// Let the parked S-SMP re-check its sample at a CPU instruction boundary.
+    fn flush_parked(&mut self, clock_end: u64, rate: u64) {
+        if self.waiting.is_none() {
+            return;
+        }
+        let clocks = std::mem::take(&mut self.parked_clocks);
+        // `advance_master_clock` compares the S-CPU clock at the *end* of the
+        // stepped window, so hand it the window start.
+        let clock = clock_end.saturating_sub(u64::from(clocks));
+        self.resume_with(clocks, clock, rate);
+    }
+
+    fn resume_with(&mut self, clocks: u32, clock: u64, rate: u64) {
         let apu = self.apu.take().expect("actor is not idle");
         let input = crate::apu::ApuInput::Advance {
             apu,
@@ -362,12 +387,14 @@ impl ApuPeer<'_> {
             _ => unreachable!(),
         }
     }
+
     fn port_read(&mut self, port: u8) -> u8 {
         self.apu
             .as_ref()
             .expect("actor is not idle")
             .cpu_read(usize::from(port))
     }
+
     fn port_write(&mut self, port: u8, value: u8) {
         self.apu
             .as_mut()
@@ -1018,6 +1045,7 @@ impl Snes {
             coro: &mut actor_coro,
             apu: Some(Box::new(std::mem::take(&mut self.apu))),
             waiting: None,
+            parked_clocks: 0,
         };
         // The actor owns the S-SMP for this step; `advance_peripherals` must
         // not tick it a second time.
@@ -1075,7 +1103,11 @@ impl Snes {
                     cycles += instruction_cycles;
                     self.apply_interrupts();
                     // ares runs the S-CPU forward while an S-SMP `$F4-$F7`
-                    // sample is parked beyond the CPU clock.
+                    // sample is parked beyond the CPU clock, and resumes the
+                    // S-SMP only at the S-CPU instruction boundary.
+                    if peer.waiting.is_some() {
+                        peer.flush_parked(self.clock, rate);
+                    }
                     if peer.waiting.is_none() {
                         break;
                     }
