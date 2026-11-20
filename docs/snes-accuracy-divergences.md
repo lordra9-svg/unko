@@ -4015,31 +4015,54 @@ register-write trace now matches ares' `dspTicks` **exactly (delta 0 on every
 write)** for Donkey Kong Country, and DKC's PCM becomes **100.0000% identical
 (0 differing samples over 350,000 stereo frames)**.
 
-Re-running the whole battery with the exact model gives:
+**S-CPU reset phase (2026-11-19).** The next measurement exposed a second
+phase error: `Cpu::reset` modelled ares' reset (`step(132)` plus the
+emulation-mode interrupt sequence, H=186) but `Snes::reset` passed it a bus
+view that did not own the system clock, and then set `self.clock = 0`
+afterwards. The CPU therefore started with `cpu.cycles = 186` while the
+system clock, PPU and APU started at 0: the whole machine ran 186 master clocks
+out of phase with the first S-CPU instruction, which is exactly the IPL
+handshake offset. `Snes::reset` now returns the reset cost and advances the
+rest of the machine by it:
+
+```rust
+let reset_cost = self.cpu.reset(&mut bus);
+drop(bus);
+self.advance_peripherals(reset_cost);
+```
+
+A unit test pins `cost == 186` and `system.clock == cpu.cycles == 186`
+(`reset_costs_the_ares_186_master_clocks`). With the exact DSP thread clocks
+and the reset phase both correct, **Donkey Kong Country and Zelda are now
+100.0000% bit-exact** over 350,000 stereo frames.
+
+Re-running the whole battery (exact model + reset phase) gives:
 
 ```
 Donkey Kong Country       0 differing  100.0000%   (was 226,813 / 67.5981%)
-Chrono Trigger        80,562            88.4911%   (was 151,957 / 78.2919%)
-Super Metroid        199,927            71.4390%   (was 248,565 / 64.4907%)
-Super Mario World     73,874            89.4466%   (was 73,895 / 89.4436%)
-Castlevania IV        76,730            89.0386%   (was 76,746 / 89.0363%)
-F-Zero               524,167            25.1190%   (was 524,169 / 25.1187%)
-Zelda                  1,449            99.7930%   (was 1,175 / 99.8321%)
+Zelda: A Link to the Past 0            100.0000%   (was 1,175 / 99.8321%)
 Mega Man X2            3,912            99.4411%   (was 915 / 99.8693%)
-Super Mario All-Stars 345,375           50.6607%   (was 31,593 / 95.4867%)
+Super Mario World     73,874            89.4466%   (was 73,895 / 89.4436%)
+Castlevania IV        70,913            89.8696%   (was 76,746 / 89.0363%)
+Super Metroid        199,925            71.4393%   (was 248,565 / 64.4907%)
+Chrono Trigger         * first difference 2.36 s (unchanged)
+Super Mario All-Stars  * first difference 3.51 s
+F-Zero                 * first difference 2.87 s
 ```
 
-The four regressions are not a phase error: DKC's write micro-steps match ares
-exactly, and in SMAS the first audio difference is a voice-4 attack already two
-envelope steps ahead in ares. The write trace shows our DSP tick count is one
-ahead of ares at that KON, and the elapsed S-SMP time between two driver writes
-differs by **16 S-SMP cycles** (ours 3,854, ares 3,870). The driver polls the
-DSP data register (`$F3`) in that loop, so one extra poll iteration (16 cycles)
-is the DSP read-visibility phase feeding back into the driver: with the DSP one
-tick ahead, the poll exits one iteration early and the next KON lands a sample
-off. Matching ares' `$F3` read/burst timing (the same scheduler port, now for
-read visibility) is the next step; the exact thread model itself is kept
-because it is the Ares-exact scheduler and makes DKC bit-exact.
+(`*` whole-window counts for the still-divergent titles are alignment-sensitive
+once the stream has drifted; the first-difference time is the stable metric.)
+
+The remaining idle difference is the **S-CPU port-read race**. With the reset
+phase fixed, the clocked S-SMP trace first diverges at IPL `$FFD8` (`ldy $F4;
+bne $FFD6` in the byte-upload loop): ours sees `$F4` as zero one poll iteration
+before ares does. In ares an S-SMP read of `$F4-$F7` calls `synchronize(cpu)`,
+which can run the S-CPU *forward* to the SMP's clock and let a write commit
+inside the read's window. Our per-access model resolves the latch only through
+CPU-side advancement, so the poll race is off by up to one S-SMP instruction.
+That is the remaining architectural item (`$F4-$F7`/`$F3` read visibility),
+not the DSP clocks; the exact thread model and reset phase are kept because
+they make DKC and Zelda bit-exact.
 
 Until then, retail audio is **not** claimed bit-exact; the per-title numbers
 above are the measured baseline, and dense music (F-Zero, Super Metroid, Donkey

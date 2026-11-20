@@ -642,16 +642,16 @@ Validation so far:
 - Retail audio parity was measured for the first time across the reference
   battery with the improved `tools/snes-oracle/diff-audio-raw.py` (loud-probe
   alignment, 700,000 interleaved samples = 350,000 stereo frames) with the
-  exact ares DSP thread clocks: **Donkey Kong Country 0 differing samples
-  (100.0000%)**, Zelda 1,449 (99.7930%), Mega Man X2 3,912 (99.4411%), Super
-  Mario World 73,874 (89.4466%), Super Castlevania IV 76,730 (89.0386%),
-  Chrono Trigger 80,562 (88.4911%), Super Metroid 199,927 (71.4390%), Super
-  Mario All-Stars 345,375 (50.6607%) and F-Zero 524,167 (25.1190%). The exact
-  model matches ares' DSP tick count write-for-write and makes DKC bit-exact;
-  the four remaining regressions versus the previous calibration-free phase are
-  traced to the `$F3` DSP-data read visibility feeding the sound driver's poll
-  loop (16 S-SMP cycles per extra poll iteration), recorded in the divergence
-  ledger as the next scheduler item.
+  exact ares DSP thread clocks and the 186-clock S-CPU reset phase:
+  **Donkey Kong Country and Zelda: A Link to the Past are both 0 differing
+  samples (100.0000%)**, Mega Man X2 3,912 (99.4411%), Super Mario World
+  73,874 (89.4466%), Super Castlevania IV 70,913 (89.8696%) and Super Metroid
+  199,925 (71.4393%). Chrono Trigger, Super Mario All-Stars and F-Zero still
+  diverge (first difference at 2.36 s, 3.51 s and 2.87 s). The exact model
+  matches ares' DSP tick count write-for-write and the reset phase matches
+  ares' H=186 first fetch; the remaining divergence is the S-CPU port-read
+  race (`$F4-$F7`/`$F3` visibility), recorded in the divergence ledger as the
+  next scheduler item.
 
 The PPU is line-based rather than dot-scheduled. **Interlace is implemented**
 (448-line output, odd field on the odd output rows, sprite and hires BG vertical

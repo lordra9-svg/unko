@@ -803,35 +803,44 @@ impl Snes {
         self.hdma_run_done = false;
         self.clock = 0;
         self.apu.debug.set_clock(0);
-        let mut bus = SnesBus {
-            wram: &mut self.wram,
-            cart: &mut self.cart,
-            gsu: &mut self.gsu,
-            dsp1: &mut self.dsp1,
-            cx4: &mut self.cx4,
-            sdd1: &mut self.sdd1,
-            sa1: &mut self.sa1,
-            spc7110: &mut self.spc7110,
-            obc1: &mut self.obc1,
-            msu1: &mut self.msu1,
-            sharp_rtc: &mut self.sharp_rtc,
-            sufami_turbo: &mut self.sufami_turbo,
-            snes_mar: &mut self.snes_mar,
-            snes_refresh: self.refresh_active,
-            apu: &mut self.apu,
-            ppu: &mut self.ppu,
-            dma: &mut self.dma,
-            io: &mut self.io,
-            nmi_enable: &mut self.nmi_enable,
-            nmi_flag: &mut self.nmi_flag,
-            nmi_line: &mut self.nmi_line,
-            nmi_lock: &mut self.nmi_lock,
-            fast_rom: &mut self.fast_rom,
-            wram_port: &mut self.wram_port,
-            vblank: false,
-            hblank: false,
+        let reset_cost = {
+            let mut bus = SnesBus {
+                wram: &mut self.wram,
+                cart: &mut self.cart,
+                gsu: &mut self.gsu,
+                dsp1: &mut self.dsp1,
+                cx4: &mut self.cx4,
+                sdd1: &mut self.sdd1,
+                sa1: &mut self.sa1,
+                spc7110: &mut self.spc7110,
+                obc1: &mut self.obc1,
+                msu1: &mut self.msu1,
+                sharp_rtc: &mut self.sharp_rtc,
+                sufami_turbo: &mut self.sufami_turbo,
+                snes_mar: &mut self.snes_mar,
+                snes_refresh: self.refresh_active,
+                apu: &mut self.apu,
+                ppu: &mut self.ppu,
+                dma: &mut self.dma,
+                io: &mut self.io,
+                nmi_enable: &mut self.nmi_enable,
+                nmi_flag: &mut self.nmi_flag,
+                nmi_line: &mut self.nmi_line,
+                nmi_lock: &mut self.nmi_lock,
+                fast_rom: &mut self.fast_rom,
+                wram_port: &mut self.wram_port,
+                vblank: false,
+                hblank: false,
+            };
+            self.cpu.reset(&mut bus)
         };
-        self.cpu.reset(&mut bus)
+        // `Cpu::reset` models ares' reset as `step(132)` plus the
+        // emulation-mode interrupt sequence, but the bus view used for the
+        // reset does not own the system clock. Advance the rest of the machine
+        // by the same amount so the S-SMP/PPU start on the same master clock
+        // as the first S-CPU instruction (ares H=186 at the first fetch).
+        self.advance_peripherals(reset_cost);
+        reset_cost
     }
 
     /// Execute one CPU instruction or interrupt.
@@ -2900,6 +2909,17 @@ mod tests {
     }
 
     #[test]
+    fn reset_costs_the_ares_186_master_clocks() {
+        // ares `CPU::main`: `status.resetPending` → `step(132)`, then the
+        // emulation-mode interrupt sequence; the first fetch is at H=186.
+        let mut system = Snes::new(cartridge(&[0xDB]));
+        let cost = system.reset();
+        assert_eq!(cost, 186);
+        assert_eq!(system.clock, 186);
+        assert_eq!(system.cpu.cycles, 186);
+    }
+
+    #[test]
     fn unmapped_reads_return_the_open_bus_mdr() {
         // ares maps unmapped addresses to `[](n24, n8 data) { return data; }`,
         // where `data` is the CPU's memory data register.
@@ -3008,13 +3028,17 @@ mod tests {
         let mut system = Snes::new(Cartridge::from_bytes(&rom).expect("valid LoROM"));
         system.reset();
         // Tick dots directly (one dot = four master clocks). A non-interlaced
-        // PAL frame is 312 lines of 341 dots.
-        let mut dots = 0u32;
+        // PAL frame is 312 lines of 341 dots. The reset already advanced the
+        // PPU by the ares H=186 reset phase, so measure the interval between
+        // the first and second line-0 wraps rather than the total from reset.
+        let mut frame_dots = 0u32;
         let mut wraps = 0u32;
         let mut last = system.ppu.line();
         for _ in 0..400_000 {
             system.ppu.tick();
-            dots += 1;
+            if wraps >= 1 {
+                frame_dots += 1;
+            }
             if system.ppu.line() < last {
                 wraps += 1;
                 if wraps == 2 {
@@ -3024,7 +3048,7 @@ mod tests {
             last = system.ppu.line();
         }
         assert_eq!(wraps, 2);
-        assert_eq!(dots, 2 * 312 * 341);
+        assert_eq!(frame_dots, 312 * 341);
     }
 
     #[test]
