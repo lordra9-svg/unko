@@ -4389,7 +4389,8 @@ implemented and measured: Zelda and F-Zero stayed exact, but DKC fell to
 75.1971%, Super Metroid to 74.3417% and Super Mario All-Stars to 52.3634%, so it
 was reverted. The only faithful fix is the mutual S-CPU/S-SMP coroutine
 scheduler (the S-SMP yielding inside `SMP::readIO($F4-$F7)` at
-`synchronize(cpu)`), which is still unimplemented.
+`synchronize(cpu)`), which is still unimplemented. *Implemented and verified in
+the 2026-11-20 section below.*
 
 ## Sharp S-RTC and Sufami Turbo (2026-11-19)
 
@@ -4536,3 +4537,56 @@ The remaining mismatch is therefore not merely "make the CPU resumable": the
 S-SMP advancement schedule must be derived from ares' `Thread`/`Scheduler`
 clock ordering (including when the scheduler runs the aux threads), which is
 the next scheduler task.
+
+## Mutual S-CPU / S-SMP actor (2026-11-20)
+
+The S-SMP now runs inside its own stackful coroutine
+(`crates/unko-snes/src/apu.rs`, `new_apu_coroutine`), peer to the S-CPU
+coroutine. The actor is not a second timing model: it advances the S-SMP with
+the same rational master-clock credit as the per-access path
+(`Apu::advance_master_clock`), one S-SMP clock per credit unit, and is
+synchronized at the **start of every S-CPU bus access** with that access's
+clocks as credit. A DRAM-refresh stall advances it a second time at the
+post-access clock, mirroring ares' two `Thread::synchronize` calls.
+
+A `$F4-$F7` read whose sample clock is ahead of the S-CPU parks the S-SMP and
+hands the `Apu` to the scheduler (`ApuOutput::Parked { apu, target }`). While
+parked the scheduler owns the `Apu`, so `$2140-$2143` reads and writes are
+ordinary bus accesses on the latches (no port-command protocol), the S-CPU runs
+forward until `clock >= target`, and the next advance resolves the read at the
+same sample clock - the ares `SMP::readIO` sequence.
+
+**What was wrong before.** The first actor executed whole `spc.step`
+instructions per resume and caught up by comparing `smp_master_clock(rate)`
+against the CPU clock. That always overshoots to an instruction boundary, and
+it reproduced the scanline-style phase exactly (DKC 47.3223%, Zelda 58.8231%,
+F-Zero 25.1250%, Super Metroid 57.4057%). It also dropped `$F0`/`$F1` writes,
+which stalled DKC's driver at `$064D` polling the timer-0 output. The
+per-clock-resume variant (one coroutine resume per S-SMP clock) produced the
+right phase but was unusably slow (300 frames did not finish in 15 minutes).
+
+**Measured result** (700,000 interleaved samples / 350,000 stereo frames):
+
+```
+Donkey Kong Country       0 differing  100.0000%
+Zelda: A Link to the Past 0            100.0000%
+F-Zero                    0            100.0000%
+Super Metroid             0            100.0000%
+Super Mario World      73,874             89.4466%
+Castlevania IV         70,913             89.8696%
+Super Mario All-Stars 313,782             55.1740%
+Chrono Trigger        444,363             36.5196%  (offset -4)
+```
+
+The four gate titles are 0-diff, and the four measured differing titles are
+**bit-identical to the per-access tree** (same differing counts and the same
+best offset), so the actor preserves the verified schedule exactly. The
+212-entry test-ROM baseline is identical in both frame and audio hashes. The
+remaining SMW/CV4/SMAS/CT/MMX2 residuals are the DSP register-write micro-step
+placement already documented above, not S-SMP clock granularity.
+
+`Apu::apu_credit` is part of the serialized `Apu`, so a state saved while the
+S-SMP is mid-instruction (`plan_pos > 0`) resumes exactly; `SAVE_STATE_VERSION`
+moved 17 -> 18 and `restore` drops the transient coroutine. 204 lib tests,
+including actor parking, parked port writes and a mid-instruction
+serialize/resume round trip.

@@ -52,8 +52,11 @@ Retail-music S-DSP audio is sample-exact for Donkey Kong Country, Zelda,
 F-Zero and Super Metroid over 350,000 stereo frames (ares' power-on APU RAM and
 DSP-register pattern is reproduced); Mega Man X2 is 99.44% with its CX4
 firmware installed, while Super Mario World, Super Mario All-Stars and Chrono
-Trigger still differ. ST018 and Satellaview/BS-X are not implemented; Sufami
-Turbo and the Sharp S-RTC are. See `docs/snes-accuracy-divergences.md`.
+Trigger still differ. The S-SMP runs in a clock-granular peer coroutine that
+advances with ares' exact rational master-clock credit; it is bit-identical to
+the per-access model on every measured title. ST018 and Satellaview/BS-X are
+not implemented; Sufami Turbo and the Sharp S-RTC are. See
+`docs/snes-accuracy-divergences.md`.
 
 ## Accuracy sources
 

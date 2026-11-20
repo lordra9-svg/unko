@@ -203,6 +203,13 @@ material used to implement it. No GPL emulator source is translated or copied.
   general-purpose coroutine crate, not an emulator source; no emulator code is
   taken from it.
 
+## `src/apu.rs` (S-SMP actor)
+
+- `corosensei` 0.3 (MIT OR Apache-2.0) also hosts the S-SMP actor. The timing
+  itself is ares' (`Thread::synchronize` clock credit, one S-SMP clock per
+  unit), derived from the ares source already credited for this module; the
+  coroutine crate only provides the suspension mechanism.
+
 ## Forthcoming modules
 
 MesenCE remains a black-box compatibility oracle and must not be read while

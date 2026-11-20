@@ -50,8 +50,9 @@ parity is measured per title with the exact ares DSP thread clocks, the
 Donkey Kong Country, Zelda, F-Zero and Super Metroid are bit-exact (0 differing
 samples over 350,000 stereo frames), Super Mario World 89.45%, Mega Man X2
 99.44% (its CX4 firmware must be supplied via `CX4_ROM`), Super Mario All-Stars
-55.17% and Chrono Trigger 40.52%. The remaining residuals are tracked in the
-SNES ledger.
+55.17% and Chrono Trigger 36.52% (offset -4). The core runs the S-SMP in a
+clock-granular peer coroutine that is bit-identical to the per-access model on
+every measured title. The remaining residuals are tracked in the SNES ledger.
 
 Reference gates:
 

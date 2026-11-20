@@ -74,13 +74,17 @@ Definition-of-done item 3 is the one place where the reference titles are not
 yet 100%. Donkey Kong Country, Zelda, F-Zero and Super Metroid are **0
 differing samples over 350,000 stereo frames** with the exact ares DSP thread
 clocks, the 186-clock reset phase and ares' power-on APU RAM/DSP-register
-pattern (see the divergence ledger). Super Mario World (89.45%), Castlevania IV
-(89.87%), Super Mario All-Stars (55.17%) and Chrono Trigger (40.52%) still
+pattern (see the divergence ledger). The S-SMP now runs in a clock-granular
+peer coroutine that advances with ares' exact rational master-clock credit and
+parks at `$F4-$F7` samples; it is bit-identical to the per-access model on
+every measured title (same differing counts and offsets), so the rewrite is
+behaviour-preserving. Super Mario World (89.45%), Castlevania IV (89.87%),
+Super Mario All-Stars (55.17%) and Chrono Trigger (36.52%, offset -4) still
 differ at note and echo boundaries, so the register-write micro-step placement
-remains open for those drivers. Mega Man X2 emits silence because its IPL driver upload is never
-reached; the first CPU divergence is a `bne` on the uninitialised `$1F53` at
-`$13FA75`, not a DSP issue. This is a known open item, not a rendering or
-CPU-timing failure; the PCM of the blargg oracle remains bit-exact.
+remains open for those drivers. Mega Man X2 measures 99.44% when its CX4
+firmware is supplied via `CX4_ROM` (without it the coprocessor self-test takes
+the failure branch and the title is silent - a harness omission, not a DSP
+issue). The PCM of the blargg oracle remains bit-exact.
 
 `unko-snes` is a new isolated crate with no `unko-core` or shell dependency.
 
