@@ -4149,6 +4149,21 @@ power-on APU change. The 3,903-sample residual has the same signature as the
 other DSP-placement residuals: the first difference is at 7.313 s and is a few
 LSBs on individual samples (253 vs 263), not a missing note.
 
+The SPC trace pins the mechanism. Just after the CX4 self-test the IPL upload
+handshake first differs by **one extra spin iteration** at `$FFCF/$FFD2`: the
+S-CPU's `sta $2140` of `$CC` commits five master clocks *after* our S-SMP's
+`cmp $F4,#$CC` samples the latch, while ares' CPU has already committed it. The
+S-SMP then enters `$FFEF` two instructions later, which shifts every subsequent
+DSP register write by one micro-step and flips the KON/KOFF sample boundary at
+7.313 s. This is a relative S-CPU/S-SMP scheduling offset, not a lost write.
+
+Resuming a parked `$F4-$F7` read immediately after a `$2140-$2143` write was
+implemented and measured: Zelda and F-Zero stayed exact, but DKC fell to
+75.1971%, Super Metroid to 74.3417% and Super Mario All-Stars to 52.3634%, so it
+was reverted. The only faithful fix is the mutual S-CPU/S-SMP coroutine
+scheduler (the S-SMP yielding inside `SMP::readIO($F4-$F7)` at
+`synchronize(cpu)`), which is still unimplemented.
+
 ## Sharp S-RTC and Sufami Turbo (2026-11-19)
 
 Both were the last missing non-hard coprocessors in the board set.
