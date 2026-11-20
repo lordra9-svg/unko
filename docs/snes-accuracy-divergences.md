@@ -4085,6 +4085,25 @@ per-access replay nor the ares-faithful scanline+split ordering matches; the
 remaining correction is in the DSP/interrupt phase, not the port-read split
 alone.
 
+**ares KON latch trace (2026-11-19).** `ARES_DSP_WRITES` now includes
+`clock.sample`. Around the SMW first difference:
+
+```
+sample 142476 reg 01=06 ticks 4559251 pc 069D smpclk 11376 sample=1
+sample 142479 reg 5C=00 ticks 4559333 pc 069D smpclk 11540 sample=0
+sample 142480 reg 4C=0B ticks 4559357 pc 069D smpclk 11588 sample=0   <- KON
+```
+
+The KON writes `_keylatch` with `clock.sample = 0`, so `misc30` does not
+apply it in that 32-step sample; it is consumed after the next `misc29`
+toggle, i.e. one sample later. Our KON lands at micro-step 4,559,361
+(`mod 32 = 1`) with the opposite `clock.sample` parity, so `misc30` applies it
+in the current sample - the one-sample attack shift. The needed correction is
+therefore the S-SMP clock at the write (4 DSP ticks earlier, at step 29 with
+`sample = 0`), i.e. the full S-SMP/DSP phase, not `misc29`/`misc30` arithmetic.
+Per-title offsets differ (SMW +4 ticks, Mega Man X2 +1), so a single global
+phase shift cannot fix them; the SMP schedule must match ares per driver.
+
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
 DSP is already ticked one micro-step per two S-SMP clocks inside the access's
