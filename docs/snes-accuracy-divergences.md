@@ -4590,3 +4590,51 @@ S-SMP is mid-instruction (`plan_pos > 0`) resumes exactly; `SAVE_STATE_VERSION`
 moved 17 -> 18 and `restore` drops the transient coroutine. 204 lib tests,
 including actor parking, parked port writes and a mid-instruction
 serialize/resume round trip.
+
+## S-SMP synchronization instant (2026-11-20)
+
+The remaining SMW/CV4/SMAS/CT/MMX2 residual was re-examined by diffing ares'
+`ARES_DSP_WRITES` log against `DSP_WRITES_OUT` for Super Mario World (300
+frames, 1,025 writes). The register/value sequence is **identical one-for-one**;
+only the `dspTicks` phase drifts. The first divergence is write 14 (`$6C = $20`
+at 1.122 s, ours +12 ticks), settling to -4 by the note setup at 1.447 s - the
+first audible difference. The cause is not `$F2`/`$F3` latching: the DSP tick
+at a write is a function of the S-SMP clock, and the S-SMP clock differs
+because the driver's `$F4` poll loop iterates a different number of times.
+
+Logging every S-SMP `$F4-$F7` read (`SMPIO_LOG`, removed before commit) and
+comparing with ares' `ARES_SMPIO_LOG` isolated it: over 90 frames the old model
+performed **121,705** `$F4` reads where ares performs **81,190**. The park
+condition used the S-CPU clock at the *start* of the stepped access, so the
+S-SMP was considered ahead on nearly every poll and ran the S-CPU forward
+mid-access. ares compares the thread clocks at the read/write instant
+(`CPU::read` steps `wait - 4` before `bus.read`, `CPU::write` steps the whole
+wait before `bus.write`), and `Thread::synchronize(cpu)` resumes the S-CPU in
+whole instruction steps.
+
+Three fixes, all derived from the ares source:
+
+1. `Apu::advance_master_clock` records the S-CPU clock at the end of the
+   stepped window (`clock + clocks`), matching the clock `readIO`/`writeIO`
+   sees.
+2. `port_read_waiting` compares the fixed-point thread clocks directly, and the
+   park target rounds the S-SMP clock up, so the S-CPU cannot stop one clock
+   short.
+3. A parked read is flushed only at an S-CPU instruction boundary; clocks
+   accumulated while parked are held in `ApuPeer::parked_clocks`.
+
+Result: the S-SMP `$F4` read count matches ares exactly (81,191 vs 81,190 over
+90 frames). The `$F4` value sequence now matches ares through read 81,062 of
+81,190; the single remaining divergence is at 1.122 s (ours reads `$1f` where
+ares reads `$23`), i.e. one CPU instruction's write order at the parked sample,
+and it is what still holds the note phase. The four gate titles remain 0
+differing, the SMW/CV4/SMAS/CT sweep is unchanged (73,874 / 70,913 / 313,782 /
+444,363), the 212-entry baseline is identical in frame and audio hashes, and the
+crate is at 204 tests with fmt/clippy clean.
+
+Next: the 1.122 s race is a single-instruction ordering at the park - ours
+resolves the sample after the instruction that reaches the S-SMP clock, ares
+after the instruction that *crosses* it. The remaining experiment is to let the
+forward loop run to the first instruction whose end clock is strictly greater
+than the sample clock (ares' `synchronize` loop condition is `cpu.clock() <
+smp.clock()` re-checked after each whole step), then re-run the sweep.

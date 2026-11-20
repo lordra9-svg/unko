@@ -74,11 +74,11 @@ Definition-of-done item 3 is the one place where the reference titles are not
 yet 100%. Donkey Kong Country, Zelda, F-Zero and Super Metroid are **0
 differing samples over 350,000 stereo frames** with the exact ares DSP thread
 clocks, the 186-clock reset phase and ares' power-on APU RAM/DSP-register
-pattern (see the divergence ledger). The S-SMP now runs in a clock-granular
-peer coroutine that advances with ares' exact rational master-clock credit and
-parks at `$F4-$F7` samples; it is bit-identical to the per-access model on
-every measured title (same differing counts and offsets), so the rewrite is
-behaviour-preserving. Super Mario World (89.45%), Castlevania IV (89.87%),
+pattern (see the divergence ledger). The S-SMP runs in a clock-granular peer
+coroutine that advances with ares' exact rational master-clock credit, parks at
+`$F4-$F7` samples, and is synchronized at the ares thread-clock instant; its
+`$F4` read count now matches ares exactly (81,191 vs 81,190 over 90 frames of
+Super Mario World). Super Mario World (89.45%), Castlevania IV (89.87%),
 Super Mario All-Stars (55.17%) and Chrono Trigger (36.52%, offset -4) still
 differ at note and echo boundaries, so the register-write micro-step placement
 remains open for those drivers. Mega Man X2 measures 99.44% when its CX4
