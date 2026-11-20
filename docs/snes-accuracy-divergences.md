@@ -4003,6 +4003,22 @@ ares checkout; the ares hook is not part of this repository).
     Mega Man X2 to 67.4529%. The exact-clock model is the closest match; the
     residual needs the full mutual coroutine, not a coarser step granularity.
 
+**ares thread-level switch trace (2026-11-19).** A local `ARES_THREAD_LOG` hook
+in `SMP::step`/`CPU::step` records `(thread, smp_cycles, cpu_cycles, dspTicks)`
+around the SMW KON write. At `dspTicks = 4,559,357` the S-SMP is at cycle
+11,590 with the S-CPU at 121,392 master cycles (SMP ≈ CPU in real time, the CPU
+a few clocks ahead). The trace then shows the S-CPU advancing to 122,758 over
+~350 `CPU::step` calls while the S-SMP stays frozen at 11,590; only then does
+the S-SMP take one 2-clock step and the DSP tick continues. So ares lets the
+S-CPU run ~1,366 master clocks *ahead* of the S-SMP during a port-read
+synchronize, rather than locking the two clocks at every access as this core
+does. That burst is the interleaving the actor scheduler must reproduce; the
+four local timing substitutions did not.
+
+This trace is local-only (patched reference ares, not committed): set
+`ARES_THREAD_LOG=<path>` and run ares; the window is `dspTicks`
+4,558,000-4,561,500.
+
 The write logs match in address/value order; the difference is only in the
 number of DSP micro-steps executed at the write (0 or -8 ticks observed). The
 DSP is already ticked one micro-step per two S-SMP clocks inside the access's
