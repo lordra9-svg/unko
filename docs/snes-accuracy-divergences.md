@@ -5915,17 +5915,15 @@ So the only difference at F-Zero's first divergence is which side of a write the
 `$F4` read lands on: at DSP tick 351,311 ares' `MOV Y,$F4` returns 0x00 (the
 write that completed at master clock 7,359,128) while ours returns 0xCC.
 
-Implementing the instruction-granularity stop (per-access cadence kept), both
-without and with the existing read park:
+Implementing the instruction-granularity stop with the per-access cadence kept
+(the existing `$F4-$F7` read park remains active; a read that overshoots the
+S-CPU clock parks and the driver runs the S-CPU to the next instruction
+boundary before the sample is taken) gives, at 600 frames:
 
 ```
-rule: overshoot only (600 frames)
-  dkc 156,064 (75.60%)   zelda 0   fzero 0   metroid 240,414 (62.42%)
-  smw 318,197 (50.26%)   cv4 101,591 (84.12%)   smas 370,472 (42.08%)
-  ct 484,068 (24.32%)
-
-rule: overshoot + park (the same code path, the read parks because its position
-is past the S-CPU clock)
+dkc 156,064 (75.60%)   zelda 0   fzero 0   metroid 240,414 (62.42%)
+smw 318,197 (50.26%)   cv4 101,591 (84.12%)   smas 370,472 (42.08%)
+ct 484,068 (24.32%)
 ```
 
 The overshoot makes Zelda and F-Zero exact but breaks DKC/Super Metroid/SMW,
