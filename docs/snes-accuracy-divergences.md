@@ -6622,3 +6622,25 @@ SMP directly, not a return value consumed by a driver loop. This is the
 ground-up rewrite that has been authorised and is the next work item.
 
 Reverted; the verified path is restored.
+
+## Why every leapfrog variant deadlocks (2026-11-21)
+
+`Apu::advance_master_clock` sets `cpu_master_clock = clock + clocks` (the *end*
+of the S-CPU access being advanced) and the carried-credit loop stops the S-SMP
+exactly at that target. `port_read_waiting()` is
+`smp_clock_at_position() > cpu_master_clock`, so in the default per-access model
+the S-SMP can never be ahead of the S-CPU's access end and the **park path is
+effectively dead code** - it was written for ares' "SMP ahead of the CPU" case
+that our cadence never produces.
+
+That is why all four leapfrog attempts deadlock: they are the first code ever to
+reach that path, and its driver protocol (`waiting`, `parked_clocks`,
+`flush_parked`, and the flush in the `Done` arm) has never been exercised. The
+flush is also unconditional in the default configuration
+(`!mutual_scheduler() || self.clock >= target` is always true when mutual is
+off), so it cannot be gated without rewriting the construct.
+
+Consequently the leapfrog cannot be added as a flag on the existing driver: it
+creates the park condition and immediately exercises an unvalidated protocol.
+The rewrite must delete `waiting`/`parked_clocks`/`flush_parked` and make the
+actor's need a scheduler request, exactly as planned.
