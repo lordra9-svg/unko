@@ -7312,3 +7312,35 @@ with the five exact titles.
 So the mutual-scheduler rewrite is not the missing piece for normal execution;
 the residual remains the DSP register-write placement relative to the S-SMP
 access (the two-valued block timing), not the CPU/SMP lead.
+
+## Timer implementation audit vs ares (2026-11-21)
+
+The SMAS block-boundary difference is one Timer-0 zero-wait iteration
+(`$0576 MOV Y,$00FD / $0579 BEQ $0576`). The timer code was audited line by line
+against ares `SMP::Timer<Frequency>`:
+
+```
+field            ares                 ours            equivalent?
+stage0           n8 (wraps at 256)    u16             yes (stage0+clocks < 256
+                                                        for Frequency 128/16 and
+                                                        timer clocks <= 16)
+stage1           n8, ^=1              bool            yes
+stage2           n8, ++ then ==target u8, wrapping_add yes
+stage3           n4, ++ (wraps 16)    u8, (x+1)&0x0F  yes
+line.increment   on line 1->0 only    same            yes
+frequencies      128/128/16           128/128/16      yes
+timer wait       {2,4,8,16}           TIMER_WAIT same yes
+read $FD-$FF     stage3 then clear    same            yes
+$F1 reset        rising edge (T2 on non-rising)       yes
+$F0 resync       synchronizeStage1   same            yes
+```
+
+So the timer itself cannot explain the one-iteration difference: the phase must
+differ because the **clock deltas fed to `timer.step` differ somewhere**, or
+because the total number of timer clocks per unit of S-SMP time differs.
+
+Concrete next step (bounded, but requires rebuilding the local ares): add a
+timer-transition log to ares (`stage3` increments with the SMP clock) and to our
+`Timer`, then diff the transition instants over a few frames. That will show the
+first clock at which the two timer phases diverge and therefore which access
+(and wait-state selector) differs.
