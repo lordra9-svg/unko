@@ -23,6 +23,7 @@ use crate::sa1::Sa1;
 use crate::sdd1::Sdd1;
 use crate::sharprtc::SharpRtc;
 use crate::spc7110::Spc7110;
+use crate::st018::St018;
 use crate::sufamiturbo::SufamiTurbo;
 
 /// Magic number at the start of a serialized save state (`"SNES"`).
@@ -216,6 +217,8 @@ pub struct Snes {
     pub cart: Cartridge,
     /// BS-X (Satellaview) memory controller, when the cartridge is BS-X.
     pub bsx: Option<Bsx>,
+    /// ST018 (ARMv3) coprocessor, when its firmware is installed.
+    pub st018: Option<St018>,
     /// The S-SMP/S-DSP audio unit.
     pub apu: Apu,
     /// The S-PPU pair.
@@ -451,6 +454,7 @@ impl Snes {
             apu_actor_driven: false,
             cart,
             bsx,
+            st018: None,
             apu,
             ppu,
             region,
@@ -906,6 +910,7 @@ impl Snes {
                 wram: &mut self.wram,
                 cart: &mut self.cart,
                 bsx: &mut self.bsx,
+                st018: &mut self.st018,
                 gsu: &mut self.gsu,
                 dsp1: &mut self.dsp1,
                 cx4: &mut self.cx4,
@@ -917,6 +922,7 @@ impl Snes {
                 sharp_rtc: &mut self.sharp_rtc,
                 sufami_turbo: &mut self.sufami_turbo,
                 snes_mar: &mut self.snes_mar,
+                clock: 0,
                 snes_refresh: self.refresh_active,
                 apu: &mut self.apu,
                 ppu: &mut self.ppu,
@@ -1186,6 +1192,7 @@ impl Snes {
                         wram: &mut self.wram,
                         cart: &mut self.cart,
                         bsx: &mut self.bsx,
+                        st018: &mut self.st018,
                         gsu: &mut self.gsu,
                         dsp1: &mut self.dsp1,
                         cx4: &mut self.cx4,
@@ -1197,6 +1204,7 @@ impl Snes {
                         sharp_rtc: &mut self.sharp_rtc,
                         sufami_turbo: &mut self.sufami_turbo,
                         snes_mar: &mut self.snes_mar,
+                        clock: 0,
                         snes_refresh: self.refresh_active,
                         apu: &mut self.apu,
                         ppu: &mut self.ppu,
@@ -1681,6 +1689,11 @@ impl Snes {
 
 impl Snes {
     /// Build a bus view over the machine's fields for one access.
+    /// Install ST018 coprocessor firmware (`st018.rom`, 0x28000 bytes).
+    pub fn load_st018_firmware(&mut self, image: &[u8]) {
+        self.st018 = Some(St018::new(image));
+    }
+
     /// Attach a BS Memory Pack image to the BS-X cartridge.
     pub fn load_bsx_pack(&mut self, image: Vec<u8>) {
         if let Some(bsx) = self.bsx.as_mut() {
@@ -1695,6 +1708,7 @@ impl Snes {
             wram: &mut self.wram,
             cart: &mut self.cart,
             bsx: &mut self.bsx,
+            st018: &mut self.st018,
             gsu: &mut self.gsu,
             dsp1: &mut self.dsp1,
             cx4: &mut self.cx4,
@@ -1706,6 +1720,7 @@ impl Snes {
             sharp_rtc: &mut self.sharp_rtc,
             sufami_turbo: &mut self.sufami_turbo,
             snes_mar: &mut self.snes_mar,
+            clock: self.clock,
             snes_refresh: self.refresh_active,
             apu: &mut self.apu,
             ppu: &mut self.ppu,
@@ -2029,6 +2044,7 @@ struct SnesBus<'a> {
     wram: &'a mut [u8],
     cart: &'a mut Cartridge,
     bsx: &'a mut Option<Bsx>,
+    st018: &'a mut Option<St018>,
     apu: &'a mut Apu,
     ppu: &'a mut Ppu,
     gsu: &'a mut Option<Gsu>,
@@ -2042,6 +2058,7 @@ struct SnesBus<'a> {
     sharp_rtc: &'a mut Option<SharpRtc>,
     sufami_turbo: &'a mut Option<SufamiTurbo>,
     snes_mar: &'a mut u32,
+    clock: u64,
     snes_refresh: bool,
     dma: &'a mut Dma,
     io: &'a mut CpuIo,
@@ -2277,6 +2294,14 @@ impl CpuBus for SnesBus<'_> {
 
         if bank == 0x7E || bank == 0x7F {
             return self.wram[((bank as usize & 1) << 16) | offset];
+        }
+        if let Some(st018) = self.st018.as_mut() {
+            let offset = (address & 0xFFFF) as usize;
+            let window = bank <= 0x3F || (0x80..=0xBF).contains(&bank);
+            if window && (0x3000..=0x3FFF).contains(&offset) {
+                st018.run_to(self.clock);
+                return st018.read(address, mdr);
+            }
         }
         if let Some(bsx) = self.bsx.as_ref() {
             if !matches!(bsx.map(address), BsxBus::Open) {
@@ -2570,6 +2595,14 @@ impl CpuBus for SnesBus<'_> {
                         slot.write_ram(slot_offset, value);
                     }
                 }
+                return;
+            }
+        }
+        if let Some(st018) = self.st018.as_mut() {
+            let low = bank <= 0x3F || (0x80..=0xBF).contains(&bank);
+            if low && (0x3000..=0x3FFF).contains(&offset) {
+                st018.run_to(self.clock);
+                st018.write(address, value);
                 return;
             }
         }
@@ -3024,6 +3057,7 @@ mod tests {
             wram: &mut system.wram,
             cart: &mut system.cart,
             bsx: &mut system.bsx,
+            st018: &mut system.st018,
             gsu: &mut system.gsu,
             dsp1: &mut system.dsp1,
             cx4: &mut system.cx4,
@@ -3035,6 +3069,7 @@ mod tests {
             sharp_rtc: &mut system.sharp_rtc,
             sufami_turbo: &mut system.sufami_turbo,
             snes_mar: &mut system.snes_mar,
+            clock: 0,
             snes_refresh: system.refresh_active,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
@@ -3224,6 +3259,7 @@ mod tests {
             wram: &mut system.wram,
             cart: &mut system.cart,
             bsx: &mut system.bsx,
+            st018: &mut system.st018,
             gsu: &mut system.gsu,
             dsp1: &mut system.dsp1,
             cx4: &mut system.cx4,
@@ -3235,6 +3271,7 @@ mod tests {
             sharp_rtc: &mut system.sharp_rtc,
             sufami_turbo: &mut system.sufami_turbo,
             snes_mar: &mut system.snes_mar,
+            clock: 0,
             snes_refresh: system.refresh_active,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
@@ -3267,6 +3304,7 @@ mod tests {
             wram: &mut system.wram,
             cart: &mut system.cart,
             bsx: &mut system.bsx,
+            st018: &mut system.st018,
             gsu: &mut system.gsu,
             dsp1: &mut system.dsp1,
             cx4: &mut system.cx4,
@@ -3278,6 +3316,7 @@ mod tests {
             sharp_rtc: &mut system.sharp_rtc,
             sufami_turbo: &mut system.sufami_turbo,
             snes_mar: &mut system.snes_mar,
+            clock: 0,
             snes_refresh: system.refresh_active,
             apu: &mut system.apu,
             ppu: &mut system.ppu,
@@ -3661,6 +3700,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 bsx: &mut system.bsx,
+                st018: &mut system.st018,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 gsu: &mut system.gsu,
@@ -3674,6 +3714,7 @@ mod tests {
                 sharp_rtc: &mut system.sharp_rtc,
                 sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
+                clock: 0,
                 snes_refresh: system.refresh_active,
                 dma: &mut system.dma,
                 io: &mut system.io,
@@ -3854,6 +3895,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 bsx: &mut system.bsx,
+                st018: &mut system.st018,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -3865,6 +3907,7 @@ mod tests {
                 sharp_rtc: &mut system.sharp_rtc,
                 sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
+                clock: 0,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
@@ -3943,6 +3986,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 bsx: &mut system.bsx,
+                st018: &mut system.st018,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -3954,6 +3998,7 @@ mod tests {
                 sharp_rtc: &mut system.sharp_rtc,
                 sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
+                clock: 0,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
@@ -3983,6 +4028,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 bsx: &mut system.bsx,
+                st018: &mut system.st018,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -3994,6 +4040,7 @@ mod tests {
                 sharp_rtc: &mut system.sharp_rtc,
                 sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
+                clock: 0,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
@@ -4023,6 +4070,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 bsx: &mut system.bsx,
+                st018: &mut system.st018,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -4034,6 +4082,7 @@ mod tests {
                 sharp_rtc: &mut system.sharp_rtc,
                 sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
+                clock: 0,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
@@ -4079,6 +4128,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 bsx: &mut system.bsx,
+                st018: &mut system.st018,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -4090,6 +4140,7 @@ mod tests {
                 sharp_rtc: &mut system.sharp_rtc,
                 sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
+                clock: 0,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
@@ -4145,6 +4196,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 bsx: &mut system.bsx,
+                st018: &mut system.st018,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -4156,6 +4208,7 @@ mod tests {
                 sharp_rtc: &mut system.sharp_rtc,
                 sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
+                clock: 0,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
@@ -4197,6 +4250,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 bsx: &mut system.bsx,
+                st018: &mut system.st018,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -4208,6 +4262,7 @@ mod tests {
                 sharp_rtc: &mut system.sharp_rtc,
                 sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
+                clock: 0,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
@@ -4240,6 +4295,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 bsx: &mut system.bsx,
+                st018: &mut system.st018,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -4251,6 +4307,7 @@ mod tests {
                 sharp_rtc: &mut system.sharp_rtc,
                 sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
+                clock: 0,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
@@ -4333,6 +4390,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 bsx: &mut system.bsx,
+                st018: &mut system.st018,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -4344,6 +4402,7 @@ mod tests {
                 sharp_rtc: &mut system.sharp_rtc,
                 sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
+                clock: 0,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
@@ -4374,6 +4433,7 @@ mod tests {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
                 bsx: &mut system.bsx,
+                st018: &mut system.st018,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -4385,6 +4445,7 @@ mod tests {
                 sharp_rtc: &mut system.sharp_rtc,
                 sufami_turbo: &mut system.sufami_turbo,
                 snes_mar: &mut system.snes_mar,
+                clock: 0,
                 snes_refresh: system.refresh_active,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,

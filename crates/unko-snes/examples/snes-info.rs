@@ -176,6 +176,10 @@ fn main() -> ExitCode {
             .unwrap_or(0),
         std::sync::atomic::Ordering::Relaxed,
     );
+    if let Some(path) = std::env::var_os("ST018_ROM") {
+        let image = std::fs::read(&path).expect("read ST018_ROM");
+        system.load_st018_firmware(&image);
+    }
     if let Some(path) = std::env::var_os("BSX_PACK") {
         let image = std::fs::read(&path).expect("read BSX_PACK");
         system.load_bsx_pack(image);

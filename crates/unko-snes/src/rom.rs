@@ -135,11 +135,24 @@ impl RomHeader {
         region_for_country(self.country_code)
     }
 
+    /// Whether the cartridge carries the ST018 (Hitachi ARMv3) coprocessor.
+    ///
+    /// `$F5` with a LoROM map mode (`$30` on the released shogi title); the
+    /// SPC7110 also uses `$F5`, but with the HiROM map modes `$2A`/`$3A`.
+    pub const fn is_st018(&self) -> bool {
+        self.cartridge_type == 0xF5 && self.map_mode & 0x0F == 0x00
+    }
+
     /// Whether the cartridge declares an SPC7110 coprocessor.
     ///
     /// mia selects an `SPC7110-` board from cartridge type `$F5` (Epson RTC
     /// variants use `$F9`) or the `SPC7110-` HiROM map modes `$2A`/`$3A`.
+    /// ST018 boards share type `$F5` but use a LoROM map mode, so they are
+    /// excluded here.
     pub const fn has_spc7110(&self) -> bool {
+        if self.is_st018() {
+            return false;
+        }
         matches!(self.cartridge_type, 0xf5 | 0xf9) || matches!(self.map_mode, 0x2a | 0x3a)
     }
 
