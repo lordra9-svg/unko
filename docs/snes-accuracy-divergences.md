@@ -6276,3 +6276,29 @@ per-access deltas agree from idx 3 onward).
 Next step: reproduce ares' first `Thread::synchronize(smp)` exactly for the
 power-on window, when the S-SMP clock starts at its uniqueID (1) and the S-CPU
 clock at 0, and confirm the third access advances 10 clocks instead of 9.
+
+## Failed diagnostic: instruction-end drain in `advance_master_clock` (2026-11-20)
+
+To test whether the one-clock deficit at the first port write is ares'
+whole-instruction overshoot, `advance_master_clock` was extended with
+
+```
+while self.plan_pos < self.plan.len() { if self.drain_unit() == 0 { return true; } }
+```
+
+after the credit loop. The instrumented build is **not usable for the
+measurement**: the APU advanced ~9x too fast (3,499,598 retired S-SMP clocks at
+master clock 4,165,004, where the true count is ~397,650). The reason is that
+`advance_master_clock` is re-entered from the parked/flush path, and each
+re-entry now finishes whole instructions without consuming credit, so the
+instruction remainder is drained repeatedly.
+
+Reverted. The overshoot hypothesis for the 9-vs-10 clock difference is
+therefore still *untested*; testing it needs the instruction-end drain to be
+driven by the credit (one instruction per synchronize, not per re-entry), which
+is exactly the `synchronize_to` shape that was measured earlier and produced the
+Zelda/F-Zero exact family.
+
+State at the end of this session: five titles exact at 600 frames, CV4 98.2383%,
+SMAS 313,782, CT 416,143, MMX2 63.2951%; BS-X boots and is unit/integration
+tested; ST018 unimplemented pending a reference-emulator decision.
