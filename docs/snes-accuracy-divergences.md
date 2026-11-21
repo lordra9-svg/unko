@@ -5894,3 +5894,58 @@ resolves at a fixed midpoint instead of a re-entrant resume.
 
 The carried-credit model is retained as the best measured overall state
 (five titles exact, CV4 98.24%, SMAS/CT unchanged).
+
+## Instruction-granularity overshoot, with and without the read park (2026-11-20)
+
+ares' `Thread::synchronize(smp)` switches threads one **instruction** at a time
+(`while(smp.clock() < cpu.clock()) co_switch(smp)`), so the S-SMP overshoots the
+S-CPU clock to the end of the instruction it is executing. The S-CPU port write
+clocks are already proven identical between the two emulators:
+
+```
+ours  7357876 W 2 00     ares W cpu=7357876 ... dsp0=351226 dsp1=351250
+ours  7357882 W 3 3C     ares W cpu=7357882 ...
+ours  7358028 W 1 01     ares W cpu=7358028 ... dsp0=351250 dsp1=351257
+ours  7358102 W 0 CC     ares W cpu=7358102 ... dsp0=351257 dsp1=351261
+ours  7359128 W 0 00     ares W cpu=7359128 ... dsp0=351294 dsp1=351310
+ours  7359134 W 1 00     ares W cpu=7359134 ...
+```
+
+So the only difference at F-Zero's first divergence is which side of a write the
+`$F4` read lands on: at DSP tick 351,311 ares' `MOV Y,$F4` returns 0x00 (the
+write that completed at master clock 7,359,128) while ours returns 0xCC.
+
+Implementing the instruction-granularity stop (per-access cadence kept), both
+without and with the existing read park:
+
+```
+rule: overshoot only (600 frames)
+  dkc 156,064 (75.60%)   zelda 0   fzero 0   metroid 240,414 (62.42%)
+  smw 318,197 (50.26%)   cv4 101,591 (84.12%)   smas 370,472 (42.08%)
+  ct 484,068 (24.32%)
+
+rule: overshoot + park (the same code path, the read parks because its position
+is past the S-CPU clock)
+```
+
+The overshoot makes Zelda and F-Zero exact but breaks DKC/Super Metroid/SMW,
+exactly the complement of the clock-granularity credit model. The instruction
+stream itself is identical to ares in both (PC sequence matches for every
+compared instruction), so the difference is purely which latch a `$F4-$F7`
+midpoint sample observes.
+
+Summary of every stop/ordering rule measured so far, at 600 frames:
+
+| rule                                        | exact titles                       |
+|---------------------------------------------|------------------------------------|
+| carried credit, clock granularity (current)  | dkc, zelda, fzero, metroid, smw    |
+| exact rational, clock granularity            | dkc, metroid, cv4                  |
+| ares fixed-point, clock granularity          | dkc, cv4 (+ zelda 99.77%, metroid 1 sample) |
+| instruction-granularity overshoot            | zelda, fzero                       |
+
+No rule is exact for all titles, and each is exact for a different subset with
+identical S-SMP clocks and identical S-CPU write instants. The remaining
+variable is the mutual suspension itself: in ares the suspended S-CPU runs
+forward *from inside* the S-SMP's step (`SMP::step` calls `synchronize(cpu)`),
+which a driver that only stops, parks and flushes at access boundaries cannot
+express. That is the symmetric-coroutine rework, not another boundary rule.
