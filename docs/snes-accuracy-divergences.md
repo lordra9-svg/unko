@@ -6302,3 +6302,32 @@ Zelda/F-Zero exact family.
 State at the end of this session: five titles exact at 600 frames, CV4 98.2383%,
 SMAS 313,782, CT 416,143, MMX2 63.2951%; BS-X boots and is unit/integration
 tested; ST018 unimplemented pending a reference-emulator decision.
+
+## Concurrent three-thread rewrite: started (2026-11-20)
+
+Decision: implement the CPU/SMP/DSP interleaving as three clock-ordered peers
+behind a flag, keeping the verified per-access path as the default.
+
+**First increment (this commit, no behaviour change):** the S-DSP advance is
+extracted from instruction recording into a single `drain_dsp_to(ram, dsp,
+dsp_clock, samples, target)` helper - ares' `Thread::synchronize(dsp)`. Output is
+bit-identical (five titles 0 differing at 600 frames, CV4 98.2383%).
+
+**Why this seam:** the DSP is currently advanced *while an instruction is being
+recorded* (`RecordBus::step_clock` -> `step_dsp_clock`), before that
+instruction's clocks are drained. That is why `dsp.ticks()` at a `$F4` read is far
+ahead of the S-SMP clock, and why the DSP register-write phase measured
+`+6 (mod 32)` micro-steps against ares. In ares the DSP is a peer: it advances
+when its thread clock is behind, in clock order.
+
+**Next increments, in order:**
+1. Defer DSP register reads (`$F2`/`$F3`) like port reads, so they resolve at
+   their access clock during the drain (`Pending::DspRead`), removing the need
+   for the eager advance.
+2. Call `drain_dsp_to` from `drain_unit` instead of from recording, so the DSP
+   advances interleaved with the S-SMP's clock.
+3. Measure: DSP write-phase vs `ARES_DSP_WRITES` (target: 0 mod 32), then the
+   600-frame 8-title gate and the 212/212 baseline.
+
+Risk: the five currently exact titles may regress during 1-2; the verified path
+stays the default until the flag's gate is green.

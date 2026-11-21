@@ -10,6 +10,30 @@ use std::collections::VecDeque;
 
 use crate::dsp::{Dsp, Sample};
 
+/// Advance the S-DSP until its thread clock reaches `target`.
+///
+/// This is ares' `Thread::synchronize(dsp)`: `DSP::tick` steps the thread by
+/// `DSP_TICK` and runs one micro-step. Kept as one function so the concurrent
+/// driver can call it from the drain loop (clock order) instead of from
+/// instruction recording; the current call site keeps the verified behaviour.
+fn drain_dsp_to(
+    ram: &mut [u8],
+    dsp: &mut Dsp,
+    dsp_clock: &mut u128,
+    samples: &mut std::collections::VecDeque<Sample>,
+    target: u128,
+) {
+    while *dsp_clock < target {
+        if let Some(sample) = dsp.tick(ram) {
+            samples.push_back(sample);
+            if samples.len() > 16_384 {
+                samples.pop_front();
+            }
+        }
+        *dsp_clock += DSP_TICK;
+    }
+}
+
 /// Whether the symmetric (mutually resumable) CPU/SMP driver is enabled.
 ///
 /// Selected once from `SNES_MUTUAL`; the default keeps the verified per-access
@@ -815,15 +839,14 @@ impl ApuBus<'_> {
     /// and the DSP stays one micro-step ahead, exactly as ares does.
     fn step_dsp_clock(&mut self, clocks: u32) {
         *self.smp_clock += u128::from(clocks) * SMP_SCALAR;
-        while *self.dsp_clock < *self.smp_clock {
-            if let Some(sample) = self.dsp.tick(self.ram) {
-                self.samples.push_back(sample);
-                if self.samples.len() > 16_384 {
-                    self.samples.pop_front();
-                }
-            }
-            *self.dsp_clock += DSP_TICK;
-        }
+        let target = *self.smp_clock;
+        drain_dsp_to(
+            self.ram,
+            &mut self.dsp,
+            &mut self.dsp_clock,
+            &mut self.samples,
+            target,
+        );
     }
 
     /// Write the underlying APU RAM (ares `writeRAM`).
