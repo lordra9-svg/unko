@@ -6925,3 +6925,33 @@ one (same crop the audio/frame oracles already use).
 
 ST018 still cannot be verified this way: ares has `armdsp` (ST010/ST011) but no
 ST018 implementation, and the mesence reference still needs a display server.
+
+## Mutual scheduler probes: parking fires but cannot reorder the latch (2026-11-21)
+
+Three results, all measured, all reverted.
+
+**Parking against the read instant.** `SNES_MUTUAL` was changed to compare the
+S-SMP clock with the S-CPU clock at the *start* of the advanced access (ares'
+`Thread::synchronize(cpu)` instant) instead of the end. Parks now actually fire:
+**447 in 60 frames** for CV4 (0 in the default model). But with
+`SNES_SMP_ACCESS_STOP`, all nine titles are byte-identical to access-stop alone
+(dkc/fzero/cv4 exact; zelda 99.7733%, metroid 62.5180%, smw 90.1613%, smas
+50.9452%, ct 31.5413%, mmx2 69.2303%), and the master clock is unchanged
+(21,411,778 at 60 frames), so there is **no timeline inflation**. The park
+fires but changes nothing: the port latch holds the *latest* write, so resuming
+the read later makes it see newer values, not the value as of the S-SMP clock.
+
+**Timestamped port latches** (`SNES_PORT_STAMP`): S-CPU `$2140-$2143` writes are
+queued with their master-clock instant and exposed only when the S-SMP's clock
+reaches them, sampled at the deferred `$F4-$F7` read. This is the value-correct
+half of the mutual model, but it **starves the handshake**: CV4 produces no
+`KOFF` writes at all within 260 frames (`KOFF pairs 0`), so the driver never
+progresses.
+
+**Conclusion.** The mutual scheduler is not expressible by (a) choosing the
+comparison clock, (b) parking, or (c) timestamping the latch in the current
+single-driver architecture. It needs the S-CPU to be genuinely suspended
+mid-instruction and resumed *while* the S-SMP continues, with the DSP sample
+stream driven by the same reordered clock. That is the redesign; both halves
+(CV4's exact phase and the S-CPU's fixed clock budget) are achievable
+individually, but not simultaneously with add-on loops.
