@@ -6669,3 +6669,79 @@ livelock, not the park protocol; the earlier analysis calling the park path
 dead code stands, but it was not what hung.
 
 Reverted; the verified per-access model remains the default.
+
+## CV4 first divergence localized to one pass of a `$F7` handshake poll (2026-11-21)
+
+Starting from the differing right-channel sample (289423, where `V3VOLR=$03` is
+written at DSP micro-step 11 in ares and 5 in ours) the write stream was traced
+backwards. Two facts fell out.
+
+### The phase flips only at KOFF (`$5C`) writes, alternating per block
+
+For CV4 the `$F3` write phase takes exactly two values, `ares - ours = +6` and
+`-22` (i.e. phase 6 vs 10 mod 32), and **every** transition between them happens
+at a KOFF (`$5C`) write:
+
+```
+KOFF#1  ares 3558499  ours 3558521  d=-22
+KOFF#2  ares 3558592  ours 3558614  d=-22
+KOFF#3  ares 3562782  ours 3562776  d=+6    <- flips at a block boundary
+KOFF#4  ares 3562875  ours 3562869  d=+6
+KOFF#5  ares 3566867  ours 3566889  d=-22   <- flips back
+```
+
+The `KOFF(n) -> KOFF(n+1)` interval is 4190 vs 4162 DSP ticks (+28) and then
+3992 vs 4020 (-28): the discrepancy **alternates and cancels over two blocks**,
+so it is not a rate difference.
+
+### It is exactly one pass of a 9-instruction, 56-SMP-clock loop
+
+Aligning the two S-SMP instruction streams (`SPC_TRACE` vs `ARES_SPC_TRACE`)
+across a long gap gives sequences that are identical except for **one extra
+pass** of nine instructions (`$049F..$04B2`) in one or the other. Counting one
+loop pass: 9 instructions, 56 S-SMP clocks = 28 DSP ticks - exactly the ±28
+alternation above. Decoding the loop from APU RAM (the byte lengths match the
+trace PC increments exactly):
+
+```
+$049F  EC FD 00   MOV Y, $00FD      ; Timer 1 output
+$04A2  D0 53      BNE $04F7         ; timer non-zero -> leave the wait
+$04A4  E9 F7 00   MOV X, $00F7      ; CPUIO3 ($2143 mirror)
+$04A7  1E F7 00   CMP X, $00F7      ; re-read: detects a port change
+$04AA  D0 F8      BNE $04A4         ; changed -> re-read
+$04AC  3E 07      CMP X, dp$07      ; expected value A?
+$04AE  F0 13      BEQ $04C3         ; yes -> exit
+$04B0  3E 06      CMP X, dp$06      ; expected value B?
+$04B2  F0 EB      BEQ $049F         ; yes -> wait another timer period
+```
+
+So CV4's audio driver waits on Timer 1 and then handshakes on `$2143`: the
+S-SMP reads `$F7` twice per poll (`MOV X,$F7` then `CMP X,$F7`) and branches on
+whether the value *changed* between the two reads.
+
+### Consequence for the audio difference
+
+One extra/missing poll pass shifts every following `$F3` write by 28 DSP ticks
+(1/8 sample). When that shift moves a write across the `voice5(voice[3])`
+(right-channel output) micro-step - which runs at micro-step 9 of the 32-step
+sample - the new right-channel volume is used for a different sample. That is
+the differing sample 289423: ares' `V3VOLR` write at step 11 lands *after*
+step 9, ours at step 5 lands *before* it.
+
+This is the same failure class already recorded for the IPL upload (`$FFDA`,
+"one extra `$F4` poll"), now reproduced at instruction level in CV4 with a
+Timer-1-gated `$F7` handshake. It is not DSP arithmetic and not the DSP/SMP
+leapfrog: it is the S-SMP observing the S-CPU's port write on a different poll
+pass.
+
+### Acceptance test (sharper than the sample-level audio diff)
+
+For CV4 and DKC simultaneously:
+
+1. the number of passes of the `$049F..$04B2` loop between consecutive KOFF
+   writes must match ares (today: +/-1, alternating), and
+2. as a consequence, the `$F3` write phase must be a single value across
+   write-block boundaries.
+
+Both are cheap to check with `SPC_TRACE`/`ARES_SPC_TRACE` plus the write logs,
+without listening to audio.
