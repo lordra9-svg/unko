@@ -1120,9 +1120,7 @@ impl Snes {
                     // checked between whole instructions).
                     let flush = match peer.waiting {
                         None => false,
-                        Some(target) => {
-                            !crate::apu::mutual_scheduler() || self.clock >= target
-                        }
+                        Some(target) => !crate::apu::mutual_scheduler() || self.clock >= target,
                     };
                     if flush {
                         peer.flush_parked(self.clock, rate);

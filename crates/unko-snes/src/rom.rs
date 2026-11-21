@@ -189,6 +189,15 @@ impl RomHeader {
             && matches!(self.mapping, Mapping::LoRom | Mapping::ExLoRom)
     }
 
+    /// Whether this is a BS-X (Satellaview) cartridge.
+    ///
+    /// BS-X BIOS images carry cartridge type `$E5` with a LoROM map mode
+    /// (`$30` on the released BIOS). The BS-X cartridge puts its own memory
+    /// controller on the bus, so it does not use the plain LoROM mapping.
+    pub const fn is_bsx(&self) -> bool {
+        self.cartridge_type == 0xE5 && self.map_mode & 0x0F == 0x00
+    }
+
     /// Whether the cartridge type declares a SuperFX (GSU) coprocessor.
     ///
     /// `$13` is SuperFX, `$14` is SuperFX + RAM + battery and `$15` is
@@ -816,6 +825,21 @@ mod tests {
         rom[offset + 0x1C..offset + 0x1E].copy_from_slice(&(!checksum).to_le_bytes());
         rom[offset + 0x1E..offset + 0x20].copy_from_slice(&checksum.to_le_bytes());
         rom
+    }
+
+    #[test]
+    fn detects_bsx_cartridge_type() {
+        // The released BS-X BIOS carries map mode $30 and cartridge type $E5.
+        let mut rom = build_rom(Mapping::LoRom, 0x10_0000, "Satellaview BS-X", 5, 0x20);
+        rom[0x7FC0 + 0x15] = 0x30;
+        rom[0x7FC0 + 0x16] = 0xE5;
+        let cartridge = Cartridge::from_bytes(&rom).expect("valid BS-X");
+        assert!(cartridge.header().is_bsx());
+
+        // A plain LoROM cart is not BS-X.
+        let plain = build_rom(Mapping::LoRom, 0x4_0000, "PLAIN", 3, 0x20);
+        let plain = Cartridge::from_bytes(&plain).expect("valid LoROM");
+        assert!(!plain.header().is_bsx());
     }
 
     #[test]

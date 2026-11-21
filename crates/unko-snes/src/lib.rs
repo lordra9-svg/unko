@@ -21,6 +21,7 @@
 #![warn(missing_docs)]
 
 pub mod apu;
+pub mod bsx;
 pub mod cpu;
 pub mod cpu_coroutine;
 pub mod cx4;
