@@ -6519,3 +6519,31 @@ structural rework as the CPU/SMP pair.
 Every parameter that can be varied without that rework has now been measured:
 stop rule, cadence, latch ordering, concurrency, DSP drain time, write
 placement, catch-up boundary, fixed-point base and overshoot policy. Reverted.
+
+## Drain-time leapfrog: measured and rejected (2026-11-21)
+
+The last structural candidate was implemented behind `SNES_LEAPFROG`:
+
+* the record-time DSP advance is disabled;
+* `drain_unit` advances `smp_clock` one clock per unit and runs the DSP to it;
+* after an advance's credit is spent, the S-SMP is run on while
+  `plan_pos >= plan.len() && smp_clock < dsp_clock`, i.e. it is pulled forward
+  to the DSP's overshot tick boundary (ares' `Thread::synchronize(smp)`).
+
+Measured at 600 frames:
+
+```
+dkc   0 differing but only 44,102 of 639,656 samples produced before timeout
+cv4   0 differing but only 13,940 samples produced
+smas  403,736 differing (36.88%)
+```
+
+The variant is both **far too slow** (the pull-forward loop re-enters the plan
+machinery on every advance, roughly 10x slower) and **incorrect** (SMAS
+regresses). Reverted.
+
+That completes the measurement of every candidate reachable by changing the
+scheduler's arithmetic or ordering. The five exact titles depend on the current
+eager-advance model, and the remaining CV4/SMAS/CT/MMX2 difference needs a
+faithful concurrency implementation (each thread able to suspend the other
+mid-instruction), not another boundary rule.
