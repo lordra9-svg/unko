@@ -6820,3 +6820,43 @@ current driver cannot express mid-instruction; access-stop approximates the
 lead without it (exact for dkc/fzero/cv4, wrong for zelda/metroid/smw).
 
 All four flags default off, so the verified path is unchanged.
+
+## Pull-forward + access-stop measured; the regression is the payback lag (2026-11-21)
+
+Combining every expressible part of ares' model was measured at 600 frames:
+
+* `SNES_INSTR_SYNC` (flush credit only at instruction ends / port accesses) +
+  `SNES_SMP_ACCESS_STOP` (overshoot to the access boundary) gives CV4's phase
+  `d=0` on all 429 KOFF pairs, and audio results **bit-identical to access-stop
+  alone**:
+
+```
+dkc 100.0000%  fzero 100.0000%  cv4 100.0000%
+zelda 99.7733%  metroid 62.5180%  smw 90.1613%
+smas 50.9452%  ct 31.5413%  mmx2 69.2303%   baseline 212/212
+```
+
+So the instruction-end flush adds nothing once the overshoot exists.
+
+* `SNES_NO_PARK` (never park an `$F4-$F7` read) changes **nothing at all**
+  (identical percentages). The park path does not even fire, and is not what
+  regresses the three titles.
+
+### Why access-stop regresses Zelda/Metroid/SMW
+
+The overshoot is paid back as negative `apu_credit`, which makes the S-SMP's
+**plan replay lag the S-CPU** for the next window. A `$F4-$F7` read is therefore
+replayed at a later wall-clock instant and observes CPU port writes that ares
+would not yet have performed - ares instead pulls the *S-CPU forward*
+(`SMP::step` -> `Thread::synchronize(cpu)`) so the two clocks keep their order.
+
+That cannot be fixed by credit arithmetic: "SMP never lags" and "lead stays
+bounded" are contradictory unless the **S-CPU clock itself advances**. So the
+pull-forward is not expressible in `advance_master_clock` alone; it must move
+the system master clock (and the PPU/HDMA/frame timeline with it) when the
+S-SMP overshoots. That is a driver/timeline change, not a stop rule.
+
+The evidence for this is that removing the park and moving the sync point both
+leave the numbers byte-identical, while the three titles that don't use the
+`$049F`-style handshake are the exact ones that regress: the only remaining
+variable is the S-SMP's replay position relative to the S-CPU clock.

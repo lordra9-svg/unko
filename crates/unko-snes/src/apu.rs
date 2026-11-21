@@ -78,6 +78,13 @@ pub fn instr_sync() -> bool {
     *INSTR.get_or_init(|| std::env::var_os("SNES_INSTR_SYNC").is_some())
 }
 
+/// `SNES_NO_PARK`: never park an `$F4-$F7` read (resolve it at the S-SMP's
+/// position instead of waiting for the S-CPU).
+pub fn no_park() -> bool {
+    static NO: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *NO.get_or_init(|| std::env::var_os("SNES_NO_PARK").is_some())
+}
+
 /// ares `Thread::Second`: the fixed-point base of the scheduler clocks.
 const SCHEDULER_SECOND: u128 = (1u128 << 62) - 1;
 /// ares `Thread::setFrequency`: `_scalar = Second / frequency`.
@@ -530,6 +537,9 @@ impl Apu {
     /// Whether the pending deferred read is a `$F4-$F7` port read whose clock
     /// is ahead of the S-CPU, i.e. ares would run the S-CPU forward first.
     pub fn port_read_waiting(&self) -> bool {
+        if no_park() {
+            return false;
+        }
         if !self.master_clock_valid {
             return false;
         }
