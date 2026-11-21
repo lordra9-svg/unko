@@ -7371,3 +7371,30 @@ not timer arithmetic, not DSP phase, not the timer.
 
 Note: the ares timer hook is local to `/var/home/Lordra/ai/refs/ares` and is not
 committed; the tree here is unchanged.
+
+## `$FD` read instants: a constant +22 timer-clock offset plus boundary spikes (2026-11-21)
+
+Instrumented every `$FD` (T0OUT) read with the cumulative timer-clock count in
+both emulators (`ARES_READ_LOG` / `SNES_READ_LOG`), 60 frames of SMAS:
+
+```
+read count:  ares 21,426   ours 21,307
+read period: 16 timer clocks (identical)
+timer-clock delta (ares - ours):
+     +22 : 21,156 reads      <- the dominant, constant offset
+     +828 / +1982 / +1738 ... : single reads at block boundaries (238 changes)
+```
+
+So relative to the timer, ares' `$FD` read happens **22 timer clocks later** than
+ours, from the very first read, while the timer transitions themselves are at
+identical cumulative positions. The read period is identical (16), so the offset
+is not drift: it is a constant phase difference that spikes by ~+806 (one extra
+poll = 16 timer clocks? no - ~806 clocks) at block boundaries and returns.
+
+The +22 is present at the *first* read, so it is introduced during boot/IPL, and
+22 = 11 accesses of the 2-clock internal timer wait. That points at a difference
+in which accesses step the timer early in the run (the deferred-I/O read path:
+the access's clocks are counted in the plan but the timer step happens once at
+resume), rather than at the timer or the DSP.
+
+Next: find the 11 accesses whose timer steps differ before the first `$FD` read.
