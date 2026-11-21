@@ -5680,3 +5680,40 @@ cooperative scheduler semantics (threads resumed from each other inside
 `writeAPU`/`readIO`), which the request/response driver cannot emulate by
 composing the endpoints. The per-access model remains the best measured and is
 restored.
+
+## First cooperative-scheduler port (2026-11-20)
+
+Implemented the authorised scheduler path: no per-access S-SMP advance; ares
+`Thread::synchronize(smp)` run in **whole instructions** (overshoot to the
+instruction end) at `$2140-$2143` and at every S-CPU instruction boundary, with
+the S-SMP still parking at `$F4-$F7`.
+
+Short window (120 frames, 128,000 samples) looked like a breakthrough:
+
+```
+dkc 0 · zelda 0 · fzero 0 · metroid 0 · cv4 0 · ct 0
+smw 23,326 (81.76%) · smas 19,930 (84.41%)
+```
+
+Full window (600 frames, 639,656 samples) shows it diverges after ~2 s:
+
+```
+fzero 0 (100.0000%)        zelda 2 (99.9997%)
+dkc 186,952 (70.7730%)     metroid 240,231 (62.4437%)
+smw 318,205 (50.2537%)     cv4 83,456 (86.9530%)
+smas 370,451 (42.0859%)    ct 483,016 (24.4882%)
+```
+
+The per-access model over the same window is far better (five exact, cv4 11,269,
+smas 313,782, ct 416,143), so the scheduler variant was reverted. The apparent
+six-title match at 120 frames was a short-window illusion of exactly the kind the
+project has guarded against.
+
+A second variant (credit-exact catch-up at instruction boundaries, tracked via an
+`apu_sync_clock`) livelocked around frame 50 in DKC: the accumulated APU credit
+and the park target interacted so the forward loop never finished. Reverted with
+the rest.
+
+Conclusion: whole-instruction synchronization at the endpoints is not sufficient;
+the scheduler port needs the mutual suspension (the S-SMP resuming the S-CPU
+*inside* `readIO`) that all previous endpoint compositions failed to emulate.
