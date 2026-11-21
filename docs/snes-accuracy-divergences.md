@@ -6331,3 +6331,27 @@ when its thread clock is behind, in clock order.
 
 Risk: the five currently exact titles may regress during 1-2; the verified path
 stays the default until the flag's gate is green.
+
+## DSP at drain time: measured and rejected (2026-11-21)
+
+The queued DSP-peer step was: defer `$F2/$F3` reads to their access clock and
+move `drain_dsp_to` from instruction recording into `drain_unit`. The first half
+turned out to be **already implemented**: the deferred-read path covers all of
+`$00f0-$00ff` (`effective & 0xfff0 == 0x00f0`), so `$F2` and `$F3` already
+resolve at their own access clock.
+
+The second half was implemented behind `SNES_DSP_DRAIN` (record-time
+`step_dsp_clock` becomes a no-op; `drain_unit` advances `smp_clock` by one
+`SMP_SCALAR` per unit and calls `drain_dsp_to`; `smp_clock_at_position` returns
+`smp_clock`). At 600 frames:
+
+```
+dkc 267,671 (58.15%)   zelda 103,119 (83.88%)   fzero 76,721 (88.01%)
+metroid 47,532 (92.57%)   smw 48,722 (92.38%)   cv4 12,225 (98.09%)
+```
+
+So the deliberate one-micro-step lead between the DSP and the S-SMP
+(`24 * DSP_SCALAR` being four fixed-point units less than `2 * SMP_SCALAR`) is
+load-bearing: removing the eager advance changes the DSP sample phase relative
+to every register write and breaks the currently exact titles. Reverted; the
+default path is unchanged (five exact, CV4 98.2383%).
