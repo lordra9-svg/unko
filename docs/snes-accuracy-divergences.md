@@ -6180,3 +6180,35 @@ Combined with the earlier stop-rule and latch-ordering tables, the conclusion is
 that the S-SMP/S-CPU concurrency structure is not the remaining variable: the
 carried-credit per-access driver already reproduces the reference exactly for
 five titles and differs only in single-sample latch visibility for the others.
+
+## S-CPU clock at the read: exactly one access late (2026-11-20)
+
+The one quantity not yet compared is the S-CPU clock at the moment of a
+`$F4-$F7` read. ares' SMPIO line was extended with `cpu=clock()/scalar()` and
+ours with `cpu_master_clock`, at CV4's first divergence:
+
+```
+ours  1396264 698133 FFED FF   cpu=14624280
+ares  ... now=14624286 smp=217 cpu=2286   apu0=00  pc=ffed
+```
+
+`oracleNow()` on the ares side is the S-CPU master clock, so ares performs the
+read at master clock **14,624,286** while ours performs it at **14,624,280** -
+exactly **one S-CPU access (6 clocks) earlier**. The S-CPU port write commits at
+14,624,280 in both (already proven identical), so ares resolves the read on the
+following access (new latch) and we resolve it on the write's own access (old
+latch).
+
+This is the whole of the CV4/SMAS/CT difference, and it is why the
+exact-rational stop - which pushes the last unit past the access boundary -
+made CV4 and SMAS bit-exact. The same one-access shift moves some reads in
+DKC/Zelda/F-Zero/SMW across a different write, which is why every rule that
+fixes one family breaks the other: the shift is a property of ares' *access
+window* accounting, and applying it uniformly changes reads that are correctly
+placed today.
+
+So the remaining question is not a stop rule or a latch-order flag but the exact
+access-window boundary used when the S-SMP catches up: ares synchronizes the
+S-SMP at the S-CPU's *next* port-access clock, and our per-access advance stops
+at the current access end. A rule that moves only reads *at* the boundary
+(and not the general case) is the target.
