@@ -6470,3 +6470,28 @@ deficit between `24 * DSP_SCALAR` and `2 * SMP_SCALAR` (10 units in ares'
 fixed-point base changes where the "extra tick" fires, so the base and the
 catch-up arithmetic must be reproduced together (base 2^63-1 **and** the
 resulting deficit) rather than independently.
+
+## The two DSP write phases correlate with nothing (2026-11-21)
+
+For the 9,680 aligned CV4 `$F3` writes the phase (mod 32 = 6 or 10) was
+cross-tabulated against every available discriminator:
+
+```
+phase by register:            (00,6) 6092  (00,10) 1481  (20,6) 1158  (20,10) 292
+                              every other register also shows both phases
+phase by ares clock.sample:   (0,6) 4129  (1,6) 3772  (1,10) 890  (0,10) 888
+phase by sample parity:       (0,6) 5103  (1,6) 2798  (0,10) 1181  (1,10) 597
+phase by our SMP delta:       (6,60) 5750  (6,160) 2078  (10,60) 1467  (10,160) 291
+```
+
+Both phases occur for every register, both parities, both `clock.sample`
+values and every SMP-delta bucket, in roughly the same 82/18 ratio. So the
+4-tick split is not tied to a particular write pattern - it is the residual of
+the DSP catch-up arithmetic itself (`while dsp_clock < smp_clock`, stopping
+with a sub-tick overshoot), whose two possible stops are 4 ticks apart.
+
+The one structural difference still untested is ares' `DSP::tick` calling
+`Thread::synchronize(smp)` *inside* the tick: the S-SMP can advance while the
+DSP catches up, which changes the SMP clock the next catch-up is compared
+against. Reproducing that requires the two threads to be mutually resumable
+(the scheduler rework), and it is the next experiment.
