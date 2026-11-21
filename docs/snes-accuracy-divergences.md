@@ -6890,3 +6890,38 @@ fixed clock budget. That is a scheduler/timeline redesign (the CPU suspended and
 resumed at scanline boundaries), not a per-access adjustment.
 
 Reverted; all flags default off.
+
+## BS-X verified pixel-identical against ares (2026-11-21)
+
+BS-X was previously only unit/source-tested and boot-checked. ares implements
+the BS-X base cartridge (`Coprocessor/MCC`) and its headless capture path works,
+so the BIOS can be compared directly. Procedure:
+
+```
+# ares (crop hash = same 256x224 pixel set our PRESENT_HASH uses)
+ARES_PRESENT_HASH=/tmp/ares.hash tools/snes-oracle/ares-capture.sh \
+    /var/home/Lordra/ai/refs/BS-X.bin 600 /tmp/ares-bsx
+
+# ours
+FRAMES=600 PRESENT_HASH=/tmp/ours.hash ./target/release/examples/snes-info \
+    /var/home/Lordra/ai/refs/BS-X.bin <ipl.rom>
+```
+
+Result:
+
+```
+600-frame crop hash: ares 600  ours 600  compared 600  matching 600
+first diffs: none
+```
+
+All **600/600 frames are pixel-identical** (FNV-1a-64 over the same 256x224
+RGBA set), and a direct frame-buffer diff at frame 239 gives mean absolute
+channel difference 0.0. This covers the MCC register file, the LoROM/HiROM
+PSRAM map, BIOS/SRAM/Pack windows and the boot path.
+
+Note: `ares-capture.sh`'s `--dump-trace` hash is the *full* 564x242 frame and
+is not comparable to our crop hash; `ARES_PRESENT_HASH` emits the comparable
+one (same crop the audio/frame oracles already use).
+
+ST018 still cannot be verified this way: ares has `armdsp` (ST010/ST011) but no
+ST018 implementation, and the mesence reference still needs a display server.
