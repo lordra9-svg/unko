@@ -7104,3 +7104,32 @@ This is the strongest evidence yet that the residual is the **DSP register-write
 phase** (a few micro-steps), and that the correct model must derive that phase
 from the SMP's access instant in a way that matches ares for all titles - the
 open item. The flag stays default-off.
+
+## Global DSP phase offsets cannot unify DKC and SMAS (2026-11-21)
+
+`SNES_DSP_PRIME` shifts the S-DSP catch-up target by a constant N micro-steps.
+Swept at 300 frames (319,828-sample window; SMAS first diverges at sample
+224,916 and CV4 at 578,847, so this window covers SMAS but not CV4):
+
+```
+prime   0       2       4       6       8      10      12      16      24      31
+dkc   100.00%  83.18%  80.22%  57.70%  56.18%  53.88%  53.70%  53.54%  52.73%  50.37%
+smas   70.41%  70.41%  70.41%  70.41%  70.41%  70.41%  70.41%  70.41%  70.41%  69.34%
+cv4   100.00% 100.00% 100.00% 100.00% 100.00% 100.00% 100.00% 100.00% 100.00% 100.00%
+```
+
+Conclusions:
+
+* **The default DSP phase is exactly right for DKC** - the only offset that
+  gives 0 differing is 0, and every other offset degrades monotonically. So a
+  "phase rule" cannot be introduced to help SMAS without breaking DKC.
+* **SMAS is phase-insensitive**: its diff is 94,638-94,640 samples for every
+  offset from 0 to 24. So the SMAS residual is *not* the DSP write phase, and the
+  SMAS-exact result under the unclamped CPU target comes from that target's
+  *variable advance pattern*, not from a constant phase shift.
+* CV4 is exact through 300 frames for every offset; its divergence begins at
+  sample 578,847 (stereo frame 289,423) - the `V3VOLR` write already analysed.
+
+So the three remaining titles have three distinct causes and no single phase
+parameter addresses them: CV4 is a single late handshake event, SMAS is not
+phase-related, and DKC pins the phase exactly.
