@@ -6060,3 +6060,44 @@ with the three-case table this proves the two families are mirror images -
 some reads in each title require the newer latch and others the older one at
 identical S-SMP clocks - so a single global latch-ordering rule cannot be
 correct. Reverted.
+
+## S-SMP clock at every `$F4-$F7` read: identical to ares (2026-11-20)
+
+Both sides now log the S-SMP clock at every `$F4` read (`PORTDBG` in our build
+writes `units tick pc value`; the ares SMPIO hook was extended with
+`smp=clock()/scalar()`). At CV4's first divergence:
+
+```
+ours  1396265 698133 FFED FF
+ours  1396279 698140 FFDC 00     (delta 14 S-SMP clocks)
+
+ares  14624286 RD0 ... apu0=00 y=22 pc=ffed smp=217
+ares  14624432 RD0 ... apu0=00 y=22 pc=ffdc smp=231     (delta 14)
+```
+
+The clocks are **identical** (delta 14 on both sides) and the read sequence
+aligns one-for-one, so the S-SMP clock accounting is correct. That rules out
+the clock-accounting branch of the question. Only the latch value differs at
+the same clock: ares has the `$2140` write that committed at master clock
+14,624,280 applied, we do not.
+
+Combining the two measures this implies - the exact-rational stop (no carried
+remainder) **and** committing `$2140-$2143` before the access advance - gives at
+600 frames:
+
+```
+dkc 0 (100%)   cv4 0 (100%)   zelda 1,450 (99.77%)
+fzero 355,081 (44.49%)   metroid 238,764 (62.67%)
+smw 62,934 (90.16%)   smas 313,782 (50.95%)   ct 438,546 (31.44%)
+```
+
+i.e. two exact titles, fewer than the carried-credit model's five, so it was
+reverted as well.
+
+Conclusion: clocks and S-CPU write instants are both proven identical to ares,
+and every latch-ordering rule flips a different subset. The read position
+inside `SMP::read`'s split wait is therefore the remaining variable: our read
+resumes at half the access in *units*, while ares' `wait(1)` steps
+`cycleWaitStates >> 1` clocks and reads between the two halves, which is only
+the same point when the wait state is even. The next step is to reproduce that
+split exactly per wait state (0-3) rather than assuming `clocks / 2`.
