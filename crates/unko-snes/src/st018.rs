@@ -392,96 +392,61 @@ impl St018 {
         }
     }
 
-    fn shift(&mut self, value: u32, shift_type: u32, amount: u32) -> u32 {
+    /// Barrel shifter (ARMv3): returns the shifted value and the carry-out.
+    /// `immediate` selects the encoding's zero-amount meaning (LSR/ASR/ROR by
+    /// 32 or RRX for immediate shifts; no shift for register shifts).
+    fn shift_value(
+        &self,
+        value: u32,
+        shift_type: u32,
+        amount: u32,
+        immediate: bool,
+    ) -> (u32, bool) {
+        let c = self.cpu.flag_c();
         match (shift_type, amount) {
-            (0, 0) => value,
+            (0, 0) => (value, c), // LSL #0 keeps C
+            (0, n) if n < 32 => (value << n, (value >> (32 - n)) & 1 != 0),
             (0, n) => {
-                if n < 32 {
-                    let carry = (value >> (32 - n)) & 1 != 0;
-                    self.cpu.set_flags(
-                        self.cpu.flag_n(),
-                        self.cpu.flag_z(),
-                        carry,
-                        self.cpu.flag_v(),
-                    );
-                    value << n
+                if n == 32 {
+                    (0, value & 1 != 0)
                 } else {
-                    self.cpu.set_flags(
-                        self.cpu.flag_n(),
-                        self.cpu.flag_z(),
-                        false,
-                        self.cpu.flag_v(),
-                    );
-                    0
+                    (0, false)
                 }
             }
             (1, 0) => {
-                let carry = value & 1 != 0;
-                self.cpu.set_flags(
-                    self.cpu.flag_n(),
-                    self.cpu.flag_z(),
-                    carry,
-                    self.cpu.flag_v(),
-                );
-                0
+                if immediate {
+                    (0, value & 0x8000_0000 != 0) // LSR #32
+                } else {
+                    (value, c)
+                }
             }
-            (1, n) => {
-                let carry = (value >> (n - 1)) & 1 != 0;
-                self.cpu.set_flags(
-                    self.cpu.flag_n(),
-                    self.cpu.flag_z(),
-                    carry,
-                    self.cpu.flag_v(),
-                );
-                value >> n
-            }
+            (1, n) => (value >> n, (value >> (n - 1)) & 1 != 0),
             (2, 0) => {
-                let carry = self.cpu.flag_c();
-                let result = (value >> 1) | (u32::from(carry) << 31);
-                self.cpu.set_flags(
-                    self.cpu.flag_n(),
-                    self.cpu.flag_z(),
-                    value & 1 != 0,
-                    self.cpu.flag_v(),
-                );
-                result
+                if immediate {
+                    // ROR #0 is RRX.
+                    ((u32::from(c) << 31) | (value >> 1), value & 1 != 0)
+                } else {
+                    (value, c)
+                }
             }
-            (2, n) => {
-                let carry = (value >> (n - 1)) & 1 != 0;
-                self.cpu.set_flags(
-                    self.cpu.flag_n(),
-                    self.cpu.flag_z(),
-                    carry,
-                    self.cpu.flag_v(),
-                );
-                value >> n
+            (2, n) => (value.rotate_right(n), (value >> (n - 1)) & 1 != 0),
+            (3, _) => {
+                let n = if amount == 0 { 32 } else { amount };
+                let result = if n >= 32 {
+                    if value & 0x8000_0000 != 0 {
+                        0xFFFF_FFFF
+                    } else {
+                        0
+                    }
+                } else {
+                    ((value as i32) >> n) as u32
+                };
+                (result, value & 0x8000_0000 != 0)
             }
-            (3, 0) => {
-                let carry = self.cpu.flag_c();
-                let result = (value << 1) | u32::from(carry);
-                self.cpu.set_flags(
-                    self.cpu.flag_n(),
-                    self.cpu.flag_z(),
-                    value & 0x8000_0000 != 0,
-                    self.cpu.flag_v(),
-                );
-                result
-            }
-            (3, n) => {
-                let carry = (value >> (32 - n)) & 1 != 0;
-                self.cpu.set_flags(
-                    self.cpu.flag_n(),
-                    self.cpu.flag_z(),
-                    carry,
-                    self.cpu.flag_v(),
-                );
-                value << n
-            }
-            _ => value,
+            _ => (value, c),
         }
     }
 
-    /// Execute one ARM instruction.
     fn step(&mut self) {
         self.cpu.cycles += 1;
         let pc = self.cpu.pc();
@@ -577,25 +542,27 @@ impl St018 {
         let set_flags = bits(20, 20) != 0;
         let rn = bits(16, 19) as usize;
         let rd = bits(12, 15) as usize;
-        let operand = if immediate {
+        let (operand, shift_carry) = if immediate {
             let rotate = bits(8, 11) * 2;
-            let value = bits(0, 7);
-            value.rotate_right(rotate)
+            let raw = bits(0, 7);
+            let value = raw.rotate_right(rotate);
+            let carry = if rotate == 0 {
+                self.cpu.flag_c()
+            } else {
+                value & 0x8000_0000 != 0
+            };
+            (value, carry)
         } else {
             let rm = (opcode & 0xF) as usize;
-            let mut value = self.reg(rm);
-            if bits(25, 25) == 0 && bits(4, 4) != 0 {
+            let value = self.reg(rm);
+            if bits(4, 4) != 0 {
                 let rs = bits(8, 11) as usize;
                 let amount = self.reg(rs) & 0xFF;
-                value = self.shift(value, bits(5, 6), amount);
-            } else if bits(4, 4) == 0 {
-                let amount = bits(7, 11);
-                value = self.shift(value, bits(5, 6), amount);
-            }
-            if bits(4, 4) != 0 {
                 self.cpu.cycles += 1;
+                self.shift_value(value, bits(5, 6), amount, false)
+            } else {
+                self.shift_value(value, bits(5, 6), bits(7, 11), true)
             }
-            value
         };
         let a = self.reg(rn);
         if std::env::var_os("ST018_CALL_LOG").is_some() && opcode == 0xE08F_1001 {
@@ -604,21 +571,21 @@ impl St018 {
             );
         }
         let (result, carry) = match op {
-            0x0 => (a & operand, self.cpu.flag_c()),        // AND
-            0x1 => (a ^ operand, self.cpu.flag_c()),        // EOR
+            0x0 => (a & operand, shift_carry),              // AND
+            0x1 => (a ^ operand, shift_carry),              // EOR
             0x2 => self.sub(a, operand, true),              // SUB
             0x3 => self.sub(operand, a, true),              // RSB
             0x4 => self.add(a, operand, false),             // ADD
             0x5 => self.add(a, operand, self.cpu.flag_c()), // ADC
             0x6 => self.sub(a, operand, self.cpu.flag_c()), // SBC
             0x7 => self.sub(operand, a, self.cpu.flag_c()), // RSC
-            0x8 => (a & operand, self.cpu.flag_c()),        // TST
-            0x9 => (a ^ operand, self.cpu.flag_c()),        // TEQ
+            0x8 => (a & operand, shift_carry),              // TST
+            0x9 => (a ^ operand, shift_carry),              // TEQ
             0xA => self.sub(a, operand, true),              // CMP
             0xB => self.add(a, operand, false),             // CMN
-            0xC => (a | operand, self.cpu.flag_c()),        // ORR
-            0xD => (operand, self.cpu.flag_c()),            // MOV
-            0xE => (a & !operand, self.cpu.flag_c()),       // BIC
+            0xC => (a | operand, shift_carry),              // ORR
+            0xD => (operand, shift_carry),                  // MOV
+            0xE => (a & !operand, shift_carry),             // BIC
             _ => (!operand, self.cpu.flag_c()),             // MVN
         };
         let (n, z) = (result & 0x8000_0000 != 0, result == 0);
@@ -741,7 +708,7 @@ impl St018 {
             let rm = (opcode & 0xF) as usize;
             let value = self.reg(rm);
             let amount = bits(7, 11);
-            self.shift(value, bits(5, 6), amount)
+            self.shift_value(value, bits(5, 6), amount, true).0
         };
         let base = self.reg(rn);
         if std::env::var_os("ST018_CALL_LOG").is_some() && opcode == 0xE551_2000 {
@@ -944,6 +911,48 @@ mod tests {
         chip.write(0x00_3804, 0x00); // falling edge: power on at PC 0
         chip.run_to(4);
         assert_eq!(chip.arm_register(0), 1);
+    }
+
+    fn run_program(words: &[u32], cycles: u64) -> St018 {
+        let mut image = vec![0u8; FIRMWARE_SIZE];
+        for (index, word) in words.iter().enumerate() {
+            image[index * 4..index * 4 + 4].copy_from_slice(&word.to_le_bytes());
+        }
+        let mut chip = St018::new(&image);
+        chip.write(0x00_3804, 0x80);
+        chip.write(0x00_3804, 0x00);
+        chip.run_to(cycles);
+        chip
+    }
+
+    #[test]
+    fn shifter_matches_armv3_semantics() {
+        // MOV r0,#1 ; MOV r0,r0,LSL #4 ; MOV r1,#0x81 ; MOV r1,r1,LSR #1
+        // ; MOV r2,#0x80000001 ; MOV r3,r2,ROR #1 ; B .
+        let chip = run_program(
+            &[
+                0xE3A0_0001,
+                0xE1A0_0200, // MOV r0, r0, LSL #4
+                0xE3A0_1081, // MOV r1, #0x81
+                0xE1A0_10A1, // MOV r1, r1, LSR #1
+                0xE3A0_2102, // MOV r2, #0x80000001
+                0xE1A0_30E2, // MOV r3, r2, ROR #1
+                0xEAFF_FFFE,
+            ],
+            16,
+        );
+        assert_eq!(chip.arm_register(0), 0x10, "LSL #4");
+        assert_eq!(chip.arm_register(1), 0x40, "LSR #1");
+        assert_eq!(chip.arm_register(3), 0xC000_0000, "ROR #1");
+    }
+
+    #[test]
+    fn logical_op_carry_comes_from_the_shifter() {
+        // MOV r0,#1 ; MOVS r1,r0,LSL #31  (carry out = 1) ; B .
+        let chip = run_program(&[0xE3A0_0001, 0xE1B0_10C0, 0xEAFF_FFFE], 8);
+        // C is bit 29 of the 26-bit r15 (0x2000_0000).
+        assert_ne!(chip.arm_register(15) & 0x2000_0000, 0, "C from shifter");
+        assert_ne!(chip.arm_register(15) & 0x8000_0000, 0, "N set (bit31)");
     }
 
     #[test]
