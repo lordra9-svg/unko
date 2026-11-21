@@ -750,9 +750,6 @@ impl Apu {
     /// clock is ahead of the S-CPU. The remaining credit is carried, so the
     /// next advance (after the S-CPU has caught up) resumes at the same sample.
     pub fn advance_master_clock(&mut self, clocks: u32, clock: u64, rate: u64) -> bool {
-        if mutual_scheduler() {
-            return self.advance_master_clock_mutual(clocks, clock, rate);
-        }
         const APU_UNIT_NUM: i64 = 2_050_560;
         let den = rate as i64;
         self.set_master_clock(clock + u64::from(clocks), rate);

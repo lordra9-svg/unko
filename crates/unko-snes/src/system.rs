@@ -1094,6 +1094,17 @@ impl Snes {
                         }
                         other => self.handle_cpu_request(other),
                     });
+                    // Concurrent driver (`SNES_MUTUAL`): resume a parked
+                    // `$F4-$F7` sample as soon as the S-CPU has reached its
+                    // clock, at S-CPU *access* granularity rather than waiting
+                    // for the instruction boundary.
+                    if crate::apu::mutual_scheduler() {
+                        if let Some(target) = peer.waiting {
+                            if self.clock >= target {
+                                peer.flush_parked(self.clock, rate);
+                            }
+                        }
+                    }
                 }
                 corosensei::CoroutineResult::Yield(crate::cpu_coroutine::CpuOutput::Done(
                     cpu,

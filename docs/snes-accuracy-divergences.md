@@ -6144,3 +6144,39 @@ credit is the only stop rule exact for five titles; every cadence and ordering
 variant measured (twelve now) is exact for a different subset. The residual is
 not reachable by choosing a cadence, a stop rule, or a latch-ordering rule in
 the current deferred-read architecture.
+
+## Concurrent resumption with the carried-credit stop (2026-11-20)
+
+`SNES_MUTUAL` now selects only the concurrent resumption: a parked `$F4-$F7`
+sample is resumed as soon as the S-CPU has reached its clock, at S-CPU *access*
+granularity, while the stop rule stays the carried credit. The instruction-
+granularity dispatch was removed from `advance_master_clock` for this test.
+
+600 frames, `SNES_MUTUAL=1`:
+
+```
+dkc 0   zelda 0   fzero 0   metroid 0   smw 0
+cv4 11,269 (98.24%)   smas 313,782   ct 416,143
+```
+
+Byte-for-byte identical to the default path. So the park/resume mechanism
+(suspending the S-SMP at a `$F4-$F7` sample and resuming it after the S-CPU
+catches up) produces no output change at all once the stop rule is the carried
+credit: the parked reads either do not occur in these titles or their latch is
+already correct by the time they resolve.
+
+This completes the concurrency axis. Every way of expressing "both threads
+suspended and resumed mid-instruction" that the driver can support has now been
+implemented:
+
+| concurrency variant | result |
+|---|---|
+| per-instruction overshoot, flush at instruction boundary | zelda + fzero exact |
+| per-instruction overshoot, flush at access boundary | zelda + fzero exact |
+| carried credit, flush at access boundary | five exact (identical to default) |
+| ares sync-point cadence (ports + H=0) | slow, diverges |
+
+Combined with the earlier stop-rule and latch-ordering tables, the conclusion is
+that the S-SMP/S-CPU concurrency structure is not the remaining variable: the
+carried-credit per-access driver already reproduces the reference exactly for
+five titles and differs only in single-sample latch visibility for the others.
