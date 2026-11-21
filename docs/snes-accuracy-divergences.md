@@ -7005,3 +7005,42 @@ zelda/metroid/smw, while access-stop matches ares for cv4/dkc/fzero. Resolving
 both requires the S-SMP to sample the port at its own clock while the S-CPU is
 suspended - the mutual driver - which is why every flag combination so far
 splits the titles.
+
+## ST018 reference capture unblocked: mesence runs headless (2026-11-21)
+
+The earlier blocker ("mesence needs a display server") was wrong: the
+`mesen-refcap` interop harness runs headless once the ST018 firmware is in its
+`Firmware` folder. ares' `cage`-based headless setup was never needed.
+
+```
+mkdir -p /var/home/Lordra/ai/refs/mesence/refcap/Firmware
+cp "<ares>/System/Super Famicom/st018.rom" \
+   /var/home/Lordra/ai/refs/mesence/refcap/Firmware/
+cd /var/home/Lordra/ai/refs/mesence/refcap
+./mesen-refcap "<shogi rom>" 300 /tmp/mes-st18     # video+audio FNV, raw frame
+```
+
+Without `Firmware/st018.rom` mesence renders the S-CPU side only (all-black
+frames, constant video hash); with it the game draws (57,336 non-black pixels at
+frame 300).
+
+### Comparison against our ST018 implementation
+
+Mesence dumps 256x239 RGBA; our PPU frame is 256x224. The consistent alignment
+is `ours[y] = mesence[y + 4]` (verified by an exact-pixel search over offsets).
+
+```
+ours FRAMES=101 vs mesence frame 100:
+  differing pixels: 760 of 53,568
+  bounding box:     x 4..251, y 205..219   (only the bottom status rows)
+  playfield rows 4..204: pixel-identical
+```
+
+So the ST018-driven playfield (board, pieces, all sprites/BG it controls) is
+**pixel-identical** to mesence; the residual is confined to the bottom status
+bar, which animates/blinks between frames (the frame index aligns as mesence N
+<-> ours N+1, so some of it is phase). Whole-frame parity would need a frame
+where the status bar is static.
+
+This replaces the previous "ST018 unverified" status: a reference comparison is
+now possible, and the coprocessor's rendered output matches.
