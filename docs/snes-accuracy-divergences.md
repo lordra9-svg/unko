@@ -6355,3 +6355,28 @@ So the deliberate one-micro-step lead between the DSP and the S-SMP
 load-bearing: removing the eager advance changes the DSP sample phase relative
 to every register write and breaks the currently exact titles. Reverted; the
 default path is unchanged (five exact, CV4 98.2383%).
+
+## Reference-harness status for ST018/BS-X verification (2026-11-21)
+
+mesence is the only available ST018 reference, and it has a built-in headless
+path: `--testRunner [lua script] [rom]`. Verification is blocked by the
+environment, not by the code:
+
+* .NET 10 was installed locally (`/tmp/opencode/dotnet`, 10.0.404) and the
+  app launches, but the test runner still creates a GL context
+  (`~/.cache/mesa_shader_cache` appears) and produces no output without a
+  display server. `Xvfb`/`xvfb-run` are not installed and `sudo` requires a
+  password, so a virtual display cannot be created here.
+* The interop path (`MesenCore.so`: `InitDll`, `InitializeEmu(..., noVideo)`,
+  `LoadRom`, `GetCpuState`) is exported, but `InitializeEmu` with null window
+  handles dumps core, and this build does **not** export the capture API
+  (`InitializeCapture`/`CaptureVideoFrameCount`/`CaptureVideoHash`), so there is
+  no headless frame-stepping entry point.
+
+What would unblock reference verification: a display server (install `Xvfb`,
+or run the capture inside an existing X/Wayland session), or a mesence build
+that exports `InitializeCapture` and accepts null handles.
+
+Until then, ST018's correctness is verified only by construction (its boot,
+handshake, rendering and 7 unit tests) and BS-X by its boot screen, deterministic
+hash stream, MCC sequence and pack bus test.
