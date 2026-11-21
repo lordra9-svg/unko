@@ -6241,3 +6241,38 @@ it is either a sub-instruction effect at a port access or a difference in the
 S-CPU clock used for a specific synchronize.
 
 Both variants reverted.
+
+## The S-SMP divergence starts at the first port write (2026-11-20)
+
+Both emulators were logged at **every** S-CPU port access (`ARES_PORT_SYNC_LOG`
+gives `smp0/smp1/dsmp`; ours logs the retired S-SMP clock at each `$2140-$2143`
+access). The two logs have exactly 142,413 entries for 70 frames of CV4 and the
+S-CPU access clocks match one-for-one, so they align index by index.
+
+The very first divergence is at the **third port access**, the first write after
+boot:
+
+```
+idx  cpu clock   ours (retired)   ares smp1   ares dsmp
+  0  4165004     397657           25204       70
+  1  4165010     397657           25204        0
+  2  4165098     397666   (+9)    25214       10      <- one clock short
+  3  4165144     397670   (+4)    25218        4
+  4  4165216     397677   (+7)    25224        6
+  5  4165268     397682   (+5)    25229        5
+```
+
+`ares` advanced the S-SMP by 10 clocks across that access window; ours by 9.
+From there the two advance in step per access but with the one-clock offset
+already present - which is exactly the "~2 S-SMP clocks" seen later at CV4's
+`$F4` read (it accumulates through subsequent parked/flush boundaries).
+
+So the root difference is in the *first* catch-up advance after power-on, not in
+the later port-read boundary. 4,165,004 master clocks is 397,650 S-SMP clocks,
+and our counter reads 397,657 there, so the offset is in how the very first
+synchronization seeds and drains the credit, not in the steady-state rate (the
+per-access deltas agree from idx 3 onward).
+
+Next step: reproduce ares' first `Thread::synchronize(smp)` exactly for the
+power-on window, when the S-SMP clock starts at its uniqueID (1) and the S-CPU
+clock at 0, and confirm the third access advances 10 clocks instead of 9.
