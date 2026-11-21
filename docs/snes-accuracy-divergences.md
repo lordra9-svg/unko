@@ -7488,3 +7488,33 @@ offset by a constant 22 timer clocks, timer logic exact), the remaining
 mechanism is: the S-SMP's `$FD` read/timer phase is offset, so the zero-wait loop
 exits one iteration earlier or later, which shifts the following block's writes
 by 16 S-SMP clocks (= 8 DSP ticks). Every other candidate has been excluded.
+
+## Loop exit vs Timer-0 transition: read grid is phase-shifted (2026-11-21)
+
+Logged every `$FD` read with the S-SMP instruction index and cumulative timer
+clocks, and compared with the Timer-0 transition.
+
+```
+Timer-0 transition:      tc 1,559,040   (identical in both)
+ares  reads around it:   1,558,976 / 1,558,992 / 1,559,008 / 1,559,024 / 1,559,040* / ...
+ours  reads around it:   1,558,986 / 1,559,002 / 1,559,018 / 1,559,034 / 1,559,050* / ...
+                                                   (* = first non-zero stage3 = loop exit)
+```
+
+So **both loops exit at the first read at/after the transition**, but the read
+grids are phase-shifted: ares' exit read lands *exactly on* the transition
+(1,559,040) while ours lands 10 timer clocks after (1,559,050). Because the reads
+occur every 16 clocks, a phase offset of 10 clocks means one side can have an
+extra read between the previous sample and the transition - which is the
+one-iteration difference that then shifts the block by 16 S-SMP clocks.
+
+The timer itself is exact (transition at the same tc). The difference is the
+**phase of the `$FD` read grid**, i.e. the cumulative timer clocks accumulated by
+the time the loop starts, which is set by every prior access's timer step.
+(ares' `oracleEventSeq` is not incremented in this build, so the program-position
+axis could not be compared directly; the timer-clock axis was used instead.)
+
+This closes the localisation: exact timer, identical transitions, but a read-grid
+phase difference of 10 timer clocks at the exit. The fix belongs in the
+access-level timer-step accounting that establishes that phase (the only place a
+net offset can be introduced), not in the timer or the DSP.
