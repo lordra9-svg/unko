@@ -190,6 +190,11 @@ impl St018 {
         self.cpu.pc()
     }
 
+    /// ARM general register (debug/tests).
+    pub fn arm_register(&self, index: usize) -> u32 {
+        self.cpu.r[index & 0xF]
+    }
+
     /// Status byte as the S-CPU reads it (reference `GetStatus`):
     /// bit 0 = data for the S-CPU, bit 2 = ack, bit 3 = data for the ARM,
     /// bit 7 = the ARM is running (reset released).
@@ -603,14 +608,14 @@ impl St018 {
             0x1 => (a ^ operand, self.cpu.flag_c()),        // EOR
             0x2 => self.sub(a, operand, true),              // SUB
             0x3 => self.sub(operand, a, true),              // RSB
-            0x4 => self.add(a, operand, true),              // ADD
+            0x4 => self.add(a, operand, false),             // ADD
             0x5 => self.add(a, operand, self.cpu.flag_c()), // ADC
             0x6 => self.sub(a, operand, self.cpu.flag_c()), // SBC
             0x7 => self.sub(operand, a, self.cpu.flag_c()), // RSC
             0x8 => (a & operand, self.cpu.flag_c()),        // TST
             0x9 => (a ^ operand, self.cpu.flag_c()),        // TEQ
             0xA => self.sub(a, operand, true),              // CMP
-            0xB => self.add(a, operand, true),              // CMN
+            0xB => self.add(a, operand, false),             // CMN
             0xC => (a | operand, self.cpu.flag_c()),        // ORR
             0xD => (operand, self.cpu.flag_c()),            // MOV
             0xE => (a & !operand, self.cpu.flag_c()),       // BIC
@@ -739,6 +744,12 @@ impl St018 {
             self.shift(value, bits(5, 6), amount)
         };
         let base = self.reg(rn);
+        if std::env::var_os("ST018_CALL_LOG").is_some() && opcode == 0xE551_2000 {
+            eprintln!(
+                "LDRBDBG rn={rn} base={base:08X} offset={offset:08X} pre={pre} up={up} wb={writeback} r1={:08X}",
+                self.cpu.r[1]
+            );
+        }
         let address = if pre {
             if up {
                 base.wrapping_add(offset)
@@ -915,6 +926,24 @@ mod tests {
         let mut chip = St018::new(&image);
         chip.arm_write8(0x0000_0010, 0xFF);
         assert_eq!(chip.program_rom()[0x10], image[0x10]);
+    }
+
+    #[test]
+    fn add_does_not_carry_in() {
+        // ARM at 0: MOV r0,#0 ; ADD r0,r0,#1 ; B .
+        // `ADD` must not add the carry flag (that is `ADC`); this caught a real
+        // bug where ADD/CMN were implemented with carry-in set, producing
+        // 0x1D4+0x68+1 instead of 0x23C in the firmware's table lookup.
+        let mut image = vec![0u8; FIRMWARE_SIZE];
+        let program: [u32; 3] = [0xE3A0_0000, 0xE280_0001, 0xEAFF_FFFE];
+        for (index, word) in program.iter().enumerate() {
+            image[index * 4..index * 4 + 4].copy_from_slice(&word.to_le_bytes());
+        }
+        let mut chip = St018::new(&image);
+        chip.write(0x00_3804, 0x80);
+        chip.write(0x00_3804, 0x00); // falling edge: power on at PC 0
+        chip.run_to(4);
+        assert_eq!(chip.arm_register(0), 1);
     }
 
     #[test]
