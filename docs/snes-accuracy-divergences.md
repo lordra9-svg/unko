@@ -7558,3 +7558,26 @@ regresses six titles. So the correct resolution is the port-sample ordering
 (read must sample the latch as of the read instant while the S-CPU is not run
 past it), which our single-driver architecture cannot express without the mutual
 driver - consistent with the earlier mutual-scheduler conclusion.
+
+## Latch-as-of-read-clock deadlocks the boot (retest, 2026-11-21)
+
+Retried the targeted port-sample ordering: S-CPU port writes are timestamped and
+exposed to the S-SMP only when its replay clock reaches the write instant, so a
+deferred `$F4-$F7` read samples the latch as of its own clock (`SNES_PORT_STAMP`).
+
+Result: the machine stalls. At 60 frames SMAS executes 227,335 S-SMP
+instructions (279,350 normally), the PPU stays dark (brightness 0) and the boot
+does not progress.
+
+Cause: during the IPL upload the S-SMP waits for a `$2140` write, the S-CPU
+waits for the S-SMP's `$2141` acknowledgement, and hiding the write from the
+S-SMP closes the loop - the S-SMP cannot advance (the CPU only grants it
+credit) and the CPU cannot receive the ack. ares avoids this because the DSP
+micro-step pulls the S-SMP forward, which in turn pulls the S-CPU; that mutual
+pull is what breaks the deadlock.
+
+So "sample the latch as of the read clock without shifting the S-SMP clock" is
+not expressible in the current driver: hiding the write requires a forward
+pull that the driver cannot perform. This is the same architectural conclusion
+reached from the opposite direction earlier, now confirmed by a direct test of
+the exact requested change. Reverted.
