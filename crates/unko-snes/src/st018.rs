@@ -430,6 +430,7 @@ impl St018 {
                 }
             }
             (2, n) => (value.rotate_right(n), (value >> (n - 1)) & 1 != 0),
+            (3, 0) if !immediate => (value, c), // register ASR #0: no shift
             (3, _) => {
                 let n = if amount == 0 { 32 } else { amount };
                 let result = if n >= 32 {
@@ -762,12 +763,14 @@ impl St018 {
                 self.arm_write32(address, self.cpu.r[rd]);
             }
         }
-        if !pre || writeback {
-            let updated = if up {
-                base.wrapping_add(offset)
-            } else {
-                base.wrapping_sub(offset)
-            };
+        // Reference: post-index always writes back; a load into the base
+        // register keeps the loaded value (`rd != rn || !load`).
+        let updated = if up {
+            base.wrapping_add(offset)
+        } else {
+            base.wrapping_sub(offset)
+        };
+        if (rd != rn || !load) && (!pre || writeback) {
             self.cpu.r[rn] = updated;
         }
     }
@@ -1030,6 +1033,61 @@ mod tests {
             chip.arm_register(0),
             0x55,
             "loaded value wins over write-back"
+        );
+    }
+
+    #[test]
+    fn post_index_load_into_base_keeps_loaded_value() {
+        // MOV r0,#0xE0000000 ; ADD r0,r0,#0x100 ; MOV r2,#0x66
+        // STR r2,[r0] ; LDR r0,[r0],#4 ; B .
+        let chip = run_program(
+            &[
+                0xE3A0_020E,
+                0xE280_0C01,
+                0xE3A0_2066,
+                0xE580_2000,
+                0xE490_0004, // LDR r0, [r0], #4
+                0xEAFF_FFFE,
+            ],
+            80,
+        );
+        assert_eq!(
+            chip.arm_register(0),
+            0x66,
+            "loaded value beats post-index write-back"
+        );
+    }
+
+    #[test]
+    fn post_index_store_always_writes_back() {
+        // MOV r0,#0xE0000000 ; ADD r0,r0,#0x100 ; MOV r2,#7
+        // STR r2,[r0],#4   ; B .   (no W bit: post-index still writes back)
+        let chip = run_program(
+            &[
+                0xE3A0_020E,
+                0xE280_0C01,
+                0xE3A0_2007,
+                0xE480_2004,
+                0xEAFF_FFFE,
+            ],
+            80,
+        );
+        assert_eq!(
+            chip.arm_register(0),
+            0xE000_0104,
+            "post-index store wrote back"
+        );
+        assert_eq!(chip.work_ram()[0x100], 7);
+    }
+
+    #[test]
+    fn register_shift_asr_zero_is_no_shift() {
+        // MOV r0,#0x80000000 ; MOV r1,#0 ; MOV r0,r0,ASR r1 ; B .
+        let chip = run_program(&[0xE3A0_0102, 0xE3A0_1000, 0xE1A0_0050, 0xEAFF_FFFE], 10);
+        assert_eq!(
+            chip.arm_register(0),
+            0x8000_0000,
+            "ASR by register 0 is no shift"
         );
     }
 
