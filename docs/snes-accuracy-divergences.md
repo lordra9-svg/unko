@@ -7167,3 +7167,28 @@ rounds on the two-valued pattern), and why the same shift breaks DKC.
 
 Open item: remove the two-valued oscillation itself (our write delta should be a
 single value), rather than shifting it.
+
+## The DSP write oscillation flips only at KOFF, constant within a block (2026-11-21)
+
+Analysed the per-write delta (ares dspTicks - our micro-step) across the whole
+SMAS trace:
+
+```
+delta values:  +3 (9,418 writes)   -5 (5,963)   +11 (15, first write only)
+delta changes: 797, and EVERY change (after the first) is at a $5C (KOFF) write
+```
+
+The delta is **constant inside each audio block and flips only at the block's
+KOFF write**. The two values differ by 8 DSP ticks = 16 S-SMP clocks, i.e. the
+same structure measured for CV4 (there 56 S-SMP clocks), just smaller.
+
+Since SMAS's (reg,value) write sequence is byte-identical to ares, the flip is
+not a control-flow difference in the writes: between blocks the S-SMP runs an
+inter-block wait (a timer/delay loop that produces no DSP writes), and by the
+next block our S-SMP clock differs from ares by +/-16 clocks, alternating.
+That shifts all of the block's writes by the constant offset, which is enough to
+move envelope/volume updates across sample boundaries and change the audio.
+
+So the residual is a **block-boundary timing difference inside the S-SMP's
+inter-block wait**, the same class as CV4's Timer-1-gated `$049F` handshake, not
+a DSP arithmetic or phase-constant problem.
