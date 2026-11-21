@@ -6793,3 +6793,30 @@ S-SMP's own `SMP::step`. Implementing that direction (the S-SMP advancing the
 S-CPU at its access boundaries, instead of the S-CPU advancing the S-SMP) is the
 next step; the flags stay at their default (off) so the verified five-title path
 is unchanged.
+
+## ares synchronization direction: measured (2026-11-21)
+
+Two further rules were added behind flags, following the access-stop result.
+
+**`SNES_PORT_SYNC` - advance the S-SMP only at `$2140-$2143` accesses**
+(ares `CPU::readAPU`/`writeAPU`), holding the credit otherwise. Result: the
+S-SMP **starves** - CV4 produces no `KOFF` writes at all (`rc=0`, but zero
+`$5C` writes), because the game rarely touches the S-CPU ports. So ares must
+synchronize on more than port accesses.
+
+**`SNES_INSTR_SYNC` - additionally flush at the S-CPU instruction end**
+(ares' per-instruction `scheduler.synchronize()`), exact-credit stop. Result:
+the run is normal (271,640 SPC instructions, same as default) but CV4's phase
+is back to the **two-valued** `{+6, -22}` (334/95 over 429 KOFF pairs). So
+moving the sync point from per-access to per-instruction with an exact stop does
+not change the port resolution at all.
+
+Together with the earlier matrix this pins the requirement: CV4's phase becomes
+single-valued only when the S-SMP is allowed to run **ahead of the S-CPU clock**
+(overshoot). The sync *point* is irrelevant; the *lead* is what matters. The
+remaining question is the S-CPU pull-forward (`SMP::step` ->
+`Thread::synchronize(cpu)`) which accompanies that lead in ares and which the
+current driver cannot express mid-instruction; access-stop approximates the
+lead without it (exact for dkc/fzero/cv4, wrong for zelda/metroid/smw).
+
+All four flags default off, so the verified path is unchanged.

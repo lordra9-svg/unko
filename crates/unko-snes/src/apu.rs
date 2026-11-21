@@ -43,7 +43,6 @@ pub fn mutual_scheduler() -> bool {
     *MUTUAL.get_or_init(|| std::env::var_os("SNES_MUTUAL").is_some())
 }
 
-/// ares `Thread::Second`: the fixed-point base of the scheduler clocks.
 /// `SNES_SMP_ACCESS_STOP`: stop the S-SMP at an access boundary instead of
 /// exactly on the carried-credit clock.
 ///
@@ -63,6 +62,23 @@ pub fn smp_instr_stop() -> bool {
     *STOP.get_or_init(|| std::env::var_os("SNES_SMP_INSTR_STOP").is_some())
 }
 
+/// `SNES_PORT_SYNC`: advance the S-SMP only at S-CPU `$2140-$2143` accesses,
+/// as ares does (`CPU::readAPU`/`writeAPU` call `synchronize(smp)`; the S-SMP
+/// then pulls the S-CPU forward from its own `SMP::step`).
+pub fn port_sync() -> bool {
+    static PORT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *PORT.get_or_init(|| std::env::var_os("SNES_PORT_SYNC").is_some())
+}
+
+/// `SNES_INSTR_SYNC`: hold the S-SMP until the S-CPU instruction end (ares'
+/// per-instruction `scheduler.synchronize()`), plus `$2140-$2143` accesses,
+/// with the exact-credit stop (no overshoot).
+pub fn instr_sync() -> bool {
+    static INSTR: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *INSTR.get_or_init(|| std::env::var_os("SNES_INSTR_SYNC").is_some())
+}
+
+/// ares `Thread::Second`: the fixed-point base of the scheduler clocks.
 const SCHEDULER_SECOND: u128 = (1u128 << 62) - 1;
 /// ares `Thread::setFrequency`: `_scalar = Second / frequency`.
 const DSP_FREQUENCY: u128 = 24_606_720;

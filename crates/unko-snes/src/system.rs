@@ -358,7 +358,30 @@ impl ApuPeer<'_> {
             self.parked_clocks = self.parked_clocks.saturating_add(clocks);
             return;
         }
-        self.resume_with(clocks, clock, rate);
+        // Credit deferred since the last `$2140-$2143` synchronization is
+        // flushed together with this access (`SNES_PORT_SYNC`).
+        let deferred = std::mem::take(&mut self.parked_clocks);
+        let total = deferred.saturating_add(clocks);
+        let start = clock.saturating_sub(u64::from(deferred));
+        self.resume_with(total, start, rate);
+    }
+
+    /// Hold the S-SMP back until the next synchronization point.
+    fn defer(&mut self, clocks: u32) {
+        self.parked_clocks = self.parked_clocks.saturating_add(clocks);
+    }
+
+    /// Flush credit deferred to the end of an S-CPU instruction.
+    fn flush_deferred(&mut self, clock_end: u64, rate: u64) {
+        if self.waiting.is_some() {
+            return;
+        }
+        let deferred = std::mem::take(&mut self.parked_clocks);
+        if deferred == 0 {
+            return;
+        }
+        let start = clock_end.saturating_sub(u64::from(deferred));
+        self.resume_with(deferred, start, rate);
     }
 
     /// Let the parked S-SMP re-check its sample at a CPU instruction boundary.
@@ -1069,6 +1092,8 @@ impl Snes {
         let rate = self.region.master_clock();
         let mut input = crate::cpu_coroutine::CpuInput::Start(cpu);
         let mut cycles = 0u32;
+        // Address of the S-CPU access currently in flight (`SNES_PORT_SYNC`).
+        let mut apu_last_access: u32 = 0;
         loop {
             match coroutine.resume(input) {
                 corosensei::CoroutineResult::Yield(crate::cpu_coroutine::CpuOutput::Request(
@@ -1091,6 +1116,10 @@ impl Snes {
                             peer.port_write(port, value);
                             BusResponse::None
                         }
+                        BusRequest::AccessCycles { address } => {
+                            apu_last_access = address;
+                            self.handle_cpu_request(BusRequest::AccessCycles { address })
+                        }
                         BusRequest::Advance { clocks } => {
                             // The APU is synchronized to the clock at the
                             // *start* of this access (ares `Thread`), with the
@@ -1102,9 +1131,21 @@ impl Snes {
                                     BusResponse::Clocks(extra) => extra,
                                     _ => unreachable!(),
                                 };
-                            peer.advance(clocks, clock, rate);
-                            if extra != 0 {
-                                peer.advance(extra, clock + u64::from(clocks), rate);
+                            let port_access = {
+                                let a = apu_last_access;
+                                a & 0x40_FF00 == 0x2100 && (0x2140..=0x2143).contains(&(a & 0xFFFF))
+                            };
+                            if (crate::apu::port_sync() || crate::apu::instr_sync()) && !port_access
+                            {
+                                peer.defer(clocks);
+                                if extra != 0 {
+                                    peer.defer(extra);
+                                }
+                            } else {
+                                peer.advance(clocks, clock, rate);
+                                if extra != 0 {
+                                    peer.advance(extra, clock + u64::from(clocks), rate);
+                                }
                             }
                             BusResponse::Clocks(extra)
                         }
@@ -1140,6 +1181,9 @@ impl Snes {
                     };
                     if flush {
                         peer.flush_parked(self.clock, rate);
+                    }
+                    if crate::apu::instr_sync() {
+                        peer.flush_deferred(self.clock, rate);
                     }
                     if peer.waiting.is_none() {
                         break;
