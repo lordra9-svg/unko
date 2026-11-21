@@ -155,10 +155,11 @@ impl Bsx {
 
     /// Whether `address` falls in the BS-X ROM area (ares/bsnes `ROM_AREA`).
     ///
-    /// `$00-$3f:$0000-$7fff` and `$7e-$7f` are WRAM/expansion space, not
-    /// cartridge space.
+    /// `$00-$3f` and `$80-$bf` below `$8000`, plus `$7e-$7f`, are WRAM /
+    /// expansion space, not cartridge space (RTL `ROM_AREA`:
+    /// `CA(22) = 0 and CA(15) = 0`, where `CA(22)` is bank bit 6).
     fn is_rom_area(bank: u8, offset: u16) -> bool {
-        !(bank == 0x7E || bank == 0x7F || (bank < 0x40 && offset < 0x8000))
+        !(bank == 0x7E || bank == 0x7F || (bank & 0x40 == 0 && offset < 0x8000))
     }
 
     fn bit(&self, index: usize) -> bool {
@@ -455,6 +456,18 @@ mod tests {
         commit(&mut cart, 0x0D, 0x80);
         cart.write(0xC0_0000, 0x11);
         assert_eq!(cart.read(0xC0_0000, 0), 0x11);
+    }
+
+    #[test]
+    fn low_half_of_fast_banks_is_not_cartridge_space() {
+        let cart = cartridge();
+        // `$80-$bf:$0000-$7fff` mirrors WRAM, so it must not decode to the
+        // BIOS: the BIOS writes its zero page there with `STA $0100,X`.
+        assert_eq!(cart.map(0x80_0100), BsxBus::Open);
+        assert_eq!(cart.map(0x80_7FFF), BsxBus::Open);
+        assert_eq!(cart.map(0x80_8000), BsxBus::Bios(0));
+        assert_eq!(cart.map(0x00_0100), BsxBus::Open);
+        assert_eq!(cart.map(0x00_8000), BsxBus::Bios(0));
     }
 
     #[test]
