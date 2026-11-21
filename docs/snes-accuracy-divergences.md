@@ -6212,3 +6212,32 @@ access-window boundary used when the S-SMP catches up: ares synchronizes the
 S-SMP at the S-CPU's *next* port-access clock, and our per-access advance stops
 at the current access end. A rule that moves only reads *at* the boundary
 (and not the general case) is the target.
+
+## Boundary-rule variants measured: no change (2026-11-20)
+
+The hypothesis "park a read that lands on the access boundary so it resolves on
+the next access" was implemented two ways on top of the carried-credit stop:
+
+1. `port_read_waiting` compares the *sample's* clock (position + one unit) with
+   `>=` against the access end;
+2. the credit drain requires `credit > rate` instead of `>=` (one unit earlier).
+
+Both leave the 600-frame result bit-identical:
+
+```
+dkc 0   zelda 0   fzero 0   metroid 0   smw 0   cv4 11,269 (98.24%)
+```
+
+So neither formulation reaches the CV4 read. The instrumentation explains why:
+at the divergence the sample position is ~31 master clocks *before* the access
+end (position 14,624,249 vs end 14,624,280), not on it, and ares resolves it
+with the CPU at 14,624,286. That means ares' S-SMP had **not yet reached** the
+read at the 14,624,280 synchronize while ours had - i.e. the two S-SMP clocks
+differ by roughly two S-SMP clocks at that instant, even though the
+instruction-boundary deltas match. Chasing the remaining difference therefore
+requires locating where the S-SMP clock diverges by ~2 clocks, which the
+per-instruction delta comparison (equal over 271k instructions) does not show;
+it is either a sub-instruction effect at a port access or a difference in the
+S-CPU clock used for a specific synchronize.
+
+Both variants reverted.
