@@ -2956,6 +2956,55 @@ mod tests {
         rom
     }
 
+    /// Build a minimal BS-X image (1 MiB, map mode `$30`, type `$E5`).
+    fn build_bsx() -> Vec<u8> {
+        let mut rom = vec![0u8; 0x10_0000];
+        let header = Mapping::LoRom.header_offset();
+        rom[header..header + 16].copy_from_slice(b"Satellaview BS-X");
+        rom[header + 0x15] = 0x30;
+        rom[header + 0x16] = 0xE5;
+        rom[header + 0x17] = 0x0A;
+        rom[header + 0x18] = 0x05;
+        rom[header + 0x19] = 1;
+        rom[header + 0x1A] = 1;
+        rom[header + 0x3C..header + 0x3E].copy_from_slice(&0x8000u16.to_le_bytes());
+        let mut checksum_source = rom.clone();
+        checksum_source[header + 0x1C..header + 0x20].fill(0);
+        let checksum = (checksum_source
+            .iter()
+            .map(|&byte| u32::from(byte))
+            .sum::<u32>()
+            & 0xFFFF) as u16;
+        rom[header + 0x1C..header + 0x1E].copy_from_slice(&(!checksum).to_le_bytes());
+        rom[header + 0x1E..header + 0x20].copy_from_slice(&checksum.to_le_bytes());
+        rom
+    }
+
+    #[test]
+    fn bsx_pack_is_reachable_from_the_cpu_bus() {
+        let cart = Cartridge::from_bytes(&build_bsx()).expect("valid BS-X");
+        assert!(cart.header().is_bsx());
+        let mut snes = Snes::new(cart);
+        assert!(snes.bsx.is_some(), "BS-X controller instantiated");
+
+        // With the reset MCC state (HiROM, r09=1) the pack owns `$c0-$ff`.
+        assert_eq!(snes.read(0xC0_0000, 0x00), 0x00, "no pack: open bus");
+
+        let mut pak = vec![0u8; 0x10_0000];
+        pak[0] = 0xA5;
+        pak[0x1234] = 0x5A;
+        snes.load_bsx_pack(pak);
+        assert!(snes.bsx.as_ref().expect("BS-X").has_pack());
+        assert_eq!(snes.read(0xC0_0000, 0x00), 0xA5);
+        assert_eq!(snes.read(0xC0_1234, 0x00), 0x5A);
+
+        // The BIOS itself is still reachable in its LoROM window.
+        assert_eq!(
+            snes.read(0x00_8000, 0x00),
+            snes.bsx.as_ref().unwrap().bios()[0]
+        );
+    }
+
     fn cartridge(code: &[u8]) -> Cartridge {
         Cartridge::from_bytes(&build_lorom(code)).expect("valid LoROM")
     }
