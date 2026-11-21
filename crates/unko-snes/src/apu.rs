@@ -610,12 +610,13 @@ impl Apu {
         let mut plan = std::mem::take(&mut self.plan);
         {
             // SNES_DSP_CPU_PHASE: target derived from the S-CPU clock.
-            let dsp_target = if dsp_cpu_phase() && self.master_clock_valid && self.master_clock_rate != 0 {
-            let scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
-            Some(u128::from(self.cpu_master_clock) * scalar)
-            } else {
-            None
-            };
+            let dsp_target =
+                if dsp_cpu_phase() && self.master_clock_valid && self.master_clock_rate != 0 {
+                    let scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
+                    Some(u128::from(self.cpu_master_clock) * scalar)
+                } else {
+                    None
+                };
             let mut bus = ApuBus {
                 ram: &mut self.ram[..],
                 ipl: &self.ipl,
@@ -698,12 +699,13 @@ impl Apu {
         }
         let page_flag = self.spc.flags.page;
         // SNES_DSP_CPU_PHASE: target derived from the S-CPU clock.
-        let dsp_target = if dsp_cpu_phase() && self.master_clock_valid && self.master_clock_rate != 0 {
-        let scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
-        Some(u128::from(self.cpu_master_clock) * scalar)
-        } else {
-        None
-        };
+        let dsp_target =
+            if dsp_cpu_phase() && self.master_clock_valid && self.master_clock_rate != 0 {
+                let scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
+                Some(u128::from(self.cpu_master_clock) * scalar)
+            } else {
+                None
+            };
         let mut bus = ApuBus {
             ram: &mut self.ram[..],
             ipl: &self.ipl,
