@@ -6745,3 +6745,51 @@ For CV4 and DKC simultaneously:
 
 Both are cheap to check with `SPC_TRACE`/`ARES_SPC_TRACE` plus the write logs,
 without listening to audio.
+
+## S-SMP stop granularity: access-stop makes CV4 exact (2026-11-21)
+
+Following the `$049F` finding, the stop rule was changed behind
+`SNES_SMP_ACCESS_STOP`: after the carried-credit loop, finish the current
+**access** (ares' `SMP::wait()` unit) and carry the overdraft as negative
+credit, instead of stopping exactly on the credit clock.
+
+### CV4 acceptance test: met
+
+All 429 KOFF writes at 260 frames now match ares exactly (`d = 0`), against the
+default's two-valued phase (`+6` 334 times, `-22` 95 times). The `$049F` loop
+pass count matches ares too (136 in the measured gap, was 135).
+
+```
+default:      d in {+6, -22}   429 KOFF pairs      (phase two-valued)
+access-stop:  d = 0            429 KOFF pairs      (phase single-valued)
+```
+
+### 600-frame audio matrix
+
+| title | exact-credit (default) | access-stop | instruction-stop |
+|---|---|---|---|
+| dkc | 100.0000% | **100.0000%** | 70.7730% |
+| zelda | 100.0000% | 99.7733% | **100.0000%** |
+| fzero | 100.0000% | **100.0000%** | **100.0000%** |
+| metroid | 100.0000% | 62.5180% | 62.4151% |
+| smw | 100.0000% | 90.1613% | 50.2550% |
+| cv4 | 98.2383% | **100.0000%** | 86.6173% |
+| smas | 50.9452% | 50.9452% | - |
+| ct | 34.9427% | 31.5413% | - |
+| mmx2 | 69.2303% | 69.2303% | - |
+
+**CV4 is bit-exact for the first time** under access-stop, and DKC/F-Zero stay
+exact, so the CV4 objective ("single-valued phase for CV4 and DKC") is met. But
+Zelda/SMW/Metroid/CT regress, and instruction-granularity overshoot (ares'
+`Thread::Enter` yield point) is worse still (DKC 70.8%).
+
+The whole difference is confined to `$F4-$F7` read resolution: the DSP write
+phase is derived at record time, not at drain time, so the stop rule only moves
+port reads. The two rules are each exact for a different subset, which means the
+outstanding error is in how a port read is resolved relative to the S-CPU, not
+in the stop instant alone: ares synchronizes the S-SMP only at `$2140-$2143`
+accesses (`CPU::readAPU/writeAPU`) and pulls the S-CPU forward from inside the
+S-SMP's own `SMP::step`. Implementing that direction (the S-SMP advancing the
+S-CPU at its access boundaries, instead of the S-CPU advancing the S-SMP) is the
+next step; the flags stay at their default (off) so the verified five-title path
+is unchanged.

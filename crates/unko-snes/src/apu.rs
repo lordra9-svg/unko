@@ -44,6 +44,25 @@ pub fn mutual_scheduler() -> bool {
 }
 
 /// ares `Thread::Second`: the fixed-point base of the scheduler clocks.
+/// `SNES_SMP_ACCESS_STOP`: stop the S-SMP at an access boundary instead of
+/// exactly on the carried-credit clock.
+///
+/// ares' `Thread::synchronize(smp)` runs the S-SMP in whole `SMP::wait()`
+/// units, so it stops at the first access end at or past the S-CPU clock and
+/// overshoots by up to one access. The exact-credit model stops mid-access.
+/// The overdraft is charged to the next window so the average rate is 1:1.
+pub fn smp_access_stop() -> bool {
+    static STOP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *STOP.get_or_init(|| std::env::var_os("SNES_SMP_ACCESS_STOP").is_some())
+}
+
+/// `SNES_SMP_INSTR_STOP`: stop the S-SMP at an instruction boundary (ares'
+/// `Thread::Enter` yield point) rather than at an access boundary.
+pub fn smp_instr_stop() -> bool {
+    static STOP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *STOP.get_or_init(|| std::env::var_os("SNES_SMP_INSTR_STOP").is_some())
+}
+
 const SCHEDULER_SECOND: u128 = (1u128 << 62) - 1;
 /// ares `Thread::setFrequency`: `_scalar = Second / frequency`.
 const DSP_FREQUENCY: u128 = 24_606_720;
@@ -783,6 +802,17 @@ impl Apu {
                 return true;
             }
             self.apu_credit -= den;
+        }
+        if smp_access_stop() || smp_instr_stop() {
+            // ares stops at the end of the access/instruction that crosses the
+            // S-CPU clock; carry the overdraft as negative credit.
+            let instr = smp_instr_stop();
+            while self.plan_sub != 0 || (instr && self.plan_pos < self.plan.len()) {
+                if self.drain_unit() == 0 {
+                    return true;
+                }
+                self.apu_credit -= den;
+            }
         }
         false
     }
