@@ -266,12 +266,25 @@ impl St018 {
     // ---- ARM bus -------------------------------------------------------
 
     fn arm_read8(&self, address: u32) -> u8 {
-        // ARMv3 26-bit address space decoded by the top byte: `$00` program
-        // ROM, `$04` S-CPU registers, `$0a` data ROM, `$0e` work RAM.
+        if std::env::var_os("ST018_MEM_LOG").is_some() && arm_region(address) != ArmRegion::Program
+        {
+            static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 40 {
+                eprintln!("ARMRD {address:08X} region={:?}", arm_region(address));
+            }
+        }
         match arm_region(address) {
             ArmRegion::Program => self.prg[(address as usize) & (PRG_ROM_SIZE - 1)],
             ArmRegion::Io => match address & 0x3F {
                 0x10 => {
+                    if std::env::var_os("ST018_CALL_LOG").is_some() {
+                        eprintln!(
+                            "IO10 read pc={:08X} -> {:02X} (pending={})",
+                            self.cpu.pc(),
+                            self.data_arm,
+                            self.has_data_for_arm
+                        );
+                    }
                     // Reading the transfer register consumes the S-CPU byte.
                     self.data_arm
                 }
@@ -298,6 +311,16 @@ impl St018 {
     }
 
     fn arm_write8(&mut self, address: u32, value: u8) {
+        if std::env::var_os("ST018_MEM_LOG").is_some() && arm_region(address) != ArmRegion::Program
+        {
+            static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 40 {
+                eprintln!(
+                    "ARMWR {address:08X} = {value:02X} region={:?}",
+                    arm_region(address)
+                );
+            }
+        }
         match arm_region(address) {
             ArmRegion::Program => {} // program ROM is read-only
             ArmRegion::Io => match address & 0x3F {
@@ -471,6 +494,23 @@ impl St018 {
             if self.recent.len() > 8 {
                 self.recent.remove(0);
             }
+        }
+        if std::env::var_os("ST018_CALL_LOG").is_some()
+            && matches!(pc, 0x1D0 | 0x1D4 | 0x1E8 | 0x204)
+        {
+            eprintln!(
+                "TBL pc={pc:08X} r0={:08X} r1={:08X} r2={:08X} z={}",
+                self.cpu.r[0],
+                self.cpu.r[1],
+                self.cpu.r[2],
+                self.cpu.flag_z()
+            );
+        }
+        if std::env::var_os("ST018_CALL_LOG").is_some() && pc == 0x300 {
+            eprintln!(
+                "CALL300 lr={:08X} r0={:08X} r1={:08X} r2={:08X}",
+                self.cpu.r[14], self.cpu.r[0], self.cpu.r[1], self.cpu.r[2]
+            );
         }
         if !self.condition_passed(opcode >> 28) {
             return;
