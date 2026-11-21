@@ -7283,3 +7283,32 @@ So the IPL handshake divergence is **not** the root cause: removing it shifts
 the S-SMP clock at every port write and damages six titles without helping SMAS.
 The ordering ares gets comes from the mutual pull (S-SMP resumes the S-CPU), not
 from a one-directional synchronise at the write. Reverted.
+
+## ARES_THREAD_LOG: the S-CPU leads the S-SMP, it does not lag (2026-11-21)
+
+Captured ares' per-thread clocks (`ARES_THREAD_LOG`, gated to dspTicks
+4,558,000-4,561,500, 270 frames of SMAS) and analysed the CPU/SMP interleaving.
+
+```
+log lines                    20,933
+lines where the S-SMP clock changed   3,509
+lines where the S-CPU clock changed  17,423
+```
+
+The S-CPU's clock changes about **5x as often** as the S-SMP's, and the S-SMP
+advances in 1-cycle increments while the CPU clock is static. So in ares the
+**S-CPU runs ahead and the S-SMP catches up in bursts** - the CPU is the
+time master during ordinary execution. The absolute lead depends on the
+CPU/SMP frequency used for the conversion (the logged clocks are per-thread
+scaled), so it cannot be read off exactly here, but the direction is
+unambiguous.
+
+This is the opposite of the "DSP-master, S-SMP pulls the S-CPU forward"
+hypothesis: during game execution the CPU is not being pulled forward by the
+S-SMP; the S-SMP is following the CPU. Our default architecture (CPU advances
+the S-SMP by carried credit) already has that direction, which is consistent
+with the five exact titles.
+
+So the mutual-scheduler rewrite is not the missing piece for normal execution;
+the residual remains the DSP register-write placement relative to the S-SMP
+access (the two-valued block timing), not the CPU/SMP lead.
