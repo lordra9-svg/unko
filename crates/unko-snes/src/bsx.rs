@@ -40,7 +40,7 @@ pub enum BsxBus {
 }
 
 /// A BS-X cartridge.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bsx {
     bios: Vec<u8>,
     psram: Vec<u8>,

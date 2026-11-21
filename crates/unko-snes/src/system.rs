@@ -7,6 +7,7 @@
 //! scheduled from the same master-clock credit.
 
 use crate::apu::Apu;
+use crate::bsx::{Bsx, BsxBus};
 use crate::cpu::{Cpu, CpuBus};
 use crate::cx4::{Cx4, Cx4Error};
 use crate::dma::{Dma, DmaBus};
@@ -213,6 +214,8 @@ pub struct Snes {
     apu_actor_driven: bool,
     /// The inserted cartridge.
     pub cart: Cartridge,
+    /// BS-X (Satellaview) memory controller, when the cartridge is BS-X.
+    pub bsx: Option<Bsx>,
     /// The S-SMP/S-DSP audio unit.
     pub apu: Apu,
     /// The S-PPU pair.
@@ -436,12 +439,18 @@ impl Snes {
         let (apu_ram, dsp_registers) = crate::random::power_on_apu();
         let mut apu = Apu::new();
         apu.load_power_on_state(&apu_ram, &dsp_registers);
+        let bsx = if cart.header().is_bsx() {
+            Some(Bsx::new(cart.rom().to_vec()))
+        } else {
+            None
+        };
         Self {
             cpu: Cpu::new(),
             cpu_coroutine: crate::cpu_coroutine::CpuCoroutineSlot::default(),
             apu_actor: crate::cpu_coroutine::ApuActorSlot::default(),
             apu_actor_driven: false,
             cart,
+            bsx,
             apu,
             ppu,
             region,
@@ -896,6 +905,7 @@ impl Snes {
             let mut bus = SnesBus {
                 wram: &mut self.wram,
                 cart: &mut self.cart,
+                bsx: &mut self.bsx,
                 gsu: &mut self.gsu,
                 dsp1: &mut self.dsp1,
                 cx4: &mut self.cx4,
@@ -1175,6 +1185,7 @@ impl Snes {
                     let mut bus = SnesBus {
                         wram: &mut self.wram,
                         cart: &mut self.cart,
+                        bsx: &mut self.bsx,
                         gsu: &mut self.gsu,
                         dsp1: &mut self.dsp1,
                         cx4: &mut self.cx4,
@@ -1670,12 +1681,20 @@ impl Snes {
 
 impl Snes {
     /// Build a bus view over the machine's fields for one access.
+    /// Attach a BS Memory Pack image to the BS-X cartridge.
+    pub fn load_bsx_pack(&mut self, image: Vec<u8>) {
+        if let Some(bsx) = self.bsx.as_mut() {
+            bsx.load_pack(image);
+        }
+    }
+
     fn bus(&mut self) -> SnesBus<'_> {
         let vblank = self.ppu.in_vblank();
         let hblank = self.ppu.in_hblank();
         SnesBus {
             wram: &mut self.wram,
             cart: &mut self.cart,
+            bsx: &mut self.bsx,
             gsu: &mut self.gsu,
             dsp1: &mut self.dsp1,
             cx4: &mut self.cx4,
@@ -2009,6 +2028,7 @@ fn hdma_phase_for(frame: u64) -> Option<u32> {
 struct SnesBus<'a> {
     wram: &'a mut [u8],
     cart: &'a mut Cartridge,
+    bsx: &'a mut Option<Bsx>,
     apu: &'a mut Apu,
     ppu: &'a mut Ppu,
     gsu: &'a mut Option<Gsu>,
@@ -2258,6 +2278,11 @@ impl CpuBus for SnesBus<'_> {
         if bank == 0x7E || bank == 0x7F {
             return self.wram[((bank as usize & 1) << 16) | offset];
         }
+        if let Some(bsx) = self.bsx.as_ref() {
+            if !matches!(bsx.map(address), BsxBus::Open) {
+                return bsx.read(address, mdr);
+            }
+        }
         *self.snes_mar = address;
         if let Some(value) = self.sa1_read(address, mdr) {
             return value;
@@ -2391,6 +2416,9 @@ impl CpuBus for SnesBus<'_> {
             if offset < 0x8000 {
                 return mdr;
             }
+        }
+        if self.bsx.is_some() {
+            return mdr;
         }
         self.cart.read(address).unwrap_or(0)
     }
@@ -2545,6 +2573,22 @@ impl CpuBus for SnesBus<'_> {
                 return;
             }
         }
+        if let Some(bsx) = self.bsx.as_mut() {
+            match bsx.map(address) {
+                BsxBus::Open => {}
+                BsxBus::Mmio(index) => {
+                    if std::env::var_os("BSX_MMIO_LOG").is_some() {
+                        eprintln!("BSX MMIO r{index:02x} <- {value:02X}");
+                    }
+                    bsx.write(address, value);
+                    return;
+                }
+                _ => {
+                    bsx.write(address, value);
+                    return;
+                }
+            }
+        }
         if bank <= 0x3F || (0x80..=0xBF).contains(&bank) {
             if offset < 0x2000 {
                 self.wram[offset & 0x1FFF] = value;
@@ -2655,6 +2699,9 @@ impl CpuBus for SnesBus<'_> {
             if offset < 0x8000 {
                 return;
             }
+        }
+        if self.bsx.is_some() {
+            return;
         }
         self.cart.write(address, value);
     }
@@ -2927,6 +2974,7 @@ mod tests {
         let mut bus = SnesBus {
             wram: &mut system.wram,
             cart: &mut system.cart,
+            bsx: &mut system.bsx,
             gsu: &mut system.gsu,
             dsp1: &mut system.dsp1,
             cx4: &mut system.cx4,
@@ -3126,6 +3174,7 @@ mod tests {
         let mut bus = SnesBus {
             wram: &mut system.wram,
             cart: &mut system.cart,
+            bsx: &mut system.bsx,
             gsu: &mut system.gsu,
             dsp1: &mut system.dsp1,
             cx4: &mut system.cx4,
@@ -3168,6 +3217,7 @@ mod tests {
         let mut bus = SnesBus {
             wram: &mut system.wram,
             cart: &mut system.cart,
+            bsx: &mut system.bsx,
             gsu: &mut system.gsu,
             dsp1: &mut system.dsp1,
             cx4: &mut system.cx4,
@@ -3561,6 +3611,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                bsx: &mut system.bsx,
                 apu: &mut system.apu,
                 ppu: &mut system.ppu,
                 gsu: &mut system.gsu,
@@ -3753,6 +3804,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                bsx: &mut system.bsx,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -3841,6 +3893,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                bsx: &mut system.bsx,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -3880,6 +3933,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                bsx: &mut system.bsx,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -3919,6 +3973,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                bsx: &mut system.bsx,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -3974,6 +4029,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                bsx: &mut system.bsx,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -4039,6 +4095,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                bsx: &mut system.bsx,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -4090,6 +4147,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                bsx: &mut system.bsx,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -4132,6 +4190,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                bsx: &mut system.bsx,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -4224,6 +4283,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                bsx: &mut system.bsx,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
@@ -4264,6 +4324,7 @@ mod tests {
             let mut bus = SnesBus {
                 wram: &mut system.wram,
                 cart: &mut system.cart,
+                bsx: &mut system.bsx,
                 gsu: &mut system.gsu,
                 dsp1: &mut system.dsp1,
                 cx4: &mut system.cx4,
