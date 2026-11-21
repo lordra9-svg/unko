@@ -7453,3 +7453,38 @@ symptom of the same sub-clock ordering.
 Reverted; all flags default off. The residual remains the block-boundary DSP
 write timing, now with the timer, DSP phase, CPU/SMP lead, split-read ordering
 and IPL handshakes each individually measured and excluded (or neutral).
+
+## Block-boundary trace: one S-SMP-clock offset, timer clocks = 2 x DSP ticks (2026-11-21)
+
+Logged, for every `$F3` write, the DSP micro-step (ours) / `dspTicks` (ares) and
+the cumulative timer-clock count, across the first KOFF boundary (55 frames):
+
+```
+write sequence: identical (704 writes, no reg/value mismatch)
+
+idx 15 sample 24363 reg 5C  ares[ticks 779632 tc 1559262]  ours[micro 779637 tc 1559272]
+                            dtick -5   dtc -10
+idx 20 sample 24427 reg 5C  ares[ticks 781683 tc 1563364]  ours[micro 781680 tc 1563358]
+                            dtick +3   dtc +6
+
+dtc distribution:   +6 (496 writes)  -10 (193)  +22 (15)
+dtick distribution: +3 (496)         -5 (193)   +11 (15)
+```
+
+Two facts:
+
+1. **`dtc = 2 * dtick` exactly**, for every write. The S-SMP timer clocks and the
+   DSP ticks are locked (one DSP tick = two S-SMP clocks), so there is a single
+   underlying quantity: the S-SMP clock at the write differs from ares by
+   `+3/-5` DSP ticks = `+6/-10` S-SMP clocks.
+2. Across the KOFF boundary between idx 19 and idx 20 (a gap of 59 samples) that
+   offset changes from `-10` to `+6`: a **16 S-SMP-clock** flip. That 16 clocks
+   is exactly one iteration of the `$0576/$0579` Timer-0 zero-wait loop (2
+   instructions x 8 clocks). So the whole residual is that single loop's
+   iteration count.
+
+Combined with the earlier measurements (timer transitions identical, `$FD` reads
+offset by a constant 22 timer clocks, timer logic exact), the remaining
+mechanism is: the S-SMP's `$FD` read/timer phase is offset, so the zero-wait loop
+exits one iteration earlier or later, which shifts the following block's writes
+by 16 S-SMP clocks (= 8 DSP ticks). Every other candidate has been excluded.
