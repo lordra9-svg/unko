@@ -302,6 +302,16 @@ impl St018 {
             ArmRegion::Program => {} // program ROM is read-only
             ArmRegion::Io => match address & 0x3F {
                 0x00 => {
+                    if std::env::var_os("ST018_IO_LOG").is_some() {
+                        eprintln!(
+                            "ARMIO wr {:02X} pc={:08X} r0={:08X} r1={:08X} r2={:08X}",
+                            value,
+                            self.cpu.pc(),
+                            self.cpu.r[0],
+                            self.cpu.r[1],
+                            self.cpu.r[2]
+                        );
+                    }
                     self.data_snes = value;
                     self.has_data_for_snes = true;
                 }
