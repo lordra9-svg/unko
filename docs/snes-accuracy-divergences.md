@@ -7428,3 +7428,28 @@ second half's timer/DSP step happens one plan unit before ares.
 This reordering is the earliest divergence and occurs inside the split-read
 handling, not in the timer. Fixing it (apply the second half when the plan step
 completes) is the next concrete edit.
+
+## Deferring the split-read second half is behaviourally neutral (2026-11-21)
+
+Implemented the identified reordering (`SNES_SPLIT_HALF`): the `$F4-$F7` split
+read's second half (`wait` after `readIO`) is stored in `pending_split` and
+applied when the plan step completes instead of at `resume_at`, with the S-DSP
+and timer stepped at the same instant as ares.
+
+600-frame result - **identical to the default on every title tested**:
+
+```
+smas     313,782 (50.9452%)      dkc   0 (100.0000%)
+cv4       11,269 (98.2383%)      zelda 0 (100.0000%)
+metroid  0 (100.0000%)
+```
+
+So the 2-vs-1 timer-step reordering seen at access 19,170 does not affect the
+audio: the second half lands inside the same two-clock window either way and the
+DSP/timer delta (one clock) is below the granularity that changes any write or
+sample. The first *access-level* divergence is therefore not a cause, only a
+symptom of the same sub-clock ordering.
+
+Reverted; all flags default off. The residual remains the block-boundary DSP
+write timing, now with the timer, DSP phase, CPU/SMP lead, split-read ordering
+and IPL handshakes each individually measured and excluded (or neutral).
