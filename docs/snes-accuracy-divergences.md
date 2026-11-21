@@ -6380,3 +6380,37 @@ that exports `InitializeCapture` and accepts null handles.
 Until then, ST018's correctness is verified only by construction (its boot,
 handshake, rendering and 7 unit tests) and BS-X by its boot screen, deterministic
 hash stream, MCC sequence and pack bus test.
+
+## DSP phase prime scan: CV4 improves monotonically, DKC degrades (2026-11-21)
+
+The DSP register-write phase measured `+6 (mod 32)` micro-steps against ares.
+Priming the DSP catch-up by N micro-steps (`SNES_DSP_PRIME=N`, diagnostic only,
+default 0) gives, at 600 frames:
+
+```
+prime  dkc            cv4
+0      0 (100.0000%)  11,269 (98.2383%)
+1      177,171 (72.30%)  11,250 (98.2412%)
+2      196,379 (69.30%)  10,765 (98.3171%)
+3      198,965 (68.90%)  10,126 (98.4170%)
+4      197,318 (69.15%)   9,475 (98.5187%)
+5      250,793 (60.79%)   2,301 (99.6403%)
+6      288,158 (54.95%)   1,181 (99.8154%)
+```
+
+Two facts follow. First, CV4's divergence falls **monotonically** with the
+offset (98.24% -> 99.82%), which is the signature of a slow phase drift between
+the write stream and the samples, not of independent sporadic glitches. Second,
+the titles require *different* phases (DKC is exact at 0, CV4 best at 6), so the
+error is not a global DSP phase: it is the timestamp at which individual DSP
+register writes land relative to the sample boundary, which varies per title
+because each writes at different points in the 32-step cycle.
+
+That rules out a constant phase correction and points at the write timestamp
+itself: ares records a DSP write at the SMP clock of the access that performs it,
+while our plan records the write at the *end of the access* after the DSP has
+already been advanced to that same clock. The next experiment is therefore to
+stamp writes with the access's *start* clock (or mid-access, matching
+`SMP::wait`'s split) and re-scan.
+
+The default path is unchanged (prime 0); the probe is diagnostic only.

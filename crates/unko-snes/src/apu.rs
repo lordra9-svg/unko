@@ -840,7 +840,20 @@ impl ApuBus<'_> {
     fn step_dsp_clock(&mut self, clocks: u32) {
         *self.smp_clock += u128::from(clocks) * SMP_SCALAR;
         let target = *self.smp_clock;
-        drain_dsp_to(self.ram, self.dsp, self.dsp_clock, self.samples, target);
+        // Diagnostic: the DSP register-write phase measured +6 micro-steps
+        // against ares; prime the DSP catch-up by that many ticks to test
+        // whether the offset is a true global phase.
+        let prime = std::env::var("SNES_DSP_PRIME")
+            .ok()
+            .and_then(|value| value.parse::<u128>().ok())
+            .map_or(0, |ticks| ticks * DSP_TICK);
+        drain_dsp_to(
+            self.ram,
+            self.dsp,
+            self.dsp_clock,
+            self.samples,
+            target + prime,
+        );
     }
 
     /// Write the underlying APU RAM (ares `writeRAM`).
