@@ -5832,3 +5832,65 @@ clocks at every write in both).
 The `YA` word-order scare (our `(Y<<8)|A`) was a mislabeled trace column in the
 local ares hook (`r.ya.byte.l` is `A`, not `Y`); the encoding matches ares and
 the change was reverted.
+
+## Exact-rational and ares-fixed-point stop boundaries (2026-11-20)
+
+Three stop rules for the per-access S-SMP advance were implemented and measured
+on the full 600-frame window.
+
+1. **Exact rational counts** - `units * rate < master_clocks * 2_050_560`, using
+   the retired S-SMP clock count (`units`), avoiding both truncated scalars.
+
+```
+dkc 0   zelda 16,503 (97.42%)   fzero 355,081 (44.49%)
+metroid 0   smw 45,880 (92.83%)   cv4 0 (100%)
+smas 313,782 (50.95%)   ct 417,093 (34.79%)
+```
+
+2. **ares fixed-point comparison** - `1 + units*SMP_SCALAR <
+   master*CPU_SCALAR`, both scalars truncated exactly as `Thread::setFrequency`
+   does, with `Second = 2^63-1` and `CPU_SCALAR` taken at ares' rounded
+   `Colorburst::NTSC*6 = 21,477,273` Hz (the integer master clock is
+   21,477,272, so using the latter for the scalar matters):
+
+```
+dkc 0   zelda 1,449 (99.77%)   fzero 355,081 (44.49%)
+metroid 1   smw 45,880 (92.83%)   cv4 0 (100%)
+smas 313,782 (50.95%)   ct 416,097 (34.95%)
+```
+
+3. **Carried credit** (the existing model) - `credit += clocks*2_050_560;
+   while credit >= rate { drain; credit -= rate }`:
+
+```
+dkc 0   zelda 0   fzero 0   metroid 0   smw 0   cv4 11,269 (98.24%)
+smas 313,782 (50.95%)   ct 416,143 (34.94%)
+```
+
+So the ares-exact boundary does what it was designed to do - it removes the
+CV4 IPL-handshake misread and makes CV4 bit-exact for the whole 600 frames,
+and it brings Zelda to 99.77% and Metroid to a single sample - but it breaks
+F-Zero (44.49%) and SMW (92.83%), which the carried credit keeps exact. SMAS and
+CT are unaffected by the rule. Each rule is exact for a different subset, so
+the remaining difference is not in the boundary rule alone.
+
+F-Zero's first divergence under the strict rule is the mirror of CV4's, and it
+pins down what is still missing:
+
+```
+instruction 78,259 (DSP tick 351,311)
+  FFD6 `MOV Y,$F4`
+  ares Y=0x00 (new latch)   ours Y=0xCC (old latch)
+```
+
+i.e. at an identical DSP tick and identical S-SMP clock, ares' `$F4` read sees
+the S-CPU write that ours placed on the other side of the same access. CV4's
+case wants the read held back past the write; F-Zero's wants it run before it.
+Since both now use ares' exact truncated clocks and both threads' clocks match
+at every instruction boundary, the residual is the ordering *inside* the access
+(ares applies `writeAPU` after `synchronize(smp)`, and its `synchronize(cpu)`
+inside `readIO` can advance the S-CPU mid-read), which the deferred-read model
+resolves at a fixed midpoint instead of a re-entrant resume.
+
+The carried-credit model is retained as the best measured overall state
+(five titles exact, CV4 98.24%, SMAS/CT unchanged).
