@@ -6860,3 +6860,33 @@ The evidence for this is that removing the park and moving the sync point both
 leave the numbers byte-identical, while the three titles that don't use the
 `$049F`-style handshake are the exact ones that regress: the only remaining
 variable is the S-SMP's replay position relative to the S-CPU clock.
+
+## S-CPU pull-forward implemented: it inflates the timeline (2026-11-21)
+
+Implemented the pull directly: with `SNES_SMP_ACCESS_STOP`, do not pay the
+overshoot back as negative credit; after each `advance`, if the S-SMP's master
+clock is ahead of `Snes::clock`, run the S-CPU and its peripherals forward to it
+(`advance_peripherals_inner(pull)`), i.e. ares' `SMP::step` ->
+`Thread::synchronize(cpu)`.
+
+Result: the emulated timeline inflates. At 600 frames DKC produces
+
+```
+329,952 stereo frames (expected 319,828, +3.2%)
+master clock 221,176,233 (expected 214,119,xxx)
+DKC audio 35.8003% identical
+```
+
+The pull advances `Snes::clock` and the PPU by a few clocks per bus access, but
+the frame boundary does not re-anchor, so total clocks and DSP samples per frame
+grow. ares avoids this because its CPU clock is re-anchored from the PPU
+horizontal counter (`CPU::scanline`): a pull shifts *which instruction* runs at
+a given clock, not the total number of clocks in a frame.
+
+So the pull-forward is not "add clocks to `Snes::clock`". It needs the timeline
+anchor: the S-CPU clock must be derived from the PPU/hcounter at each scanline,
+with the S-SMP's lead expressed only in the *ordering* of instructions inside a
+fixed clock budget. That is a scheduler/timeline redesign (the CPU suspended and
+resumed at scanline boundaries), not a per-access adjustment.
+
+Reverted; all flags default off.
