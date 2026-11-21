@@ -6414,3 +6414,29 @@ stamp writes with the access's *start* clock (or mid-access, matching
 `SMP::wait`'s split) and re-scan.
 
 The default path is unchanged (prime 0); the probe is diagnostic only.
+
+## DSP write placement within the access: measured (2026-11-21)
+
+`SNES_DSP_WRITE_AT=start|mid|end` (default `end`, selected once) places the
+`$F3` register write before the access clocks, between the two halves, or after
+them. 600 frames:
+
+```
+placement  dkc                  cv4
+start      226,813 (64.54%)     11,379 (98.2211%)
+mid        226,813 (64.54%)     11,379 (98.2211%)
+end              0 (100.00%)    11,269 (98.2383%)
+```
+
+`start` and `mid` are identical because a half access rarely crosses a DSP
+micro-step, and both regress DKC badly. The reference order (`wait`, then
+`writeIO` → `dsp.write`) is therefore already what we implement, and the CV4
+residual is not the placement of the write inside its access.
+
+Combined with the phase-prime scan (a 6-micro-step prime improves CV4
+monotonically to 99.82% while destroying DKC), the remaining difference is
+between *which* DSP micro-step index a write receives, not where in the access
+it is issued or a global phase. That is governed by the DSP's own catch-up
+schedule (`DSP::tick`: `Thread::step(24)` then `synchronize(smp)`) against the
+S-SMP access stream, i.e. by the two threads' relative clock accounting at the
+moment of the write - the last unverified link in the audio chain.

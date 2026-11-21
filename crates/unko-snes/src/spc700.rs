@@ -127,6 +127,27 @@ impl Flags {
     }
 }
 
+/// Where a DSP register write (`$F3`) lands inside its access (diagnostic).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DspWritePlacement {
+    /// Before the access clocks.
+    Start,
+    /// Between the two halves of the access.
+    Mid,
+    /// After the access clocks (the reference order).
+    End,
+}
+
+/// Diagnostic selection from `SNES_DSP_WRITE_AT`, read once.
+pub fn dsp_write_placement() -> DspWritePlacement {
+    static PLACEMENT: std::sync::OnceLock<DspWritePlacement> = std::sync::OnceLock::new();
+    *PLACEMENT.get_or_init(|| match std::env::var("SNES_DSP_WRITE_AT").as_deref() {
+        Ok("start") => DspWritePlacement::Start,
+        Ok("mid") => DspWritePlacement::Mid,
+        _ => DspWritePlacement::End,
+    })
+}
+
 /// The S-SMP CPU register file.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Spc700 {
@@ -257,9 +278,33 @@ impl Spc700 {
         let wait = bus.wait_cycles(Some(address));
         self.cycles += u64::from(wait);
         let timer = bus.timer_cycles(Some(address));
-        bus.step_clock(wait * 2);
-        bus.advance(timer);
-        bus.write(address, value);
+        // Diagnostic: where in the access the DSP register write lands
+        // (`SNES_DSP_WRITE_AT=start|mid|end`, default end). Selected once.
+        let placement = if address == 0x00F3 {
+            dsp_write_placement()
+        } else {
+            DspWritePlacement::End
+        };
+        match placement {
+            DspWritePlacement::Start => {
+                bus.write(address, value);
+                bus.step_clock(wait * 2);
+                bus.advance(timer);
+            }
+            DspWritePlacement::Mid => {
+                let half_timer = timer / 2;
+                bus.step_clock(wait);
+                bus.advance(half_timer);
+                bus.write(address, value);
+                bus.step_clock(wait);
+                bus.advance(timer - half_timer);
+            }
+            DspWritePlacement::End => {
+                bus.step_clock(wait * 2);
+                bus.advance(timer);
+                bus.write(address, value);
+            }
+        }
     }
 
     fn idle(&mut self, bus: &mut impl SpcBus) {
