@@ -98,6 +98,8 @@ pub struct St018 {
     data_arm: u8,
     arm_reset: bool,
     ack: bool,
+    /// Master clock of the last `run_to`, used as the cycle base on power-on.
+    now: u64,
 }
 
 impl St018 {
@@ -120,6 +122,7 @@ impl St018 {
             data_arm: 0,
             arm_reset: false,
             ack: false,
+            now: 0,
         }
     }
 
@@ -145,6 +148,7 @@ impl St018 {
 
     /// Run the ARM until it reaches `target` master clocks.
     pub fn run_to(&mut self, target: u64) {
+        self.now = target;
         if self.arm_reset {
             self.cpu.cycles = target;
             return;
@@ -191,6 +195,17 @@ impl St018 {
     fn power_on(&mut self) {
         self.cpu = ArmV3::new();
         self.cpu.r[15] = 0x0000_0000;
+        self.cpu.cycles = self.now;
+    }
+
+    /// Register read with ARM pipeline semantics: reading `r15` yields
+    /// `PC + 8` (`pc()` is already the following instruction).
+    fn reg(&self, index: usize) -> u32 {
+        if index == 15 {
+            self.cpu.pc().wrapping_add(4)
+        } else {
+            self.cpu.r[index]
+        }
     }
 
     // ---- ARM bus -------------------------------------------------------
@@ -378,6 +393,13 @@ impl St018 {
         self.cpu.cycles += 1;
         let pc = self.cpu.pc();
         let opcode = self.arm_read32(pc);
+        if std::env::var_os("ST018_PC_LOG").is_some() {
+            static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n < 160 {
+                eprintln!("ARM {pc:08X} {opcode:08X}");
+            }
+        }
         self.cpu.set_pc(pc.wrapping_add(4));
         if !self.condition_passed(opcode >> 28) {
             return;
@@ -395,7 +417,15 @@ impl St018 {
                 }
             }
             0b01 => self.single_transfer(opcode),
-            0b10 => self.block_transfer(opcode),
+            0b10 => {
+                // Bits 27-26 are `10` for both block transfers and branches;
+                // bit 25 selects between them.
+                if bits(25, 25) != 0 {
+                    self.branch(opcode);
+                } else {
+                    self.block_transfer(opcode);
+                }
+            }
             0b11 => {
                 // Coprocessor instructions are not present on the ST018 board;
                 // only SWI is modelled.
@@ -420,10 +450,10 @@ impl St018 {
             value.rotate_right(rotate)
         } else {
             let rm = (opcode & 0xF) as usize;
-            let mut value = self.cpu.r[rm];
+            let mut value = self.reg(rm);
             if bits(25, 25) == 0 && bits(4, 4) != 0 {
                 let rs = bits(8, 11) as usize;
-                let amount = self.cpu.r[rs] & 0xFF;
+                let amount = self.reg(rs) & 0xFF;
                 value = self.shift(value, bits(5, 6), amount);
             } else if bits(4, 4) == 0 {
                 let amount = bits(7, 11);
@@ -434,7 +464,7 @@ impl St018 {
             }
             value
         };
-        let a = self.cpu.r[rn];
+        let a = self.reg(rn);
         let (result, carry) = match op {
             0x0 => (a & operand, self.cpu.flag_c()),        // AND
             0x1 => (a ^ operand, self.cpu.flag_c()),        // EOR
@@ -454,8 +484,12 @@ impl St018 {
             _ => (!operand, self.cpu.flag_c()),             // MVN
         };
         let (n, z) = (result & 0x8000_0000 != 0, result == 0);
-        if !(0x8..0xC).contains(&op) && rd != 15 {
-            self.cpu.r[rd] = result;
+        if !(0x8..0xC).contains(&op) {
+            if rd == 15 {
+                self.cpu.set_pc(result);
+            } else {
+                self.cpu.r[rd] = result;
+            }
         }
         if set_flags {
             let v = match op {
@@ -506,9 +540,9 @@ impl St018 {
                 let rd = bits(16, 19) as usize;
                 let rn = bits(12, 15) as usize;
                 let rs = (opcode & 0xF) as usize;
-                let mut result = self.cpu.r[rs].wrapping_mul(self.cpu.r[rn]);
+                let mut result = self.reg(rs).wrapping_mul(self.reg(rn));
                 if accumulate {
-                    result = result.wrapping_add(self.cpu.r[rd]);
+                    result = result.wrapping_add(self.reg(rd));
                 }
                 self.cpu.cycles += 3;
                 self.cpu.r[rd] = result;
@@ -553,7 +587,9 @@ impl St018 {
 
     fn single_transfer(&mut self, opcode: u32) {
         let bits = |from: u32, to: u32| (opcode >> from) & ((1 << (to - from + 1)) - 1);
-        let immediate = bits(25, 25) != 0;
+        // Single data transfer: bit 25 = 1 selects a *register* offset
+        // (the opposite convention to the data-processing immediate bit).
+        let immediate = bits(25, 25) == 0;
         let pre = bits(24, 24) != 0;
         let up = bits(23, 23) != 0;
         let byte = bits(22, 22) != 0;
@@ -565,11 +601,11 @@ impl St018 {
             bits(0, 11)
         } else {
             let rm = (opcode & 0xF) as usize;
-            let value = self.cpu.r[rm];
+            let value = self.reg(rm);
             let amount = bits(7, 11);
             self.shift(value, bits(5, 6), amount)
         };
-        let base = self.cpu.r[rn];
+        let base = self.reg(rn);
         let address = if pre {
             if up {
                 base.wrapping_add(offset)
@@ -580,11 +616,18 @@ impl St018 {
             base
         };
         if load {
-            let index = rd.min(14);
-            if byte {
-                self.cpu.r[index] = u32::from(self.arm_read8(address));
+            let value = if byte {
+                u32::from(self.arm_read8(address))
             } else {
-                self.cpu.r[index] = self.arm_read32(address);
+                self.arm_read32(address)
+            };
+            if std::env::var_os("ST018_PC_LOG").is_some() {
+                eprintln!("LDR r{rd} <- {value:08X} @ {address:08X}");
+            }
+            if rd == 15 {
+                self.cpu.set_pc(value);
+            } else {
+                self.cpu.r[rd] = value;
             }
             self.cpu.cycles += 1;
         } else {
@@ -604,6 +647,19 @@ impl St018 {
         }
     }
 
+    fn branch(&mut self, opcode: u32) {
+        let link = opcode & (1 << 24) != 0;
+        // 24-bit signed word offset, relative to PC + 8.
+        let offset = (((opcode & 0x00FF_FFFF) << 8) as i32 >> 6) as u32;
+        let next = self.cpu.pc();
+        if link {
+            self.cpu.r[14] = next;
+        }
+        // `pc()` is already the following instruction, so PC + 8 is `next + 4`.
+        self.cpu.set_pc(next.wrapping_add(4).wrapping_add(offset));
+        self.cpu.cycles += 1;
+    }
+
     fn block_transfer(&mut self, opcode: u32) {
         let bits = |from: u32, to: u32| (opcode >> from) & ((1 << (to - from + 1)) - 1);
         let pre = bits(24, 24) != 0;
@@ -616,7 +672,7 @@ impl St018 {
         if count == 0 {
             return;
         }
-        let mut base = self.cpu.r[rn];
+        let mut base = self.reg(rn);
         let start = if up {
             base.wrapping_add(if pre { 4 } else { 0 })
         } else {
@@ -630,7 +686,17 @@ impl St018 {
             }
             if load {
                 let value = self.arm_read32(address);
-                self.cpu.r[index] = value;
+                if std::env::var_os("ST018_PC_LOG").is_some() && index == 15 {
+                    eprintln!(
+                        "LDMpc {address:08X} = {value:08X} sp={:08X}",
+                        self.cpu.r[13]
+                    );
+                }
+                if index == 15 {
+                    self.cpu.set_pc(value);
+                } else {
+                    self.cpu.r[index] = value;
+                }
             } else {
                 let value = self.cpu.r[index];
                 self.arm_write32(address, value);

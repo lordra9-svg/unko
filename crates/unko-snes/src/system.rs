@@ -2300,7 +2300,26 @@ impl CpuBus for SnesBus<'_> {
             let window = bank <= 0x3F || (0x80..=0xBF).contains(&bank);
             if window && (0x3000..=0x3FFF).contains(&offset) {
                 st018.run_to(self.clock);
-                return st018.read(address, mdr);
+                let value = st018.read(address, mdr);
+                if let Ok(path) = std::env::var("ST018_LOG") {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                    {
+                        let _ = writeln!(
+                            f,
+                            "{} R {:06X} -> {:02X} status={:02X} arm={:06X}",
+                            self.clock,
+                            address & 0xFFFFFF,
+                            value,
+                            st018.status(),
+                            st018.arm_pc()
+                        );
+                    }
+                }
+                return value;
             }
         }
         if let Some(bsx) = self.bsx.as_ref() {
@@ -2602,6 +2621,23 @@ impl CpuBus for SnesBus<'_> {
             let low = bank <= 0x3F || (0x80..=0xBF).contains(&bank);
             if low && (0x3000..=0x3FFF).contains(&offset) {
                 st018.run_to(self.clock);
+                if let Ok(path) = std::env::var("ST018_LOG") {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                    {
+                        let _ = writeln!(
+                            f,
+                            "{} W {:06X} <- {:02X} arm={:06X}",
+                            self.clock,
+                            address & 0xFFFFFF,
+                            value,
+                            st018.arm_pc()
+                        );
+                    }
+                }
                 st018.write(address, value);
                 return;
             }
