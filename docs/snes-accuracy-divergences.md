@@ -6955,3 +6955,53 @@ mid-instruction and resumed *while* the S-SMP continues, with the DSP sample
 stream driven by the same reordered clock. That is the redesign; both halves
 (CV4's exact phase and the S-CPU's fixed clock budget) are achievable
 individually, but not simultaneously with add-on loops.
+
+## Access-stop regressions are a handshake (port-read) effect, not DSP phase (2026-11-21)
+
+Diagnosed the three titles that regress under `SNES_SMP_ACCESS_STOP`.
+
+### First divergent sample (600 frames, access-stop)
+
+```
+title     first differing sample   stereo frame   first run   local best alignment
+metroid   394,634                 197,317        1 sample    offset 0 (1201/2200), +/- equal
+smw       280,498                 140,249        244 samples offset 0 (1956/2200)
+zelda      90,136                  45,068        122 samples offset 0 (752/2200; noisy)
+```
+
+The best local alignment is **offset 0**, not a shifted stream, so it is not a
+continuous timing/drift effect: these are discrete events.
+
+### Whole-run clocks are (near) identical
+
+```
+title     spc instructions (default / access-stop)  spc units      master clock
+smw       2,651,439 / 2,651,410  (-29)              20469021/22   214389600 both
+zelda     2,601,410 / 2,601,408   (-2)              20469022 both 214389610 both
+metroid   2,518,198 / 2,518,188  (-10)              20469021/22   214389602 both
+```
+
+So the S-SMP clock budget is unchanged and only a handful of instructions (a
+few poll/handshake iterations out of ~2.6 million) differ. That is a
+**port-read / handshake outcome** difference, which then shifts the DSP write
+stream at those points and cascades - not a stop-position drift.
+
+### DSP phase derived from the S-CPU clock: neutral
+
+`SNES_DSP_CPU_PHASE` sets the S-DSP catch-up target from the invariant S-CPU
+master clock instead of the S-SMP drain position. On the default path it is
+neutral - dkc/zelda/fzero/metroid/smw stay 100%, cv4 stays 98.2383% - and under
+`SNES_SMP_ACCESS_STOP` it changes **nothing** (identical percentages). Reason:
+the target is clamped with `.max(smp_clock)`, and under access-stop the S-SMP
+has overshot the S-CPU, so the clamp keeps the S-SMP value and the override is
+bypassed exactly where it would matter.
+
+### Determination
+
+The three regressions are caused by `$F4-$F7` read/ handshake outcomes changing
+under the coarser stop rule, not by the DSP write phase and not by drift. The
+default per-access exact-credit rule is the one that matches ares for
+zelda/metroid/smw, while access-stop matches ares for cv4/dkc/fzero. Resolving
+both requires the S-SMP to sample the port at its own clock while the S-CPU is
+suspended - the mutual driver - which is why every flag combination so far
+splits the titles.
