@@ -7192,3 +7192,39 @@ move envelope/volume updates across sample boundaries and change the audio.
 So the residual is a **block-boundary timing difference inside the S-SMP's
 inter-block wait**, the same class as CV4's Timer-1-gated `$049F` handshake, not
 a DSP arithmetic or phase-constant problem.
+
+## SMAS block-boundary difference is one Timer-0 zero-wait iteration (2026-11-21)
+
+Instrumented the first flip (DSP samples 24,363 -> 24,427). Over that interval:
+
+```
+S-SMP instructions:  ours 517   ares 519
+S-SMP clocks:        ours 4,086 ares 4,102 (= 2,051 DSP ticks x 2)
+```
+
+The whole difference is **one extra iteration of a 2-instruction loop** in ares:
+
+```
+$0576  EC FD 00   MOV Y, $00FD     ; T0OUT (Timer 0 4-bit counter, read clears it)
+$0579  F0 FB      BEQ $0576        ; loop while zero
+```
+
+One iteration is 16 S-SMP clocks, exactly the gap. So the S-SMP is waiting for
+Timer 0 to become non-zero, and ares observes it one iteration later.
+
+The timer implementation itself checks out against ares line by line:
+
+* frequencies 128/128/16 for T0/T1/T2 (ares `Timer<128>/<128>/<16>`);
+* `TIMER_WAIT = [2,4,8,16]` (ares `timerWaitStates`);
+* `$FD-$FF` returns `stage3` and clears it (ares `readIO`);
+* `$F1` rising enable edge resets `stage2/stage3` (T2 on non-rising, ares);
+* `$F0` re-synchronizes stage 1; stage2 == target wraps and increments stage3.
+
+So the 16-clock offset is **not** a timer bug: it is accumulated earlier. Over
+the 230-frame run our S-SMP executes 1,017,010 instructions vs ares' 1,017,343
+(333 fewer, ~1.4/frame), and those small divergences shift the timer's stage-0
+phase, which then changes the zero-wait iteration count at a block boundary and
+moves the whole block of DSP writes.
+
+The remaining task is therefore the cumulative S-SMP timing agreement (the same
+port/handshake-order issue), observed here through the Timer-0 wait.
