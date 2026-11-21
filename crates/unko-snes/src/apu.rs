@@ -840,13 +840,7 @@ impl ApuBus<'_> {
     fn step_dsp_clock(&mut self, clocks: u32) {
         *self.smp_clock += u128::from(clocks) * SMP_SCALAR;
         let target = *self.smp_clock;
-        drain_dsp_to(
-            self.ram,
-            &mut self.dsp,
-            &mut self.dsp_clock,
-            &mut self.samples,
-            target,
-        );
+        drain_dsp_to(self.ram, self.dsp, self.dsp_clock, self.samples, target);
     }
 
     /// Write the underlying APU RAM (ares `writeRAM`).
