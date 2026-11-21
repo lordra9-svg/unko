@@ -7044,3 +7044,31 @@ where the status bar is static.
 
 This replaces the previous "ST018 unverified" status: a reference comparison is
 now possible, and the coprocessor's rendered output matches.
+
+## ST018 verified: whole frame 100.0000% pixel-identical to mesence (2026-11-21)
+
+The earlier "playfield only" result was a temporal-alignment artefact: the frame
+index maps as **mesence N <-> ours N+3** (our ST018 executes slightly ahead), so
+the bottom status bar looked animated. With the correct alignment:
+
+```
+mesence frame 100  vs  ours frame 103, vertical offset oy = 7
+  identical pixels: 57,344 / 57,344   (100.0000%)
+  mesence non-black pixels in frame: 57,344
+```
+
+The whole 256x224 frame - playfield and bottom status bar - is **pixel-exact**.
+(Black boot frames 59-63 also match trivially; frame 100 is fully drawn.)
+
+Capture commands:
+
+```
+mkdir -p refs/mesence/refcap/Firmware
+cp "<ares>/System/Super Famicom/st018.rom" refs/mesence/refcap/Firmware/
+cd refs/mesence/refcap && ./mesen-refcap "<shogi rom>" 100 /tmp/mes-st18-100
+FRAMES=103 ST018_ROM="<...>/st018.rom" FRAME_OUT=/tmp/our-st18-103.frame \
+  ./target/release/examples/snes-info "<shogi rom>" ipl.rom
+```
+
+So both coprocessor features are now reference-verified: BS-X 600/600 frames
+against ares, ST018 a fully-drawn frame 100% against mesence.
