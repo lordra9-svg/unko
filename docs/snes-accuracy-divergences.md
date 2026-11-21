@@ -6440,3 +6440,33 @@ it is issued or a global phase. That is governed by the DSP's own catch-up
 schedule (`DSP::tick`: `Thread::step(24)` then `synchronize(smp)`) against the
 S-SMP access stream, i.e. by the two threads' relative clock accounting at the
 moment of the write - the last unverified link in the audio chain.
+
+## DSP write timestamps: bounded phase, not a rate drift (2026-11-21)
+
+Comparing every `$F3` write over 560 frames of CV4 (`ARES_DSP_WRITES` vs
+`DspTrace::writes`), 9,680 aligned pairs with zero addr/value mismatches:
+
+```
+absolute tick difference (ares - ours):  +6 in 7,901   -22 in 1,779
+mod-32 difference:                         6 in 7,901    10 in 1,779
+```
+
+Only two values occur, and they differ by 4. Because the absolute difference is
+*bounded* (it never grows), the S-SMP and DSP **rates are identical**; what
+differs is the phase, which takes one of two values 4 ticks apart and flips at
+specific writes. So the +6 (mod 32) offset measured earlier is a
+**scheduling/phase** difference, not clock-accounting drift.
+
+Two candidate mechanisms were tested and eliminated:
+
+* the DSP catch-up boundary (`dsp_clock < smp_clock` vs `<=`,
+  `SNES_DSP_LE`): bit-identical results - the equality case never arises;
+* the write's position within its access (`start`/`mid`/`end`): the reference
+  order (`end`) is best and already what we implement.
+
+The two phase values are 4 ticks apart, which is exactly the fixed-point
+deficit between `24 * DSP_SCALAR` and `2 * SMP_SCALAR` (10 units in ares'
+2^63 base, 4 in our 2^62 base). That is now the single remaining suspect: the
+fixed-point base changes where the "extra tick" fires, so the base and the
+catch-up arithmetic must be reproduced together (base 2^63-1 **and** the
+resulting deficit) rather than independently.
