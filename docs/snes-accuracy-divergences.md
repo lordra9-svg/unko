@@ -7581,3 +7581,38 @@ not expressible in the current driver: hiding the write requires a forward
 pull that the driver cannot perform. This is the same architectural conclusion
 reached from the opposite direction earlier, now confirmed by a direct test of
 the exact requested change. Reverted.
+
+## Mutual scheduler as specified: budget preserved, `$FFD6` divergence remains (2026-11-21)
+
+Implemented exactly the requested configuration behind the existing flags:
+
+* `SNES_SMP_ACCESS_STOP` - access-boundary overshoot creates the S-SMP lead;
+* `SNES_MUTUAL` - the port-read park compares against the S-CPU clock at the
+  read instant (window start), so parks actually fire;
+* the driver services a parked read by resuming the **S-CPU coroutine with real
+  instructions** (no synthetic `advance_peripherals` clocks).
+
+Measured (55 frames, SMAS):
+
+```
+stereo frames produced: 29,277   (expected ~29,317)   -> per-frame budget intact
+first S-SMP stream divergence: instruction 4,299, ares extra ['FFD6','FFD8']
+```
+
+So the frame clock does **not** inflate (the earlier +3.2% was the synthetic
+`advance_peripherals` pull, now absent), but the `$FFD6` divergence is **still
+present**: the mutual pull changes *when* the S-SMP runs, not what the latch
+contains. Ours still observes the S-CPU's `$2140` write at that read while ares
+sees 0.
+
+600-frame audio with the configuration: smas 313,782 (50.9452%), cv4 0
+(100.0000%), dkc 0 (100.0000%) - identical to access-stop alone, as previously
+measured.
+
+Conclusion: the forward pull is necessary but not sufficient. The first
+divergence is a *latch content* ordering (write visible one read too early), not
+a scheduling instant, so no arrangement of pulls/parks removes it; hiding the
+write deadlocks (measured last turn). The remaining option is to change when the
+S-CPU's port write is committed relative to the S-SMP's read within the same
+clock window - which requires executing the S-SMP *inside* the S-CPU's write
+access (true coroutine interleaving), not before or after it.
