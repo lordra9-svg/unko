@@ -6644,3 +6644,28 @@ Consequently the leapfrog cannot be added as a flag on the existing driver: it
 creates the park condition and immediately exercises an unvalidated protocol.
 The rewrite must delete `waiting`/`parked_clocks`/`flush_parked` and make the
 actor's need a scheduler request, exactly as planned.
+
+## The leapfrog "hangs" were a livelock on the moving DSP clock (2026-11-21)
+
+Root cause found by inspecting the pull loop rather than the park protocol:
+
+```
+while self.smp_clock < self.dsp_clock { drain_unit(); }
+```
+
+The DSP re-runs on every drained unit and stays one tick ahead, so the target
+moves with the runner and the loop never terminates. Capturing the target
+before the pull (`let pull_target = self.dsp_clock; while smp < pull_target`)
+makes it terminate. At 600 frames this variant gives:
+
+```
+no-park, fixed target:   dkc 25.76%   cv4 89.14%   smas 42.27%
+park, fixed target:      dkc 40.98%   cv4 89.14%   smas 38.71%
+```
+
+so the corrected leapfrog still measures worse than the default per-access
+model (dkc 100%, cv4 98.24%). Three of the four previous "deadlocks" were this
+livelock, not the park protocol; the earlier analysis calling the park path
+dead code stands, but it was not what hung.
+
+Reverted; the verified per-access model remains the default.
