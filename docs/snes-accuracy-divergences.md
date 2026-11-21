@@ -6601,3 +6601,24 @@ full concurrent driver - not an add-on loop.
 
 Reverted. Both leapfrog attempts are recorded: the first was ~10x slower and
 wrong (SMAS 36.88%), the second hangs.
+
+## Pull-flag leapfrog: the hang persists (2026-11-21)
+
+The third leapfrog attempt threaded a `pull` flag through `ApuInput::Advance`
+so the flush path (`flush_parked`) cannot re-trigger the pull-forward - the
+diagnosed cause of the previous hang. It did **not** fix it: a 60-frame DKC run
+still never reaches its statistics output, and the 600-frame runs produce no
+audio file at all.
+
+So the hang is not only the flush re-entry. A pulled unit that parks at a
+`$F4-$F7` read leaves `waiting = Some(target)` with `target` beyond the S-CPU
+clock, and every subsequent flush re-establishes the same condition; the driver
+has no way to make the *other* thread reach that target because the S-CPU is
+suspended awaiting a response from the very advance call that is pulling.
+
+That is the architectural point the three attempts converge on: the SMP's
+park/resume must be a scheduler state where the DSP (or CPU) thread resumes the
+SMP directly, not a return value consumed by a driver loop. This is the
+ground-up rewrite that has been authorised and is the next work item.
+
+Reverted; the verified path is restored.
