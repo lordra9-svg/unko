@@ -6041,3 +6041,22 @@ it).
 
 That protocol change is the next concrete step; every stop/ordering rule that
 does not touch it has now been measured and is exact for a different subset.
+
+## Latch committed before the access advance (2026-11-20)
+
+The invariant above (ares holds the newer latch) was implemented directly: for
+`$2140-$2143` writes the latch is committed *before* the access advance, so any
+`$F4-$F7` read inside that access sees it. Measured at 600 frames:
+
+```
+cv4 0 (100%)   smas 0 (100%)   fzero 0 (100%)
+dkc 173,620 (72.86%)   zelda 1,449 (99.77%)
+metroid 239,756 (62.52%)   smw 45,880 (92.83%)   ct 440,267 (31.17%)
+```
+
+This is the same split as every previous write-before-sample rule (compare the
+125,000+ `C0->R0` pairs measured earlier): the exact set simply flips. Together
+with the three-case table this proves the two families are mirror images -
+some reads in each title require the newer latch and others the older one at
+identical S-SMP clocks - so a single global latch-ordering rule cannot be
+correct. Reverted.
