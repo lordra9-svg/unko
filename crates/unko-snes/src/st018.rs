@@ -495,6 +495,13 @@ impl St018 {
                 self.recent.remove(0);
             }
         }
+        if std::env::var_os("ST018_CALL_LOG").is_some() && matches!(pc, 0x1C8 | 0x1CC) {
+            eprintln!(
+                "PIC pc={pc:08X} op={opcode:08X} r1={:08X} pc8={:08X}",
+                self.cpu.r[1],
+                self.reg(15)
+            );
+        }
         if std::env::var_os("ST018_CALL_LOG").is_some()
             && matches!(pc, 0x1D0 | 0x1D4 | 0x1E8 | 0x204)
         {
@@ -586,6 +593,11 @@ impl St018 {
             value
         };
         let a = self.reg(rn);
+        if std::env::var_os("ST018_CALL_LOG").is_some() && opcode == 0xE08F_1001 {
+            eprintln!(
+                "ADDDBG a={a:08X} operand={operand:08X} rn={rn} rd={rd} op={op:08X} imm={immediate}"
+            );
+        }
         let (result, carry) = match op {
             0x0 => (a & operand, self.cpu.flag_c()),        // AND
             0x1 => (a ^ operand, self.cpu.flag_c()),        // EOR
