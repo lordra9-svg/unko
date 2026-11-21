@@ -1092,6 +1092,22 @@ mod tests {
     }
 
     #[test]
+    fn branch_link_uses_pc_plus_4() {
+        // BL +0 at 0: link = 0x04, target = 0x08 (reference ArmBranch:
+        // R[14] = R[15] - 4 where R[15] is the pipeline value PC+8).
+        let chip = run_program(&[0xEB00_0000, 0xEAFF_FFFE, 0xEAFF_FFFE], 2);
+        assert_eq!(chip.arm_register(14), 0x04, "LR = instruction + 4");
+        assert_eq!(chip.arm_pc(), 0x08, "branch target = PC + 8 + offset");
+    }
+
+    #[test]
+    fn branch_backward_is_sign_extended() {
+        // At 0: B -8 (offset -2 words) -> target 0.
+        let chip = run_program(&[0xEAFF_FFFE], 1);
+        assert_eq!(chip.arm_pc(), 0x00, "self-branch resolves to PC + 8 - 8");
+    }
+
+    #[test]
     fn data_rom_maps_at_0x0a() {
         let image = firmware();
         let chip = St018::new(&image);
