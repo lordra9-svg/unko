@@ -5742,3 +5742,93 @@ the values are consistent with no DSP phase difference.
 So the DSP tick phase is not the source of the remaining CV4 offset either. The
 search returns to the S-SMP sample/park interaction, where the mutual-suspension
 implementation is the remaining untried piece.
+
+## Root cause located: the S-SMP/IPL boot handshake, not the scheduler (2026-11-20)
+
+The scheduler question was settled by direct execution comparison. With
+`ARES_SPC_TRACE` extended to emit `dspTicks`, our S-SMP trace was diffed
+against ares for 240 frames of CV4:
+
+```
+instructions compared      1,140,309
+PC sequence mismatches     0 (until the first divergence)
+per-instruction cycle
+  counts mismatched        0 (271,580 instructions over 60 frames)
+per-instruction dspTicks   0 mismatches up to instruction 371,351
+```
+
+So the port/interleave model already reproduces ares' S-SMP program path and
+instruction timing exactly. The divergence is a single event:
+
+```
+instruction 371,351 (master clock 28,991,600, 1.35 s)
+  ares FFE9 (branch taken)   ours FFDE (branch not taken)
+  -> one instruction earlier, `CMP Y,$F4` at FFDA read a different $F4
+```
+
+Tracing further back with the corrected `ARES_SMPIO_LOG` (the read hook opened
+the log with `"w"` while the write hook used `"a"`, which truncated the boot
+sequence - same defect previously found in `ARES_APU_LOG`), the *first*
+divergence is at instruction 182,300 (0.68 s), in the IPL ROM download
+handshake:
+
+```
+182,299  FFEB  CMP Y,$F4      Y=0x22
+182,300  FFED  ares z=1 c=1   ($F4 == 0x22)   ours z=0 c=0  ($F4 != 0x22)
+```
+
+The S-CPU writes `$2140 = 0x22` at master clock 14,624,280; the S-SMP reads
+`$F4` at DSP tick 698,133. ares returns the *new* value, we return the old one.
+
+Cause: a one-unit stop-boundary difference. ares runs
+`while(smp.clock() < cpu.clock()) co_switch(smp)`, so a unit whose *start* is at
+or beyond the S-CPU clock is not executed; it runs on the next synchronize,
+after `portWrite` has updated `io.apu0`. Our per-access advance uses a carried
+credit (`apu_credit += clocks*2_050_560; while credit >= rate`) and executes
+that unit in the same advance, before `port_write`, so the `$F4-$F7` midpoint
+sample reads the stale latch.
+
+Replacing the credit with an absolute fixed-point comparison
+(`while smp_clock_at_position() < clock_ticks`) removes this boundary error and
+keeps DKC/F-Zero/Super Metroid/SMW/CV4 exact at 120 frames - but it drifts over
+long runs:
+
+```
+600 frames: dkc 0 (100%)   zelda 231,892 (63.75%)   fzero 446,989 (30.12%)
+            metroid 238,681 (62.69%)   smw 16,177 (97.47%)   cv4 69,470 (89.14%)
+```
+
+because the two truncated scalars (`SMP_SCALAR = Second/2_050_560` and
+`Second/master_clock`) round differently over millions of units, while the
+rational credit does not. The credit is therefore required for long-term rate
+fidelity and the boundary needs a separate mechanism (e.g. recording each
+access's exact start/end rational bounds and stopping before a unit whose start
+is >= the target, without changing the accumulated rate).
+
+## DSP phase and trace comparison (2026-11-20)
+
+`ARES_DSP_TRACE` (204 columns per output sample, same layout our
+`DSP_FULL_TRACE_OUT` already emits) was diffed for 560 frames of CV4:
+
+```
+first differing row 43,537 (1.36 s): column 172 `brr._byte` (ares 200, ours 199)
+first differing *audio* row 289,423 (9.03 s): right channel only, ares 1183,
+  ours 1268, with every traced DSP state column identical
+```
+
+So the first audible difference is a single right-channel sample whose traced
+state matches ares exactly: the left channel is `mainvol.output[0]` (scaled by
+`MVOL` in `echo26`) while the right is the raw accumulator `mainvol.output[1]`,
+and the two only diverge if a voice's contribution was added on a different
+side of `echo27` - a within-sample accumulation ordering effect downstream of
+the `$F4` handshake divergence above, not an independent DSP bug.
+
+Register-write phase (from `ARES_DSP_WRITES`): our `dspTicks` at each write is
+offset by a constant `+6 (mod 32)` micro-steps in 1,788 cases and `+10` in 525,
+i.e. a sub-sample constant phase, consistent with (not the cause of) the
+boundary behaviour; the DSP rate itself matches (25 micro-steps per 50 S-SMP
+clocks at every write in both).
+
+The `YA` word-order scare (our `(Y<<8)|A`) was a mislabeled trace column in the
+local ares hook (`r.ya.byte.l` is `A`, not `Y`); the encoding matches ares and
+the change was reverted.
