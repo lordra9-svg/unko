@@ -6495,3 +6495,27 @@ The one structural difference still untested is ares' `DSP::tick` calling
 DSP catches up, which changes the SMP clock the next catch-up is compared
 against. Reproducing that requires the two threads to be mutually resumable
 (the scheduler rework), and it is the next experiment.
+
+## DSP catch-up without overshoot: measured and rejected (2026-11-21)
+
+ares' `DSP::tick` overshoots the S-SMP clock (`Thread::step(24)` then
+`Thread::synchronize(smp)`), and the synchronize pulls the S-SMP forward to the
+DSP's overshot tick boundary - a leapfrog between the two threads. The half that
+can be expressed in our model is "never overshoot"
+(`while dsp_clock + DSP_TICK <= target`, `SNES_DSP_NOOVERSHOOT`):
+
+```
+no-overshoot: dkc 226,813 (64.54%)   cv4 11,379 (98.2211%)
+              smas 313,782 (50.95%)  ct 416,143 (34.94%)
+```
+
+DKC regresses to exactly the same 64.5414% produced by the write-placement
+start/mid variants, and CV4 is slightly worse than the default. So the
+no-overshoot side is not it either; the missing half is the *pull-forward* of
+the S-SMP to the DSP's tick boundary, which requires the S-SMP to be advanced
+from inside the DSP catch-up (drain-time, mutually resumable threads) - the same
+structural rework as the CPU/SMP pair.
+
+Every parameter that can be varied without that rework has now been measured:
+stop rule, cadence, latch ordering, concurrency, DSP drain time, write
+placement, catch-up boundary, fixed-point base and overshoot policy. Reverted.
