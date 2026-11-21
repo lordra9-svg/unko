@@ -7518,3 +7518,43 @@ This closes the localisation: exact timer, identical transitions, but a read-gri
 phase difference of 10 timer clocks at the exit. The fix belongs in the
 access-level timer-step accounting that establishes that phase (the only place a
 net offset can be introduced), not in the timer or the DSP.
+
+## Instruction-boundary timer clocks: first divergence at instruction 4,299 (2026-11-21)
+
+Logged the cumulative timer clocks at every S-SMP instruction boundary in both
+emulators (`ARES_INSTR_LOG` / `SNES_INSTR_LOG`), 50 frames.
+
+```
+first cumulative-timer difference: instruction 4,299
+  k=4298 ares[4299, 34904, FFD8]  ours[4298, 34904, FFD8]
+  k=4299 ares[4300, 34912, FFD6]  ours[4299, 34908, FFDA]   <- PC diverges here
+  k=4303 ares[4304, 34932, FFDE]  ours[4303, 34932, FFE2]   (clocks re-converge)
+  k=4304 ares[4305, 34938, FFE0]  ours[4304, 34946, FFE4]   (ours 8 ahead)
+```
+
+So the **first** instruction-level divergence is exactly the IPL `$FFD6`
+(`MOV Y,$F4`) poll: ares executes the `$F4` read + `BNE` once more, ours falls
+through to `$FFDA`. In other words, at that read ours already sees the S-CPU's
+`$2140` write while ares still sees 0.
+
+Every later effect - the cumulative timer-clock oscillation, the `$FD` read-grid
+phase (10 clocks), the Timer-0 zero-wait iteration, and the +-8 DSP-tick write
+placement - cascades from this single early port-read visibility difference.
+
+The chain is now closed end to end:
+
+```
+instruction 4,299: ours sees $2140 write one poll early
+  -> S-SMP clock offset appears, oscillates (timer clocks follow it, 2x)
+  -> $FD read grid phase-shifted (10 timer clocks at the loop exit)
+  -> Timer-0 zero-wait loop runs one iteration more/less
+  -> whole block of $F3 writes shifted by 8 DSP ticks (=16 S-SMP clocks)
+  -> envelope/volume writes cross sample boundaries -> audio differs
+```
+
+And the attempted fix for the first link (exact `synchronize(smp)` before port
+writes) does remove the divergence but shifts the S-SMP clock globally and
+regresses six titles. So the correct resolution is the port-sample ordering
+(read must sample the latch as of the read instant while the S-CPU is not run
+past it), which our single-driver architecture cannot express without the mutual
+driver - consistent with the earlier mutual-scheduler conclusion.
