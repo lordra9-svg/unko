@@ -6579,3 +6579,25 @@ cannot be expressed without drain-time threads, the correct fix is the
 concurrent three-thread driver; this measurement defines its acceptance test:
 the phase must remain a single value across block boundaries, not just within a
 block.
+
+## Leapfrog with credit-charged pull-forward: hangs (2026-11-21)
+
+Second implementation of the DSP/SMP leapfrog, addressing the previous
+variant's 10x slowdown by charging the pulled S-SMP clocks against the carried
+credit (`apu_credit -= den` per pulled unit, allowing it to go negative):
+
+* record-time DSP advance disabled;
+* `drain_unit` advances `smp_clock` one clock and runs the DSP to it;
+* after the credit loop, `while smp_clock < dsp_clock { drain_unit();
+  apu_credit -= den; }`.
+
+Result: the emulator **hangs** (a 60-frame DKC run never finishes). The
+pull-forward interacts with the park/flush path: a pulled unit can park at a
+`$F4-$F7` read and return `Parked`, whose flush re-enters `advance_master_clock`
+and pulls again, so the driver never returns to the S-CPU. Fixing that requires
+the pull-forward to be part of the scheduler proper (so a parked thread is
+resumed by the other thread rather than by re-entering the advance), i.e. the
+full concurrent driver - not an add-on loop.
+
+Reverted. Both leapfrog attempts are recorded: the first was ~10x slower and
+wrong (SMAS 36.88%), the second hangs.
