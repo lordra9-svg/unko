@@ -1689,9 +1689,17 @@ impl Snes {
 
 impl Snes {
     /// Build a bus view over the machine's fields for one access.
-    /// Install ST018 coprocessor firmware (`st018.rom`, 0x28000 bytes).
+    /// Install ST018 coprocessor firmware (`st018.rom`, 0x28000 bytes, or the
+    /// split `st018.program.rom`).
     pub fn load_st018_firmware(&mut self, image: &[u8]) {
         self.st018 = Some(St018::new(image));
+    }
+
+    /// Install the ST018 data ROM (split-firmware form).
+    pub fn load_st018_data_rom(&mut self, image: &[u8]) {
+        if let Some(st018) = self.st018.as_mut() {
+            st018.load_data_rom(image);
+        }
     }
 
     /// Attach a BS Memory Pack image to the BS-X cartridge.

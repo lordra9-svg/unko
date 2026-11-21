@@ -180,6 +180,10 @@ fn main() -> ExitCode {
         let image = std::fs::read(&path).expect("read ST018_ROM");
         system.load_st018_firmware(&image);
     }
+    if let Some(path) = std::env::var_os("ST018_DATA_ROM") {
+        let image = std::fs::read(&path).expect("read ST018_DATA_ROM");
+        system.load_st018_data_rom(&image);
+    }
     if let Some(path) = std::env::var_os("BSX_PACK") {
         let image = std::fs::read(&path).expect("read BSX_PACK");
         system.load_bsx_pack(image);

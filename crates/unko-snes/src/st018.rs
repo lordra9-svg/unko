@@ -85,6 +85,34 @@ impl ArmV3 {
     }
 }
 
+/// ARM address regions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArmRegion {
+    Program,
+    Data,
+    Work,
+    Io,
+    Open,
+}
+
+/// Decode an ARM address.
+///
+/// The ST018 firmware uses `$00000000` program ROM, `$0a000000` data ROM,
+/// `$e0000000` work RAM and `$04000000` for the S-CPU handshake registers.
+/// (`$e0` in the top byte is region `$e`, not region `$0`.) Older documents
+/// place the registers at `$04000000`; both are accepted.
+fn arm_region(address: u32) -> ArmRegion {
+    if (address >> 24) == 0x04 || (address >> 28) == 0x4 {
+        return ArmRegion::Io;
+    }
+    match address >> 28 {
+        0x0 => ArmRegion::Program,
+        0xA => ArmRegion::Data,
+        0xE => ArmRegion::Work,
+        _ => ArmRegion::Open,
+    }
+}
+
 /// One ST018 cartridge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct St018 {
@@ -100,6 +128,8 @@ pub struct St018 {
     ack: bool,
     /// Master clock of the last `run_to`, used as the cycle base on power-on.
     now: u64,
+    /// Instructions logged since the last power-on (debug).
+    traced: u64,
 }
 
 impl St018 {
@@ -110,6 +140,10 @@ impl St018 {
         if firmware.len() >= FIRMWARE_SIZE {
             prg.copy_from_slice(&firmware[..PRG_ROM_SIZE]);
             data.copy_from_slice(&firmware[PRG_ROM_SIZE..FIRMWARE_SIZE]);
+        } else if firmware.len() >= PRG_ROM_SIZE {
+            // The firmware is also distributed split as `st018.program.rom`
+            // (128 KiB); the data ROM is then supplied separately.
+            prg.copy_from_slice(&firmware[..PRG_ROM_SIZE]);
         }
         Self {
             prg,
@@ -123,7 +157,19 @@ impl St018 {
             arm_reset: false,
             ack: false,
             now: 0,
+            traced: 0,
         }
+    }
+
+    /// Install the 32 KiB data ROM (split-firmware form).
+    pub fn load_data_rom(&mut self, image: &[u8]) {
+        let count = image.len().min(DATA_ROM_SIZE);
+        self.data[..count].copy_from_slice(&image[..count]);
+    }
+
+    /// Whether the program ROM contains firmware (first word not blank).
+    pub fn has_firmware(&self) -> bool {
+        self.prg.iter().any(|&byte| byte != 0)
     }
 
     /// Program ROM.
@@ -141,9 +187,14 @@ impl St018 {
         self.cpu.pc()
     }
 
-    /// Status byte as the S-CPU reads it.
+    /// Status byte as the S-CPU reads it (reference `GetStatus`):
+    /// bit 0 = data for the S-CPU, bit 2 = ack, bit 3 = data for the ARM,
+    /// bit 7 = the ARM is running (reset released).
     pub fn status(&self) -> u8 {
-        (u8::from(self.has_data_for_snes) << 7) | (u8::from(self.has_data_for_arm) << 6)
+        u8::from(self.has_data_for_snes)
+            | (u8::from(self.ack) << 2)
+            | (u8::from(self.has_data_for_arm) << 3)
+            | (u8::from(!self.arm_reset) << 7)
     }
 
     /// Run the ARM until it reaches `target` master clocks.
@@ -196,6 +247,7 @@ impl St018 {
         self.cpu = ArmV3::new();
         self.cpu.r[15] = 0x0000_0000;
         self.cpu.cycles = self.now;
+        self.traced = 0;
     }
 
     /// Register read with ARM pipeline semantics: reading `r15` yields
@@ -213,9 +265,9 @@ impl St018 {
     fn arm_read8(&self, address: u32) -> u8 {
         // ARMv3 26-bit address space decoded by the top byte: `$00` program
         // ROM, `$04` S-CPU registers, `$0a` data ROM, `$0e` work RAM.
-        match (address >> 24) & 0x0F {
-            0x0 => self.prg[(address as usize) & (PRG_ROM_SIZE - 1)],
-            0x4 => match address & 0x3F {
+        match arm_region(address) {
+            ArmRegion::Program => self.prg[(address as usize) & (PRG_ROM_SIZE - 1)],
+            ArmRegion::Io => match address & 0x3F {
                 0x10 => {
                     // Reading the transfer register consumes the S-CPU byte.
                     self.data_arm
@@ -223,15 +275,15 @@ impl St018 {
                 0x20 => self.status(),
                 _ => 0,
             },
-            0xA => self.data[(address as usize) & (DATA_ROM_SIZE - 1)],
-            0xE => self.ram[(address as usize) & (WORK_RAM_SIZE - 1)],
-            _ => 0,
+            ArmRegion::Data => self.data[(address as usize) & (DATA_ROM_SIZE - 1)],
+            ArmRegion::Work => self.ram[(address as usize) & (WORK_RAM_SIZE - 1)],
+            ArmRegion::Open => 0,
         }
     }
 
     fn arm_read32(&mut self, address: u32) -> u32 {
         let address = address & !3;
-        if (address >> 24) & 0x0F == 0x4 && address & 0x3F == 0x10 {
+        if arm_region(address) == ArmRegion::Io && address & 0x3F == 0x10 {
             self.has_data_for_arm = false;
         }
         self.cpu.cycles += 1;
@@ -243,9 +295,9 @@ impl St018 {
     }
 
     fn arm_write8(&mut self, address: u32, value: u8) {
-        match (address >> 24) & 0x0F {
-            0x0 => {} // program ROM is read-only
-            0x4 => match address & 0x3F {
+        match arm_region(address) {
+            ArmRegion::Program => {} // program ROM is read-only
+            ArmRegion::Io => match address & 0x3F {
                 0x00 => {
                     self.data_snes = value;
                     self.has_data_for_snes = true;
@@ -253,12 +305,12 @@ impl St018 {
                 0x10 => self.ack = true,
                 _ => {}
             },
-            0xA => {} // data ROM is read-only
-            0xE => {
+            ArmRegion::Data => {} // data ROM is read-only
+            ArmRegion::Work => {
                 let index = (address as usize) & (WORK_RAM_SIZE - 1);
                 self.ram[index] = value;
             }
-            _ => {}
+            ArmRegion::Open => {}
         }
     }
 
@@ -393,13 +445,6 @@ impl St018 {
         self.cpu.cycles += 1;
         let pc = self.cpu.pc();
         let opcode = self.arm_read32(pc);
-        if std::env::var_os("ST018_PC_LOG").is_some() {
-            static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if n < 160 {
-                eprintln!("ARM {pc:08X} {opcode:08X}");
-            }
-        }
         self.cpu.set_pc(pc.wrapping_add(4));
         if !self.condition_passed(opcode >> 28) {
             return;
@@ -621,9 +666,6 @@ impl St018 {
             } else {
                 self.arm_read32(address)
             };
-            if std::env::var_os("ST018_PC_LOG").is_some() {
-                eprintln!("LDR r{rd} <- {value:08X} @ {address:08X}");
-            }
             if rd == 15 {
                 self.cpu.set_pc(value);
             } else {
@@ -751,15 +793,15 @@ mod tests {
         let mut chip = St018::new(&firmware());
         // S-CPU writes a byte for the ARM, status reflects it.
         chip.write(0x00_3802, 0x5A);
-        assert_eq!(chip.status() & 0x40, 0x40);
+        assert_eq!(chip.status() & 0x08, 0x08);
         // The ARM consumes it (via the $04:0010 register) and returns one.
         let value = chip.arm_read32(0x04_000010);
         assert_eq!(value & 0xFF, 0x5A);
-        assert_eq!(chip.status() & 0x40, 0x00);
+        assert_eq!(chip.status() & 0x08, 0x00);
         chip.arm_write8(0x0400_0000, 0xA5);
-        assert_eq!(chip.status() & 0x80, 0x80);
+        assert_eq!(chip.status() & 0x01, 0x01);
         assert_eq!(chip.read(0x00_3800, 0), 0xA5);
-        assert_eq!(chip.status() & 0x80, 0x00);
+        assert_eq!(chip.status() & 0x01, 0x00);
     }
 
     #[test]
@@ -774,8 +816,8 @@ mod tests {
     #[test]
     fn work_ram_round_trips_through_the_arm_bus() {
         let mut chip = St018::new(&firmware());
-        chip.arm_write32(0x0E00_0100, 0x1234_5678);
-        assert_eq!(chip.arm_read32(0x0E00_0100), 0x1234_5678);
+        chip.arm_write32(0xE000_0100, 0x1234_5678);
+        assert_eq!(chip.arm_read32(0xE000_0100), 0x1234_5678);
         assert_eq!(&chip.work_ram()[0x100..0x104], &[0x78, 0x56, 0x34, 0x12]);
     }
 
