@@ -7398,3 +7398,33 @@ the access's clocks are counted in the plan but the timer step happens once at
 resume), rather than at the timer or the DSP.
 
 Next: find the 11 accesses whose timer steps differ before the first `$FD` read.
+
+## First timer-step divergence: the IPL `$F4-$F7` split-read loop (2026-11-21)
+
+Logged every timer step (`cumulative clocks`, `step size`, S-SMP PC) in both
+emulators (`ARES_ACCESS_LOG` / `SNES_ACCESS_LOG`).
+
+Frame 1 is identical (17,122 accesses, no divergence). The **first divergence is
+access 19,170** (timer clock 34,914), inside the IPL upload handshake:
+
+```
+k=19164 ares[34903,1] ours[34903,1]     (PC FFD8)
+k=19166 ares[34906,2] ours[34906,2]     (ares FFD9, ours FFD8)
+k=19168 ares[34910,2] ours[34910,2]     (FFDA)
+k=19170 ares[34914,2] ours[34913,1]     <- ares steps 2, ours steps 1
+k=19171 ares[34916,2] ours[34914,1]
+k=19172 ares[34917,1] ours[34916,2]     <- the 1 and 2 swap
+k=19173 ares[34918,1] ours[34918,2]
+k=19174 ares[34920,2] ours[34920,2]     <- totals re-converge
+```
+
+So the cumulative timer totals re-converge, but the **step sizes are reordered**:
+ares applies the 2-clock step before the 1-clock step, ours applies 1 then 2.
+The location is `$FFD6 MOV Y,$F4` / `$FFD8 BNE` - the `$F4-$F7` split read, whose
+second half (`wait` after `readIO`) is applied one clock early by our deferred
+path: the whole read (both halves) is executed at `resume_at = clocks/2`, so the
+second half's timer/DSP step happens one plan unit before ares.
+
+This reordering is the earliest divergence and occurs inside the split-read
+handling, not in the timer. Fixing it (apply the second half when the plan step
+completes) is the next concrete edit.
