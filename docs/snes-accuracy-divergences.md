@@ -7228,3 +7228,30 @@ moves the whole block of DSP writes.
 
 The remaining task is therefore the cumulative S-SMP timing agreement (the same
 port/handshake-order issue), observed here through the Timer-0 wait.
+
+## Full S-SMP stream alignment: 799 events, no control-flow divergence (2026-11-21)
+
+Aligned the complete S-SMP instruction streams (ours 1,017,010, ares 1,017,343
+entries, 230 frames) with a +-8-instruction resynchronising diff:
+
+```
+total divergence events:  799
+  IPL upload handshake:     3   ($FFD6/$FFD8, $FFDA/$FFDC/$FFE9)
+  Timer-0 zero-wait loop: 796   ($0576 MOV Y,$00FD / $0579 BEQ $0576)
+  other:                    0
+final alignment: ours exhausted at 1,017,010; ares at 1,017,011
+```
+
+So the **program is identical**: there is no control-flow divergence at all.
+The previously reported "333 fewer instructions" was a trailing capture-length
+artefact - after alignment the streams differ by at most one instruction, and the
+remaining 332 ares entries are simply capture time beyond our run.
+
+The 796 Timer-0 events are one-iteration insertions that alternate sides (ours
+extra, then ares extra, then ours...), i.e. the block-boundary phase oscillation
+already measured, not accumulating drift. The 3 IPL events are the earliest
+divergence (instruction 4,299) and are the documented `$FFDA/$FFDC` upload
+handshake.
+
+Next: resolve the 3 IPL handshake divergences (the earliest cause) and see
+whether removing that SMP-clock perturbation makes the Timer-0 wait parity agree.
