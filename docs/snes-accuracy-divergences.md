@@ -7072,3 +7072,35 @@ FRAMES=103 ST018_ROM="<...>/st018.rom" FRAME_OUT=/tmp/our-st18-103.frame \
 
 So both coprocessor features are now reference-verified: BS-X 600/600 frames
 against ares, ST018 a fully-drawn frame 100% against mesence.
+
+## Unclamped CPU-derived DSP phase makes SMAS exact (2026-11-21)
+
+The earlier `SNES_DSP_CPU_PHASE` test clamped the target with `.max(smp_clock)`,
+which makes it a no-op exactly under overshoot. Retested **unclamped**: the DSP
+catch-up target is the S-CPU clock converted to the shared fixed-point base, even
+when the S-SMP is ahead.
+
+600 frames (639,656-sample window):
+
+| title | default | unclamped CPU phase | access-stop + CPU phase |
+|---|---|---|---|
+| dkc | 100.0000% | **58.2915%** | 58.2915% |
+| cv4 | 98.2383% | 98.0890% | 98.3097% |
+| smas | 50.9452% | **100.0000%** | **100.0000%** |
+| zelda | 100.0000% | - | 93.0372% |
+| fzero | 100.0000% | - | 88.0415% |
+| metroid | 100.0000% | - | 62.5025% |
+| smw | 100.0000% | - | 91.1753% |
+| ct | 34.9427% | - | 31.4222% |
+| mmx2 | 69.2303% | - | 69.2303% |
+
+**SMAS is bit-exact for the first time**, and it stays exact with or without the
+access-stop rule. But the same shift breaks DKC (58.3%) and the other exact
+titles, so the untested-clamp variant is a real phase shift of the DSP write
+stream, not a free improvement: DKC/Zelda/F-Zero/Metroid/SMW constrain the
+default phase and SMAS constrains a shifted one.
+
+This is the strongest evidence yet that the residual is the **DSP register-write
+phase** (a few micro-steps), and that the correct model must derive that phase
+from the SMP's access instant in a way that matches ares for all titles - the
+open item. The flag stays default-off.

@@ -85,6 +85,13 @@ pub fn no_park() -> bool {
     *NO.get_or_init(|| std::env::var_os("SNES_NO_PARK").is_some())
 }
 
+/// `SNES_DSP_CPU_PHASE`: derive the S-DSP catch-up target from the S-CPU master
+/// clock instead of the S-SMP drain position (unclamped).
+pub fn dsp_cpu_phase() -> bool {
+    static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *P.get_or_init(|| std::env::var_os("SNES_DSP_CPU_PHASE").is_some())
+}
+
 /// ares `Thread::Second`: the fixed-point base of the scheduler clocks.
 const SCHEDULER_SECOND: u128 = (1u128 << 62) - 1;
 /// ares `Thread::setFrequency`: `_scalar = Second / frequency`.
@@ -602,6 +609,13 @@ impl Apu {
         // The S-SMP's logical time is exactly its retired access units.
         let mut plan = std::mem::take(&mut self.plan);
         {
+            // SNES_DSP_CPU_PHASE: target derived from the S-CPU clock.
+            let dsp_target = if dsp_cpu_phase() && self.master_clock_valid && self.master_clock_rate != 0 {
+            let scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
+            Some(u128::from(self.cpu_master_clock) * scalar)
+            } else {
+            None
+            };
             let mut bus = ApuBus {
                 ram: &mut self.ram[..],
                 ipl: &self.ipl,
@@ -620,6 +634,7 @@ impl Apu {
                 dsp_clock: &mut self.dsp_clock,
                 samples: &mut self.samples,
                 apu_ports: &mut self.apu_ports,
+                dsp_target,
                 cpu_ports: &mut self.cpu_ports,
                 aux4: &mut self.aux4,
                 aux5: &mut self.aux5,
@@ -682,6 +697,13 @@ impl Apu {
             return;
         }
         let page_flag = self.spc.flags.page;
+        // SNES_DSP_CPU_PHASE: target derived from the S-CPU clock.
+        let dsp_target = if dsp_cpu_phase() && self.master_clock_valid && self.master_clock_rate != 0 {
+        let scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
+        Some(u128::from(self.cpu_master_clock) * scalar)
+        } else {
+        None
+        };
         let mut bus = ApuBus {
             ram: &mut self.ram[..],
             ipl: &self.ipl,
@@ -700,6 +722,7 @@ impl Apu {
             dsp_clock: &mut self.dsp_clock,
             samples: &mut self.samples,
             apu_ports: &mut self.apu_ports,
+            dsp_target,
             cpu_ports: &mut self.cpu_ports,
             aux4: &mut self.aux4,
             aux5: &mut self.aux5,
@@ -869,6 +892,8 @@ struct ApuBus<'a> {
     dsp_clock: &'a mut u128,
     samples: &'a mut VecDeque<Sample>,
     apu_ports: &'a mut [u8; 4],
+    /// S-CPU-derived DSP target (`SNES_DSP_CPU_PHASE`), shared base.
+    dsp_target: Option<u128>,
     cpu_ports: &'a mut [u8; 4],
     aux4: &'a mut u8,
     aux5: &'a mut u8,
@@ -895,7 +920,10 @@ impl ApuBus<'_> {
     /// and the DSP stays one micro-step ahead, exactly as ares does.
     fn step_dsp_clock(&mut self, clocks: u32) {
         *self.smp_clock += u128::from(clocks) * SMP_SCALAR;
-        let target = *self.smp_clock;
+        let target = match self.dsp_target {
+            Some(t) => t,
+            None => *self.smp_clock,
+        };
         // Diagnostic: the DSP register-write phase measured +6 micro-steps
         // against ares; prime the DSP catch-up by that many ticks to test
         // whether the offset is a true global phase.
@@ -1236,6 +1264,7 @@ mod tests {
                 dsp_clock: &mut apu.dsp_clock,
                 samples: &mut apu.samples,
                 apu_ports: &mut apu.apu_ports,
+                dsp_target: None,
                 cpu_ports: &mut apu.cpu_ports,
                 aux4: &mut apu.aux4,
                 aux5: &mut apu.aux5,
@@ -1285,6 +1314,7 @@ mod tests {
                 dsp_clock: &mut apu.dsp_clock,
                 samples: &mut apu.samples,
                 apu_ports: &mut apu.apu_ports,
+                dsp_target: None,
                 cpu_ports: &mut apu.cpu_ports,
                 aux4: &mut apu.aux4,
                 aux5: &mut apu.aux5,
@@ -1315,6 +1345,7 @@ mod tests {
                 dsp_clock: &mut apu.dsp_clock,
                 samples: &mut apu.samples,
                 apu_ports: &mut apu.apu_ports,
+                dsp_target: None,
                 cpu_ports: &mut apu.cpu_ports,
                 aux4: &mut apu.aux4,
                 aux5: &mut apu.aux5,
@@ -1355,6 +1386,7 @@ mod tests {
             dsp_clock: &mut apu.dsp_clock,
             samples: &mut apu.samples,
             apu_ports: &mut apu.apu_ports,
+            dsp_target: None,
             cpu_ports: &mut apu.cpu_ports,
             aux4: &mut apu.aux4,
             aux5: &mut apu.aux5,
@@ -1393,6 +1425,7 @@ mod tests {
             dsp_clock: &mut apu.dsp_clock,
             samples: &mut apu.samples,
             apu_ports: &mut apu.apu_ports,
+            dsp_target: None,
             cpu_ports: &mut apu.cpu_ports,
             aux4: &mut apu.aux4,
             aux5: &mut apu.aux5,
@@ -1491,6 +1524,7 @@ mod wait_state_tests {
             dsp_clock: &mut apu.dsp_clock,
             samples: &mut apu.samples,
             apu_ports: &mut apu.apu_ports,
+            dsp_target: None,
             cpu_ports: &mut apu.cpu_ports,
             aux4: &mut apu.aux4,
             aux5: &mut apu.aux5,
