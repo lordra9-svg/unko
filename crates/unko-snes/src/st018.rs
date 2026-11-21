@@ -130,6 +130,8 @@ pub struct St018 {
     now: u64,
     /// Instructions logged since the last power-on (debug).
     traced: u64,
+    /// Recent ARM PCs (debug ring buffer).
+    recent: Vec<u32>,
 }
 
 impl St018 {
@@ -158,6 +160,7 @@ impl St018 {
             ack: false,
             now: 0,
             traced: 0,
+            recent: Vec::new(),
         }
     }
 
@@ -446,19 +449,42 @@ impl St018 {
         let pc = self.cpu.pc();
         let opcode = self.arm_read32(pc);
         self.cpu.set_pc(pc.wrapping_add(4));
+        if std::env::var_os("ST018_CALL_LOG").is_some() {
+            if pc == 0x2B4 && self.cpu.r[1] == 0 && self.recent.len() == 8 {
+                eprintln!(
+                    "CALL 0x2B4 lr={:08X} prev={:08X?}",
+                    self.cpu.r[14], self.recent
+                );
+                self.recent.clear();
+            }
+            self.recent.push(pc);
+            if self.recent.len() > 8 {
+                self.recent.remove(0);
+            }
+        }
         if !self.condition_passed(opcode >> 28) {
             return;
         }
         let bits = |from: u32, to: u32| (opcode >> from) & ((1 << (to - from + 1)) - 1);
         match bits(26, 27) {
             0b00 => {
-                if bits(22, 27) == 0b000000 {
-                    self.data_processing(opcode);
-                } else if bits(22, 27) == 0b000001 {
+                // Bits 27-26 are `00` for every opcode in this class; the
+                // multiply/misc forms are identified by bits 7-4, **not** by
+                // bits 27-22 (which include the immediate bit and the opcode,
+                // so testing them routed every MOV/ADD/CMP to the multiply
+                // path and silently dropped it).
+                // Multiply is the only form with bits 7-4 = 1001 and
+                // bits 27-22 = 0. MRS/MSR are identified by their canonical
+                // bit masks; everything else is data processing.
+                let misc = (opcode & 0x0FBF_0FFF) == 0x010F_0000
+                    || (opcode & 0x0FB0_FFF0) == 0x0120_F000
+                    || (opcode & 0x0FB0_F000) == 0x0320_F000;
+                if bits(4, 7) == 0b1001 && bits(22, 27) == 0 {
+                    self.multiply(opcode);
+                } else if misc {
                     self.misc(opcode);
                 } else {
-                    // Multiplies and halfword transfers: multiply subset only.
-                    self.multiply(opcode);
+                    self.data_processing(opcode);
                 }
             }
             0b01 => self.single_transfer(opcode),
