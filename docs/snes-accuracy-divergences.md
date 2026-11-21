@@ -6109,3 +6109,38 @@ read's latch depends on which window it is resolved in. Reproducing ares'
 synchronization *points* (not its totals) is therefore the remaining variable,
 which is what the `SNES_MUTUAL` cadence was meant to do but currently combines
 with the wrong stop rule.
+
+## ares synchronization-point cadence, carried-credit stop (2026-11-20)
+
+The last untested degree of freedom was the *cadence*: advance the APU only at
+ares' synchronization points (a `$2140-$2143` access, Hcounter 0, and from the
+S-SMP's own step) while keeping the carried-credit stop. Implemented behind
+`SNES_MUTUAL` (deferred clock accumulation in `ApuPeer`, synced at port
+accesses and at the `wrapped` Hcounter-0 event).
+
+Two problems:
+
+1. It is pathologically slow. A 600-frame run produced only 75,692 audio samples
+   (~141 frames) before the timeout, for every title, because each deferred
+   chunk drains a long S-SMP stretch and the park/flush then re-runs the S-CPU,
+   making the cost superlinear.
+2. On the frames it did produce, it is not correct: `metroid 0` and `cv4 0` but
+   `dkc 5,942/75,692`, `zelda 10,266`, `fzero 2,236`, `smw 82,875`,
+   `smas 13,328`, `ct 19`.
+
+Also measured with the instruction-granularity stop still active (the earlier
+`SNES_MUTUAL` semantics) for the full 600 frames:
+
+```
+fzero 0   zelda 2   dkc 186,952   metroid 240,033   smw 318,205
+cv4 83,384   smas 370,451   ct 483,153
+```
+
+Both variants are reverted.
+
+Status of the search: the S-SMP clock, the S-CPU port-write commit clocks and
+the split-wait read position are all proven identical to ares; the carried
+credit is the only stop rule exact for five titles; every cadence and ordering
+variant measured (twelve now) is exact for a different subset. The residual is
+not reachable by choosing a cadence, a stop rule, or a latch-ordering rule in
+the current deferred-read architecture.
