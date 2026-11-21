@@ -7255,3 +7255,31 @@ handshake.
 
 Next: resolve the 3 IPL handshake divergences (the earliest cause) and see
 whether removing that SMP-clock perturbation makes the Timer-0 wait parity agree.
+
+## Exact synchronize(smp) at port writes: fixes the IPL events, regresses audio (2026-11-21)
+
+Implemented `SNES_PORT_WRITE_SYNC`: before an S-CPU `$2140-$2143` write lands,
+run the S-SMP to the exact write clock (`synchronize_to_master_clock`, consuming
+the extra clocks from credit), which is ares' `CPU::writeAPU` ->
+`synchronize(smp)`.
+
+Effect on the instruction stream: the first IPL divergence (instruction 4,299,
+`$FFD6/$FFD8`) disappears and total alignment events fall 799 -> 736, earliest
+remaining event now instruction 72,244 (`$FFDA/$FFDC/$FFE9`).
+
+Effect on audio (600 frames):
+
+```
+smas     313,782  (50.9452%)   unchanged
+dkc            0  (100.0000%)  unchanged
+cv4       69,470  (89.1395%)   worse (was 11,269)
+zelda    231,894  (63.7471%)   much worse
+metroid  238,681  (62.6860%)   much worse
+smw       16,177  (97.4710%)   worse
+fzero    463,471  (27.5437%)   much worse
+```
+
+So the IPL handshake divergence is **not** the root cause: removing it shifts
+the S-SMP clock at every port write and damages six titles without helping SMAS.
+The ordering ares gets comes from the mutual pull (S-SMP resumes the S-CPU), not
+from a one-directional synchronise at the write. Reverted.
