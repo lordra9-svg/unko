@@ -7133,3 +7133,37 @@ Conclusions:
 So the three remaining titles have three distinct causes and no single phase
 parameter addresses them: CV4 is a single late handshake event, SMAS is not
 phase-related, and DKC pins the phase exactly.
+
+## SMAS characterised: identical write sequence, two-valued write timing (2026-11-21)
+
+Compared our S-DSP register-write stream against ares' (`ARES_DSP_WRITES`) for
+230 frames, around the first audio divergence (DSP sample 112,458).
+
+```
+write counts:   ares 15,398   default 15,396   SNES_DSP_CPU_PHASE 15,396
+first (reg,value) divergence:  NONE (both variants)
+```
+
+The register/value stream is **identical to ares** - there is no control-flow
+difference at all in SMAS. The only difference is *when* each write lands
+relative to the DSP clock:
+
+```
+tick delta (ares - ours):
+  default      +3 : 9,418 writes     -5 : 5,963 writes   (11: 15)
+  cpu-phase    +8 : 9,201 writes      0 : 5,848 writes   (others: a few)
+```
+
+So SMAS has the same **two-valued write-timing** phenomenon already measured for
+CV4 (`+6 / -22` mod 32), not a value race, not a sample-count problem, and not a
+constant phase. The two values differ by 8 ticks = 16 S-SMP clocks. Around the
+first audio divergence (sample 112,458) the delta flips from -5 to +3 (default)
+or 0 to +8 (cpu-phase).
+
+`SNES_DSP_CPU_PHASE` makes SMAS exact by shifting this two-valued pattern by
++5 ticks; that is why the constant `SNES_DSP_PRIME` sweep could not reproduce it
+(prime shifts the drain target, but the write's sample/micro placement still
+rounds on the two-valued pattern), and why the same shift breaks DKC.
+
+Open item: remove the two-valued oscillation itself (our write delta should be a
+single value), rather than shifting it.
