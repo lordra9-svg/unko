@@ -6547,3 +6547,35 @@ scheduler's arithmetic or ordering. The five exact titles depend on the current
 eager-advance model, and the remaining CV4/SMAS/CT/MMX2 difference needs a
 faithful concurrency implementation (each thread able to suspend the other
 mid-instruction), not another boundary rule.
+
+## Where the DSP phase flips (2026-11-21)
+
+Looked at the write sequence around a phase transition (CV4, writes 28-49). The
+writes come in blocks of six (registers 00,00,00,00,20,00) spaced 31 DSP ticks
+apart, with a long gap (~3,930-4,128 ticks) between blocks. The phase is
+**constant within a block** and flips between blocks:
+
+```
+idx 32  reg 20  phase 10   ares 3558654  ours 3558676
+        (gap ~4128 ticks)
+idx 33  reg 00  phase  6   ares 3562782  ours 3562776   <- flipped
+...
+idx 38  reg 20  phase  6   ares 3562937  ours 3562931
+        (gap ~3930 ticks)
+idx 39  reg 00  phase 10   ares 3566867  ours 3566889   <- flipped back
+```
+
+So the 4-tick (1/8 sample) difference is not latched at a write: it
+**accumulates during the long stretches where the S-SMP runs without touching
+the DSP**, then stays fixed until the next such stretch. During those stretches
+the DSP catches up over many accesses, and a small per-access rounding
+difference between our catch-up and ares' accumulates to four micro-steps.
+
+That is precisely the behaviour ares' leapfrog prevents: its DSP tick pulls the
+S-SMP to the tick boundary on *every* tick, so the two clocks never drift apart
+by more than a fraction of a tick, whereas our catch-up lets the overshoot
+persist across an advance and lets rounding accumulate. Since the leapfrog
+cannot be expressed without drain-time threads, the correct fix is the
+concurrent three-thread driver; this measurement defines its acceptance test:
+the phase must remain a single value across block boundaries, not just within a
+block.
