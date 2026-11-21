@@ -642,12 +642,16 @@ impl St018 {
                 // MUL / MLA.
                 let accumulate = bits(21, 21) != 0;
                 let set = bits(20, 20) != 0;
+                // `MUL Rd, Rm, Rs` / `MLA Rd, Rm, Rs, Rn`: the product is
+                // Rm * Rs and Rn is the accumulate operand (reference
+                // ArmMultiply: mul(R(rm), R(rs)), mla(R(rm), R(rs), R(rn))).
                 let rd = bits(16, 19) as usize;
                 let rn = bits(12, 15) as usize;
-                let rs = (opcode & 0xF) as usize;
-                let mut result = self.reg(rs).wrapping_mul(self.reg(rn));
+                let rs = bits(8, 11) as usize;
+                let rm = (opcode & 0xF) as usize;
+                let mut result = self.reg(rm).wrapping_mul(self.reg(rs));
                 if accumulate {
-                    result = result.wrapping_add(self.reg(rd));
+                    result = result.wrapping_add(self.reg(rn));
                 }
                 self.cpu.cycles += 3;
                 self.cpu.r[rd] = result;
@@ -668,13 +672,26 @@ impl St018 {
                         self.cpu.r[rd] = self.cpu.r[15] & 0xF000_0000;
                     }
                 } else {
-                    let value = self.cpu.r[opcode as usize & 0xF] & 0xF000_0000;
-                    self.cpu.set_flags(
-                        value & 0x8000_0000 != 0,
-                        value & 0x4000_0000 != 0,
-                        value & 0x2000_0000 != 0,
-                        value & 0x1000_0000 != 0,
-                    );
+                    // Reference `ArmMsr`: the operand is immediate when bit 25
+                    // is set (rotated by bits 8-11), and only the fields named
+                    // by the mask (bits 16-19) are written. Mask bit 3 selects
+                    // the condition flags.
+                    let immediate = bits(25, 25) != 0;
+                    let mask = bits(16, 19);
+                    let raw = if immediate {
+                        let rotate = bits(8, 11) * 2;
+                        bits(0, 7).rotate_right(rotate)
+                    } else {
+                        self.cpu.r[opcode as usize & 0xF]
+                    };
+                    if mask & 0b1000 != 0 {
+                        self.cpu.set_flags(
+                            raw & 0x8000_0000 != 0,
+                            raw & 0x4000_0000 != 0,
+                            raw & 0x2000_0000 != 0,
+                            raw & 0x1000_0000 != 0,
+                        );
+                    }
                 }
             }
             _ => {}
@@ -787,10 +804,24 @@ impl St018 {
             base.wrapping_sub(count * 4)
                 .wrapping_add(if pre { 0 } else { 4 })
         };
+        // Write-back is applied when the first listed register is processed, so
+        // a load into `rn` overwrites it (reference ArmBlockDataTransfer).
+        let wb_value = if up {
+            base.wrapping_add(count * 4)
+        } else {
+            base.wrapping_sub(count * 4)
+        };
+        let mut addr_first = true;
         let mut address = start;
         for index in 0..16 {
             if list & (1 << index) == 0 {
                 continue;
+            }
+            if addr_first {
+                if writeback {
+                    self.cpu.r[rn] = wb_value;
+                }
+                addr_first = false;
             }
             if load {
                 let value = self.arm_read32(address);
@@ -812,14 +843,8 @@ impl St018 {
             address = address.wrapping_add(4);
             self.cpu.cycles += 1;
         }
-        if writeback {
-            base = if up {
-                base.wrapping_add(count * 4)
-            } else {
-                base.wrapping_sub(count * 4)
-            };
-            self.cpu.r[rn] = base;
-        }
+        base = wb_value;
+        let _ = base;
     }
 
     fn swi(&mut self) {
@@ -953,6 +978,59 @@ mod tests {
         // C is bit 29 of the 26-bit r15 (0x2000_0000).
         assert_ne!(chip.arm_register(15) & 0x2000_0000, 0, "C from shifter");
         assert_ne!(chip.arm_register(15) & 0x8000_0000, 0, "N set (bit31)");
+    }
+
+    #[test]
+    fn multiply_uses_rm_and_rs() {
+        // MOV r2,#3 ; MOV r3,#5 ; MUL r0,r2,r3 ; B .
+        let chip = run_program(&[0xE3A0_2003, 0xE3A0_3005, 0xE000_0392, 0xEAFF_FFFE], 10);
+        assert_eq!(chip.arm_register(0), 15, "MUL r0 = r2 * r3");
+    }
+
+    #[test]
+    fn multiply_accumulate_uses_rn() {
+        // MOV r0,#100 ; MOV r2,#3 ; MOV r3,#5 ; MLA r0,r2,r3,r0 ; B .
+        let chip = run_program(
+            &[
+                0xE3A0_0064,
+                0xE3A0_2003,
+                0xE3A0_3005,
+                0xE020_0392,
+                0xEAFF_FFFE,
+            ],
+            14,
+        );
+        assert_eq!(chip.arm_register(0), 115, "MLA r0 += r2 * r3");
+    }
+
+    #[test]
+    fn msr_respects_the_field_mask() {
+        // MOV r0,#0xF0000000 ; MSR CPSR_c, r0 (mask 0b1001) ; B .
+        let chip = run_program(&[0xE3A0_04F0, 0xE129_F000, 0xEAFF_FFFE], 8);
+        assert_ne!(chip.arm_register(15) & 0x8000_0000, 0, "N set by MSR");
+        assert_ne!(chip.arm_register(15) & 0x2000_0000, 0, "C set by MSR");
+    }
+
+    #[test]
+    fn ldm_writeback_loses_to_a_loaded_base_register() {
+        let chip = run_program(
+            &[
+                0xE3A0_020E, // MOV r0, #0xE0000000
+                0xE280_0C01, // ADD r0, r0, #0x100
+                0xE3A0_2055, // MOV r2, #0x55
+                0xE580_2000, // STR r2, [r0]
+                0xE8B0_0003, // LDMIA r0!, {r0, r1}
+                0xEAFF_FFFE,
+            ],
+            80,
+        );
+        assert_eq!(chip.arm_register(2), 0x55, "r2 = 0x55");
+        assert_eq!(chip.work_ram()[0x100], 0x55, "STR wrote RAM");
+        assert_eq!(
+            chip.arm_register(0),
+            0x55,
+            "loaded value wins over write-back"
+        );
     }
 
     #[test]
