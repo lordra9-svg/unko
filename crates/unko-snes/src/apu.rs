@@ -10,6 +10,15 @@ use std::collections::VecDeque;
 
 use crate::dsp::{Dsp, Sample};
 
+/// Whether the symmetric (mutually resumable) CPU/SMP driver is enabled.
+///
+/// Selected once from `SNES_MUTUAL`; the default keeps the verified per-access
+/// carried-credit path.
+pub fn mutual_scheduler() -> bool {
+    static MUTUAL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *MUTUAL.get_or_init(|| std::env::var_os("SNES_MUTUAL").is_some())
+}
+
 /// ares `Thread::Second`: the fixed-point base of the scheduler clocks.
 const SCHEDULER_SECOND: u128 = (1u128 << 62) - 1;
 /// ares `Thread::setFrequency`: `_scalar = Second / frequency`.
@@ -741,6 +750,9 @@ impl Apu {
     /// clock is ahead of the S-CPU. The remaining credit is carried, so the
     /// next advance (after the S-CPU has caught up) resumes at the same sample.
     pub fn advance_master_clock(&mut self, clocks: u32, clock: u64, rate: u64) -> bool {
+        if mutual_scheduler() {
+            return self.advance_master_clock_mutual(clocks, clock, rate);
+        }
         const APU_UNIT_NUM: i64 = 2_050_560;
         let den = rate as i64;
         self.set_master_clock(clock + u64::from(clocks), rate);
@@ -750,6 +762,32 @@ impl Apu {
                 return true;
             }
             self.apu_credit -= den;
+        }
+        false
+    }
+
+    /// Symmetric-scheduler advance (`SNES_MUTUAL=1`).
+    ///
+    /// Mirrors ares' cooperative threads: `Thread::synchronize(smp)` switches to
+    /// the S-SMP one whole instruction at a time (`while(smp.clock() <
+    /// cpu.clock()) co_switch(smp)`), so the S-SMP overshoots the S-CPU clock to
+    /// the end of its current instruction, and a `$F4-$F7` read that is then
+    /// ahead of the S-CPU parks so the driver can run the S-CPU forward from
+    /// inside the S-SMP's step before the sample is taken.
+    fn advance_master_clock_mutual(&mut self, clocks: u32, clock: u64, rate: u64) -> bool {
+        self.set_master_clock(clock + u64::from(clocks), rate);
+        let cpu_frequency = match rate {
+            21_477_272 => 21_477_273,
+            other => other,
+        };
+        let cpu_scalar = SCHEDULER_SECOND / u128::from(cpu_frequency);
+        let target = u128::from(clock + u64::from(clocks)) * cpu_scalar;
+        while 1 + u128::from(self.units) * SMP_SCALAR < target
+            || self.plan_pos < self.plan.len()
+        {
+            if self.drain_unit() == 0 {
+                return true;
+            }
         }
         false
     }

@@ -5947,3 +5947,51 @@ variable is the mutual suspension itself: in ares the suspended S-CPU runs
 forward *from inside* the S-SMP's step (`SMP::step` calls `synchronize(cpu)`),
 which a driver that only stops, parks and flushes at access boundaries cannot
 express. That is the symmetric-coroutine rework, not another boundary rule.
+
+## Symmetric CPU/SMP driver (`SNES_MUTUAL=1`, 2026-11-20)
+
+The mutual suspension is now implemented behind `SNES_MUTUAL`, so the verified
+per-access path remains the default.
+
+What it does, mirroring ares' cooperative threads:
+
+- `Apu::advance_master_clock_mutual` stops the S-SMP at **instruction**
+  granularity (`while(smp.clock() < cpu.clock())` checked between whole
+  instructions), using ares' rounded `Colorburst::NTSC*6 = 21,477,273` Hz for
+  the S-CPU scalar and `Second = 2^63-1`.
+- A `$F4-$F7` read whose position is ahead of the S-CPU clock parks the S-SMP.
+- The driver keeps running the S-CPU coroutine, accumulating APU clocks
+  (`parked_clocks`) and answering port accesses against the live latch, and
+  resumes the S-SMP only once `self.clock >= target` - ares'
+  `while(cpu.clock() < smp.clock()) co_switch(cpu)` checked between whole
+  S-CPU instructions.
+
+The park is exercised: for F-Zero at power-on the S-SMP is ahead by ~19 master
+clocks at each event (`PARK cpu=7358934 smp=7358953`, ...).
+
+Measured at 600 frames:
+
+```
+default (verified path): dkc 0   zelda 0   fzero 0   metroid 0   smw 0
+                         cv4 11,269 (98.24%)   smas 313,782   ct 416,143
+
+SNES_MUTUAL=1:           zelda 0   fzero 0
+                         dkc 156,064 (75.60%)   metroid 240,414 (62.42%)
+                         smw 318,197 (50.26%)   cv4 101,591 (84.12%)
+                         smas 370,472 (42.08%)   ct 484,068 (24.32%)
+```
+
+So the full mutual-suspension mechanism, implemented as ares describes it,
+reproduces the instruction-granularity-overshoot result exactly: it is exact for
+Zelda and F-Zero and worse for DKC/Super Metroid/SMW. The extra S-CPU run
+forward at the park does not change any sampled latch for these titles, because
+the writes that matter complete before the parked read's clock in both cases.
+
+Conclusion: the driver now supports the symmetric resume, but the residual
+difference is not the presence of the mechanism. The two families of results
+(clock-granularity credit: dkc/zelda/fzero/metroid/smw; instruction-granularity
+mutual: zelda/fzero) are produced by identical S-SMP clocks and identical S-CPU
+write instants, so the remaining variable is inside the S-SMP's own
+port-read/write interleaving at the same clocks - the `$F4-$F7` latch timing
+relative to `SMP::step`'s intra-instruction CPU synchronize, not the driver's
+scheduling structure.

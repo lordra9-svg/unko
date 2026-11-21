@@ -1104,8 +1104,16 @@ impl Snes {
                     self.apply_interrupts();
                     // ares runs the S-CPU forward while an S-SMP `$F4-$F7`
                     // sample is parked beyond the CPU clock, and resumes the
-                    // S-SMP only at the S-CPU instruction boundary.
-                    if peer.waiting.is_some() {
+                    // S-SMP only once the S-CPU has reached that clock (the
+                    // `while(cpu.clock() < smp.clock()) co_switch(cpu)` loop is
+                    // checked between whole instructions).
+                    let flush = match peer.waiting {
+                        None => false,
+                        Some(target) => {
+                            !crate::apu::mutual_scheduler() || self.clock >= target
+                        }
+                    };
+                    if flush {
                         peer.flush_parked(self.clock, rate);
                     }
                     if peer.waiting.is_none() {
