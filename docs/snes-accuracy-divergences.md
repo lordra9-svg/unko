@@ -6094,10 +6094,18 @@ smw 62,934 (90.16%)   smas 313,782 (50.95%)   ct 438,546 (31.44%)
 i.e. two exact titles, fewer than the carried-credit model's five, so it was
 reverted as well.
 
-Conclusion: clocks and S-CPU write instants are both proven identical to ares,
-and every latch-ordering rule flips a different subset. The read position
-inside `SMP::read`'s split wait is therefore the remaining variable: our read
-resumes at half the access in *units*, while ares' `wait(1)` steps
-`cycleWaitStates >> 1` clocks and reads between the two halves, which is only
-the same point when the wait state is even. The next step is to reproduce that
-split exactly per wait state (0-3) rather than assuming `clocks / 2`.
+Conclusion: the S-SMP clock, the S-CPU write instants and the split-wait read
+position are all proven identical to ares (`wait_cycles` returns
+`{1,2,5,10}` units, the read resumes at `clocks/2 = {1,2,5,10}` S-SMP clocks,
+which is exactly `cycleWaitStates >> 1`), yet every latch-ordering rule flips a
+different subset of titles.
+
+The observable that has *not* been compared is the sequence of intermediate
+`cpu_master_clock` targets handed to the APU: we advance the APU once per
+S-CPU bus access, while ares only synchronizes at `$2140-$2143`, at Hcounter 0
+and from the S-SMP's own `step`. The totals (S-SMP clocks, write commit clocks)
+agree exactly, but the intermediate visibility windows differ, and a `$F4-$F7`
+read's latch depends on which window it is resolved in. Reproducing ares'
+synchronization *points* (not its totals) is therefore the remaining variable,
+which is what the `SNES_MUTUAL` cadence was meant to do but currently combines
+with the wrong stop rule.
