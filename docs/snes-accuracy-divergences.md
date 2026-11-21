@@ -5717,3 +5717,28 @@ the rest.
 Conclusion: whole-instruction synchronization at the endpoints is not sufficient;
 the scheduler port needs the mutual suspension (the S-SMP resuming the S-CPU
 *inside* `readIO`) that all previous endpoint compositions failed to emulate.
+
+## S-DSP tick phase at H=0 (2026-11-20)
+
+Logged our S-DSP micro-step counter (`samples_run*32 + step`, ares `dspTicks`)
+at every Hcounter-0 point and compared with `ARES_SCANLINE_LOG` for CV4:
+
+```
+ares B line  clock 1,364   dsp=0        (logged before CPU::scanline synchronizes the SMP)
+ours  H line  clock 1,364   dsp=67
+ares B line  clock 2,730   dsp=65
+ours  H line  clock 2,730   dsp=131
+```
+
+The apparent ~66-tick lead is the logging point: ares' `B` line is emitted
+*before* `Thread::synchronize(smp, ppu)` catches the SMP up, while our hook runs
+after the access has advanced the APU. The expected post-sync value at clock
+1,364 is ~65 ticks (1,364 master clocks = ~130 SMP cycles = ~65 DSP ticks), and
+ours reads 67 - i.e. within the one-tick DSP lead the ares scalar rounding
+produces. The local ares `A` (post-sync) lines are missing from the capture
+(only one line written), so the comparison cannot be completed from that log, but
+the values are consistent with no DSP phase difference.
+
+So the DSP tick phase is not the source of the remaining CV4 offset either. The
+search returns to the S-SMP sample/park interaction, where the mutual-suspension
+implementation is the remaining untried piece.
