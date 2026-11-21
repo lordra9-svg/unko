@@ -7616,3 +7616,32 @@ write deadlocks (measured last turn). The remaining option is to change when the
 S-CPU's port write is committed relative to the S-SMP's read within the same
 clock window - which requires executing the S-SMP *inside* the S-CPU's write
 access (true coroutine interleaving), not before or after it.
+
+## Ceiling stop: removes the instruction-4,299 divergence and makes CV4 exact (2026-11-21)
+
+The remaining ordering difference was floor vs ceil: our carried-credit loop stops
+the S-SMP at `floor(target)`, while ares `Thread::synchronize(smp)` runs whole
+accesses until the S-SMP clock is **at or past** the S-CPU clock (`ceil`).
+`SNES_SMP_CEIL` drains one extra S-SMP clock when the credit remainder is
+positive (the negative remainder carries, so the average rate is unchanged).
+
+* Instruction stream: the first divergence at **4,299 is gone** (events 46 -> 43
+  over 55 frames; earliest now 4,475 `$FFDA/$FFDC/$FFE9`), with the per-frame
+  budget unchanged (29,277 stereo frames at 55 frames).
+* 600-frame audio:
+
+```
+dkc      0 (100.0000%)     metroid   0 (100.0000%)     cv4   0 (100.0000%)
+zelda    16,503 (97.4200%) fzero 355,081 (44.4888%)   smw  45,880 (92.8274%)
+smas  313,782 (50.9452%)   ct    417,093 (34.7942%)   mmx2 196,820 (69.2303%)
+baseline: IDENTICAL 212/212
+```
+
+So the ceiling is a real, principled fix - it removes the first measured
+divergence and makes **CV4 exact without any access-stop flag** - but F-Zero,
+Zelda and SMW regress. Combined with the earlier matrices this gives four
+distinct per-title splits (default: zelda/fzero/metroid/smw; access-stop:
+dkc/fzero/cv4; ceiling: dkc/metroid/cv4; instr-stop: zelda/fzero), which is
+strong evidence that the remaining error is not a single stop/rounding rule.
+
+Flag retained default-off; the default gate is unchanged.

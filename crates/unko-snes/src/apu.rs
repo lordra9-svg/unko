@@ -92,6 +92,14 @@ pub fn dsp_cpu_phase() -> bool {
     *P.get_or_init(|| std::env::var_os("SNES_DSP_CPU_PHASE").is_some())
 }
 
+/// `SNES_SMP_CEIL`: run the S-SMP to `ceil` the carried-credit target instead of
+/// `floor` (ares runs whole accesses until the SMP clock is at or past the CPU
+/// clock).
+pub fn smp_ceil() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *C.get_or_init(|| std::env::var_os("SNES_SMP_CEIL").is_some())
+}
+
 /// ares `Thread::Second`: the fixed-point base of the scheduler clocks.
 const SCHEDULER_SECOND: u128 = (1u128 << 62) - 1;
 /// ares `Thread::setFrequency`: `_scalar = Second / frequency`.
@@ -849,6 +857,12 @@ impl Apu {
         self.set_master_clock(clock + u64::from(clocks), rate);
         self.apu_credit += i64::from(clocks) * APU_UNIT_NUM;
         while self.apu_credit >= den {
+            if self.drain_unit() == 0 {
+                return true;
+            }
+            self.apu_credit -= den;
+        }
+        if smp_ceil() && self.apu_credit > 0 {
             if self.drain_unit() == 0 {
                 return true;
             }
