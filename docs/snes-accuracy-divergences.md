@@ -5995,3 +5995,49 @@ write instants, so the remaining variable is inside the S-SMP's own
 port-read/write interleaving at the same clocks - the `$F4-$F7` latch timing
 relative to `SMP::step`'s intra-instruction CPU synchronize, not the driver's
 scheduling structure.
+
+## Three-case latch comparison: ares always holds the newer latch (2026-11-20)
+
+Instrumented both emulators' `$F4-$F7` path (`PORT_OUT` now logs the DSP tick of
+each S-SMP read and the master clock of each S-CPU port write; `ARES_SMPIO_LOG`
+logs the S-SMP read value and PC). First divergence per title, and the latch on
+each side at the *same* S-SMP clock:
+
+| title | rule under test | read (S-SMP tick) | ares latch | ours latch | S-CPU write commit |
+|---|---|---|---|---|---|
+| CV4 | carried credit | 698,133 | 0x00 | 0xFF | master 14,624,280 |
+| F-Zero | carried credit | 351,311 | 0x00 | 0xCC | master 7,359,128 |
+| DKC | `SNES_MUTUAL` | 77,918 | 0xCC | 0x00 | master 1,632,150 |
+
+In every case ares observes the **newer** latch at the same S-SMP clock, and the
+write's commit clock is at or before that clock. So the invariant is not
+"write before/after sample" as an ordering flag but: *the read is timed so that
+a write completing at or before the read's clock is already visible*.
+
+Two different mechanisms in our driver violate it, in opposite directions:
+
+- carried credit: the read at CV4's clock executes inside the advance that
+  precedes the write request, so the latch is still old;
+- instruction-granularity (`SNES_MUTUAL`): the S-SMP overshoots past the access
+  end and executes the read before the write for *that* access is applied, so
+  DKC's handshake poll needs one extra iteration (`FFD2 FFCF FFD2 FFCF` vs ares'
+  `FFD2 FFCF FFD2`).
+
+The ares-exact fixed-point rule (`1 + units*SMP_SCALAR < master*CPU_SCALAR`,
+with `Second = 2^63-1` and the S-CPU scalar at ares' rounded
+`Colorburst::NTSC*6 = 21,477,273`) computes the boundary on the same fixed-point
+clocks ares uses and does make CV4 exact, but puts DKC on the wrong side. Since
+both rules claim to implement the same comparison and yet disagree per title,
+the residual is a sub-clock difference in the S-SMP's own clock between the
+port-write commit and the read position - not a scheduling-rule choice.
+
+Concretely, satisfying the invariant needs the S-CPU port write to be ordered
+before the S-SMP read that follows it by the *access end* rather than by the
+request stream. The driver currently receives `Advance` before `Write` for the
+same access, so the latch cannot be updated during that advance without
+reordering the coroutine protocol (emit the write with its commit clock ahead
+of the advance, and apply it at the access end while reads beyond that end see
+it).
+
+That protocol change is the next concrete step; every stop/ordering rule that
+does not touch it has now been measured and is exact for a different subset.
