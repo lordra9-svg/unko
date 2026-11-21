@@ -7344,3 +7344,30 @@ timer-transition log to ares (`stage3` increments with the SMP clock) and to our
 `Timer`, then diff the transition instants over a few frames. That will show the
 first clock at which the two timer phases diverge and therefore which access
 (and wait-state selector) differs.
+
+## Timer transitions proven identical to ares; the difference is the read instant (2026-11-21)
+
+Added a timer-transition log to both emulators (ares hook `ARES_TIMER_LOG`,
+ours `SNES_TIMER_LOG`), recording each Timer-0 `stage3` increment with the DSP
+tick and the cumulative timer-clock count.
+
+```
+transitions:  ares 119   ours 119   (ares has one extra before its longer capture)
+DSP ticks:    ares [779521, 781569, 783617, ...]
+              ours [779521, 781569, 783617, ...]   identical
+timer clocks: ares [1559040, 1563136, 1567232, ...]
+              ours [1559040, 1563136, 1567232, ...] identical
+first differing transition: none
+```
+
+So the S-SMP timer is **exactly** ares (same logic, same instants on both the DSP
+tick and timer-clock axes). The Timer-0 zero-wait loop iteration difference is
+therefore not caused by the timer: the `$FD` read must be sampling `stage3` at a
+slightly different **S-SMP execution instant** relative to the transition.
+
+That makes the remaining error a pure S-SMP read-timing/position issue (the plan
+replay/credit rounded relative to the timer), by a few clocks that alternate -
+not timer arithmetic, not DSP phase, not the timer.
+
+Note: the ares timer hook is local to `/var/home/Lordra/ai/refs/ares` and is not
+committed; the tree here is unchanged.
