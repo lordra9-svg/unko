@@ -1102,9 +1102,7 @@ impl Dsp {
                     let _ = writeln!(
                         f,
                         "sample {} left {} right {}",
-                        self.samples_run,
-                        left as i16,
-                        right
+                        self.samples_run, left as i16, right
                     );
                     for (index, voice) in self.voice.iter().enumerate() {
                         let _ = writeln!(
