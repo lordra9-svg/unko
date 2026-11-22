@@ -9266,3 +9266,29 @@ Thread::synchronize(smp)` -> `SMP::step -> synchronize(dsp)`). That requires
 replacing the record/plan architecture (which exists to make the S-CPU port
 sync rewindable) with direct mutual coroutining, i.e. a core rewrite rather than
 a flag. All default-off flags leave the default gate unchanged.
+
+## Why the mutual pull cannot be added as a drain-loop hook (2026-11-21)
+
+Attempted to express ares' `DSP::tick -> Thread::synchronize(smp)` inside the
+existing drain loop. The architecture blocks it concretely:
+
+* every `drain_unit` re-targets the DSP to the *current* S-SMP position
+  (`drain_dsp_to(pos)`, plus the sample-boundary extension if enabled), so the
+  DSP can never be held at a fixed clock while the SMP is pulled. Adding "pull
+  SMP until smp >= dsp" makes the target follow the SMP one tick further on each
+  unit, so the loop never terminates (the SMP chases a DSP target that keeps
+  moving with it).
+* running the DSP one tick ahead and then pulling cannot help either: the next
+  `drain_unit` immediately re-targets the DSP to the new (higher) SMP position,
+  restoring the lead.
+* the record/plan layer exists precisely so an S-CPU port read can park and
+  rewind the S-SMP; direct recursion from the DSP drain would execute SPC700
+  instructions outside that plan, breaking the park/rewind invariants the S-CPU
+  synchronisation depends on.
+* `SNES_DSP_SAMPLE_SYNC` showed the symptom: making the DSP lead without the
+  matching SMP pull regresses all seven titles.
+
+Expressing ares' scheduler therefore requires replacing the plan-based driver
+with mutually resumable coroutines (DSP drain <-> SMP instruction <-> S-CPU
+bus request), i.e. the core stepping rewrite. This is not implementable as a
+default-off hook in the current driver; all proxies are measured and documented.
