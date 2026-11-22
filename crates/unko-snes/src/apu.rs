@@ -60,6 +60,14 @@ pub fn smp_write_pull() -> bool {
     *PULL.get_or_init(|| std::env::var_os("SNES_SMP_WRITE_PULL").is_some())
 }
 
+/// `SNES_SMP_ENTRY_PULL`: before the S-SMP starts each instruction, run the
+/// S-CPU forward to the S-SMP clock if the S-SMP is ahead (ares' SMP thread
+/// entry calls `scheduler.synchronize()`, which pulls the S-CPU forward).
+pub fn smp_entry_pull() -> bool {
+    static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *P.get_or_init(|| std::env::var_os("SNES_SMP_ENTRY_PULL").is_some())
+}
+
 /// `SNES_SMP_ACCESS_STOP`: stop the S-SMP at an access boundary instead of
 /// exactly on the carried-credit clock.
 ///
@@ -1054,6 +1062,17 @@ impl Apu {
     /// SMP clock.
     fn drain_unit(&mut self) -> u32 {
         if self.plan_pos >= self.plan.len() {
+            // ares' SMP thread entry synchronizes the S-CPU to the S-SMP clock
+            // before executing each instruction (`Thread::Enter`).
+            if smp_entry_pull() {
+                let position = self.smp_clock_at_position();
+                if let Some(cpu) = self.cpu_fixed_clock() {
+                    if position > cpu {
+                        self.park_at = Some(position);
+                        return 0;
+                    }
+                }
+            }
             self.record_instruction();
         }
         if dsp_late() {

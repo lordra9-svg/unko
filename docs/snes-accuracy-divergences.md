@@ -8953,3 +8953,61 @@ the IPL boot handshake such that zelda/F-Zero and MMX2 are both exact. The
 current unidirectional driver cannot express both; a scheduler rework that lets
 the S-SMP and S-CPU switch to each other at instruction entry (ares
 `Thread::Enter` -> `scheduler.synchronize()`) is the next architectural step.
+
+## ACCESS_STOP reaches CV4 100%; zelda's residual is a KOFF/KON sample straddle (2026-11-21)
+
+Re-measured `SNES_SMP_ACCESS_STOP=1` with the current build (CX4 for MMX2):
+
+```
+dkc    0 differing (100.0000%)
+zelda  1450 differing (99.7733%)
+fzero  0 differing (100.0000%)
+cv4    0 differing (100.0000%)      <- CV4 is bit-exact under access-stop
+smas   313782 differing (50.9452%)
+ct     437900 differing (31.5413%)
+mmx2   196872 differing (69.2222%)
+```
+
+So CV4 can be made bit-exact (the old matrix's access-stop result is confirmed),
+at the cost of zelda (1450 samples) and the metroid/SMW regressions measured
+earlier. `SNES_MUTUAL=1` changes none of these numbers.
+
+### Why zelda differs under access-stop
+
+The 1450 differing samples are almost all one transient: 1448 in second 1, plus
+one sample each in seconds 6 and 7. First difference at DSP sample 45,068; the
+per-voice dump shows ours `ours[n] = ares[n-2]` for voice 7 (env/pitch identical,
+BRR fetch two samples behind, a transient `brr=001B` exposed for two samples).
+
+The DSP write logs explain it exactly:
+
+```
+ares: 45054 $72=0A  45055 $73=3D  45057 $5C=00  45057 $4C=80
+ours: 45054 $72=0A  45055 $73=3D  45057 $5C=00  45058 $4C=80
+```
+
+ares lands the KOFF (`$5C`) and KON (`$4C`) in the **same** DSP sample; under
+access-stop ours puts the KON one sample later, so the voice's key-on (and its
+2-sample BRR phase) starts a sample late. That is the same DSP write-phase
+sensitivity as before, now reduced to a single event: a write pair straddling
+one sample boundary (`ceil(smp_clock/24)` crossing 32 ticks).
+
+A `SNES_DSP_PRIME` sweep (0,2,4,6,8,10,12) does not change the count (1448 at
+0-8, worse at 10-12), so it is not a globally wrong DSP catch-up phase.
+
+### `SNES_SMP_ENTRY_PULL` (added, inert here)
+
+The ares SMP thread entry synchronizes the S-CPU to the S-SMP clock before each
+S-SMP instruction (`Thread::Enter` -> `scheduler.synchronize()`). Implemented as
+a default-off park before `record_instruction`. With access-stop the S-SMP is
+never ahead at an instruction entry (the stop rule already finished the
+instruction and the credit is negative), so it is inert: zelda stays at 99.7733%
+and every other title is unchanged.
+
+### State
+
+Default gate unchanged (dkc/zelda/fzero 100%, cv4 98.2383%, smas 50.9452%,
+ct 34.9427%, mmx2 69.2222%). Access-stop gives dkc/fzero/cv4 100% and zelda
+99.7733%. The per-title split now reduces to a single sample-boundary question
+in the DSP write phase: CV4 and zelda want opposite stop rules at their
+respective write pairs, so still no global default.
