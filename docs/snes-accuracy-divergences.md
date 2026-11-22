@@ -9535,3 +9535,51 @@ a direct driver.
 
 `SNES_SYM_DRIVER` stays default off at 57.9834% (DKC); the default gate is
 unchanged.
+
+## CT diagnosed: voice-1 KON is 3 samples late; no existing rule fixes it (2026-11-22)
+
+First default-vs-ares audio difference: interleaved 151,022 = **DSP 75,511**
+(~2.36 s). Best global offset is -8 (53.4%), and the differing count grows to
+~64k/sample per second after that, so this is not a uniform shift.
+
+Per-voice state at DSP 75,511 shows only voice 1, and only in its fetch phase:
+
+```
+ares : envx=127 env=2047 pitch=3068 brr=B606 off=5 gauss=12208
+ours : envx=127 env=2047 pitch=3068 brr=B606 off=5 gauss=6072
+```
+
+`ours[n] = ares[n-2]` across the window (gauss advances by pitch in both; the
+BRR block wrap happens 2 samples later in ours). Envelope, pitch, BRR address
+and source are identical.
+
+DSP write logs locate the cause: the voice-1 note-on is late.
+
+```
+voice-1 pitch:  ares sample 75458/75459    ours 75462
+KON ($4C bit 1): ares sample 75484 (tick 2415491)
+                 ours sample 75487 (tick 2415602)
+```
+
+So ours starts the note ~3 samples later, and the 2-sample gauss/BRR phase
+follows; the audio only becomes audible ~27 samples later at 75,511 as the
+envelope rises.
+
+Flag sweep on CT (600 frames, offset 0):
+
+```
+default                      416143 (34.9427%)
+ACCESS_STOP                  437900 (31.5413%)
+DSP_INSTR_SYNC               416109 (34.9480%)
+PORT_LEAD+WRITE_PULL         453777 (29.0592%)
+SMP_CEIL=0                   417093 (34.7942%)
+ACCESS_STOP+DSP_INSTR_SYNC   438662 (31.4222%)
+PORT_LEAD+WRITE_PULL+DSP_INSTR_SYNC 453749 (29.0636%)
+DSP_LATE / DSP_FLOOR / WRITE_AT=start / SMP_WRITE_PULL  ~416143 (no change)
+DSP_PRIME=2/4                416147 / 416165 (no change)
+DSP_SAMPLE_SYNC              417278 (34.7652%)
+```
+
+No existing stop/pull/gating/DSP-phase rule makes CT exact. CT needs a discrete
+**3-sample KON/note-start** correction, larger than the per-event write phase the
+current rules target - a new mechanism, not another phase constant.
