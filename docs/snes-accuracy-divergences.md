@@ -9322,3 +9322,27 @@ is on the right track, but the full run diverges. Two concrete issues remain:
 
 The driver stays default off; the default gate is unchanged and the 212/212
 baseline is unaffected by construction.
+
+## Actor-layer park attempt (2026-11-21)
+
+Tried moving the `SNES_SYM_DRIVER` pull/park into the actor layer, as planned:
+
+* the APU coroutine returned `ApuOutput::Parked` when the direct driver left the
+  S-SMP ahead of the S-CPU clock (so reset/non-actor callers never park);
+* the `Done` arm was changed to break out of the in-step forward loop for the
+  symmetric driver, since its parks are instruction-granular (otherwise the loop
+  spins forever re-parking and deadlocks - this was the earlier hang).
+
+Result: the reset deadlock is gone (a 5-frame run completes), but the game no
+longer boots correctly under the park:
+
+```
+nmi_count 0   nonzero_pixels 0   apu cpu<-apu [29, BB, 00, 00]
+spc inst 210913 in 5 frames (~11x the normal 3.8k/frame)
+```
+
+So the instruction-entry park alone is not enough: the direct path also needs the
+`$F4-$F7` read park (the S-SMP must sample the port only after the S-CPU has
+reached the S-SMP clock), which is exactly what the plan layer provides. The
+changes were reverted; `SNES_SYM_DRIVER` remains the no-park version (DKC first
+60 frames bit-exact, 42.3528% over 600). Default gate unchanged.
