@@ -10819,3 +10819,22 @@ S-SMP clock `-22` (SMAS) and `-6/+10` (SMAS after the init block) clocks from
 ares at the same writes, and the same 16-S-SMP-clock (8 DSP tick) classes
 reappear. Fixing them needs the handshake itself to tick identically, i.e. the
 full mutual recursion, not a stop/latch/flush rule.
+
+## Oracle refresh (2026-11-22)
+
+The local oracle trees were refreshed and rebuilt:
+
+| Oracle | Revision | Notes |
+|---|---|---|
+| ares | `5c989a5` (was `78bc8ed`) | 18 new commits, all PS1; the SFC/SMP/DSP capture hooks rebased cleanly |
+| MesenCE | `a8e5d02` | already current; rebuilt with the .NET 10 SDK |
+| Mednafen | 1.32.1 | newly added (`refs/mednafen-1.32.1`), primary `snes` module |
+| RustySNES | `9f7a1d7` | current; rebuilt |
+| RustyNES | `b150717` | current; rebuilt (`librustynes.so`) |
+| gopher64 | `5c6aacc` | updated 6 commits; upstream parallel-rdp pin restored |
+
+The ares change is PS1-only, so the SNES behavioural reference and the stored
+`ares.i16`/DSP-write captures are unchanged; the 7-title gate above was
+re-run against them and still reports dkc/zelda/fzero/cv4 at 0 differing. The
+new Mednafen peer is documented in `docs/oracle-feature-matrix.md` and
+`docs/emulator-tooling.md`.

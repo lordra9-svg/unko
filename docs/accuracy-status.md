@@ -20,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **852 workspace tests**, 0 failed, plus the ROM-backed suites |
+| Test suite | **1,026 workspace tests**, 0 failed (4 ignored), plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -40,7 +40,7 @@ sample lands on fade/transition frames. "Rendering" is a boot smoke test, not
 a completion claim. The current audit, mapper breadth and per-mapper gaps are
 in `docs/mapper-audit.md`; the dated measurements are below.
 
-## SNES core (in progress, 2026-11-16)
+## SNES core (in progress, 2026-11-22)
 
 ### SNES definition of done (recorded 2026-11-19)
 
@@ -70,21 +70,24 @@ proved torn presents excluded; item 3 is bit-exact on the blargg
 `near_cd_quality` oracle (639,700 stereo frames) and is measured per retail
 title below; item 4 is covered by the state round-trip and continuation tests.
 
-Definition-of-done item 3 is the one place where the reference titles are not
-yet 100%. Donkey Kong Country, Zelda, F-Zero, Super Metroid and **Super Mario World** are
-**0 differing samples over 350,000 stereo frames** with the exact ares DSP
-thread clocks, the 186-clock reset phase and ares' power-on APU RAM/DSP-register
-pattern (see the divergence ledger). The S-SMP runs in a clock-granular peer
-coroutine that advances with ares' exact rational master-clock credit, parks at
-`$F4-$F7` samples, and is synchronized at the ares thread-clock instant; its
-`$F4` read count now matches ares exactly (81,191 vs 81,190 over 90 frames of
-Super Mario World). Castlevania IV (89.87%), Super Mario All-Stars
-(53.46%) and Chrono Trigger (36.52%, offset -4) still differ at note and echo
-boundaries, so the register-write micro-step placement
-remains open for those drivers. Mega Man X2 measures 99.44% when its CX4
-firmware is supplied via `CX4_ROM` (without it the coprocessor self-test takes
-the failure branch and the title is silent - a harness omission, not a DSP
-issue). The PCM of the blargg oracle remains bit-exact.
+Definition-of-done item 3 now passes for four reference titles. Donkey Kong
+Country, Zelda, F-Zero and **Castlevania IV** are **0 differing samples over the
+600-frame gate** (639,656 interleaved i16) with the default per-access driver
+and ares' exact rounded thread scalars. The CV4 fix was a real clock bug: ares
+`Thread::setFrequency` rounds each frequency with `+0.5` before building its
+fixed-point scalar, so the NTSC CPU scalar uses **21,477,273**, not 21,477,272;
+`SCHEDULER_SECOND` is `(u64)-1 >> 1 = 2^63 - 1`. The S-SMP runs in a
+clock-granular peer coroutine that advances with ares' exact rational
+master-clock credit, parks at `$F4-$F7` samples, and is synchronized at the
+ares thread-clock instant.
+
+Super Mario All-Stars (50.9452%), Chrono Trigger (34.9427%) and Mega Man X2
+(69.2222%, CX4 firmware via `CX4_ROM`) still differ. Two structurally different
+schedulers - the plan/drain driver and a direct coroutine engine - produce
+byte-identical output on these three, so the residual is deterministic and
+shared: the per-title boot upload handshake ticks one poll iteration (a few
+S-SMP clocks) differently. The DSP pipeline and the four exact titles are
+unaffected. The PCM of the blargg oracle remains bit-exact.
 
 `unko-snes` is a new isolated crate with no `unko-core` or shell dependency.
 
@@ -173,7 +176,7 @@ Implemented so far:
 
 Validation so far:
 
-- **852 workspace tests**, 0 failed
+- **1,026 workspace tests**, 0 failed (4 ignored)
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -656,6 +659,13 @@ Validation so far:
   The exact model matches ares' DSP tick count write-for-write, the reset
   phase matches ares' H=186 first fetch, and the `$F4-$F7` port read now parks
   and runs the S-CPU forward to the S-SMP clock.
+  *Correction (2026-11-22):* these 350,000-frame figures predate the canonical
+  CX4 image and the CPU thread-scalar fix. On the current 600-frame gate
+  (639,656 interleaved samples) the default driver is 0 differing for DKC,
+  Zelda, F-Zero and Castlevania IV, 50.9452% for Super Mario All-Stars,
+  34.9427% for Chrono Trigger and 69.2222% for Mega Man X2 with the canonical
+  `cx4.rom`. The earlier MMX2 99.44% used a non-canonical firmware image and is
+  not reproducible; see the SNES ledger.
 
 - Power-on APU RAM and the S-DSP register file now reproduce ares' low-entropy
   `Random` pattern (the same deterministic stream that fills work RAM, drawn in

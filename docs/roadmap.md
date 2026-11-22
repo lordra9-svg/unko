@@ -243,10 +243,12 @@ The main effort was the reference-parity accuracy core. Details in
 - [ ] A second NES core behind the same ABI (pick by measured compatibility or
       performance gap), selected in settings.
 - [ ] A second system behind the same ABI. **In progress:** the isolated
-      `unko-snes` core (MIT Rust, ares as implementation source, MesenCE and
-      RustySNES as oracles) has started with ROM parsing and cartridge bus
-      mapping; the `unko-snes-host` adapter follows. Then **N64 from ares** with
-      gopher64 as a GPL structural reference. See `docs/systems.md`.
+      `unko-snes` core (MIT Rust; ares as implementation source; MesenCE,
+      Mednafen and RustySNES as black-box oracles) has the CPU, SPC700/DSP,
+      PPU, DMA/HDMA and coprocessors implemented, with every reference title
+      pixel-identical to ares and four titles audio-bit-exact; the
+      `unko-snes-host` adapter follows. Then **N64 from ares** with gopher64 as
+      a GPL structural reference. See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.
 - [ ] GameCube/Wii is deferred: Dolphin is GPL-2.0+ and application-shaped, so
       it can only be a separate optional process, never a registry core.

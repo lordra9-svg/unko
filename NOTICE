@@ -44,5 +44,5 @@ supply their own `ipl.rom`. RustySNES
 (https://github.com/doublegate/RustySNES, Apache-2.0) is an oracle/reference
 only and no RustySNES code is included.
 
-No GPL-licensed emulator source (including MesenCE, RustyNES or Dolphin) is
-included in this repository.
+No GPL-licensed emulator source (including MesenCE, Mednafen, RustyNES or
+Dolphin) is included in this repository.

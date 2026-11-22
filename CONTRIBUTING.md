@@ -8,7 +8,7 @@ a clean, multi-system emulator shell with a reference-parity NES core.
 - **No ROMs, BIOS images, or copyrighted firmware** may be committed. Tests
   that need public test ROMs look under `test-roms/` and skip when it is
   absent.
-- **No GPL source** (MesenCE, RustyNES, Dolphin, gopher64) may be copied,
+- **No GPL source** (MesenCE, RustyNES, Mednafen, Dolphin, gopher64) may be copied,
   translated, vendored or linked. They are behaviour oracles only.
 - ares (ISC) may be adapted with attribution. Record every such adaptation in
   `crates/unko-nes/PROVENANCE.md` and keep the ares notice in

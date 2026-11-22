@@ -214,11 +214,16 @@ Oracle hierarchy for SNES:
    oracle.
 3. **MesenCE `Core/SNES`** — broad compatibility oracle, GPL-3.0. Run it
    black-box only; do not read or translate its source.
-4. **RustySNES** (<https://github.com/doublegate/RustySNES>, Apache-2.0) — a
+4. **Mednafen 1.32.1** — multi-system black-box peer (GPL-2.0). Its primary
+   `snes` module is a bsnes v0.059 fork with Cx4/DSP-1/2/4/OBC1/SA-1/S-DD1/
+   SPC7110/SuperFX/BS-X; `-force_module snes_faust` selects the experimental
+   MSU1/SPC-capable core. GPL: run it black-box only, never read or translate
+   its source.
+5. **RustySNES** (<https://github.com/doublegate/RustySNES>, Apache-2.0) — a
    second pure-Rust oracle for differential frames/audio and feature coverage.
    It is license-compatible, but it is still oracle-only until a specific
    module has an explicit provenance review; do not copy it wholesale.
-5. **MIT `w65c816`** — CPU cross-check oracle only. The 65C816 interpreter is
+6. **MIT `w65c816`** — CPU cross-check oracle only. The 65C816 interpreter is
    our own; the crate is differential-tested in `tests/cpu_oracle.rs`.
 
 Public documentation: [SNESdev Wiki](https://snes.nesdev.org/wiki/SNESdev_Wiki),

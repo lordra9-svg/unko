@@ -105,6 +105,12 @@ netplay, GLSL shaders plus NTSC/CRT filters, palette editor + "Raw" palette
 for shader decoding, cheats, per-game PPU overclock, FFmpeg video/audio
 recording, Family/Subor keyboard, tape and microphone support.
 
+### Mednafen (GPL-2.0)
+A multi-system emulator. Its NES/FDS core is useful as an additional
+black-box peer for boot, mapper and FDS audio comparisons; it is not the
+primary NES oracle (RustyNES/MesenCE are). Its SNES peers are described in the
+SNES section below.
+
 ### RustyNES (GPL-3.0)
 The closest feature peer to Mesen and Unko's primary differential oracle:
 208 mapper families, real-BIOS FDS, VS/PlayChoice, rollback netplay,
@@ -223,6 +229,23 @@ Public SNES documentation used by the implementation:
 [SNESdev Wiki](https://snes.nesdev.org/wiki/SNESdev_Wiki),
 [Super Famicom Development Wiki](https://wiki.superfamicom.org/) and
 [awesome-snesdev](https://github.com/Scottcjn/awesome-snesdev).
+
+## Local oracle revisions (checked 2026-11-22)
+
+| Oracle | Revision / version | Local build |
+|---|---|---|
+| ares | `5c989a5` (oracle capture hooks rebased) | `refs/ares/build_headless/desktop-ui/ares` |
+| MesenCE | `a8e5d02` | `refs/mesence/bin/linux-x64/Release/linux-x64/publish/Mesen` |
+| Mednafen | 1.32.1 | `refs/mednafen-1.32.1/src/mednafen` |
+| RustySNES | `9f7a1d7` | `refs/RustySNES/target/release` (libretro/harness) |
+| RustyNES | `b150717` | `refs/rustynes/target/release/librustynes.so` |
+| gopher64 | `5c6aacc` | `refs/gopher64/target/release/gopher64` |
+| TriCNES | `c4f13fc` | C#/.NET Framework; source-only here |
+| Dolphin | `66df2b4e18` | `refs/dolphin/build_headless/Binaries/dolphin-emu` (not an NES/SNES oracle) |
+
+The ares update from `78bc8ed` to `5c989a5` contains PS1 fixes only; the SNES
+behavioural reference is unchanged. MesenCE, RustySNES, RustyNES and TriCNES
+were already at their upstream heads.
 
 ## Licensing and provenance
 

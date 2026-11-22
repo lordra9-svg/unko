@@ -34,8 +34,9 @@ deferred to a later date. Do not start new NES work unless this is reopened.
 ## SNES track (started 2026-11-16)
 
 `crates/unko-snes` is the isolated MIT Rust core. ares is the primary
-implementation source, MesenCE is a black-box oracle, and RustySNES
-(Apache-2.0) is a second oracle/reference. Order:
+implementation source; MesenCE and Mednafen 1.32.1 are black-box oracles
+(GPL-3.0 / GPL-2.0), and RustySNES (Apache-2.0) is a second oracle/reference.
+Order:
 
 1. ROM container, header detection and cartridge bus mapping. **Done**:
    copier header, LoROM/HiROM/ExLoROM/ExHiROM, header decode, SRAM, checksum
@@ -51,13 +52,14 @@ implementation source, MesenCE is a black-box oracle, and RustySNES
    noise, pitch modulation and echo. Eight `spc700` differential tests plus
    DSP/APU unit and integration tests cover the slice.
 4. PPU dot/scanline timing, background/sprite rendering, then the first
-   frame. **Done for the base console**: line-based modes 0-7, sprites,
-   subscreen/colour math, vblank/NMI, DMA/HDMA and exact S-CPU wait states.
-   Super Mario World is bit-identical to ares with frames aligned at 600, 900
-   and 1500 frames. Remaining: the two-frame title-screen phase, hires,
-   interlace and offset-per-tile.
+   frame. **Done for the base console**: modes 0-7 with hires and interlace,
+   sprites, windows, mosaic, subscreen/colour math, vblank/NMI, DMA/HDMA and
+   exact S-CPU wait states. Every reference title is pixel-identical to ares.
 5. `unko-snes-host` adapter once the core surface is stable.
-6. Coprocessors and enhancement chips after the base console is green.
+6. Coprocessors and enhancement chips. **Done**: SuperFX, SA-1, SDD1,
+   SPC7110, CX4, DSP-1/2/3/4, OBC1, MSU1, S-RTC, ST018, Satellaview/BS-X and
+   Sufami Turbo. Remaining: retail-audio bit-exactness for SMAS, Chrono
+   Trigger and Mega Man X2, which is a per-title boot-handshake phase.
 
 Every SNES item needs unit tests and, where possible, a black-box oracle check
 against ares or RustySNES. No GPL Mesen source is read while implementing.

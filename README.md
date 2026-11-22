@@ -45,14 +45,17 @@ HDMA phase calibration), Zelda / Super Mario All-Stars / F-Zero / Donkey Kong
 Country / Chrono Trigger 1200/1200, Mega Man X3 and Star Fox 10000/10000, and
 Mega Man X2 9996/10000 with only three proved torn presents excluded. The 212
 test-ROM baseline and the `unko-snes` test suite are green. Retail-music audio
-parity is measured per title with the exact ares DSP thread clocks, the
-186-clock S-CPU reset phase and ares' power-on APU RAM/DSP-register pattern:
-Donkey Kong Country, Zelda, F-Zero, Super Metroid and Super Mario World are
-bit-exact (0 differing samples over 350,000 stereo frames); Mega Man X2 99.44%
-(its CX4 firmware must be supplied via `CX4_ROM`), Super Mario All-Stars 53.46%
-and Chrono Trigger 36.52% (offset -4). The core runs the S-SMP in a
-clock-granular peer coroutine that is bit-identical to the per-access model on
-every measured title. The remaining residuals are tracked in the SNES ledger.
+parity is measured per title against ares' pre-resampler stream with its exact
+DSP thread clocks: **Donkey Kong Country, Zelda, F-Zero and Castlevania IV are
+bit-exact** (0 differing samples over the 600-frame gate, 639,656 interleaved
+i16); Super Mario All-Stars is 50.9452%, Chrono Trigger 34.9427% and Mega Man X2
+69.2222% (its CX4 firmware must be supplied via `CX4_ROM`). The CV4 fix was a
+real clock bug: ares rounds each thread frequency with `+0.5` before building
+its fixed-point scalar, so the NTSC CPU scalar uses 21,477,273, not 21,477,272.
+The remaining three residuals are a per-title boot-handshake phase in the
+S-CPU/S-SMP port exchange, tracked in the SNES ledger. The reference oracles are
+ares (primary, ISC), MesenCE (GPL-3.0, black-box), Mednafen 1.32.1 (GPL-2.0,
+black-box) and RustySNES (Apache-2.0).
 
 Reference gates:
 
@@ -63,7 +66,7 @@ Reference gates:
 - mapper matrix (Holy Mapperel, blargg MMC3, MMC5, VRC2a, MMC1-A12):
   **65/65**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW**, 0 failed, 5 DRAW skips
-- `cargo test --workspace`: **852 passed, 0 failed**; clippy/fmt clean
+- `cargo test --workspace`: **1,026 passed, 0 failed** (4 ignored); clippy/fmt clean
 - VS. System: mapper 99, cabinet input, UniSystem/DualSystem parsing,
   2C03/2C04/2C05 palettes and 2C05 security; 13 repaired local images boot
   (including Gumshoe's outer bank)
@@ -79,7 +82,10 @@ Details: [`docs/accuracy-status.md`](docs/accuracy-status.md),
 [`docs/snes-accuracy-divergences.md`](docs/snes-accuracy-divergences.md),
 [`docs/compatibility.md`](docs/compatibility.md),
 [`docs/mapper-audit.md`](docs/mapper-audit.md),
-[`docs/test-rom-inventory.md`](docs/test-rom-inventory.md).
+[`docs/test-rom-inventory.md`](docs/test-rom-inventory.md),
+[`docs/oracle-feature-matrix.md`](docs/oracle-feature-matrix.md),
+[`docs/emulator-tooling.md`](docs/emulator-tooling.md),
+[`docs/systems.md`](docs/systems.md).
 
 ## NetPlay
 
@@ -98,13 +104,13 @@ and run-ahead. The legacy input-framing session remains for tests and
 
 | Metric | Value |
 |---|---:|
-| Workspace crates | 12 |
-| First-party Rust lines | ~105,200 |
-| Workspace tests | 852 pass, 0 failed |
+| Workspace crates | 11 |
+| First-party Rust lines | ~129,200 |
+| Workspace tests | 1,026 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images | 7,101 |
 
-Measured on the local checkout, 2026-11-16. Test/accuracy figures are re-run in
+Measured on the local checkout, 2026-11-22. Test/accuracy figures are re-run in
 CI; performance budgets are in [`docs/performance.md`](docs/performance.md).
 
 ## Layout

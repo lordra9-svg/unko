@@ -6,9 +6,10 @@ Short ADRs for choices that are expensive to reverse.
 
 The project is MIT. Consequences:
 
-- **GPL-3.0 cores cannot be linked or vendored.** MesenCE and RustyNES are
-  therefore **read-only references**: behaviour, test suites and design ideas
-  may be studied, but no code, tables or assets are copied into this tree.
+- **GPL-2.0/3.0 cores cannot be linked or vendored.** MesenCE and RustyNES
+  (GPL-3.0) and Mednafen (GPL-2.0) are therefore **read-only references**:
+  behaviour, test suites and design ideas may be studied, but no code, tables
+  or assets are copied into this tree.
 - **ares' NES core (ISC) is license-compatible** if a port or FFI binding is
   ever wanted; keep its notice if that happens.
 - Cores must be MIT/Apache-2.0/ISC/0BSD/Zlib or public domain.
@@ -39,6 +40,7 @@ Rejected for now:
 
 - **RustyNES** — GPL-3.0, NES-only, larger surface.
 - **MesenCE** — GPL-3.0, C++/C# application, no library ABI.
+- **Mednafen** — GPL-2.0, C++ multi-system application, no library ABI.
 - **ares** — ISC and excellent, but C++ and coroutine/global based; useful as a
   correctness oracle and as a possible future port, not the first backend.
 
@@ -53,8 +55,8 @@ Rejected for now:
 
 ## ADR-0006 — provenance firewall
 
-- No GPL code, generated tables or test assets from MesenCE/RustyNES enter this
-  repository.
+- No GPL code, generated tables or test assets from MesenCE/RustyNES/Mednafen
+  enter this repository.
 - Public test ROMs are used as oracles only where their licenses allow it.
 - Every third-party component is listed in `NOTICE` with its license text under
   `licenses/`.
@@ -89,7 +91,8 @@ Rust, and there is no deadline. The consequences:
 - Any future NES core can implement `unko_core::Core` plus
   `unko_nes_api::NesCore` and be selected by
   `CoreInfo.id`.
-- GPL emulators (MesenCE, RustyNES, Dolphin) are run as black-box oracles only
+- GPL emulators (MesenCE, Mednafen, RustyNES, Dolphin) are run as black-box
+  oracles only
   and are never copied or linked. ares is ISC, so documented adaptations are
   allowed with attribution.
 - The bar, oracle hierarchy and milestones are in `docs/accuracy.md`.

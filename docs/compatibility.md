@@ -23,7 +23,7 @@ test, or a smoke audit covers it; a dash means no verdict yet.
 | NSF / NSFE | **Loads only** | Parser and player wiring are unit-tested; corpus validation pending |
 | VS. System | **Partial** | Mapper 99 banking, four-screen VRAM, 2 KiB OUT1-gated work RAM, coin/service/DIP input, coin counter, NES 2.0 UniSystem/DualSystem type parsing and the 2C03/2C04/2C05 RGB palettes with 2C05 security implemented; 13 local images (mapper 99/2C03/2C04, including the Gumshoe 40 KiB outer bank) boot in staged tests. A 2C05 title, a known-good DualSystem dump, per-title DIP defaults and the DualSystem sub-CPU/watchdog are still missing |
 | PlayChoice-10 | **Partial** | 2C03 RGB palette implemented; PC10 BIOS is present; no PC10 game ROMs or coin/service input |
-| SNES / Super Famicom | **In progress** | Isolated `unko-snes` crate: ROM parsing/checksums/mapping, SRAM, cycle-exact 65C816 timing, full SPC700, APU IPL/ports/timers, S-DSP synthesis, PPU modes 0-7 + sprites + subscreen/colour math, DMA/HDMA. Super Mario World is 100.000% pixel-identical to ares with frames aligned (two-frame title-screen offset noted) |
+| SNES / Super Famicom | **In progress** | Isolated `unko-snes` crate: ROM parsing/checksums/mapping, SRAM, cycle-exact 65C816, full SPC700, S-DSP, PPU modes 0-7 with hires/interlace, sprites, windows, mosaic and subscreen/colour math, DMA/HDMA, and the SuperFX, SA-1, SDD1, SPC7110, CX4, DSP-1/2/3/4, OBC1, MSU1, S-RTC, ST018, Satellaview/BS-X and Sufami Turbo pieces. Every reference title is pixel-identical to ares; audio is bit-exact for Donkey Kong Country, Zelda, F-Zero and Castlevania IV, with SMAS/Chrono Trigger/Mega Man X2 residuals in the boot-handshake phase |
 | Nintendo 64 | **Not started** | Queued after SNES |
 
 ## ROM containers and patch formats
@@ -112,7 +112,7 @@ Public mapper-specific status:
 | x0000 APU write-window tests | 10/10 pass |
 | NESdev archive | 137 pass / 11 fail / 115 visual/audio/input-only; PAL APU timing leaves 4 failures, adding the alternate MMC3 selector leaves only `read_joy3/count_errors` |
 | RustyNES test tree | 159 pass / 11 fail / 171 visual/audio/input-only; 166 / 4 with PAL APU in PAL mode, 1 with the alternate MMC3 selector too |
-| Workspace tests | 852 pass, 0 failed |
+| Workspace tests | 1,026 pass, 0 failed |
 
 The actionable accuracy failures are tracked in
 [`accuracy-divergences.md`](accuracy-divergences.md); the ROM/BIOS inventory is

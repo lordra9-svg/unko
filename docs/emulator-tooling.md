@@ -67,7 +67,10 @@ make STATICLINK=false USE_GCC=true -j"$(nproc)"
 Binary: `refs/mesence/bin/linux-x64/Release/linux-x64/publish/Mesen`
 (`MesenCore.so` is next to it).
 
-Requires SDL2 at runtime (provided by `sdl2-compat`).
+Requires SDL2 at runtime (provided by `sdl2-compat`). The UI pins the .NET 10
+SDK in `UI/global.json`; install it with `brew install dotnet@10` and build with
+`DOTNET_ROOT=$(brew --prefix dotnet@10)/libexec` and that keg's `bin` first in
+`PATH`.
 
 ## Mednafen
 
@@ -105,7 +108,19 @@ cd refs/rustynes
 cargo build --release
 ```
 
-The workspace release build completes with the stable 1.99.1 toolchain.
+The workspace release build completes with the stable 1.99.1 toolchain and
+produces the libretro oracle `refs/rustynes/target/release/librustynes.so`.
+
+## RustySNES
+
+```
+cd refs/RustySNES
+PKG_CONFIG_PATH=$(brew --prefix systemd)/lib/pkgconfig cargo build --release
+```
+
+Produces the libretro/harness artefacts under `refs/RustySNES/target/release`.
+`libudev.pc` comes from the Homebrew `systemd` keg; without it the
+`libudev-sys` build script fails.
 
 ## Dolphin
 
@@ -326,14 +341,20 @@ repository with the reference trees and take ROM paths only at runtime.
 
 ## Build status summary
 
-| Emulator | Status | Binary |
-|---|---|---|
-| ares | built | `refs/ares/build_headless/desktop-ui/ares` |
-| Dolphin | built | `build_headless/Binaries/dolphin-emu` |
-| gopher64 | built | `refs/gopher64/target/release/gopher64` |
-| Mednafen | built | `refs/mednafen-1.32.1/src/mednafen` |
-| MesenCE | built | `refs/mesence/bin/linux-x64/Release/linux-x64/publish/Mesen` |
-| RustyNES | built | `refs/rustynes/target/release/` |
+| Emulator | Revision | Status | Binary |
+|---|---|---|---|
+| ares | `5c989a5` | built | `refs/ares/build_headless/desktop-ui/ares` |
+| Dolphin | `66df2b4e18` | built | `build_headless/Binaries/dolphin-emu` |
+| gopher64 | `5c6aacc` | built | `refs/gopher64/target/release/gopher64` |
+| Mednafen | 1.32.1 | built | `refs/mednafen-1.32.1/src/mednafen` |
+| MesenCE | `a8e5d02` | built | `refs/mesence/bin/linux-x64/Release/linux-x64/publish/Mesen` |
+| RustyNES | `b150717` | built | `refs/rustynes/target/release/librustynes.so` |
+| RustySNES | `9f7a1d7` | built | `refs/RustySNES/target/release` |
+| TriCNES | `c4f13fc` | source only (C#/.NET Framework) | `refs/tricnes` |
+
+Checked 2026-11-22. The ares checkout carries the local oracle capture hooks
+(CPU/SMP/DSP/PPU tracing, SA-1/SuperFX/Cx4/ST018 hooks); they were rebased onto
+current ares, whose new commits are PS1-only.
 
 ## ROM metadata and provenance
 
