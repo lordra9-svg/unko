@@ -8430,3 +8430,25 @@ So the two-valued clock is not a new mechanism: it is the instruction-granularit
 overshoot, whose per-title sensitivity is already mapped. No new data path or
 rounding is involved - confirming the work is a scheduler-credit policy question,
 not another bug.
+
+## Port-only instruction overshoot: strongly negative (2026-11-21)
+
+Implemented `SNES_PORT_INSTR`: finish the current SPC700 instruction only at
+S-CPU `$2140-$2143` accesses (ares' synchronize points) instead of at every
+access or never. 600-frame audio:
+
+```
+dkc   186,952 (70.7730%)     cv4  77,017 (87.9596%)
+smas  370,451 (42.0859%)     fzero      0 (100.0000%)
+zelda       2 (99.9997%)
+```
+
+So applying the overshoot only at port accesses is much worse than both the
+default (exact credit) and the uniform ceiling: it destroys DKC/SMAS and leaves
+CV4 well below the default. Zelda's two differing samples and F-Zero's exactness
+are the only positive notes, and they do not generalise.
+
+This closes the "restrict the overshoot to ares' sync points" idea. Together with
+the uniform ceiling and the exact-credit default, every placement of the
+instruction-granularity overshoot (never / every access / ports only) has now
+been measured, and none satisfies the nine titles.
