@@ -10386,3 +10386,22 @@ family. So it is a clean, single-mechanism equivalent of that family: it settles
 MMX2's handshake but shifts the others.
 
 Default gate unchanged; the flag is default off.
+
+## Conditioning the timestamped latch on the pending poll: identical result (2026-11-22)
+
+Added `SNES_CPU_LATCH_COND`: with `SNES_CPU_LATCH_TIME`, apply the timestamped
+CPU->SMP visibility only while an S-SMP `$F4-$F7` poll read is pending; other
+writes latch immediately.
+
+7-title 600-frame gate (`SNES_CPU_LATCH_TIME=1 SNES_CPU_LATCH_COND=1`):
+
+```
+dkc 100.0000%   zelda 63.7471%   fzero 27.5437%   cv4 89.1395%
+smas 50.9452%   ct 29.0592%      mmx2 100.0000%
+```
+
+Bit-identical to the unconditional rule. At a CPU port write the S-SMP is
+almost always mid-poll on `$F4-$F7`, so the condition is effectively always true;
+conditioning on pending state does not separate MMX2 from the regressing titles.
+
+Default gate unchanged; both flags default off.

@@ -222,6 +222,17 @@ pub fn instr_lead() -> bool {
 /// `SNES_CPU_LATCH_TIME`: timestamp S-CPU `$2140-$2143` writes with the S-CPU
 /// clock and expose them to the SPC700 only when its own clock reaches that
 /// write (timestamped CPU->SMP latch ordering in the plan drain).
+/// `SNES_CPU_LATCH_COND`: with `SNES_CPU_LATCH_TIME`, apply the timestamped
+/// visibility only while an S-SMP `$F4-$F7` poll read is pending; other writes
+/// latch immediately.
+pub fn cpu_latch_cond() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *C.get_or_init(|| std::env::var_os("SNES_CPU_LATCH_COND").is_some())
+}
+
+/// `SNES_CPU_LATCH_TIME`: timestamp S-CPU `$2140-$2143` writes with the S-CPU
+/// clock and expose them to the SPC700 only when its own clock reaches that
+/// write (timestamped CPU->SMP latch ordering in the plan drain).
 pub fn cpu_latch_time() -> bool {
     static Q: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *Q.get_or_init(|| std::env::var_os("SNES_CPU_LATCH_TIME").is_some())
@@ -744,7 +755,17 @@ impl Apu {
                 eprintln!("WM {} {} {:02X}", self.smp_clock, port, value);
             }
         }
-        if cpu_latch_time() {
+        let mid_poll = match self.spc.pending {
+            Some(crate::spc700::Pending::DirectRead { address, .. }) => {
+                let effective = (u16::from(self.spc.flags.page) << 8) | u16::from(address);
+                (0x00F4..=0x00F7).contains(&effective)
+            }
+            Some(crate::spc700::Pending::AbsoluteRead { address, .. }) => {
+                (0x00F4..=0x00F7).contains(&address)
+            }
+            None => false,
+        };
+        if cpu_latch_time() && (!cpu_latch_cond() || mid_poll) {
             let time = self.cpu_fixed_clock().unwrap_or(self.smp_clock);
             self.cpu_write_queue.push_back((time, port & 3, value));
         } else {
