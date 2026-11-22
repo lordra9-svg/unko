@@ -10190,3 +10190,23 @@ remains the best engine configuration, matching the default path's conclusion
 that the residual is not a phase constant.
 
 Default gate unchanged; engine flags remain default off.
+
+## Engine DKC port polling at the divergence matches ares; residual is DSP phase (2026-11-22)
+
+Instrumented the engine's `$F4-$F7` reads with the S-SMP clock (`SNES_SMP_READ_LOG`,
+now also emitted from `sym_read`) and compared positionally with ares at DKC's
+post-fix divergence (DSP 85,871 = SMP clock ~5.50 M).
+
+```
+engine and ares, port 0 reads in 5.44-5.56 M SMP clocks:
+one pass, value 01, 5 reads both sides, t0 difference +2 clocks
+```
+
+So the port poll/ack ordering at the divergence is **the same as ares** (same
+pass count, same read count, start within 2 clocks). Combined with the earlier
+finding that the engine's 616 DSP writes match ares' register/value order with
+only -1/-8/-15 tick offsets, the engine's residual is the **DSP write phase**
+crossing a sample boundary, not the port-handshake ordering.
+
+This rules out the last per-port ordering hypothesis for the engine as well. The
+engine flag remains default off; the default gate is unchanged.

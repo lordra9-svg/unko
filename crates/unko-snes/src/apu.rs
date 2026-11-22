@@ -991,7 +991,18 @@ impl Apu {
             0xF0 | 0xF1 | 0xFA | 0xFB | 0xFC => 0,
             0xF2 => self.dsp_address,
             0xF3 => self.dsp.read(self.dsp_address),
-            0xF4..=0xF7 => self.apu_ports[usize::from(address - 0xF4)],
+            0xF4..=0xF7 => {
+                let value = self.apu_ports[usize::from(address - 0xF4)];
+                if std::env::var_os("SNES_SMP_READ_LOG").is_some() {
+                    eprintln!(
+                        "PR {} {} {}",
+                        self.smp_clock,
+                        usize::from(address - 0xF4),
+                        value
+                    );
+                }
+                value
+            }
             0xF8 => self.aux4,
             0xF9 => self.aux5,
             0xFD..=0xFF => {
