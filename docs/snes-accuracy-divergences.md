@@ -7677,3 +7677,29 @@ floor      : dkc, zelda, metroid, smw (+ lower cv4 98.24%)
 remaining error is not a global rounding/stop rule: it depends on per-access
 sub-clock ordering that a single threshold cannot express. The threshold
 parameter is exhausted; the flag stays default-off.
+
+## Default stream is exact for F-Zero; the ceiling perturbs it (2026-11-21)
+
+Aligned the full S-SMP instruction stream against ares for F-Zero (230 frames):
+
+```
+default      : 1,027,220 instructions, 0 divergence events   (stream identical)
+SNES_SMP_CEIL: 1,027,221 instructions, 1,176 events, first at 78,260 (ours extra
+               ['FFD6','FFD8'])
+```
+
+So the **default floor rounding reproduces ares' S-SMP instruction stream exactly
+for F-Zero** - the floor is faithful, not accidental. The ceiling's extra
+one-clock round-up *introduces* divergences (and drops F-Zero's audio to 44%),
+while it happens to fix CV4. That is why no threshold satisfies all titles: the
+threshold perturbs a stream that is already exact.
+
+This settles the direction: the default model is the correct general model (five
+titles stream-exact), and the remaining audio differences in CV4/SMAS/CT/MMX2 are
+**title-specific events**, not a global stop/rounding rule. For CV4 the event is
+already isolated (the `$049F` Timer-1/`$F7` handshake, `V3VOLR` write at DSP
+sample 289,423); the "fixes" found so far (access-stop, ceiling) simply shift the
+global timing enough to move that one event.
+
+So further progress must be per-event: reproduce CV4's handshake outcome without
+perturbing the globally exact stream. No global parameter can do that.
