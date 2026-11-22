@@ -169,6 +169,22 @@ pub fn smp_latch_queue() -> bool {
 /// at the access boundary at/after the S-CPU clock (negative credit) and a
 /// deferred `$F4-$F7` read parks so the S-CPU is pulled forward at access
 /// granularity.
+/// `SNES_POLL_LEAD=N`: before latching an S-CPU write to `$2140-$2143`, advance
+/// the S-SMP by N clocks (borrowed from future credit) so its `$F4-$F7` poll
+/// sees the write N clocks sooner. Tests the measured `W->A` latency lead.
+pub fn poll_lead() -> Option<u32> {
+    static L: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    *L.get_or_init(|| {
+        std::env::var("SNES_POLL_LEAD")
+            .ok()
+            .and_then(|v| v.parse().ok())
+    })
+}
+
+/// `SNES_PER_ACCESS_MUTUAL`: distinct per-access mutual path - the S-SMP stops
+/// at the access boundary at/after the S-CPU clock (negative credit) and a
+/// deferred `$F4-$F7` read parks so the S-CPU is pulled forward at access
+/// granularity.
 pub fn per_access_mutual() -> bool {
     static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *P.get_or_init(|| std::env::var_os("SNES_PER_ACCESS_MUTUAL").is_some())
@@ -856,6 +872,21 @@ impl Apu {
     /// instructions until the S-SMP reaches the S-CPU clock, advancing the DSP
     /// to the next output-sample boundary after each instruction and pulling the
     /// S-SMP forward to the DSP clock.
+    /// Advance the S-SMP by `clocks` SMP clocks without credit (`SNES_POLL_LEAD`),
+    /// borrowing from future credit. Returns true if it parked.
+    fn lead_clocks(&mut self, clocks: u32) -> bool {
+        let den = self.master_clock_rate as i64;
+        for _ in 0..clocks {
+            if self.drain_unit() == 0 {
+                return true;
+            }
+            if den != 0 {
+                self.apu_credit -= den;
+            }
+        }
+        false
+    }
+
     fn advance_symmetric(&mut self, clocks: u32, clock: u64, rate: u64) -> bool {
         const APU_UNIT_NUM: i64 = 2_050_560;
         self.set_master_clock(clock + u64::from(clocks), rate);
@@ -2323,6 +2354,17 @@ pub enum ApuInput {
         /// Master clock rate paired with `clock`.
         rate: u64,
     },
+    /// Advance the S-SMP by `clocks` SMP clocks (`SNES_POLL_LEAD`).
+    LeadSmp {
+        /// The APU, owned by the scheduler between advances.
+        apu: Box<Apu>,
+        /// S-SMP clocks to lead.
+        clocks: u32,
+        /// S-CPU master clock at the write.
+        clock: u64,
+        /// Master clock rate paired with `clock`.
+        rate: u64,
+    },
     /// Finish the S-SMP instruction in progress at `clock` (`SNES_PORT_LEAD`).
     FinishInstruction {
         /// The APU, owned by the scheduler between advances.
@@ -2361,6 +2403,20 @@ pub fn new_apu_coroutine() -> ApuCoroutine {
                 rate,
             } => {
                 if apu.advance_master_clock(clocks, clock, rate) {
+                    let target = apu.park_master_clock(rate);
+                    ApuOutput::Parked { apu, target }
+                } else {
+                    ApuOutput::Stopped(apu)
+                }
+            }
+            ApuInput::LeadSmp {
+                mut apu,
+                clocks,
+                clock,
+                rate,
+            } => {
+                apu.set_master_clock(clock, rate);
+                if apu.lead_clocks(clocks) {
                     let target = apu.park_master_clock(rate);
                     ApuOutput::Parked { apu, target }
                 } else {

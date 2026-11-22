@@ -9954,3 +9954,32 @@ already measured to trade titles (ceil family), so it would need to be
 conditioned per write, which the current scheduler cannot express.
 
 The CPU-read debug recording is committed (default off). Default gate unchanged.
+
+## `SNES_POLL_LEAD`: per-write S-SMP lead measured, counterproductive (2026-11-22)
+
+Implemented the per-write phase lead suggested by the round-trip measurement:
+before latching an S-CPU `$2140-$2143` write, advance the S-SMP by N clocks
+(borrowed from future credit) so its poll sees the write sooner.
+
+CT 600 frames:
+
+```
+N=2   29.6004%
+N=4   29.0592%
+N=6   29.0592%   (== PORT_LEAD+WRITE_PULL result)
+N=8   29.1794%
+N=12  29.2232%
+default 34.9427%
+```
+
+DKC stays 100% at N=6. So leading the S-SMP at the write makes CT *worse*: the
+measured `W->A` leg being larger is not fixed by advancing the S-SMP first - the
+lead changes which poll the write lands on and collapses to the same result as
+the port-lead family. The flag stays default off (negative).
+
+This closes the last corrective hypothesis on the CT handshake: the S-SMP poll
+phase cannot be corrected after the fact; matching ares needs the write and poll
+to be interleaved at the same instant, which is the per-access scheduler property
+and not reachable by a lead/latch/catch-up rule.
+
+Default gate unchanged.

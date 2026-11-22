@@ -451,6 +451,30 @@ impl ApuPeer<'_> {
             .ipl_rom_enabled()
     }
 
+    fn lead_smp(&mut self, clocks: u32, clock: u64, rate: u64) {
+        if self.waiting.is_some() {
+            return;
+        }
+        let apu = self.apu.take().expect("actor is not idle");
+        let input = crate::apu::ApuInput::LeadSmp {
+            apu,
+            clocks,
+            clock,
+            rate,
+        };
+        match self.coro.resume(input) {
+            corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Stopped(apu)) => {
+                self.apu = Some(apu);
+                self.waiting = None;
+            }
+            corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Parked { apu, target }) => {
+                self.apu = Some(apu);
+                self.waiting = Some(target);
+            }
+            _ => unreachable!(),
+        }
+    }
+
     fn port_write(&mut self, port: u8, value: u8) {
         self.apu
             .as_mut()
@@ -1135,11 +1159,8 @@ impl Snes {
                             let port = ((address & 0xFFFF) - 0x2140) as u8;
                             let value = peer.port_read(port);
                             if let Some(apu) = peer.apu.as_mut() {
-                                apu.debug.record_cpu_read(
-                                    self.clock,
-                                    usize::from(port),
-                                    value,
-                                );
+                                apu.debug
+                                    .record_cpu_read(self.clock, usize::from(port), value);
                             }
                             BusResponse::Byte(value)
                         }
@@ -1152,6 +1173,9 @@ impl Snes {
                                 && (!crate::apu::lead_after_boot() || !peer.ipl_rom_enabled())
                             {
                                 peer.finish_instruction(self.clock, rate);
+                            }
+                            if let Some(lead) = crate::apu::poll_lead() {
+                                peer.lead_smp(lead, self.clock, rate);
                             }
                             peer.port_write(port, value);
                             if let Some(apu) = peer.apu.as_mut() {
