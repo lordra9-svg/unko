@@ -7791,3 +7791,23 @@ micro-step grid. That sync is a forward pull of the S-SMP from inside the DSP
 drain - not expressible at record time in the current driver.
 
 Reverted; no behaviour change.
+
+## Advancing smp_clock to the DSP boundary hangs the driver (2026-11-21)
+
+Attempted the per-micro-step pull in the only form the current code can express:
+after each access, if the S-DSP clock overshot, set `smp_clock = dsp_clock`
+(`SNES_DSP_PULL`), imitating `DSP::tick` -> `Thread::synchronize(smp)`.
+
+Result: the emulator **hangs** (60-frame run times out, no statistics). Advancing
+`smp_clock` without executing the plan breaks the position accounting
+(`smp_clock_at_position` derives the plan start from `smp_clock - plan clocks`),
+and the driver never progresses.
+
+So the pull cannot be expressed by moving the clock: the S-SMP must actually
+*execute* plan instructions inside the DSP drain (a scheduler loop owning both),
+which is the mutual-coroutine rewrite. Every clock-only approximation either
+scrambles the DSP phase (whole-sample drain), regresses other titles
+(access-stop/ceiling/write-sync), deadlocks the boot (latch hiding) or hangs
+(clock pull).
+
+Reverted; the verified default is unchanged.
