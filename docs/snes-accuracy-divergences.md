@@ -7703,3 +7703,28 @@ global timing enough to move that one event.
 
 So further progress must be per-event: reproduce CV4's handshake outcome without
 perturbing the globally exact stream. No global parameter can do that.
+
+## No adjacent read/write pair at CV4's divergent write (2026-11-21)
+
+Instrumented every `$F4-$F7` and `$FD-$FF` read in both emulators (timer clock,
+DSP tick, address, value) for 560 frames of CV4, looking for the read/write pair
+around the first divergent output (DSP sample 289,423).
+
+```
+both logs span DSP ticks 198,854..9,551,085 (target 9,261,536 is inside)
+reads within +/-2,000 ticks of the target:  ares 0   ours 0
+```
+
+So there is **no port or timer read anywhere near** the divergent `V3VOLR` write.
+The write is an ordinary audio-ISR register update; its placement is fixed by the
+accumulated block phase at the preceding KOFF boundary, not by a local
+read/handshake.
+
+This closes the "per-event read/write pair" hypothesis: CV4's difference is not a
+local ordering that can be corrected at that point. It is the block-boundary
+phase (already measured: delta flips only at KOFF by 8 DSP ticks = 16 S-SMP
+clocks, and the S-SMP stream matches ares for the exact titles). Any fix must
+correct the block-boundary phase for CV4 without perturbing the globally exact
+stream - and every global rule tried changes which titles are exact.
+
+The instrumentation is reverted; the tree is unchanged.
