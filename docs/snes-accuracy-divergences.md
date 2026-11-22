@@ -8185,3 +8185,35 @@ Next: align the two streams by cumulative instruction index from the start of th
 run (not by write-clock windows) and compare clock sums per instruction; that
 distinguishes a real control-flow difference from a wait-state/clock-accounting
 difference without window-edge ambiguity.
+
+## Cumulative-index alignment: first divergence 371,351; clocks agree within 4-8 (2026-11-21)
+
+Aligned the two 300-frame CV4 S-SMP streams purely by instruction index (no
+write-clock windows) and compared cumulative SMP clocks with ares' `2*dspTicks`:
+
+```
+index      PC ours/ares   cum our clocks   ares 2*dspTicks   diff
+0          FFC0/FFC0                 4                  0    +4
+100        FFC6/FFC6               664                662    +2
+1,000      FFCF/FFCF             7,320              7,312    +8
+20,000     FFCF/FFCF           178,320            178,312    +8
+100,000    FFDC/FFDC           799,016            799,010    +6
+300,000    FFE9/FFE9         2,250,342          2,250,336    +6
+500,000    FFDC/FFDC         3,700,272          3,700,266    +6
+
+first PC divergence: index 371,351 (ares extra FFE9, FFDA, FFDC)
+```
+
+Two conclusions:
+
+1. **Wait-state/clock accounting is not the cause**: over 500k instructions the
+   cumulative clock difference stays at +2..+8 (a few ticks), so a 56-clock
+   difference in one gap is not an accumulated wait-state error.
+2. **The first control-flow divergence is at instruction 371,351**, in the IPL
+   handshake region (`FFE9`/`FFDA`/`FFDC`), which is *before* the first DSP write
+   block. The `$049F` handshake iteration difference measured earlier is
+   **downstream** of this.
+
+So the next target is the divergence at 371,351, not the `$049F` loop: identify
+which latch/timer read at that IPL handshake differs. This supersedes the
+previous "one extra `$049F` iteration at the first block" localization.
