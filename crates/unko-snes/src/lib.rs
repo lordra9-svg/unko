@@ -42,6 +42,7 @@ pub mod sdd1;
 pub mod sharprtc;
 pub mod spc700;
 pub mod spc7110;
+pub mod spc_coroutine;
 pub mod st018;
 pub mod sufamiturbo;
 pub mod system;
