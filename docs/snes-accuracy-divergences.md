@@ -10405,3 +10405,34 @@ almost always mid-poll on `$F4-$F7`, so the condition is effectively always true
 conditioning on pending state does not separate MMX2 from the regressing titles.
 
 Default gate unchanged; both flags default off.
+
+## Parking the pending port read until the write clock (`SNES_CPU_LATCH_PARK`) (2026-11-22)
+
+With `SNES_CPU_LATCH_TIME`, if a pending `$F4-$F7` read would sample before the
+clock of a queued S-CPU write to that port, `drain_unit` parks the read until the
+write's clock (the actor runs the S-CPU forward to it), so the read observes the
+new value.
+
+7-title 600-frame run (`SNES_CPU_LATCH_TIME=1 SNES_CPU_LATCH_PARK=1`):
+
+```
+dkc  0 differing over 635702  (100%, stream 3954 samples short)
+smas 0 differing over 639656  (100%, full length)
+cv4  42890 over 613074 (93.0041%, stream 26582 short)
+ct   417138 over 604028 (30.9406%, stream 35628 short)
+mmx2 175179 over 617998 (71.6538%, stream 21658 short)
+zelda 231894 (63.7471%), fzero 456942 (28.5644%)
+```
+
+Two findings:
+
+* **SMAS is bit-exact at full length under this variant** (the only configuration
+  besides DSP_INSTR_SYNC), and dkc is exact over its (shortened) window.
+* The park **stalls the DSP**: the output stream is 4k-36k samples short on five
+  titles, so those percentages are over truncated windows and the full-window
+  gate fails. Parking a read does not advance the DSP while the S-CPU catches up,
+  unlike ares where the DSP runs during the CPU's catch-up.
+
+So the conditioning idea has merit for SMAS but the park implementation loses
+time. A correct version must keep the DSP advancing while the S-CPU runs forward.
+Default gate unchanged; flags default off.

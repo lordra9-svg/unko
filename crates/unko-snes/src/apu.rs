@@ -225,6 +225,17 @@ pub fn instr_lead() -> bool {
 /// `SNES_CPU_LATCH_COND`: with `SNES_CPU_LATCH_TIME`, apply the timestamped
 /// visibility only while an S-SMP `$F4-$F7` poll read is pending; other writes
 /// latch immediately.
+/// `SNES_CPU_LATCH_PARK`: with `SNES_CPU_LATCH_TIME`, if a pending `$F4-$F7`
+/// read would sample before the clock of a queued S-CPU write to that port,
+/// park the read until the write's clock so it observes the new value.
+pub fn cpu_latch_park() -> bool {
+    static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *P.get_or_init(|| std::env::var_os("SNES_CPU_LATCH_PARK").is_some())
+}
+
+/// `SNES_CPU_LATCH_COND`: with `SNES_CPU_LATCH_TIME`, apply the timestamped
+/// visibility only while an S-SMP `$F4-$F7` poll read is pending; other writes
+/// latch immediately.
 pub fn cpu_latch_cond() -> bool {
     static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *C.get_or_init(|| std::env::var_os("SNES_CPU_LATCH_COND").is_some())
@@ -1607,6 +1618,22 @@ impl Apu {
     /// to that master instant. Advancing one clock at a time (instead of one
     /// two-clock access unit) keeps a port write's visibility window to a single
     /// SMP clock.
+    /// Port index of the pending deferred read, if it is `$F4-$F7`.
+    fn pending_read_port(&self) -> Option<usize> {
+        let address = match self.spc.pending {
+            Some(crate::spc700::Pending::DirectRead { address, .. }) => {
+                (u16::from(self.spc.flags.page) << 8) | u16::from(address)
+            }
+            Some(crate::spc700::Pending::AbsoluteRead { address, .. }) => address,
+            None => return None,
+        };
+        if (0x00F4..=0x00F7).contains(&address) {
+            Some(usize::from(address - 0x00F4))
+        } else {
+            None
+        }
+    }
+
     fn drain_unit(&mut self) -> u32 {
         if cpu_latch_time() {
             let now = self.smp_clock_at_position();
@@ -1677,6 +1704,19 @@ impl Apu {
             let clocks = u32::from(step.clocks);
             let resume_at = if step.split { clocks / 2 } else { clocks };
             if self.plan_sub == resume_at {
+                if cpu_latch_time() && cpu_latch_park() {
+                    if let Some(port) = self.pending_read_port() {
+                        let now = self.smp_clock_at_position();
+                        if let Some(&(time, _, _)) = self
+                            .cpu_write_queue
+                            .iter()
+                            .find(|(time, p, _)| *p == port && *time > now)
+                        {
+                            self.park_at = Some(time);
+                            return 0;
+                        }
+                    }
+                }
                 self.resume_deferred_read();
             }
         }
