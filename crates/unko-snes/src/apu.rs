@@ -1712,6 +1712,15 @@ impl Apu {
                             .iter()
                             .find(|(time, p, _)| *p == port && *time > now)
                         {
+                            // Keep the S-DSP advancing to the park target while
+                            // the S-CPU runs forward, so no samples are lost.
+                            drain_dsp_to(
+                                &mut self.ram[..],
+                                &mut self.dsp,
+                                &mut self.dsp_clock,
+                                &mut self.samples,
+                                time,
+                            );
                             self.park_at = Some(time);
                             return 0;
                         }

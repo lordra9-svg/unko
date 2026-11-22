@@ -10436,3 +10436,25 @@ Two findings:
 So the conditioning idea has merit for SMAS but the park implementation loses
 time. A correct version must keep the DSP advancing while the S-CPU runs forward.
 Default gate unchanged; flags default off.
+
+## Keeping the DSP advancing during the park: partial (2026-11-22)
+
+When `SNES_CPU_LATCH_PARK` parks a pending read, the S-DSP is now drained to the
+park target (the CPU write's clock) before returning, so it keeps producing
+samples while the S-CPU runs forward instead of freezing.
+
+Before/after stream lengths (600 frames, full = 639,656):
+
+```
+dkc  635,702 -> 637,404   (still 2,252 short; 100% over its window)
+smas 639,656 -> 639,656   (full; 100.0000%)
+ct   604,028 -> 620,452   (still 19,204 short; 30.1245%)
+```
+
+So most of the lost samples are recovered and **SMAS stays bit-exact at full
+length**, but the streams remain short on dkc/ct (and the other titles), so the
+full-window gate is still not met. The residual loss is the park's target being
+the write clock while the S-CPU actually runs past it by up to one instruction;
+a complete fix must advance the DSP by the CPU's actual elapsed catch-up window.
+
+Default gate unchanged; both flags default off.
