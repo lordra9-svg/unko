@@ -8076,3 +8076,41 @@ the read-ordering idea; reverted to the byte-identical coroutine seam.
 
 The evidence is now closed on the read side as well: the CV4 residual is not
 reproducible by any ordering of latch exposure relative to the read instant.
+
+## The 56-clock deficit is exactly one extra `$049F` iteration in ares (2026-11-21)
+
+Extracted the S-SMP instruction streams for the write-32 -> write-33 gap
+(ours 7,117,350..7,125,550 SMP clocks; ares dspTicks 3,558,654..3,562,782) and
+aligned them:
+
+```
+ours: 1303 instructions, 8,200 clocks
+ares: 1312 instructions, 8,256 clocks (2 x 4,128 dspTicks)
+non-equal blocks: 3
+  insert  ares[28:37] = 049F 04A2 04A4 04A7 04AA 04AC 04AE 04B0 04B2   (ours missing)
+```
+
+So ares runs **one additional iteration of the `$049F..$04B2` handshake loop**
+(9 instructions = exactly 56 clocks); every other instruction in the gap is
+identical. This settles the objective's question: the deficit is a **read-value
+(control-flow) difference**, not a wait-state/timer-step shortfall.
+
+The loop body is:
+
+```
+$049F MOV Y,$00FD    (Timer 0 output)
+$04A2 BNE
+$04A4 MOV X,$00F7    (CPUIO3 latch)
+$04A7 CMP X,$00F7    (detects a change between two reads)
+$04AA BNE            (re-read if changed)
+$04AC CMP X,dp$07
+$04AE BEQ exit
+$04B0 CMP X,dp$06
+$04B2 BEQ loop
+```
+
+Ours takes the exit branch one iteration earlier, so at that iteration our `$F7`
+read value differs from ares' (the latch content at the read instant). This is
+the same latch-ordering question measured exhaustively (immediate / timestamped /
+inline / hidden); the next instrumentation is to log the `$F7` value and clock at
+the extra iteration in both and compare the two reads directly.
