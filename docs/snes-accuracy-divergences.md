@@ -9394,3 +9394,26 @@ wrong: after the flush the pending read must be completed before the next credit
 loop iteration, and the port value must be sampled at the deferred half, not at
 the pre-instruction check. Reverted to the credit-paced no-park driver (commit
 133659d). The default gate is unchanged.
+
+## Deferred-read park at the top of the credit loop: still breaks boot (2026-11-21)
+
+Moved the read park from `step_direct` to the first action of
+`advance_symmetric` (before any new credit or instruction), so the resume would
+complete the pending half first. Same result as the pre-instruction gate:
+
+```
+SNES_SYM_DRIVER=1, 5 frames: nmi_count 0, nonzero_pixels 0,
+  cpu<-apu [29, BB, 00, 00], apu<-cpu [A9, 00, 3E, 05]
+  spc inst 19512 (correct rate), master clock correct
+```
+
+The S-SMP keeps running at the right rate and the master clock is correct, so
+this is not a stall; the handshake itself diverges when the deferred read is
+parked. The no-park credit-paced driver boots (DKC 57.9834%). Reverted.
+
+Remaining hypothesis for the next attempt: the park target uses the S-SMP clock
+at the pending read, but ares' `SMP::readIO` synchronizes the S-CPU to the
+*post-wait* S-SMP clock and then samples; our pending read's first half has
+already advanced the SMP clock by half the wait, so the target/completion order
+is off by that half. The park should carry the read's post-wait clock explicitly
+(and resume by advancing to it) rather than using the position clock.
