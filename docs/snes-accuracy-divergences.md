@@ -8273,3 +8273,31 @@ The residual is therefore a **tick-boundary rounding effect in the DSP catch-up
 at reads** (a 3-read cycle), not a block/phase offset. That is consistent with the
 two-valued `$F3` write deltas ({+6,-22} mod 32 is exactly {6,10} = a 4-tick
 rounding split).
+
+## Read-tick rounding is a benign rotation; the write split is the target (2026-11-21)
+
+Inspected the 0/-3/+6 read-tick cycle in detail:
+
+```
+read#   ares_tick  ours_tick  delta  ares_step  ours_step
+125848    1384002    1384005    -3        8         11
+125849    1384019    1384013    +6       17          8
+125850    1384030    1384030    +0       11         17
+125851    1384038    1384041    -3        8         11
+... repeats with period 3
+```
+
+The per-read tick *steps* are the same set {8, 17, 11}, merely rotated by one
+read between the emulators, and the reconvergence points are exact (delta 0 every
+third read). Combined with the earlier finding that the `$F4` values are
+identical, this read-side rounding is **benign**: it permutes which read samples
+which intermediate tick, but samples the same latch values at the same total
+tick progression.
+
+So the read side is exonerated. The only remaining audio-affecting difference is
+on the **write** side: the two-valued `$F3` placement ({+6,-22} mod 32 for CV4 =
+{6,10}, a 4-tick split), which moves a register write across a sample boundary
+(the V3VOLR case at DSP sample 289,423). The next measurement is the write-side
+tick rounding: at each `$F3` write log our `dsp_clock` before/after the
+`drain_dsp_to` and the target, and compare with ares' `dspTicks`, to find why the
+placement is 4 ticks two-valued instead of single-valued.
