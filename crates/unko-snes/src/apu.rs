@@ -1040,6 +1040,12 @@ impl Apu {
             0xF2 => self.dsp_address = value,
             0xF3 => {
                 self.dsp.set_debug_clock(self.smp_clock);
+                if std::env::var_os("SYM_DSP_LOG").is_some() {
+                    eprintln!(
+                        "DW {} {:02X} {:02X}",
+                        self.smp_clock, self.dsp_address, value
+                    );
+                }
                 self.dsp.write(self.dsp_address, value);
             }
             0xF4..=0xF7 => self.cpu_ports[usize::from(address - 0xF4)] = value,

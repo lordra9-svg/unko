@@ -10091,3 +10091,23 @@ It boots and renders (DKC nmi 416, 35,488 pixels) but is far below the default o
 every title. So the shared-state mutual driver - the last unbuilt form - does not
 recover ares' audio either. The default (record/plan, exact-credit per-access
 drain) remains the best and is unchanged; the flag is default off.
+
+## SNES_SYM_ENGINE first divergence: the driver never reaches its DSP writes (2026-11-22)
+
+DKC first audio difference under `SNES_SYM_ENGINE` is at interleaved 153,036
+(DSP 76,518, ~2.4 s) - the music start. Instrumenting the engine's `$F3` writes
+with the S-SMP clock (`SYM_DSP_LOG`) gives only **56 DSP writes over 200 frames**
+versus **616** in ares.
+
+The S-SMP is running (PC 0x064D at 200 frames, 1.24 M instructions) but the sound
+driver is not emitting its DSP command stream, so the music never starts; the
+2.4 s match is the pre-music silence. The first ordering difference is therefore
+in the driver's `$F4-$F7` handshake/program flow, not in DSP tick ordering.
+
+`ResumeBus` already defers I/O reads (`defer_io_reads = true`) and the engine
+answers the resumed read, so the remaining difference is in when the S-SMP
+observes the CPU's port writes within its own instruction stream - the same
+poll-race mechanism measured for CT, now in the engine path.
+
+The `SYM_DSP_LOG` instrumentation is debug-only (default off); the engine and
+default gate are unchanged.
