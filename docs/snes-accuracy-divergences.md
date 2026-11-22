@@ -9470,3 +9470,27 @@ differs from the plan layer's replay order.
 Reverted. Conclusion: the symmetric driver's port handshake needs to be built on
 the plan/replay read-and-write ordering (or a port-latch queue with explicit
 timestamps), not by parking individual reads inside the direct loop.
+
+## CORRECTION: the "park breaks boot" conclusions were based on 5 frames (2026-11-22)
+
+Verified that `SNES_SYM_DRIVER` does boot: at FRAMES=5 the DKC run reports
+`nmi_count 0, nonzero_pixels 0`, but at FRAMES=600 it reports `nmi_vec 416,
+nonzero_pixels 35488` and produces 57.9834% matching audio. Five frames is
+simply before this driver reaches the game's init/NMI path, so the previous four
+"park breaks boot" notes (pre-instruction gate, credit-loop top, post-wait
+target, half-advance+skip) were **misdiagnosed** - they were judged on the
+5-frame snapshot.
+
+Re-tested the pre-instruction read park at 600 frames: the result is bit-identical
+to the no-park driver (`nmi_vec 416`, `nonzero_pixels 35488`, 57.9834%), because
+`port_read_waiting()` never fires under credit pacing - the S-SMP is held at or
+behind the S-CPU clock, so the "S-SMP ahead" condition is false. The park is
+inert, not harmful.
+
+So the direct driver's divergence is not the read park. With credit pacing the
+S-SMP samples ports at its own (behind-CPU) clock, which is the hardware rule;
+the remaining difference from the plan layer must be in the DSP/DSP-write
+interleaving or the S-SMP instruction stream ordering, not the port handshake.
+
+The committed `SNES_SYM_DRIVER` remains the no-park, credit-paced version
+(default off, DKC 57.9834%). The default gate is unchanged.
