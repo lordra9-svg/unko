@@ -7869,3 +7869,26 @@ stepping, with the S-SMP resumable between accesses. Concretely:
 
 Everything else needed (comparison tooling, ares/mesence captures, acceptance
 numbers) is already in place and documented above.
+
+## Step 2 attempt: DSP-lead interleave does not collapse the deltas (2026-11-21)
+
+On top of `SNES_DSP_LATE`, made the S-DSP lead the S-SMP by one micro-step and
+run plan accesses until the S-SMP catches up, applying `$F3` writes at the
+current (leading) `dsp_clock` (`SNES_DSP_LEAD`).
+
+CV4 KOFF deltas (ares - ours): `{+7 (334), -21 (95)}` - still **two-valued**
+(shifted by one from the default's `{+6, -22}`), not single-valued.
+
+600-frame audio:
+
+```
+late+lead  dkc 226,813 (64.5414%)   cv4 11,379 (98.2211%)   smas 313,782 (50.9452%)
+```
+
+So leading the DSP by one micro-step shifts the whole two-valued pattern by one
+tick and regresses DKC; it does not remove the alternation. The alternation is
+therefore in the S-SMP clock at the write, not in the DSP's lead - consistent
+with the earlier finding that the stream is identical for the exact titles and
+that no global rounding rule (threshold sweep) collapses it.
+
+Reverted; step 1 (`SNES_DSP_LATE`) remains, default-off.
