@@ -9919,3 +9919,38 @@ handshake round-trip (CPU write -> SMP ack -> CPU next write) to have ares' exac
 latency, which the measured latch/visibility/catch-up changes do not alter.
 
 Default gate unchanged; the per-read logs are debug-only.
+
+## CT handshake round-trip per pass: the extra latency is in write->ack (2026-11-22)
+
+Measured the full round trip per upload pass using timestamped CPU writes and
+CPU reads (new `CR` recording) plus the S-SMP ack (`$1185`) clock from the SPC
+trace: `W -> A` (CPU write to S-SMP ack) and `A -> R` (ack to CPU read), in
+S-CPU clocks.
+
+```
+pass  ours W->A  ours A->R  ours RT | ares W->A  ares A->R  ares RT
+#00      196        2        198   |   185        1        186
+#01       66        0         66   |    69        1         70
+#03       78        0         78   |    58        3         62
+#06       68        2         70   |    70        3         74
+#12       78        0         78   |    66        4         70
+#20       78        0         78   |    70        4         74
+#26       67        2         70   |    70        0         70
+#30       77        1         78   |    70        0         70
+#34       79        3         82   |    57        1         58
+```
+
+* `A -> R` is ~0-4 clocks on both sides - the CPU reads the ack almost
+  immediately after it is latched.
+* `W -> A` is the differing leg: ours 65-79 vs ares 57-70, i.e. the S-SMP takes
+  a few clocks longer to see the CPU's write and issue the ack.
+* Pass lengths differ by exactly one poll period when `W -> A` crosses a poll
+  read boundary, which produces the -14-clock phase steps measured earlier.
+
+So the added latency is in the **S-SMP's ack after the CPU write** (the
+`$1193/$1195` poll's phase versus the write), not in the CPU's read of the ack.
+A correction is therefore an S-SMP phase lead at the handshake; a global lead was
+already measured to trade titles (ceil family), so it would need to be
+conditioned per write, which the current scheduler cannot express.
+
+The CPU-read debug recording is committed (default off). Default gate unchanged.

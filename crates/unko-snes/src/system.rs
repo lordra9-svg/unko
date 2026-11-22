@@ -1133,7 +1133,15 @@ impl Snes {
                                 && (0x2140..=0x2143).contains(&(address & 0xFFFF)) =>
                         {
                             let port = ((address & 0xFFFF) - 0x2140) as u8;
-                            BusResponse::Byte(peer.port_read(port))
+                            let value = peer.port_read(port);
+                            if let Some(apu) = peer.apu.as_mut() {
+                                apu.debug.record_cpu_read(
+                                    self.clock,
+                                    usize::from(port),
+                                    value,
+                                );
+                            }
+                            BusResponse::Byte(value)
                         }
                         BusRequest::Write { address, value }
                             if address & 0x40_FF00 == 0x2100
