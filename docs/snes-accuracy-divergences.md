@@ -7728,3 +7728,42 @@ correct the block-boundary phase for CV4 without perturbing the globally exact
 stream - and every global rule tried changes which titles are exact.
 
 The instrumentation is reverted; the tree is unchanged.
+
+## CV4 stream alignment: the phase difference precedes the first stream event (2026-11-21)
+
+Aligned CV4's complete S-SMP instruction stream against ares (default model,
+`ARES_SPC_TRACE`, 300 frames vs ares' 1,140,702-instruction trace):
+
+```
+ours 1,462,563 instructions   ares 1,140,702 (trace end)
+divergence events: 116
+first: instruction 371,351, ours extra ['FFE9','FFDA','FFDC'] (IPL handshake)
+```
+
+So CV4's stream is *more* faithful than SMAS's at the same point, and its first
+divergence is at instruction 371,351 - the familiar IPL `$FFDA/$FFDC/$FFE9`
+handshake, not anything audio-specific.
+
+Crucially, the DSP write phase for CV4 differs from **the very first writes**
+(the KOFF deltas alternate +6/-22 from the start), i.e. long before instruction
+371,351. The stream divergence therefore cannot be the origin of the block-phase
+difference: the phase is already wrong while the streams still match.
+
+That closes the search for a causal event in CV4 as well: the instruction stream
+matches to 371k instructions yet the DSP write micro-step placement differs from
+the first write. The difference is intrinsic to how our record-time DSP drain
+places writes relative to the S-SMP access (the floor/ceil question), not to any
+specific instruction, read, timer or stream event.
+
+Summary of the four title alignments (default model):
+```
+dkc     audio exact
+fzero   stream identical (0 events / 230 frames), audio exact
+metroid audio exact
+smw     audio exact
+zelda   audio exact
+smas    799 events / 230 frames, audio 50.95%
+cv4     116 events / 1.14M instructions, first 371,351, audio 98.24%
+```
+All stream differences are IPL-handshake/timer-loop resyncs that leave the exact
+titles untouched; the audio failures track DSP write placement, not the stream.
