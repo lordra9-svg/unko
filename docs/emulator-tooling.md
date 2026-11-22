@@ -69,6 +69,24 @@ Binary: `refs/mesence/bin/linux-x64/Release/linux-x64/publish/Mesen`
 
 Requires SDL2 at runtime (provided by `sdl2-compat`).
 
+## Mednafen
+
+Mednafen 1.32.1 is unpacked at `refs/mednafen-1.32.1` (upstream tarball kept
+alongside for provenance). It is a black-box peer, not linked into Unko:
+
+```
+cd refs/mednafen-1.32.1
+./configure --prefix="$PWD/inst"
+make -j"$(nproc)"
+```
+
+Binary: `refs/mednafen-1.32.1/src/mednafen`.
+
+The default `snes` module is a bsnes v0.059 fork (Cx4, DSP-1/2/4, OBC1, SA-1,
+S-DD1, SPC7110, SuperFX, BS-X); `-force_module snes_faust` selects the
+experimental MSU1/SPC-capable core. For headless captures set
+`SDL_VIDEODRIVER=dummy` and `-sound 0` (or use the `qtrecord`/movie output).
+
 ## gopher64
 
 Submodules were initialized. Built with SDL3 + parallel-rdp:
@@ -313,6 +331,7 @@ repository with the reference trees and take ROM paths only at runtime.
 | ares | built | `refs/ares/build_headless/desktop-ui/ares` |
 | Dolphin | built | `build_headless/Binaries/dolphin-emu` |
 | gopher64 | built | `refs/gopher64/target/release/gopher64` |
+| Mednafen | built | `refs/mednafen-1.32.1/src/mednafen` |
 | MesenCE | built | `refs/mesence/bin/linux-x64/Release/linux-x64/publish/Mesen` |
 | RustyNES | built | `refs/rustynes/target/release/` |
 

@@ -6,9 +6,9 @@ commitment: the "gaps" section lists candidates, and the project owner picks
 what to build.
 
 Method: public documentation and release notes, plus the locally checked-out
-reference sources (`refs/ares`, `refs/mesence`, `refs/rustynes`) for
-behaviour that the docs do not state. No GPL code is copied; only
-user-visible features and documented behaviour are recorded.
+reference sources (`refs/ares`, `refs/mesence`, `refs/mednafen-1.32.1`,
+`refs/rustynes`) for behaviour that the docs do not state. No GPL code is
+copied; only user-visible features and documented behaviour are recorded.
 
 Legend: **Yes** / **Partial** / **No**; "—" means not part of that
 emulator's scope.
@@ -177,20 +177,20 @@ The SNES core is `unko-snes` (MIT Rust). Its oracle set is smaller than the
 NES set because ares is both the primary implementation source and the first
 behavioural reference.
 
-| | ares | MesenCE | RustySNES | **Unko** |
-|---|---|---|---|---|
-| Role | implementation source | black-box compatibility oracle | Apache-2.0 oracle/reference | isolated core |
-| Language / license | C++ / ISC | C++ / GPL-3.0 | Rust / Apache-2.0 | Rust / MIT |
-| Accuracy model | cycle-level, dot PPU | cycle-level, dot PPU | claims Mesen2/ares/higan bar; still early | target: cycle-level |
-| 65816 | Yes | Yes | Yes | planned |
-| SPC700 + S-DSP | Yes | Yes | Yes | planned |
-| PPU | dot/scanline, hires/interlace | dot/scanline, hires/interlace | Yes | planned |
-| Coprocessors | SuperFX, SA-1, SDD1, SPC7110, CX4, DSP1-4, OBC1, ST018 | broad | claims DSP-1/2/4, SuperFX, SA-1, CX4, S-DD1, SPC7110 | later |
-| Enhancement | MSU1, Satellaview, Sufami Turbo, BS-X | MSU1, BS-X | partial | later |
-| Save states / rewind | Yes / Yes | Yes / Yes | Yes | planned |
-| Netplay | No | Yes | — | GGRS (shell) |
-| Platforms | Win/mac/Linux | Win/mac/Linux, libretro | native + WebAssembly | Linux/Win/mac/iOS/Android |
-| Local source | `refs/ares` | `refs/mesence` | not checked out | — |
+| | ares | MesenCE | Mednafen | RustySNES | **Unko** |
+|---|---|---|---|---|---|
+| Role | implementation source | black-box compatibility oracle | black-box peer (primary `snes` + experimental `snes_faust`) | Apache-2.0 oracle/reference | isolated core |
+| Language / license | C++ / ISC | C++ / GPL-3.0 | C++ / GPL-2.0 | Rust / Apache-2.0 | Rust / MIT |
+| Accuracy model | cycle-level, dot PPU | cycle-level, dot PPU | bsnes v0.059 fork with scheduler/timing changes; Faust core is approximate | claims Mesen2/ares/higan bar; still early | target: cycle-level |
+| 65816 | Yes | Yes | Yes | Yes | planned |
+| SPC700 + S-DSP | Yes | Yes | Yes (SPC playback only in `snes_faust`) | Yes | planned |
+| PPU | dot/scanline, hires/interlace | dot/scanline, hires/interlace | Yes, hires and interlace | Yes | planned |
+| Coprocessors | SuperFX, SA-1, SDD1, SPC7110, CX4, DSP1-4, OBC1, ST018 | broad | CX4, DSP1/2/4, OBC1, SA-1, S-DD1, SPC7110, SuperFX | claims DSP-1/2/4, SuperFX, SA-1, CX4, S-DD1, SPC7110 | later |
+| Enhancement | MSU1, Satellaview, Sufami Turbo, BS-X | MSU1, BS-X | BS-X; MSU1 in `snes_faust` | partial | later |
+| Save states / rewind | Yes / Yes | Yes / Yes | Yes / Yes (`snes` state caveat) | Yes | planned |
+| Netplay | No | Yes | Yes | — | GGRS (shell) |
+| Platforms | Win/mac/Linux | Win/mac/Linux, libretro | Win/Linux/mac/BSD | native + WebAssembly | Linux/Win/mac/iOS/Android |
+| Local source | `refs/ares` | `refs/mesence` | `refs/mednafen-1.32.1` | not checked out | — |
 
 ### Notes
 
@@ -199,6 +199,18 @@ behavioural reference.
   with attribution.
 - **MesenCE** is the broad compatibility oracle. It is GPL-3.0: run it
   black-box, do not read or translate its source.
+- **Mednafen** (GPL-2.0) is a multi-system peer. Its primary SNES module
+  (`snes`) is a fork of bsnes v0.059 with a Cx4 Op10 fix, scheduler/timing
+  changes and S-SMP/SuperFX optimizations; it implements the Cx4, DSP-1/2/4,
+  OBC1, SA-1, S-DD1, SPC7110, SuperFX and BS-X. The experimental `snes_faust`
+  module is approximate but adds MSU1, CX4, DSP-1/2 (HLE), S-DD1, SA-1,
+  SuperFX and SPC/SNSF playback. Save states, rewind and netplay exist, though
+  the `snes` module warns states can break some games (e.g. Tales of
+  Phantasia). Use it as a black-box differential/feature peer only; it is GPL,
+  so do not read or translate its source into this MIT project. Its NES/FDS
+  core likewise makes it an additional NES/FDS peer. Source: local
+  `refs/mednafen-1.32.1` (`Documentation/snes.html`,
+  `Documentation/snes_faust.html`, `src/snes`, `src/snes_faust`).
 - **RustySNES** (<https://github.com/doublegate/RustySNES>) is a pure-Rust
   Apache-2.0 emulator targeting the Mesen2/ares/higan accuracy bar, including
   coprocessor LLE cores and WebAssembly support. It joins the oracle set for
@@ -214,8 +226,8 @@ Public SNES documentation used by the implementation:
 
 ## Licensing and provenance
 
-ares is ISC; FCEUX, Nestopia UE, Nintendulator, puNES are GPL-2.0; MesenCE
-and RustyNES are GPL-3.0; RustySNES is Apache-2.0. None of their code, assets
+ares is ISC; FCEUX, Nestopia UE, Nintendulator, puNES and Mednafen are
+GPL-2.0; MesenCE and RustyNES are GPL-3.0; RustySNES is Apache-2.0. None of their code, assets
 or databases may be ported into this MIT project without a provenance review.
 The observations above are limited to documented, user-visible features and
 behaviour. Palette tables are factual colour data, but any imported set will
@@ -225,6 +237,8 @@ GPL implementation unless the license permits it.
 ## Sources
 
 - ares: <https://ares-emu.net>, local `refs/ares` (`ares/fc`, `desktop-ui`).
+- Mednafen: <https://mednafen.github.io/>, local `refs/mednafen-1.32.1`
+  (`Documentation/snes.html`, `Documentation/snes_faust.html`).
 - MesenCE: <https://docs.libretro.com/library/mesen2/>,
   <https://emulation.gametechwiki.com/index.php/Mesen>,
   local `refs/mesence`.
