@@ -10339,3 +10339,28 @@ earlier, but that is precisely the per-write ordering the architecture cannot
 express (and the variant experiments all regressed).
 
 Default gate unchanged; no code change this turn.
+
+## The "latch between read halves" rule is already the live behaviour (2026-11-22)
+
+Instrumented `Apu::cpu_write` to count S-CPU `$2140-$2143` writes that arrive
+while an S-SMP `$F4-$F7` read is deferred (between its two halves). CT, 200
+frames: **9,415 such mid-read writes**. For example:
+
+```
+WM 932540 0 17    (value 0x17 arrives between the halves)
+WM 932928 0 19
+WM 933523 0 24
+```
+
+The plan/replay drain already applies the write immediately to `apu_ports`, and
+`resume_deferred_read` builds a fresh `ApuBus` whose `read` returns the live
+`apu_ports` - so the pending read's second half **already observes** a write that
+arrived between the halves. The requested rule is the current behaviour.
+
+CT's first lost poll is not a between-halves case: the v=0x18 write lands
+*before* the pass starts (the pass's first read is at 932745, the write earlier),
+so there is no second half for it to be latched into. That is why the rule cannot
+change the v=0x18 loss.
+
+The `SNES_WRITE_MIDREAD_LOG` instrumentation is debug-only (default off); the
+default gate is unchanged.

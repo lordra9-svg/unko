@@ -714,6 +714,21 @@ impl Apu {
 
     /// S-CPU write to `$2140-$2143`.
     pub fn cpu_write(&mut self, port: usize, value: u8) {
+        if std::env::var_os("SNES_WRITE_MIDREAD_LOG").is_some() {
+            let mid = match self.spc.pending {
+                Some(crate::spc700::Pending::DirectRead { address, .. }) => {
+                    let effective = (u16::from(self.spc.flags.page) << 8) | u16::from(address);
+                    (0x00F4..=0x00F7).contains(&effective)
+                }
+                Some(crate::spc700::Pending::AbsoluteRead { address, .. }) => {
+                    (0x00F4..=0x00F7).contains(&address)
+                }
+                None => false,
+            };
+            if mid {
+                eprintln!("WM {} {} {:02X}", self.smp_clock, port, value);
+            }
+        }
         self.apu_ports[port & 3] = value;
     }
 
