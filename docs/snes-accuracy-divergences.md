@@ -10507,3 +10507,34 @@ itself, which the earlier pending-poll conditioning showed to be effectively
 always-on.
 
 Commit window flag (default off); default gate unchanged.
+
+## Why LATCH_TIME regresses zelda/F-Zero: it delays every DSP write by ~4 samples (2026-11-22)
+
+Diffed zelda's DSP write stream with and without `SNES_CPU_LATCH_TIME` (200
+frames):
+
+```
+default writes: 9955     LATCH_TIME writes: 9952
+register/value order divergence: None
+sample differences: +4 for 9275 writes, +3/+5 for ~660, +1/+2 for 15
+```
+
+The driver behaviour is identical; the timestamped latch **delays each DSP write
+by about 4 samples** uniformly. That delay is the distance the S-SMP lags the
+S-CPU at the write: the queue exposes the value only when the S-SMP clock reaches
+the CPU's write clock, while the default (exact-credit) already holds the S-SMP at
+the CPU clock so the latch is immediate.
+
+The audio is not a uniform shift (best offset still ~63.7%), because already-
+sounding voices keep their phase while note events move by 4 samples.
+
+ares' model releases the latch *after* `synchronize(smp)` brings the S-SMP to the
+CPU clock - i.e. immediate in our exact-credit default. So delaying the latch is
+not the hardware rule; it happens to align dkc/smas/MMX2 by adding a ~4-sample
+delay there, and breaks zelda/F-Zero where the default was already right.
+
+This explains the mutually exclusive split and why no pending-state or window
+conditioning can separate them: the flag is a delay, and titles differ in whether
+they need the delay.
+
+Default gate unchanged; flags default off.
