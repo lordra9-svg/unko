@@ -212,6 +212,25 @@ impl DspCoroutine {
     }
 }
 
+/// Drive `cpu_step` (one S-CPU instruction) until the S-CPU clock reaches
+/// `target`, then return that clock.
+///
+/// This is the S-CPU side of the mutual pull: ares' `SMP::step` calls
+/// `Thread::synchronize(cpu)`, so an S-SMP access can require the S-CPU to run
+/// forward to the S-SMP clock. `cpu_step` must return the new S-CPU clock; a
+/// non-advancing step (halted CPU) stops the pull instead of spinning.
+pub fn pull_cpu(cpu_clock: u128, target: u128, mut cpu_step: impl FnMut() -> u128) -> u128 {
+    let mut clock = cpu_clock;
+    while clock < target {
+        let next = cpu_step();
+        if next <= clock {
+            break;
+        }
+        clock = next;
+    }
+    clock
+}
+
 /// Drive `smp_step` until its clock reaches `target`, then return that clock.
 ///
 /// `smp_step` executes one S-SMP unit/instruction and returns the new S-SMP
@@ -252,6 +271,26 @@ mod mutual_tests {
         assert_eq!(order[0], ("dsp", 24));
         assert_eq!(order[1], ("smp", 0));
         assert_eq!(order[2], ("smp", 4));
+    }
+
+    #[test]
+    fn pull_cpu_runs_until_the_smp_clock() {
+        let mut cpu_clock = 0u128;
+        let mut step_clock = 0u128;
+        let mut order = Vec::new();
+        cpu_clock = pull_cpu(cpu_clock, 20, || {
+            order.push(step_clock);
+            step_clock += 6;
+            step_clock
+        });
+        assert_eq!(cpu_clock, 24);
+        assert_eq!(order, vec![0, 6, 12, 18]);
+    }
+
+    #[test]
+    fn pull_cpu_stops_on_a_halted_cpu() {
+        let clock = pull_cpu(10, 100, || 10);
+        assert_eq!(clock, 10);
     }
 
     #[test]
