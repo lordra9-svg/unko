@@ -61,6 +61,14 @@ pub fn smp_write_pull() -> bool {
     *PULL.get_or_init(|| std::env::var_os("SNES_SMP_WRITE_PULL").is_some())
 }
 
+/// `SNES_DSP_INSTR_SYNC`: synchronize the S-DSP to the S-SMP only at S-SMP
+/// instruction boundaries (ares `SMP::step` calls `Thread::synchronize(dsp)`
+/// once per instruction) instead of at every S-SMP access.
+pub fn dsp_instr_sync() -> bool {
+    static S: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *S.get_or_init(|| std::env::var_os("SNES_DSP_INSTR_SYNC").is_some())
+}
+
 /// `SNES_DSP_LAG`: hold the S-DSP `N` micro-steps behind the S-SMP, i.e. derive
 /// the catch-up target as `smp_clock - N*DSP_TICK` (diagnostic for the DSP
 /// register-write sample phase).
@@ -784,6 +792,15 @@ impl Apu {
             };
             self.spc.step(&mut recorder);
         }
+        if dsp_instr_sync() {
+            drain_dsp_to(
+                &mut self.ram[..],
+                &mut self.dsp,
+                &mut self.dsp_clock,
+                &mut self.samples,
+                self.smp_clock,
+            );
+        }
         let pending_address = match self.spc.pending {
             Some(crate::spc700::Pending::DirectRead { address, .. }) => {
                 Some((u16::from(self.spc.flags.page) << 8) | u16::from(address))
@@ -979,6 +996,15 @@ impl Apu {
         SPC_CORO.with(|slot| *slot.borrow_mut() = Some(coroutine));
         if let Some(core) = returned {
             self.spc = core;
+        }
+        if dsp_instr_sync() {
+            drain_dsp_to(
+                &mut self.ram[..],
+                &mut self.dsp,
+                &mut self.dsp_clock,
+                &mut self.samples,
+                self.smp_clock,
+            );
         }
         let pending_address = match self.spc.pending {
             Some(crate::spc700::Pending::DirectRead { address, .. }) => {
@@ -1417,7 +1443,11 @@ impl SpcBus for ApuBus<'_> {
     }
 
     fn step_clock(&mut self, clocks: u32) {
-        self.step_dsp_clock(clocks);
+        if dsp_instr_sync() {
+            self.advance_smp_clock(clocks);
+        } else {
+            self.step_dsp_clock(clocks);
+        }
     }
 
     fn wait_cycles(&mut self, address: Option<u16>) -> u32 {
@@ -1601,7 +1631,7 @@ impl SpcBus for RecordBus<'_, '_> {
         // cooperative thread inside `SMP::wait`), which keeps every DSP register
         // access ordered exactly one micro-step after its wait, as on hardware.
         // `SNES_DSP_LATE` defers the drain to replay instead.
-        if dsp_late() {
+        if dsp_late() || dsp_instr_sync() {
             self.inner.advance_smp_clock(clocks);
         } else {
             self.inner.step_clock(clocks);

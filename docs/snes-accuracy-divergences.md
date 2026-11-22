@@ -9082,3 +9082,44 @@ interleaving; a per-write boundary rule cannot help because the default already
 has the right write placement. The remaining fix is the symmetric scheduler at
 the boot handshake, and every expressible stop/pull/phase/gating variant has now
 been measured on the 7-title gate.
+
+## `SNES_DSP_INSTR_SYNC`: SMAS becomes bit-exact (2026-11-21)
+
+ares' `SMP::step` synchronizes the DSP once per S-SMP *instruction*
+(`Thread::synchronize(dsp)` in timing.cpp); our default drains the DSP at every
+S-SMP *access*. New default-off `SNES_DSP_INSTR_SYNC` advances the SMP clock
+during recording and drains the DSP once at the instruction boundary.
+
+With the default CPU scheduling it makes SMAS bit-exact:
+
+```
+SNES_DSP_INSTR_SYNC=1, 600 frames
+  smas   0 differing / 639656  (100.0000%)
+  dkc    267671 differing (58.1539%)
+  zelda  103119 differing (83.8790%)
+  fzero   76721 differing (88.0059%)
+  cv4     12225 differing (98.0888%)
+  ct     416109 differing (34.9480%)
+  mmx2   196878 differing (69.2213%)
+```
+
+SMAS is 100% under every CPU-scheduling combination tried with
+`SNES_DSP_INSTR_SYNC`, except the instruction-synced CPU driver
+(`INSTR_SYNC+INSTR_LEAD+DSP_INSTR_SYNC` gives smas 42.0832%), so SMAS needs
+per-instruction DSP sync with the default exact-credit CPU scheduling.
+
+`SNES_DSP_LAG` has no effect under instruction sync (the per-instruction drain
+crosses the same sample boundaries), and combining with
+`PORT_LEAD+WRITE_PULL` gives smas 100% but mmx2 91.3700%.
+
+So there is now a second, independent split axis:
+
+| axis | titles wanting it |
+|---|---|
+| CPU exact-credit (default) | dkc, zelda, fzero |
+| CPU port-lead + write-pull | mmx2 (100%), cv4 via access-stop |
+| DSP per-access sync | dkc, zelda, fzero |
+| DSP per-instruction sync | smas (100%) |
+
+The default gate is unchanged; `SNES_DSP_INSTR_SYNC` stays default off, and SMAS
+is now reachable bit-exact with `SNES_DSP_INSTR_SYNC=1`.
