@@ -7892,3 +7892,27 @@ with the earlier finding that the stream is identical for the exact titles and
 that no global rounding rule (threshold sweep) collapses it.
 
 Reverted; step 1 (`SNES_DSP_LATE`) remains, default-off.
+
+## ares' logged S-SMP clock is unusable for the write-phase comparison (2026-11-21)
+
+Added the raw `smp.clock()` (fixed point) to ares' `ARES_DSP_WRITES` and compared
+the S-SMP clock at each `$F3` write with ours (raw / each side's own scalar):
+
+```
+first CV4 write: ares smp clock 21,266 cycles, its own dspTicks 3,557,662
+                 ours smp clock 7,115,366 cycles
+```
+
+ares' reported S-SMP clock is inconsistent with its own DSP tick count by ~167x
+(expected ~7.1M cycles for 111k samples). The same anomaly appeared earlier in
+`ARES_SPC_TRACE` (smp clock 1,784 / 8,876 while dspTicks were millions).
+
+So the ares build's `Thread::clock()` for the S-SMP is not a usable time axis in
+this checkout (it accumulates far too slowly), and the requested "S-SMP clock at
+each write" comparison cannot be made against ares as-is. The DSP tick axis
+(which is consistent) remains the only cross-emulator clock axis, and it already
+shows the two-valued delta.
+
+To continue this line, the ares reference would need its thread-clock logging
+fixed/validated against `dspTicks` first; until then the alternation cannot be
+compared on the SMP-clock axis.
