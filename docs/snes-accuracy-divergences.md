@@ -8452,3 +8452,31 @@ This closes the "restrict the overshoot to ares' sync points" idea. Together wit
 the uniform ceiling and the exact-credit default, every placement of the
 instruction-granularity overshoot (never / every access / ports only) has now
 been measured, and none satisfies the nine titles.
+
+## SMAS first divergence is not an envelope/ADSR difference (2026-11-21)
+
+Characterised SMAS's first audio difference (DSP sample 224,916, default model):
+
+```
+first differing sample: 224,916 (left); run length 856
+before it: both silent
+ares:  ... 0 0 5 5 15 15 30 30   (sound onset)
+ours:  ... 0 0 0 0  0  0  4  4   (onset later)
+best local alignment: offset -4 but only 39.7% of samples match
+differing samples: left 156,891 / right 156,891 (equal)
+```
+
+Not a pure time shift (best alignment far from 100%), and equal on both channels
+(so not a per-channel/echo accumulation bug).
+
+Then audited the ADSR/envelope path against ares `envelope.cpp`:
+`CounterRate`/`CounterOffset` tables, `counterTick`/`counterPoll`,
+`envelopeRun` (release -8, ADSR 99% decay/attack formulas, GAIN modes 0-7,
+sustain-level check, `(u32)_envelope >= 0x600` mode-7 threshold, the `>0x7ff`
+clamp and Attack→Decay transition) - all line-for-line equivalent.
+
+So the objective's envelope hypothesis is excluded. The SMAS difference lies
+elsewhere in the DSP pipeline (BRR decode / Gaussian / pitch / KON timing) or in
+the voice's key-on instant. The next step requires a per-voice DSP state dump at
+sample 224,916 (instrument the local ares `DSP::sample`) to compare voice
+envelope/envx/pitch/BRR state against ours.
