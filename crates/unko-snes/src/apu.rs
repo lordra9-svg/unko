@@ -787,6 +787,12 @@ impl Apu {
             }
             None => false,
         };
+        if std::env::var_os("SNES_WRITE_OFFSET_LOG").is_some() {
+            if let Some(cpu) = self.cpu_fixed_clock() {
+                let offset = cpu as i128 - self.smp_clock as i128;
+                eprintln!("WO {} {} {:02X}", offset / SMP_SCALAR as i128, port, value);
+            }
+        }
         if cpu_latch_time() && (!cpu_latch_cond() || mid_poll) {
             let time = self.cpu_fixed_clock().unwrap_or(self.smp_clock);
             self.cpu_write_queue.push_back((time, port & 3, value));

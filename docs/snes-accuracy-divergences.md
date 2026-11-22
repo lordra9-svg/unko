@@ -10538,3 +10538,32 @@ conditioning can separate them: the flag is a delay, and titles differ in whethe
 they need the delay.
 
 Default gate unchanged; flags default off.
+
+## SMP-vs-CPU offset at port writes: no discriminator between the title groups (2026-11-22)
+
+Instrumented each S-CPU `$2140-$2143` write with the clock offset
+`(cpu_fixed - smp_clock) / SMP_SCALAR` (S-SMP clocks the S-CPU is ahead), 200
+frames:
+
+```
+dkc   {0: 29209, -6: 8925, -4: 8186, -5: 7804, -3: 4794, -1: 3804, -2: 2144}
+smas  {-1: 12858, -2: 12351, -3: 11053, -4: 11026, 0: 7914, -5: 5567}
+zelda {-1: 22971, -2: 22002, -3: 19802, -4: 19782, 0: 13966, -5: 9983}
+fzero {-1: 21089, -2: 20168, -3: 18157, -4: 18150, 0: 12735, -5: 9126}
+```
+
+The offset at a write is only **-6..0 S-SMP clocks** for every title, and the
+distributions overlap almost completely (dkc has more zeros, but zelda/fzero also
+have 14k/12.7k zero-offset writes). There is no threshold that separates the
+titles that need the ~4-sample latch delay (dkc/smas/MMX2) from those that
+regress (zelda/F-Zero).
+
+The measured ~4-sample (256 SMP-clock) write shift of `LATCH_TIME` also cannot
+come from this offset: the SMP is at most 6 clocks behind at the write, so the
+shift must originate in the queue's drain granularity (the write is applied at a
+later plan unit), not in the CPU/SMP clock distance.
+
+So the SMP-vs-CPU offset is not a usable conditioning signal. The flag's benefit
+is a drain-granularity delay, not a clock-distance correction.
+
+Default gate unchanged; instrumentation default off.
