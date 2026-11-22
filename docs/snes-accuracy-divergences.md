@@ -8159,3 +8159,29 @@ address for the two `CMP X,dp` operands inside the `$049F` loop, and compare the
 *values read* at the extra iteration. Since `X = $F7 = 0` and the writes match,
 the remaining candidate is the direct-page RAM content read at that instant
 (possibly a D change or a write to D+6/7 that the absolute filter missed).
+
+## Direct-page compare values are identical; the "extra iteration" needs re-checking (2026-11-21)
+
+Logged every direct-page `D+6`/`D+7` read (any page, low byte 6/7) with value and
+PC in both emulators inside the write-32 -> write-33 window:
+
+```
+ares 271 reads, ours 269
+first differing (address, value): NONE
+example: ares [3558689, 0007, 00, pc 04AE]  ours [3558711, 0007, 00, pc 04AC]
+```
+
+Addresses and **values match for every compared read**; only the logged PC
+differs (ours records the instruction-start PC `04AC`, ares records `r.pc` which
+has advanced to `04AE`). So the branch inputs (`$F7 = 0`, dp values) are identical.
+
+That makes the earlier "one extra `$049F` iteration" attribution suspect: it came
+from aligning windows whose edges were taken from each side's own write clocks
+(which already differ by the +22-tick read offset). With identical inputs and
+values, the 56-clock difference needs to be re-examined as possibly a
+window/clock-accounting artefact rather than a genuinely different branch.
+
+Next: align the two streams by cumulative instruction index from the start of the
+run (not by write-clock windows) and compare clock sums per instruction; that
+distinguishes a real control-flow difference from a wait-state/clock-accounting
+difference without window-edge ambiguity.
