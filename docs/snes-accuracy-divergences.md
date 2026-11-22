@@ -9876,3 +9876,46 @@ the n-th read clock, which will show exactly which pass gains or loses one
 `$1193/$1195` iteration.
 
 Default gate unchanged.
+
+## CT positional per-pass comparison: ours polls one fewer time in most passes (2026-11-22)
+
+Segmented the new per-read logs into upload passes (consecutive reads of the same
+value) and compared positionally. Representative passes (SMP clocks):
+
+```
+pass v   ours n  ours t0   ares n  ares t0   dn   dt0
+#00 16     3    931817      3    931777    0    +40
+#01 00    21    932091     21    932051    0    +40
+#02 17     4    932541      4    932501    0    +40
+#03 18     5    932745      6    932705   -1    +40
+#05 20     6    933051      5    933025   +1    +26
+#08 23     5    933417      6    933377   -1    +40
+#11 26     5    933741      6    933743   -1     -2
+#17 32     5    934459      6    934475   -1    -16
+#20 35     5    934783      6    934841   -1    -58
+#29 44     5    935825      6    935939   -1   -114
+#38 99     6    937085      1    937199   +5   -114
+```
+
+Findings:
+
+* Every pass start is offset from ares by a quantised amount; `dt0` starts at
+  +40 clocks and drifts in steps of ~14 clocks (one `$1193/$1195` read spacing).
+* The drift is exactly explained by the **pass length difference**: each pass in
+  which ours polls one fewer time (`dn = -1`) moves `dt0` by -14 clocks. Over the
+  burst that accumulates from +40 to -128 clocks, and the same mechanism produces
+  the +230-clock KON offset later.
+* The pass length is `ceil((value_change_time - pass_start)/poll_period)`, so the
+  difference is driven by the **S-CPU write time relative to the poll phase**
+  (ours "+196..+426 master clocks" per byte), not by the poll loop itself.
+
+So CT's divergence is now fully characterised positionally: the S-CPU's next-byte
+write lands a fraction of a poll period later, which removes one poll iteration
+per affected pass and shifts the phase by one poll period, accumulating.
+
+A per-cycle correction cannot be computed from the S-SMP side alone (the poll
+count is determined by the CPU write instant); matching ares requires the
+handshake round-trip (CPU write -> SMP ack -> CPU next write) to have ares' exact
+latency, which the measured latch/visibility/catch-up changes do not alter.
+
+Default gate unchanged; the per-read logs are debug-only.
