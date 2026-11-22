@@ -1690,12 +1690,14 @@ mod clock_position_tests {
                 port_write: None,
                 deferred: false,
                 split: false,
+                dsp_write: None,
             },
             PlanStep {
                 clocks: 6,
                 port_write: None,
                 deferred: false,
                 split: false,
+                dsp_write: None,
             },
         ];
         apu.smp_clock = 10 * SMP_SCALAR;
