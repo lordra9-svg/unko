@@ -7998,3 +7998,27 @@ is already measured on the access-granularity driver: "DSP catches up" (default,
 5 titles exact), "DSP leads by a tick" (DKC 72.3%), "latch at access instant"
 (CV4 89.14%). Per-clock granularity alone does not change those outcomes; it only
 allows the driver to *observe* each clock.
+
+## ares S-SMP clock: wrap-correct logging shows exact agreement, then a reset (2026-11-21)
+
+Fixed the ares write-log clock to record a wrap-correct *relative* value
+(`smp.clock() - base`, u64) instead of the overflowing absolute clock. Comparing
+relative SMP cycles at each `$F3` write:
+
+```
+first reg/value mismatch: none
+idx 0..32:  ares rel 0, 54, 104, 154, 204, 254 ...   ours identical   (delta 0)
+idx 33:     ares jumps by ~3,828,217 SMP cycles (ours advances ~64)
+```
+
+So our S-SMP clock at writes agrees with ares **exactly through the first audio
+block** (write 33 is precisely where the KOFF delta first flips), and then the
+ares value jumps by ~2^64 worth: its `Thread::_clock` is **not monotonic** in this
+build (it is reset/pulled by the scheduler), so neither absolute nor relative
+absolute-time comparison is valid beyond that point.
+
+This is a genuine, if narrow, positive: for the first block the S-SMP write clock
+is bit-identical to ares, and the divergence begins exactly at the block
+boundary. It also means the remaining comparison cannot be made with the current
+ares clock; the DSP-tick axis (monotonic and consistent) remains the only usable
+one, and it already localises the difference to the block boundary.
