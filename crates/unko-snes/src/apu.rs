@@ -284,11 +284,43 @@ pub fn instr_sync() -> bool {
     *INSTR.get_or_init(|| symmetric() || std::env::var_os("SNES_INSTR_SYNC").is_some())
 }
 
+/// `SNES_PORT_READ_CLOCK`: compare the pending `$F4-$F7` read's **sample**
+/// clock (the position *after* the first half access, i.e. `plan_sub + 1`)
+/// against the S-CPU clock instead of the position before it. ares `SMP::read`
+/// performs the first `wait()` half, then calls `readIO`, whose
+/// `synchronize(cpu)` compares the *post-step* S-SMP clock, so the S-CPU is
+/// pulled forward whenever the read clock is at or past the S-CPU clock.
+pub fn port_read_clock() -> bool {
+    static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *P.get_or_init(|| std::env::var_os("SNES_PORT_READ_CLOCK").is_some())
+}
+
 /// `SNES_NO_PARK`: never park an `$F4-$F7` read (resolve it at the S-SMP's
 /// position instead of waiting for the S-CPU).
 pub fn no_park() -> bool {
     static NO: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *NO.get_or_init(|| std::env::var_os("SNES_NO_PARK").is_some())
+}
+
+/// `SNES_SMP_SUSPEND_STOP`: when an S-CPU synchronization must stop the S-SMP,
+/// stop at the *first* S-SMP suspension point at or past the S-CPU clock. The
+/// suspension points are access ends and, for a split `$F4-$F7` read, the read
+/// clock between the two half accesses (ares `SMP::read` -> `readIO` ->
+/// `synchronize(cpu)`). `SNES_SMP_ACCESS_STOP` alone always runs to the access
+/// end, overshooting a port read by the second half.
+pub fn smp_suspend_stop() -> bool {
+    static S: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *S.get_or_init(|| std::env::var_os("SNES_SMP_SUSPEND_STOP").is_some())
+}
+
+/// `SNES_WRITE_ACCESS_STOP`: before an S-CPU `$2140-$2143` write latches, run
+/// the S-SMP to the first suspension point at or past the S-CPU clock (ares
+/// `SMP::portWrite` is reached only after `CPU::step` -> `synchronize(smp)`).
+/// Unlike `SNES_PORT_LEAD` this stops at the crossing access, not the end of
+/// the S-SMP instruction.
+pub fn write_access_stop() -> bool {
+    static W: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *W.get_or_init(|| std::env::var_os("SNES_WRITE_ACCESS_STOP").is_some())
 }
 
 /// `SNES_DSP_CPU_PHASE`: derive the S-DSP catch-up target from the S-CPU master
@@ -884,7 +916,14 @@ impl Apu {
         // clock early and change which instruction's writes the read sees.
         let cpu_scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
         let cpu_fixed = u128::from(self.cpu_master_clock) * cpu_scalar;
-        self.smp_clock_at_position() > cpu_fixed
+        // `SNES_PORT_READ_CLOCK`: `readIO` runs after the first half access, so
+        // the sampled clock is one S-SMP clock past the current plan position.
+        let position = if port_read_clock() {
+            self.smp_clock_at_position() + SMP_SCALAR
+        } else {
+            self.smp_clock_at_position()
+        };
+        position > cpu_fixed
     }
 
     /// Fixed-point S-CPU clock for the current advance, if known.
@@ -1710,6 +1749,11 @@ impl Apu {
             // the S-CPU catches up; the system runs CPU instructions in the
             // meantime (the S-SMP clock is frozen, so this terminates).
             if self.plan_sub + 1 == resume_at && self.port_read_waiting() {
+                if port_read_clock() {
+                    // The read samples after the first half access; the S-CPU
+                    // must reach that clock (ares `readIO` -> `synchronize(cpu)`).
+                    self.park_at = Some(self.smp_clock_at_position() + SMP_SCALAR);
+                }
                 return 0;
             }
         }
@@ -1905,6 +1949,52 @@ impl Apu {
                     return true;
                 }
                 self.apu_credit -= den;
+            }
+        }
+        false
+    }
+
+    /// Extend the S-SMP to the first suspension point at or past the S-CPU
+    /// clock, starting a new access if the S-SMP is at a step boundary.
+    ///
+    /// This is ares' `Thread::synchronize(smp)` cadence as seen from an S-CPU
+    /// bus access: `CPU::step` runs the S-SMP until its clock reaches the S-CPU
+    /// clock, and the S-SMP only suspends at access ends (and, for a split
+    /// `$F4-$F7` access, at the read clock). Used by `SNES_WRITE_ACCESS_STOP`
+    /// before a `$2140-$2143` write latches so the write commits after the same
+    /// S-SMP accesses ares runs. Returns `true` if the S-SMP parked.
+    fn finish_access_to_cpu(&mut self, clock: u64, rate: u64) -> bool {
+        let den = rate as i64;
+        self.set_master_clock(clock, rate);
+        let Some(cpu) = self.cpu_fixed_clock() else {
+            return false;
+        };
+        let mut guard = 0u32;
+        loop {
+            if self.plan_pos >= self.plan.len() {
+                self.record_instruction();
+            }
+            let Some(step) = self.plan.get(self.plan_pos).copied() else {
+                break;
+            };
+            if self.smp_clock_at_position() >= cpu {
+                break;
+            }
+            let clocks = u32::from(step.clocks);
+            let next = self.smp_clock_at_position() + SMP_SCALAR;
+            let end = self.plan_sub + 1 == clocks;
+            let half = step.split && self.plan_sub + 1 == clocks / 2;
+            let stop_after = next >= cpu && end;
+            if self.drain_unit() == 0 {
+                return true;
+            }
+            self.apu_credit -= den;
+            if stop_after || (smp_suspend_stop() && next >= cpu && half) {
+                break;
+            }
+            guard += 1;
+            if guard > 4096 {
+                break;
             }
         }
         false
@@ -2786,6 +2876,16 @@ pub enum ApuInput {
         /// Master clock rate paired with `clock`.
         rate: u64,
     },
+    /// Run the S-SMP to the first suspension point at or past `clock`
+    /// (`SNES_WRITE_ACCESS_STOP`).
+    FinishAccess {
+        /// The APU, owned by the scheduler between advances.
+        apu: Box<Apu>,
+        /// S-CPU master clock at the port write.
+        clock: u64,
+        /// Master clock rate paired with `clock`.
+        rate: u64,
+    },
 }
 
 /// Output from the S-SMP actor coroutine.
@@ -2841,6 +2941,18 @@ pub fn new_apu_coroutine() -> ApuCoroutine {
                 rate,
             } => {
                 if apu.finish_instruction(clock, rate) {
+                    let target = apu.park_master_clock(rate);
+                    ApuOutput::Parked { apu, target }
+                } else {
+                    ApuOutput::Stopped(apu)
+                }
+            }
+            ApuInput::FinishAccess {
+                mut apu,
+                clock,
+                rate,
+            } => {
+                if apu.finish_access_to_cpu(clock, rate) {
                     let target = apu.park_master_clock(rate);
                     ApuOutput::Parked { apu, target }
                 } else {

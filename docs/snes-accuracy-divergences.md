@@ -10567,3 +10567,69 @@ So the SMP-vs-CPU offset is not a usable conditioning signal. The flag's benefit
 is a drain-granularity delay, not a clock-distance correction.
 
 Default gate unchanged; instrumentation default off.
+
+## CV4 trace: the poll race is a one-iteration (4-clock) phase, not a stop rule (2026-11-22)
+
+Compared the monotonic `aresSmpMono` in `ARES_SPC_TRACE` against our cumulative
+S-SMP clock for CV4 (200 frames, first 931k instructions). The two streams are
+identical - same PC, same cumulative clock - until instruction 371,351:
+
+```
+ares  371349  pc=FFE9  smp=2767974
+ares  371350  pc=FFDA  smp=2767982   (CMP Y,$F4 -> Z=1, i.e. read the old 0x68)
+ares  371351  pc=FFDC  smp=2767988
+ours  371351  pc=FFE9  smp=2767996   (CMP saw the new 0x00 -> branch taken)
+```
+
+The CPU logs show both emulators write `$2140=00` at master clock 28,991,500
+(SMP 2,767,987). ares' S-SMP performs the read at SMP 2,767,988 *during* the
+`CPU::writeAPU -> synchronize(smp)` call, before the port latch - so it sees the
+old value; ours resolves the read in the following access, after the latch. The
+same pattern fixes CV4 under `SNES_SMP_ACCESS_STOP` (ceil to the crossing access)
+but moves the first divergence to instruction 265,571, where our S-SMP is now
+4 clocks *behind* and reads the old value where ares reads the new one.
+
+So floor and ceil are each off by exactly one 4-clock poll iteration, in opposite
+directions, at different handshakes: the stop point ares lands on is a position of
+the mutual S-SMP/S-CPU scheduler, not an access-local rule of the plan drain.
+
+## Stop-at-read-clock and stop-at-suspension: inert (2026-11-22)
+
+Two candidate refinements of the access-stop, both default off:
+
+* `SNES_PORT_READ_CLOCK` - compare the pending `$F4-$F7` read's sample clock
+  (`plan_sub + 1`) instead of the position before it against the S-CPU clock, and
+  park to that clock.
+* `SNES_SMP_SUSPEND_STOP` - when finishing a crossing access, stop at the split
+  read's read clock (ares `SMP::read -> readIO -> synchronize(cpu)`) instead of
+  the full access end.
+
+Neither changes a single byte of the 7-title gate or the CV4 S-SMP trace:
+`SNES_SMP_ACCESS_STOP+SNES_PORT_READ_CLOCK` and
+`ACCESS_STOP+SNES_SMP_SUSPEND_STOP` reproduce ACCESS_STOP exactly (dkc 100,
+zelda 99.7733, fzero 100, cv4 100, smas 50.9452, ct 31.5413, mmx2 69.2222).
+Extending the stop to step starts (so the next access is entered) moves the CV4
+divergence *earlier* (instruction 51,597), so the S-SMP cannot be advanced past a
+step boundary at these synchronizations either.
+
+## Finish-the-crossing-access at port writes: equivalent to the port-lead family (2026-11-22)
+
+`SNES_WRITE_ACCESS_STOP` runs the S-SMP to the first suspension at or past the
+S-CPU clock immediately before a `$2140-$2143` write latches (ares
+`SMP::portWrite` is reached after `CPU::step -> synchronize(smp)`), stopping at
+the crossing access rather than the end of the instruction.
+
+7-title 600-frame gate:
+
+```
+dkc    0 differing (100.0000%)      zelda  231894 (63.7471%)
+fzero  463471 differing (27.5437%)  cv4     69470 (89.1395%)
+smas   313782 differing (50.9452%)  ct     453777 (29.0592%)
+mmx2   0 differing (100.0000%)
+```
+
+Bit-identical to `SNES_PORT_LEAD`/`SNES_CPU_LATCH_TIME`: settling the CPU->SMP
+commit at access granularity gives DKC+MMX2 but shifts zelda/F-Zero. This is the
+same mutually-exclusive family, now reached without the whole-instruction
+overshoot. Flag default off; default gate unchanged (dkc/zelda/fzero 0,
+cv4 98.2383, smas 50.9452, ct 34.9427, mmx2 69.2222).

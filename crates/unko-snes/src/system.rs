@@ -449,6 +449,27 @@ impl ApuPeer<'_> {
         }
     }
 
+    /// Run the S-SMP to the first suspension point at or past `clock`
+    /// (`SNES_WRITE_ACCESS_STOP`).
+    fn finish_access(&mut self, clock: u64, rate: u64) {
+        if self.waiting.is_some() {
+            return;
+        }
+        let apu = self.apu.take().expect("actor is not idle");
+        let input = crate::apu::ApuInput::FinishAccess { apu, clock, rate };
+        match self.coro.resume(input) {
+            corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Stopped(apu)) => {
+                self.apu = Some(apu);
+                self.waiting = None;
+            }
+            corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Parked { apu, target }) => {
+                self.apu = Some(apu);
+                self.waiting = Some(target);
+            }
+            _ => unreachable!(),
+        }
+    }
+
     fn ipl_rom_enabled(&self) -> bool {
         self.apu
             .as_ref()
@@ -1174,6 +1195,9 @@ impl Snes {
                                 && (0x2140..=0x2143).contains(&(address & 0xFFFF)) =>
                         {
                             let port = ((address & 0xFFFF) - 0x2140) as u8;
+                            if crate::apu::write_access_stop() {
+                                peer.finish_access(self.clock, rate);
+                            }
                             if crate::apu::port_lead()
                                 && (!crate::apu::lead_after_boot() || !peer.ipl_rom_enabled())
                             {
