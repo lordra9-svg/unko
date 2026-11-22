@@ -10140,3 +10140,30 @@ This is a large improvement over the stalled engine (dkc 42.35%, zelda 64.37%,
 fzero 27.49%) and now matches the default for zelda/fzero exactly, but dkc, cv4,
 smas, ct and mmx2 remain below the default. The flag stays default off; the
 default gate is unchanged.
+
+## SNES_SYM_ENGINE after the handshake fix: DSP writes match ares in order, phase <=15 ticks (2026-11-22)
+
+Re-measured DKC's first engine divergence after the `$F0/$F1` fix: interleaved
+**171,742 = DSP 85,871 (~2.68 s)** (was 153,036 before the fix). Errors are small
+early (2,487 samples in second 2) and grow later.
+
+Instrumented the engine's `$F3` writes with the S-SMP clock and compared them to
+ares' `ARES_DSP_WRITES` over 200 frames:
+
+```
+engine writes: 616     ares writes: 616
+register/value order divergence: None
+tick difference: -1 (482), -8 (79), -15 (55)
+```
+
+So the engine now emits exactly ares' DSP command sequence in the same order;
+the remaining difference is a **DSP-write phase of 1-15 ticks** (the engine is
+earlier), which crosses a sample boundary at the first divergence exactly like
+the default path's write-phase family.
+
+This confirms the handshake fix was the major engine defect: with the driver
+running, the engine reproduces ares' entire DSP write stream and zelda/fzero
+exactly. The residual on dkc/cv4/smas/ct/mmx2 is the same write-phase problem
+already characterised for the default driver.
+
+Default gate unchanged; the engine flag stays default off.
