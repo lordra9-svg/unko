@@ -8677,3 +8677,32 @@ APU is never initialised. It explains why MMX2 was insensitive to every DSP
 scheduling variant. Next: determine what the S-CPU boot code is waiting for when
 it polls `$2140-$2143` (value expected, and whether the CX4 boot path is involved)
 by logging the polled port values and the S-CPU PC at the spin.
+
+## MMX2: the S-CPU never reaches APU init (CPU-side divergence) (2026-11-21)
+
+Followed the S-CPU PC over the run:
+
+```
+frame 1    PC=00:8081
+frame 2    PC=00:B2DF
+frame 10   PC=7E:240F
+frame 50   PC=13:F941
+frame 100  PC=00:8100
+frame 150  PC=00:8100
+frame 300  PC=00:8103
+frame 600  PC=00:8100
+```
+
+From ~frame 100 the S-CPU sits in the routine at `$8100` (`STA $0008,X / SEP #$20 /
+JSR $1C86 / RTL`) and never writes `$2140-$2143`. NMI still runs (556 by frame 600),
+so the machine is not dead - but the game never performs its APU upload, and the
+S-SMP waits forever in the IPL (`PC=FFCF`, 1.1M polls of `$F4`).
+
+So MMX2's silence is **not** an APU/DSP issue at all: the S-CPU-side initialisation
+never happens. That makes it a separate CPU/boot divergence, plausibly CX4-related
+(MMX2 is a CX4 title) - the same class as a coprocessor-dependent init path.
+
+Next: compare the S-CPU PC trace with ares over the first ~1-2 s to find the first
+divergent instruction (area `$8000-$1C86`, likely a CX4 handshake or a status
+wait), then fix that - this is the only failing title whose root is not the
+exhausted DSP write-phase family.
