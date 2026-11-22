@@ -113,6 +113,13 @@ pub fn smp_ceil() -> bool {
     smp_ceil_threshold().is_some()
 }
 
+/// `SNES_DSP_LATE`: record `$F3` writes in the plan and drain the S-DSP during
+/// replay (per S-SMP clock) instead of at record time.
+pub fn dsp_late() -> bool {
+    static L: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *L.get_or_init(|| std::env::var_os("SNES_DSP_LATE").is_some())
+}
+
 /// ares `Thread::Second`: the fixed-point base of the scheduler clocks.
 const SCHEDULER_SECOND: u128 = (1u128 << 62) - 1;
 /// ares `Thread::setFrequency`: `_scalar = Second / frequency`.
@@ -306,6 +313,8 @@ struct PlanStep {
     deferred: bool,
     /// The deferred read is a `$F4-$F7` port read (wait split around the fetch).
     split: bool,
+    /// Deferred `$F3` DSP register write `(address, value)` (`SNES_DSP_LATE`).
+    dsp_write: Option<(u8, u8)>,
 }
 
 /// The S-SMP + S-DSP APU.
@@ -689,6 +698,7 @@ impl Apu {
                 port_write: None,
                 deferred: true,
                 split,
+                dsp_write: None,
             });
             true
         } else {
@@ -700,6 +710,7 @@ impl Apu {
                 port_write: None,
                 deferred: false,
                 split: false,
+                dsp_write: None,
             });
         }
         if self.debug.enabled && self.debug.trace.len() < 6_000_000 {
@@ -769,6 +780,16 @@ impl Apu {
         if self.plan_pos >= self.plan.len() {
             self.record_instruction();
         }
+        if dsp_late() {
+            let pos = self.smp_clock_at_position();
+            drain_dsp_to(
+                &mut self.ram[..],
+                &mut self.dsp,
+                &mut self.dsp_clock,
+                &mut self.samples,
+                pos,
+            );
+        }
         let step = self.plan[self.plan_pos];
         if step.deferred {
             let clocks = u32::from(step.clocks);
@@ -791,6 +812,20 @@ impl Apu {
             }
         }
         if self.plan_sub >= u32::from(step.clocks) {
+            if let Some((addr, value)) = step.dsp_write {
+                if dsp_late() {
+                    let pos = self.smp_clock_at_position();
+                    drain_dsp_to(
+                        &mut self.ram[..],
+                        &mut self.dsp,
+                        &mut self.dsp_clock,
+                        &mut self.samples,
+                        pos,
+                    );
+                }
+                self.dsp.set_debug_clock(self.smp_clock_at_position());
+                self.dsp.write(addr, value);
+            }
             if let Some((port, value)) = step.port_write {
                 // S-SMP -> S-CPU latch ($2140-$2143), committed at the end of
                 // the access, which is when the S-CPU can observe it.
@@ -949,6 +984,11 @@ impl ApuBus<'_> {
     /// micro-step: because `24 * DSP_SCALAR` is four fixed-point units less
     /// than two `SMP_SCALAR`s, the first synchronization runs one extra tick
     /// and the DSP stays one micro-step ahead, exactly as ares does.
+    /// Advance the S-SMP clock without draining the S-DSP (`SNES_DSP_LATE`).
+    fn advance_smp_clock(&mut self, clocks: u32) {
+        *self.smp_clock += u128::from(clocks) * SMP_SCALAR;
+    }
+
     fn step_dsp_clock(&mut self, clocks: u32) {
         *self.smp_clock += u128::from(clocks) * SMP_SCALAR;
         let target = match self.dsp_target {
@@ -1187,7 +1227,12 @@ impl SpcBus for RecordBus<'_, '_> {
         // The DSP advances while the instruction is recorded (ares runs it as a
         // cooperative thread inside `SMP::wait`), which keeps every DSP register
         // access ordered exactly one micro-step after its wait, as on hardware.
-        self.inner.step_clock(clocks);
+        // `SNES_DSP_LATE` defers the drain to replay instead.
+        if dsp_late() {
+            self.inner.advance_smp_clock(clocks);
+        } else {
+            self.inner.step_clock(clocks);
+        }
     }
 
     fn read(&mut self, address: u16) -> u8 {
@@ -1198,6 +1243,7 @@ impl SpcBus for RecordBus<'_, '_> {
             port_write: None,
             deferred: false,
             split: false,
+            dsp_write: None,
         });
         self.units += u64::from(clocks);
         value
@@ -1215,6 +1261,17 @@ impl SpcBus for RecordBus<'_, '_> {
                 port_write: Some(((address - 0xF4) as u8, value)),
                 deferred: false,
                 split: false,
+                dsp_write: None,
+            });
+        } else if address == 0x00F3 && dsp_late() {
+            // Defer the DSP register write to replay (`SNES_DSP_LATE`).
+            self.inner.write_ram(address, value);
+            self.plan.push(PlanStep {
+                clocks,
+                port_write: None,
+                deferred: false,
+                split: false,
+                dsp_write: Some((*self.inner.dsp_address, value)),
             });
         } else {
             self.inner.write(address, value);
@@ -1223,6 +1280,7 @@ impl SpcBus for RecordBus<'_, '_> {
                 port_write: None,
                 deferred: false,
                 split: false,
+                dsp_write: None,
             });
         }
     }
@@ -1234,6 +1292,7 @@ impl SpcBus for RecordBus<'_, '_> {
             port_write: None,
             deferred: false,
             split: false,
+            dsp_write: None,
         });
         self.units += u64::from(clocks);
     }
