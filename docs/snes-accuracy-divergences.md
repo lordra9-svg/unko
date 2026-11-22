@@ -9681,3 +9681,36 @@ events here, `ARES_APU_LOG` in ares), the next comparison can align the first
 upload pass and the S-CPU write that each `$1193` poll is waiting for.
 
 No behavioural change; default gate unchanged.
+
+## CT upload CPU writes are ~200-450 master clocks later in ours; port-read catch-up worsens it (2026-11-22)
+
+Aligned CT's upload pass per cycle using the timestamped CPU writes (ours
+`PORT_OUT W`, ares `ARES_APU_LOG`). Both write the same byte sequence in one
+burst, but ours is consistently later:
+
+```
+value   ares master   ours master   delta
+0x11    9,766,850     9,767,276     +426
+0x12    9,768,476     9,768,860     +384
+0x13    9,770,970     9,771,354     +384
+0x14    9,772,248     9,772,506     +258
+0x15    9,773,486     9,773,784     +298
+```
+
+The delta oscillates (+196..+426 master clocks, i.e. ~19-41 S-SMP clocks) rather
+than accumulating, so it is the per-byte handshake round-trip, not a drift: the
+S-SMP acknowledges each byte slightly later, so the S-CPU issues the next byte
+later. This matches the `$1193` poll reading each new value one poll group late.
+
+Adding an S-SMP catch-up at S-CPU port reads (`SNES_PORT_READ_LEAD`, ares
+`CPU::readAPU`'s `synchronize(smp)`) makes CT worse, not better:
+
+```
+PORT_READ_LEAD                    24.3354%
+PORT_READ_LEAD+PORT_LEAD+PULL     29.0592%
+PORT_READ_LEAD+ACCESS_STOP        24.4558%
+```
+
+(default 34.9427%). So the ack must become visible at the exact S-SMP write clock
+(a timestamped SMP->CPU latch queue sampled at the S-CPU's clock), not by
+catching the S-SMP up at the read. Reverted; default gate unchanged.
