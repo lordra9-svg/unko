@@ -9983,3 +9983,21 @@ to be interleaved at the same instant, which is the per-access scheduler propert
 and not reachable by a lead/latch/catch-up rule.
 
 Default gate unchanged.
+
+## Latch-at-read experiment: CT 29.22%, dkc 42.35% (rejected, reverted) (2026-11-22)
+
+Implemented `SNES_CPU_LATCH_AT_READ`: hold an S-CPU `$2140-$2143` write and apply
+it at the S-SMP's next `$F4-$F7` read (between two poll reads) rather than at the
+write instant.
+
+```
+CT  : 452725 differing (29.2237%)   (default 34.9427%)
+dkc : 368744 differing (42.3528%)   (default 100.0000%)
+```
+
+Both regress, so applying the write at the next read is worse than the current
+"write at the CPU clock" model. Reverted. This is the fifth latch/visibility
+variant and, together with the queue and lead families, confirms the CT offset
+is not a latch-instant problem.
+
+Default gate unchanged.
