@@ -8244,3 +8244,32 @@ So the two "control-flow divergence" localizations are not real; the only
 reads, +6/-22 write deltas). The next step should therefore treat the residual as
 a phase/rounding offset, not a branch/control-flow difference - and the earlier
 alignment-based localizations must not be used as targets.
+
+## Read-tick offset measured directly: 0 for 125k reads, then 0/-3/+6 rounding (2026-11-21)
+
+Compared the DSP tick at every `$F4` read (both logs filtered to `$F4`; the
+earlier index mismatch was ours logging `$F5/$F6` too):
+
+```
+F4 reads: ares 313,750   ours 313,752
+tick delta distribution:
+   0    : 198,568
+  -3    :  40,737
+  +6    :  40,681
+  +3    :  28,433
+  -8    :   4,238   (and a few artefacts where alignment shifts)
+
+first 125,848 reads: delta = 0 exactly
+then a repeating 0, -3, +6, 0, -3, +6 ... pattern
+```
+
+So there is **no constant +22-tick read phase**: for the first 125,848 reads the
+S-SMP read instant matches ares exactly, and afterwards the offset is a small
+`0/-3/+6` rounding cycle (±3 DSP ticks = ±6 S-SMP clocks). This supersedes the
+earlier "+22 ticks" characterization, which came from a different comparison
+axis/window.
+
+The residual is therefore a **tick-boundary rounding effect in the DSP catch-up
+at reads** (a 3-read cycle), not a block/phase offset. That is consistent with the
+two-valued `$F3` write deltas ({+6,-22} mod 32 is exactly {6,10} = a 4-tick
+rounding split).
