@@ -7767,3 +7767,27 @@ cv4     116 events / 1.14M instructions, first 371,351, audio 98.24%
 ```
 All stream differences are IPL-handshake/timer-loop resyncs that leave the exact
 titles untouched; the audio failures track DSP write placement, not the stream.
+
+## Whole-sample DSP drain alone scrambles the phase (2026-11-21)
+
+Implemented the mechanical half of ares' DSP thread model: drain the S-DSP in
+whole 32-micro-step samples per Thread entry (so it may overshoot the target to a
+sample boundary), `SNES_DSP_SAMPLE`.
+
+CV4 KOFF delta (ares ticks - ours) under this model:
+
+```
+distinct values: -2, -5, -48, +1, -10, +4 ... each ~16 times
+```
+
+Instead of collapsing to a single value, the deltas scatter across many values -
+the phase is *worse* than the default (which gives only +6/-22). Overshooting to
+sample boundaries without the per-micro-step SMP sync randomises the placement.
+
+So the entire behavioural content of ares' DSP thread model is the
+`synchronize(smp)` after each `tick()`, not the 32-step batching: the batching
+alone is a coarse overshoot, and the sync is what keeps the S-SMP on the DSP's
+micro-step grid. That sync is a forward pull of the S-SMP from inside the DSP
+drain - not expressible at record time in the current driver.
+
+Reverted; no behaviour change.
