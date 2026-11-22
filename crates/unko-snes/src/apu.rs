@@ -1654,6 +1654,9 @@ impl SpcBus for ApuBus<'_> {
             0xF4..=0xF7 => {
                 let port = u8::try_from(address - 0xF4).unwrap_or(0);
                 let value = self.apu_ports[usize::from(port)];
+                if std::env::var_os("SNES_SMP_READ_LOG").is_some() {
+                    eprintln!("PR {} {} {}", *self.smp_clock, port, value);
+                }
                 if let Some(debug) = self.debug.as_deref_mut() {
                     let clock = debug.clock;
                     let spc_instruction = debug.spc_instruction;

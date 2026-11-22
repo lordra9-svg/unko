@@ -9855,3 +9855,24 @@ iteration the CPU write crosses in ares, which requires a correct ares-side
 per-read timestamp mapping first.
 
 Default gate unchanged; no behavioural change this turn.
+
+## Per-read monotonic logs added both sides; value matching is confounded (2026-11-22)
+
+Instrumented S-SMP port reads with their monotonic clocks on both sides:
+
+* ours: `SNES_SMP_READ_LOG` -> stderr `PR <smp_clock_fixed> <port> <value>`
+  (194,577 reads over 200 CT frames);
+* ares: `ARES_SMP_READ_LOG` -> `<aresSmpMono> <port> <value>` (148,284 reads).
+
+Attempting to compute the per-byte CPU-write-to-consume delay by "first read of
+the same value after the write" fails: CT's upload stream repeats values across
+passes, so the first matching read is often from a different cycle and the
+computed delays blow up to millions of SMP clocks (e.g. 2.4M). Correct per-cycle
+matching must be positional (n-th read in the handshake sequence), not by value.
+
+The instrumented logs are in place and default-off (debug only). The next
+measurement is positional: index the ack/read sequence per upload pass and compare
+the n-th read clock, which will show exactly which pass gains or loses one
+`$1193/$1195` iteration.
+
+Default gate unchanged.
