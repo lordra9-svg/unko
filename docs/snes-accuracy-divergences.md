@@ -10289,3 +10289,24 @@ is no instruction-local quantity that predicts -6 vs +22. The discriminator is t
 absolute clock phase, which requires matching ares' scheduler phase.
 
 Default gate unchanged; no code change this turn.
+
+## CV4 write-offset classes do not correlate with the SMP sample phase (2026-11-22)
+
+Correlated the bimodal -6/+22 DSP-write offset with our S-SMP clock modulo the
+64-clock sample period (16 buckets of 4 clocks), 11,956 CV4 writes:
+
+```
+-6 class: spread across all 16 buckets (223..802 per bucket)
++22 class: concentrated in buckets 0-3 (269..560), sparse elsewhere (24..169)
+```
+
+The distributions **overlap across every bucket**, so the offset class is not a
+function of our absolute sample phase. Since both classes occur at the same PCs
+and the same phase ranges, the discriminator must be ares' own phase at the
+write - which our emulator does not have.
+
+So a phase-conditioned write-placement rule computed from our clock cannot
+predict -6 vs +22 either. Combined with the earlier falsification of the
+access-clock hypothesis, every write-local signal available to us is ruled out.
+
+Default gate unchanged; no code change this turn.
