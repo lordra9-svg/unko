@@ -10210,3 +10210,29 @@ crossing a sample boundary, not the port-handshake ordering.
 
 This rules out the last per-port ordering hypothesis for the engine as well. The
 engine flag remains default off; the default gate is unchanged.
+
+## Engine DSP-write offsets cluster by the writing instruction (2026-11-22)
+
+Logged the engine's `$F3` writes with the S-SMP PC (`SYM_DSP_LOG` now includes
+`spc.pc`) and matched them to ares by register/value; offsets grouped by the
+write instruction (ares PC):
+
+```
+pc=0x548B (21643) n=1  offset -14      pc=0x548B..(many) -14
+pc=0x38D2 (14546) n=2  offset  -7
+pc=0x54xx          n=2  offset -14 / 0
+pc=0x...           n=2  offset   0
+```
+
+The offsets are not a constant phase: they cluster by the instruction that
+performs the `$F3` write (-14 for most, -7 or 0 for others). That is the shape
+expected when the two logs timestamp the write at different points within the
+instruction (ares records the post-instruction PC/clock, ours the access point),
+not a single DSP-phase error.
+
+So the engine's DSP write stream matches ares in order and the residual offset is
+instruction-relative. The engine's remaining audio error (dkc 24.4%) is therefore
+not addressable by a global DSP target/prime, which the earlier sweep already
+showed.
+
+Default gate unchanged; engine flag remains default off.

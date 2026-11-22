@@ -1069,8 +1069,8 @@ impl Apu {
                 self.dsp.set_debug_clock(self.smp_clock);
                 if std::env::var_os("SYM_DSP_LOG").is_some() {
                     eprintln!(
-                        "DW {} {:02X} {:02X}",
-                        self.smp_clock, self.dsp_address, value
+                        "DW {} {:04X} {:02X} {:02X}",
+                        self.smp_clock, self.spc.pc, self.dsp_address, value
                     );
                 }
                 self.dsp.write(self.dsp_address, value);
