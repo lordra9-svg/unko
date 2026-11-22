@@ -7982,3 +7982,19 @@ So the per-access interleaved lead is negative, consistent with the plan-path
 lead experiment (`{+7,-21}` deltas, DKC 64.5%): moving the DSP ahead of the S-SMP
 does not reproduce ares and destroys the exact titles. Reverted to the
 byte-identical coroutine seam.
+
+## Per-clock yield granularity in the recorder (2026-11-21)
+
+`SNES_SPC_PERCLOCK` makes the coroutine bus yield one S-SMP clock at a time from
+`step_clock`/`advance` instead of one event per access. No core change is needed
+(the bus splits the counts).
+
+Verified **byte-identical** to the default: dkc/cv4/smas 600-frame audio files
+are identical. This is expected - `drain_dsp_to` is monotone, so advancing the
+DSP one clock at a time is equivalent to a bulk drain.
+
+This provides the per-tick interleaving hook. Note the policy choice it enables
+is already measured on the access-granularity driver: "DSP catches up" (default,
+5 titles exact), "DSP leads by a tick" (DKC 72.3%), "latch at access instant"
+(CV4 89.14%). Per-clock granularity alone does not change those outcomes; it only
+allows the driver to *observe* each clock.

@@ -55,6 +55,13 @@ pub enum SpcEvent {
 /// The resumable recorder.
 pub type SpcCoroutine = corosensei::Coroutine<SpcInput, SpcEvent, ()>;
 
+/// `SNES_SPC_PERCLOCK`: yield one S-SMP clock at a time from `step_clock` and
+/// `advance` (instead of one event per access), enabling per-tick interleaving.
+pub fn per_clock() -> bool {
+    static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *P.get_or_init(|| std::env::var_os("SNES_SPC_PERCLOCK").is_some())
+}
+
 /// A bus that yields every access instead of performing it.
 struct ResumeBus<F: FnMut(SpcEvent) -> SpcResume> {
     resume: F,
@@ -77,11 +84,23 @@ impl<F: FnMut(SpcEvent) -> SpcResume> SpcBus for ResumeBus<F> {
     }
 
     fn advance(&mut self, clocks: u32) {
-        let _ = (self.resume)(SpcEvent::Advance(clocks));
+        if per_clock() {
+            for _ in 0..clocks {
+                let _ = (self.resume)(SpcEvent::Advance(1));
+            }
+        } else {
+            let _ = (self.resume)(SpcEvent::Advance(clocks));
+        }
     }
 
     fn step_clock(&mut self, clocks: u32) {
-        let _ = (self.resume)(SpcEvent::StepClock(clocks));
+        if per_clock() {
+            for _ in 0..clocks {
+                let _ = (self.resume)(SpcEvent::StepClock(1));
+            }
+        } else {
+            let _ = (self.resume)(SpcEvent::StepClock(clocks));
+        }
     }
 
     fn wait_cycles(&mut self, address: Option<u16>) -> u32 {
