@@ -43,6 +43,15 @@ pub fn mutual_scheduler() -> bool {
     *MUTUAL.get_or_init(|| std::env::var_os("SNES_MUTUAL").is_some())
 }
 
+/// `SNES_SMP_WRITE_PULL`: when the S-SMP commits a write to `$F4-$F7` while it
+/// is ahead of the S-CPU clock, park the write and let the S-CPU run forward to
+/// the write clock first (ares `SMP::writeIO` calls `synchronize(cpu)` before
+/// latching the port).
+pub fn smp_write_pull() -> bool {
+    static PULL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *PULL.get_or_init(|| std::env::var_os("SNES_SMP_WRITE_PULL").is_some())
+}
+
 /// `SNES_SMP_ACCESS_STOP`: stop the S-SMP at an access boundary instead of
 /// exactly on the carried-credit clock.
 ///
@@ -396,6 +405,8 @@ pub struct Apu {
     /// Carried S-SMP master-clock credit: the fractional remainder of the
     /// rational conversion from master clocks to S-SMP clocks.
     apu_credit: i64,
+    /// Fixed-point clock to hand the S-CPU as a park target (`SNES_SMP_WRITE_PULL`).
+    park_at: Option<u128>,
     samples: VecDeque<Sample>,
     /// Debug: S-CPU/S-SMP port handshake trace.
     pub debug: PortDebug,
@@ -444,6 +455,7 @@ impl Apu {
             master_clock_rate: 0,
             master_clock_valid: false,
             apu_credit: 0,
+            park_at: None,
             samples: VecDeque::new(),
             debug: PortDebug::default(),
         }
@@ -524,6 +536,7 @@ impl Apu {
         self.master_clock_rate = 0;
         self.master_clock_valid = false;
         self.apu_credit = 0;
+        self.park_at = None;
         self.samples.clear();
         self.apu_ports = [0; 4];
         self.cpu_ports = [0; 4];
@@ -627,6 +640,26 @@ impl Apu {
         let cpu_scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
         let cpu_fixed = u128::from(self.cpu_master_clock) * cpu_scalar;
         self.smp_clock_at_position() > cpu_fixed
+    }
+
+    /// Fixed-point S-CPU clock for the current advance, if known.
+    fn cpu_fixed_clock(&self) -> Option<u128> {
+        if !self.master_clock_valid {
+            return None;
+        }
+        let scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
+        Some(u128::from(self.cpu_master_clock) * scalar)
+    }
+
+    /// Master-clock target for the parked S-SMP (`SNES_SMP_WRITE_PULL` uses the
+    /// port write's own clock instead of the current position).
+    pub fn park_master_clock(&mut self, master_clock: u64) -> u64 {
+        let fixed = self
+            .park_at
+            .take()
+            .unwrap_or_else(|| self.smp_clock_at_position());
+        let scalar = SCHEDULER_SECOND / u128::from(master_clock);
+        u64::try_from(fixed.div_ceil(scalar)).unwrap_or(u64::MAX)
     }
 
     /// Value currently visible to the SPC700 on `$F4-$F7`.
@@ -1032,6 +1065,21 @@ impl Apu {
                 return 0;
             }
         }
+        // `SNES_SMP_WRITE_PULL`: ares' `SMP::writeIO($F4-$F7)` synchronizes the
+        // S-CPU forward to the S-SMP clock before latching the port. Park on
+        // the write's own clock and let the S-CPU catch up first.
+        if smp_write_pull()
+            && step.port_write.is_some()
+            && self.plan_sub + 1 >= u32::from(step.clocks)
+        {
+            let write_at = self.smp_clock_at_position() + SMP_SCALAR;
+            if let Some(cpu_fixed) = self.cpu_fixed_clock() {
+                if write_at > cpu_fixed {
+                    self.park_at = Some(write_at);
+                    return 0;
+                }
+            }
+        }
         self.units += 1;
         self.plan_sub += 1;
         if step.deferred {
@@ -1187,11 +1235,24 @@ impl Apu {
         if self.apu_credit < 0 {
             return false;
         }
-        while self.plan_pos < self.plan.len() {
-            if self.drain_unit() == 0 {
-                return true;
+        // ares' `Thread::synchronize` runs whole instructions while the target
+        // thread is still behind, so catch up fully rather than stopping after
+        // one instruction.
+        let cpu_fixed = self.cpu_fixed_clock();
+        for _ in 0..1024 {
+            if self.plan_pos >= self.plan.len() {
+                self.record_instruction();
             }
-            self.apu_credit -= den;
+            while self.plan_pos < self.plan.len() {
+                if self.drain_unit() == 0 {
+                    return true;
+                }
+                self.apu_credit -= den;
+            }
+            match cpu_fixed {
+                Some(target) if self.smp_clock_at_position() < target => continue,
+                _ => break,
+            }
         }
         false
     }
@@ -2045,7 +2106,7 @@ pub fn new_apu_coroutine() -> ApuCoroutine {
                 rate,
             } => {
                 if apu.advance_master_clock(clocks, clock, rate) {
-                    let target = apu.smp_master_clock(rate);
+                    let target = apu.park_master_clock(rate);
                     ApuOutput::Parked { apu, target }
                 } else {
                     ApuOutput::Stopped(apu)
@@ -2057,7 +2118,7 @@ pub fn new_apu_coroutine() -> ApuCoroutine {
                 rate,
             } => {
                 if apu.finish_instruction(clock, rate) {
-                    let target = apu.smp_master_clock(rate);
+                    let target = apu.park_master_clock(rate);
                     ApuOutput::Parked { apu, target }
                 } else {
                     ApuOutput::Stopped(apu)

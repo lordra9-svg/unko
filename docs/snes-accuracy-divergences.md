@@ -8842,3 +8842,50 @@ all seven. Reconciling them requires the bidirectional whole-instruction
 scheduler (the S-SMP pulling the S-CPU forward mid-instruction), which the
 current CPU-coroutine driver cannot express. Both new flags stay default off;
 the verified default path is unchanged.
+
+## `SNES_SMP_WRITE_PULL`: ares' S-SMP write synchronize, and MMX2 becomes bit-exact (2026-11-21)
+
+ares' `SMP::writeIO($F4-$F7)` calls `synchronize(cpu)` *before* latching the
+port (io.cpp), i.e. the S-SMP pulls the S-CPU forward to the write's clock. Our
+model latched the value immediately with no pull. `SNES_SMP_WRITE_PULL` parks
+the S-SMP on the write's own clock (`park_at`) and lets the S-CPU run forward
+to it before the port is committed.
+
+Combined with the existing `SNES_PORT_LEAD` (catch the S-SMP up to the S-CPU
+clock in whole instructions at a `$2140-$2143` write, ares `CPU::writeAPU`):
+
+```
+SNES_PORT_LEAD=1 SNES_SMP_WRITE_PULL=1, 600-frame audio, cx4.rom for MMX2
+
+dkc    0 differing over 639656  (100.0000%)
+mmx2   0 differing over 639656  (100.0000%)   <- first bit-exact result
+zelda  231894 differing (63.7471%)
+fzero  463471 differing (27.5437%)
+cv4     69470 differing (89.1395%)
+smas   313782 differing (50.9452%)
+ct     453777 differing (29.0592%)
+```
+
+**MMX2 audio is now bit-exact** (all 319,828 stereo frames, offset 0) under this
+configuration, and DKC stays exact. The write-pull is inert on its own
+(`SNES_SMP_WRITE_PULL=1` gives exactly the default numbers), so it only matters
+when the S-SMP is first pushed ahead by `SNES_PORT_LEAD` - i.e. it is the
+missing half of the bidirectional scheduler, not a separate rule.
+
+Also measured with the same build:
+
+```
+SNES_PORT_LEAD + SNES_SMP_WRITE_PULL + SNES_INSTR_LEAD
+  mmx2 93.8051%  (INSTR_LEAD perturbs the port-lead win)
+SNES_PORT_LEAD + SNES_SMP_WRITE_PULL + SNES_DSP_CPU_PHASE
+  mmx2 91.3700%, dkc 58.2915%  (worse)
+SNES_INSTR_LEAD + SNES_SMP_WRITE_PULL
+  = default on all seven (the write-pull is inert without the port lead)
+```
+
+The failure split is unchanged: zelda/fzero need the exact-credit default, MMX2
+needs the port-lead + write-pull pair, CV4 needs the ceiling/access-stop rule.
+All flags remain default off, so the verified default gate
+(dkc/zelda/fzero 100%, cv4 98.2383%, smas 50.9452%, ct 34.9427%, mmx2 69.2222%)
+is unchanged; MMX2's bit-exact result is reachable with
+`SNES_PORT_LEAD=1 SNES_SMP_WRITE_PULL=1`.
