@@ -10264,3 +10264,28 @@ A narrow rule would have to reproduce ares' micro-step write position per write,
 which is the unresolved scheduler/ordering dependency.
 
 Default gate unchanged.
+
+## CV4 write micro-step offsets are bimodal, not access-clock derived (2026-11-22)
+
+Grouped the default driver's `$F3` writes by the writing instruction's clock
+length (PC -> modal clocks from the SPC trace) for CV4, 600 frames, matched to
+ares by register/value:
+
+```
+instruction clocks = 10 for all 11,956 writes
+offset (ours - ares): -6 for 9,699 writes, +22 for 2,257 writes
+by PC: 0x0494 (9,492): -6 x7566, +22 x1926
+       0x0720 (2,408): -6 x2077, +22 x331
+```
+
+So the micro-step offset does **not** vary with the write instruction's access
+clock (all are 10-clock instructions) and is not per-PC either: the same
+instruction produces both -6 and +22 depending on the current clock phase. The
+two classes differ by 28 ticks (~7/8 of a sample), i.e. the offset is a phase
+state of the scheduler, not a function of the write's access length.
+
+This falsifies the proposed per-write correction derived from access clocks: there
+is no instruction-local quantity that predicts -6 vs +22. The discriminator is the
+absolute clock phase, which requires matching ares' scheduler phase.
+
+Default gate unchanged; no code change this turn.
