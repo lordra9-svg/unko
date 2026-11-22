@@ -9292,3 +9292,33 @@ Expressing ares' scheduler therefore requires replacing the plan-based driver
 with mutually resumable coroutines (DSP drain <-> SMP instruction <-> S-CPU
 bus request), i.e. the core stepping rewrite. This is not implementable as a
 default-off hook in the current driver; all proxies are measured and documented.
+
+## First mutually-resumable driver implementation (2026-11-21)
+
+`SNES_SYM_DRIVER` (default off) adds a separate direct-execution path: S-SMP
+instructions run outside the record/plan layer, the DSP advances one micro-step
+per tick, and after each tick the S-SMP is pulled toward the DSP clock
+(`DSP::tick -> synchronize(smp)` shape). The DSP tick limit is captured before
+the pull (otherwise it feeds back and runs away), and the pull is capped at the
+S-CPU clock.
+
+Measured:
+
+```
+dkc, first 60 frames (63960 interleaved samples): 0 differing (100.0000%)
+dkc, full 600 frames                            : 368744 differing (42.3528%)
+```
+
+The early bit-exact first second shows the direct instruction/DSP interleaving
+is on the right track, but the full run diverges. Two concrete issues remain:
+
+1. The direct path has no S-CPU port park. When the sound driver starts polling
+   `$F4`, the S-SMP can run ahead of the S-CPU, so the handshake does not settle
+   at the ares rate (the run executes ~49M S-SMP instructions vs ~2.3M normally
+   even though the master clock is right).
+2. Attempting to park inside `advance_symmetric` deadlocked (the reset path calls
+   `advance_master_clock` directly, outside the actor park loop), so the park
+   must be integrated in the actor/peer layer rather than the APU advance.
+
+The driver stays default off; the default gate is unchanged and the 212/212
+baseline is unaffected by construction.

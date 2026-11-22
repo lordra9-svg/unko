@@ -73,6 +73,16 @@ pub fn smp_write_pull() -> bool {
     *PULL.get_or_init(|| std::env::var_os("SNES_SMP_WRITE_PULL").is_some())
 }
 
+/// `SNES_SYM_DRIVER`: mutually-resumable scheduler. S-SMP instructions are
+/// executed directly (not through the plan) in a loop with the DSP, and after
+/// each instruction the DSP is advanced to the next output-sample boundary and
+/// the S-SMP is pulled forward to the DSP clock (ares `DSP::tick` ->
+/// `Thread::synchronize(smp)`).
+pub fn sym_driver() -> bool {
+    static S: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *S.get_or_init(|| std::env::var_os("SNES_SYM_DRIVER").is_some())
+}
+
 /// `SNES_DSP_FLOOR`: stop the S-DSP at the last micro-step at or below the
 /// S-SMP clock (never crossing it), instead of advancing to the first step at
 /// or past it. Models the `Thread::synchronize` pull direction where the
@@ -765,6 +775,86 @@ impl Apu {
         self.drain_unit()
     }
 
+    /// Execute one S-SMP instruction directly against the DSP (`SNES_SYM_DRIVER`),
+    /// bypassing the plan so a DSP micro-step and an S-SMP instruction can be
+    /// interleaved by the caller.
+    fn step_direct(&mut self) {
+        let page_flag = self.spc.flags.page;
+        let dsp_target =
+            if dsp_cpu_phase() && self.master_clock_valid && self.master_clock_rate != 0 {
+                let scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
+                Some(u128::from(self.cpu_master_clock) * scalar)
+            } else {
+                None
+            };
+        let mut bus = ApuBus {
+            ram: &mut self.ram[..],
+            ipl: &self.ipl,
+            ipl_loaded: self.ipl_loaded,
+            iplrom_enable: &mut self.iplrom_enable,
+            ram_writable: &mut self.ram_writable,
+            ram_disable: &mut self.ram_disable,
+            timers_enable: &mut self.timers_enable,
+            timers_disable: &mut self.timers_disable,
+            internal_wait: &mut self.internal_wait,
+            external_wait: &mut self.external_wait,
+            timers: &mut self.timers,
+            dsp_address: &mut self.dsp_address,
+            dsp: &mut self.dsp,
+            smp_clock: &mut self.smp_clock,
+            dsp_clock: &mut self.dsp_clock,
+            samples: &mut self.samples,
+            apu_ports: &mut self.apu_ports,
+            dsp_target,
+            cpu_ports: &mut self.cpu_ports,
+            aux4: &mut self.aux4,
+            aux5: &mut self.aux5,
+            timer_targets: &mut self.timer_targets,
+            page_flag,
+            spc_pc: self.spc.pc,
+            debug: Some(&mut self.debug),
+        };
+        self.spc.step(&mut bus);
+        self.instructions += 1;
+    }
+
+    /// Mutually-resumable advance (`SNES_SYM_DRIVER`): run whole S-SMP
+    /// instructions until the S-SMP reaches the S-CPU clock, advancing the DSP
+    /// to the next output-sample boundary after each instruction and pulling the
+    /// S-SMP forward to the DSP clock.
+    fn advance_symmetric(&mut self, clocks: u32, clock: u64, rate: u64) -> bool {
+        self.set_master_clock(clock + u64::from(clocks), rate);
+        let target = self.smp_clock + u128::from(clocks) * SCHEDULER_SECOND / u128::from(rate);
+        let mut guard = 0u64;
+        while self.smp_clock < target && guard < 100_000_000 {
+            self.step_direct();
+            guard += 1;
+            // Per DSP tick: advance the DSP one micro-step, then pull the S-SMP
+            // to the DSP clock (ares `DSP::tick` -> `Thread::synchronize(smp)`).
+            // The DSP tick limit is captured before the pull so the pulled S-SMP
+            // does not feed back into more DSP ticks in the same iteration.
+            let dlimit = self.smp_clock;
+            let mut ticks = 0u32;
+            while self.dsp_clock + DSP_TICK <= dlimit && ticks < 64 {
+                let step_to = self.dsp_clock + DSP_TICK;
+                drain_dsp_to(
+                    &mut self.ram[..],
+                    &mut self.dsp,
+                    &mut self.dsp_clock,
+                    &mut self.samples,
+                    step_to,
+                );
+                let mut inner = 0u32;
+                while self.smp_clock < self.dsp_clock && self.smp_clock < target && inner < 64 {
+                    self.step_direct();
+                    inner += 1;
+                }
+                ticks += 1;
+            }
+        }
+        false
+    }
+
     /// Execute the next instruction into a fresh micro-op timeline.
     fn record_instruction(&mut self) {
         if spc_coro() {
@@ -1291,6 +1381,9 @@ impl Apu {
     /// clock is ahead of the S-CPU. The remaining credit is carried, so the
     /// next advance (after the S-CPU has caught up) resumes at the same sample.
     pub fn advance_master_clock(&mut self, clocks: u32, clock: u64, rate: u64) -> bool {
+        if sym_driver() {
+            return self.advance_symmetric(clocks, clock, rate);
+        }
         const APU_UNIT_NUM: i64 = 2_050_560;
         let den = rate as i64;
         self.set_master_clock(clock + u64::from(clocks), rate);
@@ -1473,7 +1566,7 @@ impl SpcBus for ApuBus<'_> {
     }
 
     fn step_clock(&mut self, clocks: u32) {
-        if dsp_instr_sync() {
+        if dsp_instr_sync() || sym_driver() {
             self.advance_smp_clock(clocks);
         } else {
             self.step_dsp_clock(clocks);
