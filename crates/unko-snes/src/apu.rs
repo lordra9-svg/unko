@@ -43,6 +43,14 @@ pub fn mutual_scheduler() -> bool {
     *MUTUAL.get_or_init(|| std::env::var_os("SNES_MUTUAL").is_some())
 }
 
+/// `SNES_LEAD_AFTER_BOOT`: apply `SNES_PORT_LEAD`/`SNES_SMP_WRITE_PULL` only
+/// after the IPL ROM has been disabled (the boot handshake keeps the default
+/// exact-credit path).
+pub fn lead_after_boot() -> bool {
+    static A: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *A.get_or_init(|| std::env::var_os("SNES_LEAD_AFTER_BOOT").is_some())
+}
+
 /// `SNES_SMP_WRITE_PULL`: when the S-SMP commits a write to `$F4-$F7` while it
 /// is ahead of the S-CPU clock, park the write and let the S-CPU run forward to
 /// the write clock first (ares `SMP::writeIO` calls `synchronize(cpu)` before
@@ -615,6 +623,11 @@ impl Apu {
         u64::try_from(fixed.div_ceil(scalar)).unwrap_or(u64::MAX)
     }
 
+    /// Whether the IPL ROM is currently mapped (`$FFC0-$FFFF`).
+    pub fn ipl_rom_enabled(&self) -> bool {
+        self.iplrom_enable
+    }
+
     /// Whether the pending deferred read is a `$F4-$F7` port read whose clock
     /// is ahead of the S-CPU, i.e. ares would run the S-CPU forward first.
     pub fn port_read_waiting(&self) -> bool {
@@ -1069,6 +1082,7 @@ impl Apu {
         // S-CPU forward to the S-SMP clock before latching the port. Park on
         // the write's own clock and let the S-CPU catch up first.
         if smp_write_pull()
+            && (!lead_after_boot() || !self.iplrom_enable)
             && step.port_write.is_some()
             && self.plan_sub + 1 >= u32::from(step.clocks)
         {

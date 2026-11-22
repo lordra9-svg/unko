@@ -444,6 +444,13 @@ impl ApuPeer<'_> {
         }
     }
 
+    fn ipl_rom_enabled(&self) -> bool {
+        self.apu
+            .as_ref()
+            .expect("actor is not idle")
+            .ipl_rom_enabled()
+    }
+
     fn port_write(&mut self, port: u8, value: u8) {
         self.apu
             .as_mut()
@@ -1133,7 +1140,9 @@ impl Snes {
                                 && (0x2140..=0x2143).contains(&(address & 0xFFFF)) =>
                         {
                             let port = ((address & 0xFFFF) - 0x2140) as u8;
-                            if crate::apu::port_lead() {
+                            if crate::apu::port_lead()
+                                && (!crate::apu::lead_after_boot() || !peer.ipl_rom_enabled())
+                            {
                                 peer.finish_instruction(self.clock, rate);
                             }
                             peer.port_write(port, value);

@@ -8889,3 +8889,67 @@ All flags remain default off, so the verified default gate
 (dkc/zelda/fzero 100%, cv4 98.2383%, smas 50.9452%, ct 34.9427%, mmx2 69.2222%)
 is unchanged; MMX2's bit-exact result is reachable with
 `SNES_PORT_LEAD=1 SNES_SMP_WRITE_PULL=1`.
+
+## The PORT_LEAD split is the IPL boot handshake (2026-11-21)
+
+### The zelda shift is an IPL upload phase, not a DSP effect
+
+Zelda under `SNES_PORT_LEAD=1 SNES_SMP_WRITE_PULL=1`:
+
+* first non-zero audio sample: **ours 90,144, ares 90,136** (fixed 4 stereo
+  frames, 8 interleaved samples; constant at 200/400/600 frames, so not
+  accumulating);
+* whole output = default output shifted by 8 interleaved samples (89.0% match at
+  that shift; default matches ares at offset 0);
+* per-voice (v7): `ours[n] = ares[n-4]` with env/pitch/BRR progression identical.
+
+The first S-SMP PC divergence explains it: instruction 1,532 (of 1,113,537),
+inside the IPL boot loop:
+
+```
+k=1532  ours $FFDA / $FFDC / $FFE9 (RAM clear)   ares $FFEB / $FFED (transfer)
+```
+
+Ours performs extra IPL iterations, so the driver upload completes about four
+output samples late. The split lives in the **boot handshake**, not in the DSP.
+
+### `SNES_LEAD_AFTER_BOOT`: gate the pull until the IPL is unmapped
+
+With `SNES_PORT_LEAD=1 SNES_SMP_WRITE_PULL=1 SNES_LEAD_AFTER_BOOT=1` (the pull
+rules only apply once the IPL ROM is disabled):
+
+```
+dkc    100.0000%
+zelda  100.0000%
+fzero  100.0000%
+mmx2    69.2217%   (back to the default)
+```
+
+So the MMX2 bit-exact result *requires* the boot-handshake treatment, while
+zelda/F-Zero *require* its absence - the two are opposite at the same IPL
+handshake. This is the per-title split, localised to one place.
+
+### `SNES_SMP_ACCESS_STOP` + `SNES_SMP_WRITE_PULL` (also measured)
+
+```
+dkc 100.0000%  zelda 63.7474%  fzero 35.9945%  cv4 89.1395%
+smas 50.9452%  ct 29.5962%  mmx2 95.8540%
+```
+
+Same family as `PORT_LEAD + WRITE_PULL`, so the write-pull dominates whichever
+stop rule is used.
+
+### `SNES_LEAD_CLAMP` (rejected: deadlocks)
+
+Clamping the borrowed credit to zero after a catch-up hung DKC (no output after
+more than an hour); the flag and code were removed. Not viable.
+
+### State
+
+All flags default off; the default gate is unchanged (dkc/zelda/fzero 100%,
+cv4 98.2383%, smas 50.9452%, ct 34.9427%, mmx2 69.2222%). The remaining question
+is now narrow and explicit: reproduce ares' symmetric cooperative scheduler at
+the IPL boot handshake such that zelda/F-Zero and MMX2 are both exact. The
+current unidirectional driver cannot express both; a scheduler rework that lets
+the S-SMP and S-CPU switch to each other at instruction entry (ares
+`Thread::Enter` -> `scheduler.synchronize()`) is the next architectural step.
