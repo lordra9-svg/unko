@@ -8053,3 +8053,26 @@ $FD read grid phase (10 timer clocks)  ->  one $049F iteration skipped (56 clock
 The remaining fix must make the `$049F` loop run that one additional iteration -
 i.e. align the S-SMP timer/read phase at the loop entry - which every global rule
 so far has failed to do without breaking the exact titles.
+
+## Timestamped latch + inline read (coroutine): same as inline, CV4 89.14% (2026-11-21)
+
+Tried the precise ares ordering on the coroutine recorder with `defer_io_reads =
+false`: S-CPU port writes are timestamped and exposed only when the S-SMP clock
+reaches them (`ares readIO -> synchronize(cpu)`), with the latch sampled inline
+at the access instant (`SNES_PORT_PULL`).
+
+600 frames:
+
+```
+dkc   0 differing (100.0000%)
+cv4  69,476 (89.1385%)   - identical to plain inline sampling, worse than default
+smas 313,782 (50.9452%)  - unchanged
+```
+
+So "expose only writes the S-SMP has reached" changes nothing over inline
+sampling: at the read instant the exposed set is the same, and CV4 still
+regresses to the access-stop-like result. This is the last untried combination of
+the read-ordering idea; reverted to the byte-identical coroutine seam.
+
+The evidence is now closed on the read side as well: the CV4 residual is not
+reproducible by any ordering of latch exposure relative to the read instant.
