@@ -9609,3 +9609,47 @@ origin of the ~15-tick within-sample phase found. Without that, the tick logs
 cannot separate the constant origin offset from the real phase.
 
 Default gate unchanged; no source change this turn.
+
+## CT phase origin located: an `$F4` poll loop gains ~11 iterations (2026-11-22)
+
+Instrumented the monotonic `aresSmpMono` into `ARES_SPC_TRACE` (local ares
+rebuild) and compared the S-SMP clock instruction-by-instruction against our
+cumulative S-SMP clock.
+
+At the voice-1 KON (`$02BC`): ares `aresSmpMono = 4,830,980`, ours = 4,831,210
+=> **+230 S-SMP clocks** (= 115 DSP ticks = ~3.6 samples). Local alignment over
+the run shows the offset is ~+25..+45 during boot and jumps to ~+270 between
+instruction indices 130,000 and 135,000.
+
+Bisected the jump to index **131,448** in a tight driver loop:
+
+```
+        ours                     ares
+131447  $1195  clk 932934     $1195  mono 932890
+131448  $1197  clk 932940     $1193  mono 932898   <- branch differs
+131449  $1199  clk 932948     $1195
+131450  $1179  clk 932954     $1197
+```
+
+Disassembly of the CT driver at `$1190`:
+
+```
+1190: AC 89 11   (data/operand)
+1193: 3E F4      CMP $F4        ; compare with the CPU port latch
+1195: F0 FC      BEQ $1193      ; loop while equal
+1197: F8 F4      MOV X,$F4
+```
+
+At `$1195` ares takes the branch (Z=1) and ours does not, and ours executes
+~22 fewer/more iterations across the loop (the index alignment shifts from -5 to
+-27), adding ~230 S-SMP clocks. So CT's note-on offset is acquired in this
+**CPU-port poll loop**: the S-SMP sees the S-CPU's `$2140` value (or its change)
+a different number of iterations away.
+
+This is the port-visibility/handshake mechanism again, now pinpointed to one
+`$1193-$1195` poll and a measured ~230-clock offset. The next step is to compare
+the S-CPU write time to `$2140` with the S-SMP clock at this loop in both
+emulators to determine whether ours exposes the value late (or the S-SMP is
+ahead and not parked), rather than testing more global scheduling rules.
+
+No source change this turn; the default gate is unchanged.
