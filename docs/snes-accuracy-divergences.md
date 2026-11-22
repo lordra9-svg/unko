@@ -8301,3 +8301,26 @@ on the **write** side: the two-valued `$F3` placement ({+6,-22} mod 32 for CV4 =
 tick rounding: at each `$F3` write log our `dsp_clock` before/after the
 `drain_dsp_to` and the target, and compare with ares' `dspTicks`, to find why the
 placement is 4 ticks two-valued instead of single-valued.
+
+## Write-side rounding is a pure single-valued ceil; the split is in the SMP clock (2026-11-21)
+
+Checked every `$F3` write in the 300-frame CV4 run against the rounding formula:
+
+```
+writes: 2313
+micro != ceil(smp_clock / DSP_TICK): 0
+micro - floor(smp_clock / DSP_TICK): 1 for all 2313 writes
+```
+
+So our DSP write placement is **exactly `ceil(smp_clock / DSP_TICK)`** - a
+deterministic, single-valued rounding. It cannot by itself produce the
+two-valued `$F3` delta ({+6,-22} mod 32).
+
+Therefore the two-valued write placement comes entirely from the **S-SMP clock at
+the write** being two-valued relative to ares. The write side is now exonerated
+together with the read side; both are pure functions of the S-SMP clock, and that
+clock was measured to match ares exactly through write 32 and to diverge at the
+block boundary.
+
+This is the correct target: the S-SMP clock trajectory at the block boundary
+(credit/record timing), not the DSP rounding, read grid or write placement.
