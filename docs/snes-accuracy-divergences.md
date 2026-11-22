@@ -10036,3 +10036,32 @@ each write. That is exactly the latch/lead family already measured to regress.
 The phase measurement therefore confirms the offset is the S-SMP instruction
 phase at the write, not a free parameter that can be corrected externally.
 Default gate unchanged.
+
+## `SNES_SYMMETRIC`: the symmetric entry-sync driver shape, measured (2026-11-22)
+
+Implemented the authorised symmetric scheduler shape as a single switch: the
+S-SMP is advanced only at S-CPU instruction boundaries and `$2140-$2143`
+accesses, catching up in whole instructions (ares `scheduler.synchronize()` before
+each thread instruction), with the deferred-read park pulling the S-CPU
+(`SNES_SYMMETRIC` = INSTR_SYNC + INSTR_LEAD semantics).
+
+7-title 600-frame gate (CX4 for MMX2):
+
+```
+dkc    156064 differing (75.6019%)
+zelda       2 differing (99.9997%)
+fzero       0 differing (100.0000%)
+cv4     83384 differing (86.9642%)
+smas   370472 differing (42.0826%)
+ct     484124 differing (24.3149%)
+mmx2   211808 differing (66.8872%)
+```
+
+Worse than the default on dkc/cv4/smas/ct/mmx2, better only on fzero/zelda (the
+fzero 100% was already the case). So even the faithful symmetric entry-sync
+shape does not reproduce ares' audio better than the current exact-credit
+per-access drain; the residual mismatches are not explained by the sync shape
+alone.
+
+The flag stays default off. Default gate unchanged; 236 tests, clippy/fmt clean,
+212/212 baseline.

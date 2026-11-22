@@ -206,7 +206,19 @@ pub fn port_lead() -> bool {
 /// instruction catch-up ares uses instead of the exact-credit stop.
 pub fn instr_lead() -> bool {
     static LEAD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *LEAD.get_or_init(|| std::env::var_os("SNES_INSTR_LEAD").is_some())
+    *LEAD.get_or_init(|| symmetric() || std::env::var_os("SNES_INSTR_LEAD").is_some())
+}
+
+/// `SNES_INSTR_SYNC`: hold the S-SMP until the S-CPU instruction end (ares'
+/// per-instruction `scheduler.synchronize()`), plus `$2140-$2143` accesses,
+/// with the exact-credit stop (no overshoot).
+/// `SNES_SYMMETRIC`: the symmetric mutually-resumable driver shape - the S-SMP
+/// is advanced only at S-CPU instruction boundaries and `$2140-$2143` accesses,
+/// catching up in whole instructions (ares `scheduler.synchronize()` before each
+/// thread instruction), with the deferred-read park pulling the S-CPU.
+pub fn symmetric() -> bool {
+    static S: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *S.get_or_init(|| std::env::var_os("SNES_SYMMETRIC").is_some())
 }
 
 /// `SNES_INSTR_SYNC`: hold the S-SMP until the S-CPU instruction end (ares'
@@ -214,7 +226,7 @@ pub fn instr_lead() -> bool {
 /// with the exact-credit stop (no overshoot).
 pub fn instr_sync() -> bool {
     static INSTR: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *INSTR.get_or_init(|| std::env::var_os("SNES_INSTR_SYNC").is_some())
+    *INSTR.get_or_init(|| symmetric() || std::env::var_os("SNES_INSTR_SYNC").is_some())
 }
 
 /// `SNES_NO_PARK`: never park an `$F4-$F7` read (resolve it at the S-SMP's
