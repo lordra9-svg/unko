@@ -9583,3 +9583,29 @@ DSP_SAMPLE_SYNC              417278 (34.7652%)
 No existing stop/pull/gating/DSP-phase rule makes CT exact. CT needs a discrete
 **3-sample KON/note-start** correction, larger than the per-event write phase the
 current rules target - a new mechanism, not another phase constant.
+
+## CT instruction-stream probe: driver writes identical; ares clock field unusable (2026-11-22)
+
+Captured CT's S-SMP traces (200 frames) for both emulators and compared the
+driver around the voice-1 note-on.
+
+* The DSP register/value write sequences are **exactly identical** over all 7,070
+  writes (`first reg/val divergence: None`). The driver program and its write
+  order are the same; only timing differs.
+* DSP write tick differences (`ours - ares`) are `+126` (2414), `+136` (2217),
+  `+111` (997), `+133` (952), ... i.e. a constant log-origin offset of ~+111 with
+  a spread of ~20 ticks. Mod 32 they spread across {5,8,12,15,20,23,30}, so the
+  within-sample phase does vary by up to ~15 ticks.
+* The ares SPC trace's clock field (`clock()/scalar()`) is **not cumulative**
+  (e.g. 30,714 at instruction 133,750 while ours is 949,358), so it cannot be
+  used for an instruction-level clock comparison. The earlier finding that
+  `Thread::clock()` is discontinuous was worked around with a monotonic
+  `aresSmpMono` counter; that counter is not in the SPC trace.
+
+Conclusion: the CT driver is identical and the timing spread is small; the next
+measurement needs the monotonic `aresSmpMono` value in `ARES_SPC_TRACE` (a local
+ares rebuild) so the S-SMP clock can be compared at the KON instruction and the
+origin of the ~15-tick within-sample phase found. Without that, the tick logs
+cannot separate the constant origin offset from the real phase.
+
+Default gate unchanged; no source change this turn.
