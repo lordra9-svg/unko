@@ -9653,3 +9653,31 @@ emulators to determine whether ours exposes the value late (or the S-SMP is
 ahead and not parked), rather than testing more global scheduling rules.
 
 No source change this turn; the default gate is unchanged.
+
+## CPU port writes are now timestamped; the CT upload repeats values across passes (2026-11-22)
+
+Added S-CPU port-write recording to the actor write path (`DEBUG` events with the
+master clock), so `PORT_OUT` now contains `W` events with real timestamps
+(previously only S-SMP reads/writes, all clocks 0).
+
+CT, CPU writes to port 0 near the first divergence (master clocks):
+
+```
+9,346,   9,415,   9,485,   9,555,   9,625,   9,695   : value 10 (one per frame)
+9,767,276 : 11   9,768,860 : 12   9,771,354 : 13   9,772,506 : 14
+9,773,784 : 15   9,775,062 : 16   ... 9,790,756 : 23
+```
+
+The S-SMP's poll reads around the divergence (instruction 131,446, cumulative
+932,930 S-SMP clocks = master ~9,769,860) already see `$13` **before** the CPU's
+9,771,354 write of `$13`. So the same value is delivered in more than one upload
+pass / the driver re-reads stale latch values, and matching by `(reg,value)` is
+ambiguous - the upload must be compared **cycle by cycle** (per pass), not by
+value.
+
+This is why the earlier write-log comparisons could not isolate the CT
+handshake: the values repeat. With both sides now timestamped (`PORT_OUT W`
+events here, `ARES_APU_LOG` in ares), the next comparison can align the first
+upload pass and the S-CPU write that each `$1193` poll is waiting for.
+
+No behavioural change; default gate unchanged.

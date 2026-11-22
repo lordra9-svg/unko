@@ -1146,6 +1146,10 @@ impl Snes {
                                 peer.finish_instruction(self.clock, rate);
                             }
                             peer.port_write(port, value);
+                            if let Some(apu) = peer.apu.as_mut() {
+                                apu.debug
+                                    .record_cpu_write(self.clock, usize::from(port), value);
+                            }
                             BusResponse::None
                         }
                         BusRequest::AccessCycles { address } => {
