@@ -10310,3 +10310,32 @@ predict -6 vs +22 either. Combined with the earlier falsification of the
 access-clock hypothesis, every write-local signal available to us is ruled out.
 
 Default gate unchanged; no code change this turn.
+
+## CT: the first lost poll is pass v=0x18 at the pass start (2026-11-22)
+
+Re-ran the read-log segmentation around the CT divergence using the monotonic
+logs. The first pass where ours polls one fewer time is **v=0x18**:
+
+```
+ours: pass v=17 1 read (932645), v=18 5 reads (932745..932915), v=19 6 reads
+ares: pass v=18 6 reads starting 932705
+```
+
+The pass start is +40 SMP clocks later in ours, and the pass is correspondingly
+one read shorter (5 vs 6). So the lost poll is at the **start** of the v=0x18
+pass: ares' CPU write of 0x18 lands before a poll read, ours lands after it,
+costing exactly one iteration. That single lost read shifts every later pass
+phase (the -14-clock steps measured earlier) and accumulates to the +230-clock
+KON offset.
+
+The write of 0x18 is the same 10-clock `MOV $F3` sequence; the difference is the
+instant the CPU's `$2140` write becomes visible relative to the poll read - the
+port write/poll ordering. Every ordering variant (latch-at-write, latch-queue,
+latch-at-read, lead, catch-up) was measured and none reproduces ares' instant.
+
+So CT's residual is now localised to **one poll at the start of the v=0x18
+pass**; a targeted fix would have to make that one write visible one poll
+earlier, but that is precisely the per-write ordering the architecture cannot
+express (and the variant experiments all regressed).
+
+Default gate unchanged; no code change this turn.
