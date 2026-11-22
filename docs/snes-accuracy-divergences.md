@@ -9823,3 +9823,35 @@ mmx2   196872 differing (69.2222%)
 It reproduces access-stop exactly, including CT at 31.5413% - the per-access
 mutual pull does not change the CT `$1193/$1195` poll race, whose ack clocks were
 already measured to oscillate (+48..-64 S-SMP clocks). Default unchanged.
+
+## CT per-cycle poll instrumentation: ours' consume delay is quantised by the poll period (2026-11-22)
+
+For each uploaded byte, measured the delay between the S-CPU `$2140` write
+(timestamped `PORT_OUT W`) and the first S-SMP poll read of that value
+(timestamped via the SPC trace cumulative clock), in master clocks:
+
+```
+v=11 35   v=12 588  v=13 21   v=14 147  v=15 147  v=16 147  v=17 147
+v=18 40   v=19 19   v=1A 40   v=1B 19   v=1C 145  v=1D 145  ...  v=20 144
+v=21 37   v=22 17   v=23 38   v=24 17
+```
+
+The delays cluster at ~17, ~37 and ~145 master clocks, i.e. 0, 1 or ~7
+iterations of the ~135-clock `$1193/$1195` poll loop. So each byte is consumed a
+quantised number of poll iterations after the cast; the byte-to-byte phase
+advances by ~118-135 clocks.
+
+The ares side of the comparison is blocked by the read-log mapping: `ARES_PORT_READ_LOG`
+values do not align with the CPU writes in the same window (first matching value
+appears tens of millions of clocks later), so the ares per-byte delay could not
+be computed this way. The earlier instruction-clock comparison (ack writes
+oscillating +48..-64 S-SMP clocks in poll steps) remains the valid ares-side
+evidence.
+
+So CT's divergence is the quantised poll-race phase: ours and ares land each
+byte at different iteration counts, and the differences accumulate to the
++230-clock KON offset. A per-cycle adjustment would need to know which poll
+iteration the CPU write crosses in ares, which requires a correct ares-side
+per-read timestamp mapping first.
+
+Default gate unchanged; no behavioural change this turn.
