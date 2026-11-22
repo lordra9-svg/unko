@@ -1465,7 +1465,14 @@ impl Snes {
         if self.refresh_pending {
             self.refresh_pending = false;
             self.refresh_active = true;
-            self.advance_peripherals_inner(DRAM_REFRESH_CLOCKS);
+            // ares `CPU::step` runs the refresh as five `step(6); step(2)`
+            // pairs, each of which ends with `synchronize(smp, ppu)`. Advance
+            // in the same slices so the S-SMP stops at the same suspension
+            // points ares visits during the stall.
+            for _ in 0..5 {
+                self.advance_peripherals_inner(6);
+                self.advance_peripherals_inner(2);
+            }
             self.refresh_active = false;
             DRAM_REFRESH_CLOCKS + spc7110
         } else {

@@ -10633,3 +10633,97 @@ commit at access granularity gives DKC+MMX2 but shifts zelda/F-Zero. This is the
 same mutually-exclusive family, now reached without the whole-instruction
 overshoot. Flag default off; default gate unchanged (dkc/zelda/fzero 0,
 cv4 98.2383, smas 50.9452, ct 34.9427, mmx2 69.2222).
+
+## S-SMP synchronization at suspension intervals, not one clock at a time (2026-11-22)
+
+`SNES_SMP_ACCESS_STOP` now models ares' `Thread::synchronize(smp)` correctly.
+The S-SMP does not advance one clock at a time to the S-CPU clock: it runs whole
+suspension intervals. It suspends at the end of every bus access (`SMP::step` ->
+`synchronize`), and the split `$F4-$F7` read's `readIO` only *pulls the S-CPU*
+when the S-SMP is ahead - it is not itself a suspension. The new helper
+`sync_smp_to` drains exactly the remainder of each access (`plan_sub` resets at
+an access end, so a loop on `plan_sub` ran into the next access forever).
+
+With that correction the access-stop model reaches a new best result:
+
+```
+dkc 173620 (72.8573%)   zelda 16503 (97.4200%)   fzero 409415 (35.9945%)
+cv4  69473 (89.1390%)   smas      0 (100.0000%)  ct     416097 (34.9499%)
+mmx2 63969 (89.9995%)
+```
+
+**SMAS is now bit-exact at full length under a single principled rule** (it was
+50.9452% before), and MMX2 rises to 90%. The previously-exact dkc/zelda/F-Zero
+regress, so this is not yet a universal default. Applying the rule only after
+the IPL boot (`SNES_LEAD_AFTER_BOOT`) restores the default exactly, which shows
+the phase is set during the boot upload handshake.
+
+`SNES_PORT_READ_CLOCK` (park at the read clock, `plan_sub + 1`) with the
+corrected stop gives:
+
+```
+dkc 173620   zelda 16503   fzero 0 (100%)   cv4 16561 (97.4110%)
+smas 370472  ct 461340     mmx2 204374
+```
+
+and adding `SNES_PER_ACCESS_MUTUAL` (S-CPU pull resolved at access granularity):
+
+```
+dkc 173620   zelda 29913   fzero 163979   cv4 16561
+smas 0 (100%)  ct 347893 (45.6125%)  mmx2 55202 (91.3700%)
+```
+
+So the read-clock park is right for F-Zero and the access-granularity pull is
+right for SMAS/CT, but neither combination is universal.
+
+## DRAM refresh now advances in ares' five 6+2-clock steps (2026-11-22)
+
+`advance_peripherals` used to advance the whole 40-clock WRAM refresh stall in
+one call; ares runs five `step(6); step(2)` pairs, each ending in
+`synchronize(smp, ppu)`. It now does the same. The default gate is byte-identical
+(dkc/zelda/fzero 0, cv4 11269, smas 313782, ct 416143, mmx2 196872), so this is a
+fidelity change without a regression.
+
+## Shared-state engine: the S-CPU pull is not its missing piece (2026-11-22)
+
+Added the ares `$F4-$F7` mutual pull to `SNES_SYM_ENGINE` (`SNES_SYM_PULL`): on a
+port read/write with the S-SMP ahead, the instruction parks, keeps the SPC700
+coroutine suspended, and resumes after the S-CPU reaches the park clock. Without
+the pull the engine is unchanged and still gives **zelda 100.0000%** and
+**fzero 100.0000%**. With it:
+
+```
+dkc 376163 (41.1929%)   zelda 232574 (63.6408%)  fzero 463855 (27.4837%)
+cv4  69470 (89.1395%)   smas  373206 (41.6552%)  ct     478833 (25.1421%)
+mmx2 196835 (69.2280%)
+```
+
+The pull regresses the two titles the engine already gets exactly, so the
+engine's credit-driven floor is already the right ordering for them; adding an
+explicit pull double-counts the catch-up. The engine is left default off with the
+pull behind its own flag.
+
+## Frontier: the residual is a boot-handshake phase (2026-11-22)
+
+Every ares-faithful access-local rule now measured:
+
+| rule | exact |
+|---|---|
+| default (carried-credit floor) | dkc, zelda, fzero |
+| access stop, corrected suspension (`SMP_ACCESS_STOP`) | smas |
+| + read-clock park (`PORT_READ_CLOCK`) | fzero |
+| + per-access pull (`PER_ACCESS_MUTUAL`) | smas |
+| + S-SMP write pull (`SMP_WRITE_PULL`) | dkc, mmx2 |
+| old mid-step access stop | dkc, fzero, cv4 |
+| timestamped CPU latch (`CPU_LATCH_TIME`) | dkc, smas, mmx2 |
+
+Each mechanism is exact for a different subset because the whole driver timeline
+is phased by the **boot upload handshake**, whose port-exchange interleaving is
+one poll iteration (4 S-SMP clocks) different per rule. A rule that is right for
+one title shifts another by one iteration. Matching every title needs the exact
+mutual scheduler recursion (CPU/SMP/DSP coroutines), not another stop or latch
+rule; the corrected suspension model above is the closest description of it and
+is the required next base.
+
+Default gate unchanged: dkc/zelda/fzero 0, cv4 98.2383%, smas 50.9452%,
+ct 34.9427%, mmx2 69.2222%. 244 tests, clippy/fmt clean, 212/212 baseline.

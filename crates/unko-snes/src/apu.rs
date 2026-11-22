@@ -313,6 +313,34 @@ pub fn smp_suspend_stop() -> bool {
     *S.get_or_init(|| std::env::var_os("SNES_SMP_SUSPEND_STOP").is_some())
 }
 
+/// `SNES_SMP_STEP_PULL`: ares' `SMP::step` calls `synchronize(cpu)` after
+/// advancing the S-SMP clock, so the S-CPU is always run forward to the S-SMP
+/// clock before the S-SMP continues. Park whenever the S-SMP is ahead of the
+/// S-CPU so the scheduler runs the S-CPU to it (the general mutual ratchet,
+/// not only at port accesses).
+pub fn smp_step_pull() -> bool {
+    static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *P.get_or_init(|| std::env::var_os("SNES_SMP_STEP_PULL").is_some())
+}
+
+/// `SNES_SMP_PORT_STOP`: apply the ares access-boundary stop only when the
+/// crossing access touches the S-CPU ports (`$F4-$F7` read or write); other
+/// accesses keep the carried-credit floor. Diagnostics for whether the port
+/// handshake needs the overshoot without shifting the whole S-SMP cadence.
+pub fn smp_port_stop() -> bool {
+    static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *P.get_or_init(|| std::env::var_os("SNES_SMP_PORT_STOP").is_some())
+}
+
+/// `SNES_SYM_PULL`: give the shared-state engine (`SNES_SYM_ENGINE`) ares'
+/// `$F4-$F7` mutual pull. `SMP::readIO`/`writeIO` call `synchronize(cpu)`; when
+/// the S-SMP is ahead, the instruction parks and the scheduler runs the S-CPU
+/// to the S-SMP clock before the port is sampled or latched.
+pub fn sym_pull() -> bool {
+    static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *P.get_or_init(|| std::env::var_os("SNES_SYM_PULL").is_some())
+}
+
 /// `SNES_WRITE_ACCESS_STOP`: before an S-CPU `$2140-$2143` write latches, run
 /// the S-SMP to the first suspension point at or past the S-CPU clock (ares
 /// `SMP::portWrite` is reached only after `CPU::step` -> `synchronize(smp)`).
@@ -621,6 +649,12 @@ pub struct Apu {
     apu_credit: i64,
     /// Fixed-point clock to hand the S-CPU as a park target (`SNES_SMP_WRITE_PULL`).
     park_at: Option<u128>,
+    /// Pending `$F4-$F7` read parked by the shared-state engine: the S-SMP has
+    /// suspended at `readIO` and the S-CPU must reach the park clock first.
+    sym_pending_read: Option<u16>,
+    /// Pending `$F4-$F7` write parked by the shared-state engine: the S-SMP has
+    /// suspended before latching and the S-CPU must reach the park clock first.
+    sym_pending_write: Option<(u16, u8)>,
     samples: VecDeque<Sample>,
     /// Debug: S-CPU/S-SMP port handshake trace.
     pub debug: PortDebug,
@@ -678,6 +712,8 @@ impl Apu {
             master_clock_valid: false,
             apu_credit: 0,
             park_at: None,
+            sym_pending_read: None,
+            sym_pending_write: None,
             samples: VecDeque::new(),
             debug: PortDebug::default(),
         }
@@ -1237,13 +1273,26 @@ impl Apu {
 
     /// Execute one S-SMP instruction through the coroutine, answering its bus
     /// events against the shared APU state (`SNES_SYM_ENGINE`).
-    fn sym_instruction(&mut self) {
+    ///
+    /// Returns `true` when the instruction parked at a `$F4-$F7` access because
+    /// the S-SMP is ahead of the S-CPU (`SNES_SYM_PULL`); the coroutine stays
+    /// suspended and the next call resumes it after the S-CPU catches up.
+    fn sym_instruction(&mut self) -> bool {
         use crate::spc_coroutine::{SpcEvent, SpcInput, SpcResume};
-        let core = std::mem::take(&mut self.spc);
         let mut coro = SYM_CORO
             .with(|slot| slot.borrow_mut().take())
             .unwrap_or_else(crate::spc_coroutine::new_spc_coroutine);
-        let mut input = SpcInput::Start(core);
+        let mut input = if let Some(address) = self.sym_pending_read.take() {
+            // The S-CPU has reached the park clock: sample the port now.
+            SpcInput::Resume(SpcResume::Byte(self.sym_read(address)))
+        } else if let Some((address, value)) = self.sym_pending_write.take() {
+            // The S-CPU has reached the park clock: latch the port now.
+            self.sym_write(address, value);
+            SpcInput::Resume(SpcResume::Unit)
+        } else {
+            let core = std::mem::take(&mut self.spc);
+            SpcInput::Start(core)
+        };
         loop {
             match coro.resume(input) {
                 corosensei::CoroutineResult::Yield(SpcEvent::Done(core)) => {
@@ -1262,6 +1311,33 @@ impl Apu {
                     break;
                 }
                 corosensei::CoroutineResult::Yield(event) => {
+                    if sym_pull() {
+                        if let Some(cpu) = self.cpu_fixed_clock() {
+                            if self.smp_clock > cpu {
+                                // ares `SMP::readIO`/`writeIO` synchronize the
+                                // S-CPU to the S-SMP clock on `$F4-$F7`.
+                                match &event {
+                                    SpcEvent::Read(address)
+                                        if (0x00F4..=0x00F7).contains(address) =>
+                                    {
+                                        self.park_at = Some(self.smp_clock);
+                                        self.sym_pending_read = Some(*address);
+                                        SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
+                                        return true;
+                                    }
+                                    SpcEvent::Write(address, value)
+                                        if (0x00F4..=0x00F7).contains(address) =>
+                                    {
+                                        self.park_at = Some(self.smp_clock);
+                                        self.sym_pending_write = Some((*address, *value));
+                                        SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
+                                        return true;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
                     let response = match event {
                         SpcEvent::Wait(address) => SpcResume::Clocks(self.sym_wait(address)),
                         SpcEvent::Timer(address) => SpcResume::Clocks(self.sym_timer(address)),
@@ -1305,6 +1381,7 @@ impl Apu {
             }
         }
         SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
+        false
     }
 
     /// Shared-state mutual advance (`SNES_SYM_ENGINE`).
@@ -1316,7 +1393,9 @@ impl Apu {
         let mut guard = 0u32;
         while self.apu_credit >= den && guard < 10_000_000 {
             let before = self.smp_clock;
-            self.sym_instruction();
+            if self.sym_instruction() {
+                return true;
+            }
             let cost = self.smp_clock.saturating_sub(before).div_ceil(SMP_SCALAR) as i64;
             self.apu_credit -= cost.max(1) * den;
             guard += 1;
@@ -1705,6 +1784,18 @@ impl Apu {
     }
 
     fn drain_unit(&mut self) -> u32 {
+        if smp_step_pull() {
+            // ares `SMP::step` ends with `synchronize(cpu)`: if the S-SMP is
+            // ahead of the S-CPU, run the S-CPU forward to the S-SMP clock
+            // before the S-SMP continues.
+            if let Some(cpu) = self.cpu_fixed_clock() {
+                let position = self.smp_clock_at_position();
+                if position > cpu {
+                    self.park_at = Some(position);
+                    return 0;
+                }
+            }
+        }
         if cpu_latch_time() {
             let now = self.smp_clock_at_position();
             while let Some(&(time, port, value)) = self.cpu_write_queue.front() {
@@ -1941,14 +2032,69 @@ impl Apu {
         if (smp_access_stop() || smp_instr_stop() || per_access_mutual())
             && (!lead_after_boot() || !self.iplrom_enable)
         {
-            // ares stops at the end of the access/instruction that crosses the
-            // S-CPU clock; carry the overdraft as negative credit.
-            let instr = smp_instr_stop();
-            while self.plan_sub != 0 || (instr && self.plan_pos < self.plan.len()) {
+            if smp_instr_stop() {
+                // Legacy whole-instruction cadence (`SNES_PORT_LEAD` family).
+                while self.plan_sub != 0 || self.plan_pos < self.plan.len() {
+                    if self.drain_unit() == 0 {
+                        return true;
+                    }
+                    self.apu_credit -= den;
+                }
+            } else if let Some(target) = self.cpu_fixed_clock() {
+                // ares runs the S-SMP to the first suspension point at or past
+                // the S-CPU clock; carry the overdraft as negative credit.
+                return self.sync_smp_to(den, target);
+            }
+        }
+        false
+    }
+
+    /// Advance the S-SMP to the first suspension point at or past `target`.
+    ///
+    /// ares' `Thread::synchronize(smp)` switches to the S-SMP and lets it run
+    /// until its clock is at or past the S-CPU clock. The S-SMP only suspends
+    /// at the end of a bus access (`SMP::step` -> `synchronize`) and, for a
+    /// split `$F4-$F7` access, at the read clock between the two half accesses
+    /// (`readIO` -> `synchronize(cpu)`). The move is therefore "to the next
+    /// suspension point", never a partial access: stopping one clock at a time
+    /// would leave the S-SMP mid-access at a position ares never visits.
+    /// Returns `true` if the S-SMP parked on a pending port read.
+    fn sync_smp_to(&mut self, den: i64, target: u128) -> bool {
+        let mut guard = 0u32;
+        loop {
+            if self.plan_pos >= self.plan.len() {
+                self.record_instruction();
+            }
+            let Some(step) = self.plan.get(self.plan_pos).copied() else {
+                break;
+            };
+            if smp_port_stop() && step.port_write.is_none() && !(step.deferred && step.split) {
+                // Keep the carried-credit floor for non-port accesses.
+                break;
+            }
+            if self.smp_clock_at_position() >= target {
+                break;
+            }
+            let clocks = u32::from(step.clocks);
+            // ares' S-SMP suspends at the end of every bus access (`SMP::step`
+            // -> `synchronize`). The split read's `readIO` only *pulls the CPU*
+            // when the S-SMP is ahead; it does not stop the S-SMP, so the
+            // midpoint is not a suspension for a CPU-side synchronize.
+            let suspension = clocks;
+            // Drain only the remainder of *this* access: `plan_sub` resets to
+            // zero when the access completes, so a loop on `plan_sub` alone
+            // would keep running into the next access forever.
+            let mut remaining = suspension.saturating_sub(self.plan_sub);
+            while remaining > 0 {
                 if self.drain_unit() == 0 {
                     return true;
                 }
                 self.apu_credit -= den;
+                remaining -= 1;
+            }
+            guard += 1;
+            if guard > 200_000 {
+                break;
             }
         }
         false
@@ -1969,35 +2115,7 @@ impl Apu {
         let Some(cpu) = self.cpu_fixed_clock() else {
             return false;
         };
-        let mut guard = 0u32;
-        loop {
-            if self.plan_pos >= self.plan.len() {
-                self.record_instruction();
-            }
-            let Some(step) = self.plan.get(self.plan_pos).copied() else {
-                break;
-            };
-            if self.smp_clock_at_position() >= cpu {
-                break;
-            }
-            let clocks = u32::from(step.clocks);
-            let next = self.smp_clock_at_position() + SMP_SCALAR;
-            let end = self.plan_sub + 1 == clocks;
-            let half = step.split && self.plan_sub + 1 == clocks / 2;
-            let stop_after = next >= cpu && end;
-            if self.drain_unit() == 0 {
-                return true;
-            }
-            self.apu_credit -= den;
-            if stop_after || (smp_suspend_stop() && next >= cpu && half) {
-                break;
-            }
-            guard += 1;
-            if guard > 4096 {
-                break;
-            }
-        }
-        false
+        self.sync_smp_to(den, cpu)
     }
 
     /// Finish the S-SMP instruction currently in progress (`SNES_PORT_LEAD`).
