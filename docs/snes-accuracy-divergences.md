@@ -9771,3 +9771,33 @@ reproducing the exact per-access interleaving of both threads (the original
 symmetric-scheduler problem), not a latch or phase constant.
 
 Default gate unchanged; all flags default off.
+
+## Per-access mutual scheduler on the plan/replay drain: measured (2026-11-22)
+
+Ran the existing per-access mutual configuration on the plan/replay drain
+(`SNES_SMP_ACCESS_STOP=1 SNES_MUTUAL=1`: the S-SMP stops at the access boundary
+at/after the S-CPU clock and carries negative credit, so the deferred `$F4-$F7`
+read park and the mutual flush are active):
+
+```
+dkc    0 differing (100.0000%)
+zelda  1450 differing (99.7733%)
+fzero  0 differing (100.0000%)
+cv4    0 differing (100.0000%)
+smas   313782 differing (50.9452%)
+ct     437900 differing (31.5413%)
+mmx2   196872 differing (69.2222%)
+```
+
+`SNES_MUTUAL` is inert here (identical to access-stop alone), and CT gets worse
+(31.54% vs 34.94% default), so the per-access boundary stop does not resolve the
+`$1193/$1195` poll race. It does make CV4 exact (with dkc/fzero), at the cost of
+zelda's 1450 samples.
+
+This is the best global configuration measured on this gate (three exact plus
+zelda at 99.77%), but it is not "every title exact", and metroid/SMW regress
+under access-stop (measured earlier), so it cannot become the default.
+
+Conclusion: the per-access mutual scheduler is already expressible with the
+existing switches and is measured; it does not resolve CT or the remaining
+titles. The default gate is unchanged.
