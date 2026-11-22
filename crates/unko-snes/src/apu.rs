@@ -32,6 +32,18 @@ fn drain_dsp_to(
         }
         *dsp_clock += DSP_TICK;
     }
+    if dsp_sample_sync() {
+        // ares runs a whole `DSP::main` (32 micro-steps) per thread entry.
+        while dsp.micro_step() != 0 {
+            if let Some(sample) = dsp.tick(ram) {
+                samples.push_back(sample);
+                if samples.len() > 16_384 {
+                    samples.pop_front();
+                }
+            }
+            *dsp_clock += DSP_TICK;
+        }
+    }
 }
 
 /// Whether the symmetric (mutually resumable) CPU/SMP driver is enabled.
@@ -59,6 +71,15 @@ pub fn lead_after_boot() -> bool {
 pub fn smp_write_pull() -> bool {
     static PULL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *PULL.get_or_init(|| std::env::var_os("SNES_SMP_WRITE_PULL").is_some())
+}
+
+/// `SNES_DSP_SAMPLE_SYNC`: advance the S-DSP in whole output samples when it
+/// catches up to the S-SMP (ares' DSP thread entry `DSP::main` runs all 32
+/// micro-steps of one sample), instead of stopping mid-sample at the exact
+/// S-SMP clock.
+pub fn dsp_sample_sync() -> bool {
+    static S: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *S.get_or_init(|| std::env::var_os("SNES_DSP_SAMPLE_SYNC").is_some())
 }
 
 /// `SNES_DSP_INSTR_SYNC`: synchronize the S-DSP to the S-SMP only at S-SMP

@@ -454,7 +454,11 @@ impl Dsp {
         }
     }
 
-    /// Run one 32 kHz stereo sample through the DSP.
+    /// Micro-step within the current output sample (0 = sample boundary).
+    pub const fn micro_step(&self) -> u8 {
+        self.step
+    }
+
     /// Advance the S-DSP by one micro-step, returning the finished sample when
     /// the 32-step sequence wraps.
     pub fn tick(&mut self, ram: &mut [u8]) -> Option<Sample> {

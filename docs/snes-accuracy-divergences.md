@@ -9204,3 +9204,29 @@ clock constant.
 So the "eliminate the drift" step is a negative result: there is no drift. The
 remaining difference is structural (per-instruction vs per-access DSP
 observation), and the default gate is unchanged.
+
+## DSP whole-sample observation point measured and rejected (2026-11-21)
+
+ares' DSP thread entry `DSP::main` runs all 32 micro-steps of one output sample,
+and every `DSP::tick` advances 24 clocks then calls `Thread::synchronize(smp)`
+(pulling the SMP to the DSP clock inside the sample). New default-off
+`SNES_DSP_SAMPLE_SYNC` advances the DSP to the next sample boundary when it
+catches up to the SMP, i.e. makes the observation point sample-granular.
+
+Measured alone (600 frames):
+
+```
+dkc    342556 differing (46.4468%)   zelda 196248 (69.3198%)
+fzero  463200 differing (27.5861%)   cv4    56805 (91.1194%)
+smas   336844 differing (47.3398%)   ct    417278 (34.7652%)
+mmx2   196874 differing (69.2219%)
+```
+
+It regresses every title, so ares' DSP observation point is **not**
+sample-granular in effect: the in-sample `synchronize(smp)` keeps the SMP and DSP
+clocks interleaved at micro-step granularity, which our unidirectional driver
+cannot express (we cannot run SMP instructions from inside the DSP drain).
+
+This confirms the architectural requirement precisely: the missing piece is the
+DSP pulling the SMP forward *inside* `DSP::main`, not the DSP's stopping
+granularity. The flag stays default off; the default gate is unchanged.
