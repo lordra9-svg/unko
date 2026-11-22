@@ -45,6 +45,7 @@ pub mod spc7110;
 pub mod spc_coroutine;
 pub mod st018;
 pub mod sufamiturbo;
+pub mod sym_scheduler;
 pub mod system;
 
 pub use apu::{Apu, PortEvent, PortEventKind};
