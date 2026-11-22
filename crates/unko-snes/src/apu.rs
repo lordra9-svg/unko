@@ -120,6 +120,18 @@ pub fn dsp_late() -> bool {
     *L.get_or_init(|| std::env::var_os("SNES_DSP_LATE").is_some())
 }
 
+/// `SNES_SPC_CORO`: drive instruction recording from the per-access coroutine
+/// recorder (`spc_coroutine`) instead of the synchronous `Spc700::step`.
+pub fn spc_coro() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *C.get_or_init(|| std::env::var_os("SNES_SPC_CORO").is_some())
+}
+
+thread_local! {
+    static SPC_CORO: std::cell::RefCell<Option<crate::spc_coroutine::SpcCoroutine>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// ares `Thread::Second`: the fixed-point base of the scheduler clocks.
 const SCHEDULER_SECOND: u128 = (1u128 << 62) - 1;
 /// ares `Thread::setFrequency`: `_scalar = Second / frequency`.
@@ -630,6 +642,10 @@ impl Apu {
 
     /// Execute the next instruction into a fresh micro-op timeline.
     fn record_instruction(&mut self) {
+        if spc_coro() {
+            self.record_instruction_coro();
+            return;
+        }
         self.plan.clear();
         self.plan_pos = 0;
         self.plan_sub = 0;
@@ -690,6 +706,201 @@ impl Apu {
         };
         let deferred = if let Some(effective) = pending_address {
             // ares `SMP::wait`: the I/O window uses the internal wait selector.
+            const CYCLE_WAIT: [u8; 4] = [1, 2, 5, 10];
+            let clocks = CYCLE_WAIT[usize::from(self.internal_wait.min(3))] * 2;
+            let split = effective & 0xFFFC == 0x00F4;
+            plan.push(PlanStep {
+                clocks,
+                port_write: None,
+                deferred: true,
+                split,
+                dsp_write: None,
+            });
+            true
+        } else {
+            false
+        };
+        if plan.is_empty() && !deferred {
+            plan.push(PlanStep {
+                clocks: 2,
+                port_write: None,
+                deferred: false,
+                split: false,
+                dsp_write: None,
+            });
+        }
+        if self.debug.enabled && self.debug.trace.len() < 6_000_000 {
+            let clocks: u32 = plan.iter().map(|step| u32::from(step.clocks)).sum();
+            self.debug.trace.push((self.debug.clock, entry_pc, clocks));
+        }
+        self.plan = plan;
+        if !deferred {
+            self.instructions += 1;
+        }
+    }
+
+    /// Build an `ApuBus` for one recorded event (the SPC700 is moved out, so the
+    /// whole `self` borrow is free).
+    fn event_bus(&mut self, page_flag: bool, spc_pc: u16) -> ApuBus<'_> {
+        let dsp_target =
+            if dsp_cpu_phase() && self.master_clock_valid && self.master_clock_rate != 0 {
+                let scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
+                Some(u128::from(self.cpu_master_clock) * scalar)
+            } else {
+                None
+            };
+        ApuBus {
+            ram: &mut self.ram[..],
+            ipl: &self.ipl,
+            ipl_loaded: self.ipl_loaded,
+            iplrom_enable: &mut self.iplrom_enable,
+            ram_writable: &mut self.ram_writable,
+            ram_disable: &mut self.ram_disable,
+            timers_enable: &mut self.timers_enable,
+            timers_disable: &mut self.timers_disable,
+            internal_wait: &mut self.internal_wait,
+            external_wait: &mut self.external_wait,
+            timers: &mut self.timers,
+            dsp_address: &mut self.dsp_address,
+            dsp: &mut self.dsp,
+            smp_clock: &mut self.smp_clock,
+            dsp_clock: &mut self.dsp_clock,
+            samples: &mut self.samples,
+            apu_ports: &mut self.apu_ports,
+            dsp_target,
+            cpu_ports: &mut self.cpu_ports,
+            aux4: &mut self.aux4,
+            aux5: &mut self.aux5,
+            timer_targets: &mut self.timer_targets,
+            page_flag,
+            spc_pc,
+            debug: Some(&mut self.debug),
+        }
+    }
+
+    /// Record one instruction by driving the per-access coroutine recorder.
+    fn record_instruction_coro(&mut self) {
+        use crate::spc_coroutine::{SpcEvent, SpcInput, SpcResume};
+        self.plan.clear();
+        self.plan_pos = 0;
+        self.plan_sub = 0;
+        self.debug.spc_instruction = self.instructions;
+        let entry_pc = self.spc.pc;
+        let mut plan = std::mem::take(&mut self.plan);
+        let spc = std::mem::take(&mut self.spc);
+        let spc_pc = spc.pc;
+        let mut coroutine = SPC_CORO
+            .with(|slot| slot.borrow_mut().take())
+            .unwrap_or_else(crate::spc_coroutine::new_spc_coroutine);
+        let mut input = SpcInput::Start(spc);
+        let mut wait: u32 = 1;
+        let mut returned = None;
+        while let corosensei::CoroutineResult::Yield(event) = coroutine.resume(input) {
+            {
+                {
+                    input = SpcInput::Resume(match event {
+                        SpcEvent::Wait(address) => {
+                            let value = {
+                                let mut bus = self.event_bus(false, spc_pc);
+                                bus.wait_cycles(address)
+                            };
+                            wait = value;
+                            SpcResume::Clocks(value)
+                        }
+                        SpcEvent::Timer(address) => {
+                            let value = {
+                                let mut bus = self.event_bus(false, spc_pc);
+                                bus.timer_cycles(address)
+                            };
+                            SpcResume::Clocks(value)
+                        }
+                        SpcEvent::StepClock(clocks) => {
+                            let mut bus = self.event_bus(false, spc_pc);
+                            bus.step_clock(clocks);
+                            SpcResume::Unit
+                        }
+                        SpcEvent::Advance(clocks) => {
+                            let mut bus = self.event_bus(false, spc_pc);
+                            bus.advance(clocks);
+                            SpcResume::Unit
+                        }
+                        SpcEvent::Read(address) => {
+                            let value = {
+                                let mut bus = self.event_bus(false, spc_pc);
+                                bus.read(address)
+                            };
+                            plan.push(PlanStep {
+                                clocks: (wait * 2) as u8,
+                                port_write: None,
+                                deferred: false,
+                                split: false,
+                                dsp_write: None,
+                            });
+                            SpcResume::Byte(value)
+                        }
+                        SpcEvent::Write(address, value) => {
+                            let mut bus = self.event_bus(false, spc_pc);
+                            if (0xF4..=0xF7).contains(&address) {
+                                bus.write_ram(address, value);
+                                plan.push(PlanStep {
+                                    clocks: (wait * 2) as u8,
+                                    port_write: Some(((address - 0xF4) as u8, value)),
+                                    deferred: false,
+                                    split: false,
+                                    dsp_write: None,
+                                });
+                            } else if address == 0x00F3 && dsp_late() {
+                                bus.write_ram(address, value);
+                                let dsp_address = *bus.dsp_address;
+                                plan.push(PlanStep {
+                                    clocks: (wait * 2) as u8,
+                                    port_write: None,
+                                    deferred: false,
+                                    split: false,
+                                    dsp_write: Some((dsp_address, value)),
+                                });
+                            } else {
+                                bus.write(address, value);
+                                plan.push(PlanStep {
+                                    clocks: (wait * 2) as u8,
+                                    port_write: None,
+                                    deferred: false,
+                                    split: false,
+                                    dsp_write: None,
+                                });
+                            }
+                            SpcResume::Unit
+                        }
+                        SpcEvent::Idle => {
+                            plan.push(PlanStep {
+                                clocks: (wait * 2) as u8,
+                                port_write: None,
+                                deferred: false,
+                                split: false,
+                                dsp_write: None,
+                            });
+                            SpcResume::Unit
+                        }
+                        SpcEvent::Done(core) => {
+                            returned = Some(core);
+                            break;
+                        }
+                    });
+                }
+            }
+        }
+        SPC_CORO.with(|slot| *slot.borrow_mut() = Some(coroutine));
+        if let Some(core) = returned {
+            self.spc = core;
+        }
+        let pending_address = match self.spc.pending {
+            Some(crate::spc700::Pending::DirectRead { address, .. }) => {
+                Some((u16::from(self.spc.flags.page) << 8) | u16::from(address))
+            }
+            Some(crate::spc700::Pending::AbsoluteRead { address, .. }) => Some(address),
+            None => None,
+        };
+        let deferred = if let Some(effective) = pending_address {
             const CYCLE_WAIT: [u8; 4] = [1, 2, 5, 10];
             let clocks = CYCLE_WAIT[usize::from(self.internal_wait.min(3))] * 2;
             let split = effective & 0xFFFC == 0x00F4;

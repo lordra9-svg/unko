@@ -32,7 +32,7 @@ pub enum SpcInput {
 }
 
 /// One bus access the core has reached and not yet performed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum SpcEvent {
     /// Read one byte from `address`.
     Read(u16),
@@ -48,8 +48,8 @@ pub enum SpcEvent {
     Wait(Option<u16>),
     /// Clocks the timers advance for `address`.
     Timer(Option<u16>),
-    /// The current instruction retired; the core is at the next boundary.
-    InstructionDone,
+    /// The current instruction retired; the core is handed back to the host.
+    Done(Spc700),
 }
 
 /// The resumable recorder.
@@ -123,7 +123,11 @@ pub fn new_spc_coroutine() -> SpcCoroutine {
                 };
                 spc.step(&mut bus);
             }
-            let _ = yielder.suspend(SpcEvent::InstructionDone);
+            // Hand the core back for the next instruction.
+            match yielder.suspend(SpcEvent::Done(spc)) {
+                SpcInput::Start(next) => spc = next,
+                SpcInput::Resume(_) => return,
+            }
         }
     })
 }
@@ -154,31 +158,31 @@ mod tests {
         for _ in 0..256 {
             match coroutine.resume(input) {
                 CoroutineResult::Yield(event) => {
-                    input = SpcInput::Resume(match event {
+                    input = match event {
                         SpcEvent::Read(address) => {
                             reads += 1;
-                            SpcResume::Byte(ram[usize::from(address)])
+                            SpcInput::Resume(SpcResume::Byte(ram[usize::from(address)]))
                         }
                         SpcEvent::Write(address, value) => {
                             ram[usize::from(address)] = value;
                             writes.push((address, value));
-                            SpcResume::Unit
+                            SpcInput::Resume(SpcResume::Unit)
                         }
-                        SpcEvent::Wait(_) => SpcResume::Clocks(1),
-                        SpcEvent::Timer(_) => SpcResume::Clocks(2),
+                        SpcEvent::Wait(_) => SpcInput::Resume(SpcResume::Clocks(1)),
+                        SpcEvent::Timer(_) => SpcInput::Resume(SpcResume::Clocks(2)),
                         SpcEvent::StepClock(clocks) | SpcEvent::Advance(clocks) => {
                             assert!(clocks > 0);
-                            SpcResume::Unit
+                            SpcInput::Resume(SpcResume::Unit)
                         }
-                        SpcEvent::Idle => SpcResume::Unit,
-                        SpcEvent::InstructionDone => {
+                        SpcEvent::Idle => SpcInput::Resume(SpcResume::Unit),
+                        SpcEvent::Done(core) => {
                             instructions += 1;
                             if instructions == 2 {
                                 break;
                             }
-                            SpcResume::Unit
+                            SpcInput::Start(core)
                         }
-                    });
+                    };
                 }
                 CoroutineResult::Return(()) => break,
             }
