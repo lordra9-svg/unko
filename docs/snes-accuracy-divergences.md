@@ -8539,3 +8539,28 @@ the +-4-tick DSP write phase measured elsewhere.
 Next: log the KON (`$4C`) write for voice 4 with its sample index in both and
 compare; a 2-sample (64-tick) displacement of that one write would explain the
 whole SMAS divergence.
+
+## SMAS: KON(v4) is one sample late, and the phase drifts one more (2026-11-21)
+
+Logged the `$4C` KON write with bit 4 set (voice 4) in both emulators over 450
+frames of SMAS:
+
+```
+ares 1 KON(v4): sample 112,399  value 10
+ours 1 KON(v4): sample 112,400  value 10   (one sample later)
+```
+
+So the voice-4 key-on lands **one sample (32 DSP ticks) later** in ours - much
+coarser than the +-4-tick write phase measured for CV4. That alone explains one of
+the two samples of delay seen at sample 224,916.
+
+The remaining sample: at 224,916 the gaussian phase is 2 x pitch behind (2142),
+while the gaussian advances by exactly pitch (1071) per sample in both. So one
+additional sample of phase accumulates across the 112,517 samples between KON and
+the divergence - i.e. a single extra fetch/phase step somewhere in that span
+(key-on delay start value or one BRR-wrap boundary), not a rate difference in the
+window.
+
+Next: dump `keyonDelay`, `brrOffset` and the gaussian value for a few samples
+right after the KON (sample ~112,399) in both, to see whether the extra sample
+comes from the key-on delay sequence or from one BRR wrap.
