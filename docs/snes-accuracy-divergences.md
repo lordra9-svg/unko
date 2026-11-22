@@ -8022,3 +8022,34 @@ is bit-identical to ares, and the divergence begins exactly at the block
 boundary. It also means the remaining comparison cannot be made with the current
 ares clock; the DSP-tick axis (monotonic and consistent) remains the only usable
 one, and it already localises the difference to the block boundary.
+
+## CV4 first block boundary: ours is exactly 56 S-SMP clocks short (2026-11-21)
+
+Fixed the ares write-log clock to emit a per-write wrap-safe delta (the earlier
+format string was missing the specifier, so the value was varargs garbage). Then
+compared per-write S-SMP clock deltas:
+
+```
+through write 32:  ares and ours advance identically (cumulative diff 0)
+write 32 -> 33:    ares +8,256 clocks   ours +8,200 clocks   -> ours 56 short
+thereafter:        deltas identical again (62 each), offset persists at 56
+```
+
+So at CV4's first KOFF boundary our S-SMP retires exactly **56 fewer clocks** in
+the inter-block gap than ares. 56 clocks is precisely one iteration of the
+`$049F..$04B2` handshake loop (measured earlier: 9 instructions, 56 clocks = 28
+DSP ticks). The measurement therefore confirms at the clock level what the DSP
+tick axis showed: ours executes one fewer handshake iteration at that boundary,
+and the block phase then stays offset by 56 clocks.
+
+This closes the causal chain with exact numbers:
+
+```
+$FD read grid phase (10 timer clocks)  ->  one $049F iteration skipped (56 clocks)
+  ->  block phase offset                    ->  DSP write delta 2-valued (+6/-22)
+  ->  the V3VOLR write lands across a sample boundary  ->  audio diverges
+```
+
+The remaining fix must make the `$049F` loop run that one additional iteration -
+i.e. align the S-SMP timer/read phase at the loop entry - which every global rule
+so far has failed to do without breaking the exact titles.
