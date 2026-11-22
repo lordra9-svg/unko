@@ -9166,3 +9166,41 @@ state that selects the mode, only a small cumulative clock difference whose
 audible effect depends on where a register write lands relative to the 32-tick
 sample grid. The remaining work is to eliminate the residual S-SMP/DSP clock
 drift (instruction-clock accounting) rather than to condition the DSP drain.
+
+## No S-SMP clock drift to eliminate: the DSP-write phase is a fixed small set (2026-11-21)
+
+Tested the "residual clock drift" hypothesis directly.
+
+**Per-instruction clock costs are identical.** Comparing SMAS's S-SMP instruction
+traces (ours `SPC_TRACE`, ares `ARES_SPC_TRACE`) by decoding instruction deltas
+per PC, every PC's cost matches ares exactly (our delta is exactly twice ares'
+only because our trace units are half-SMP-clocks; the ratio is exactly 2 for
+every PC, including the 10/20 wait-glitch cases). There is no per-instruction
+clock-accounting difference to fix.
+
+**The DSP write-tick difference is a fixed set, not a drift.** Aligning the SMAS
+DSP write logs by (register, value) and comparing ticks (ours − ares):
+
+```
+default      : {-11: 15,  -3: 10723,  +5: 6399}
+DSP_INSTR_SYNC: {-16: 15,  -8: 10723,   0: 6399}
+```
+
+Only three values over the whole 250-frame run; the difference does not grow
+with time. It is a small fixed phase per write, not accumulated drift.
+
+**`SNES_DSP_PRIME` cannot move SMAS.** Sweeping prime 1..5 leaves SMAS at exactly
+313782 differing samples for every value, while degrading dkc (72.3%→60.8%) and
+zelda (99.77%→89.65%). So SMAS's requirement is not a DSP target phase either.
+
+Interpretation: `SNES_DSP_INSTR_SYNC` does not compensate a drifting clock; it
+changes *where within an instruction* each register write is observed (the DSP
+has not yet been advanced for the current instruction's accesses). SMAS's DSP
+writes need the instruction-start position, dkc/zelda's need the per-access
+position. Since ares synchronizes the DSP per access, the SMAS match is a
+property of ares' instruction sequencing relative to its `wait` calls, not of a
+clock constant.
+
+So the "eliminate the drift" step is a negative result: there is no drift. The
+remaining difference is structural (per-instruction vs per-access DSP
+observation), and the default gate is unchanged.
