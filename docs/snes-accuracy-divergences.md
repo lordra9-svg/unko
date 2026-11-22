@@ -7937,3 +7937,26 @@ resumable per-access recorder does not need the SPC700 core rewritten by hand:
 
 Acceptance remains unchanged: F-Zero stream 0 events, CV4/SMAS deltas
 single-valued, 9-title gate, 212/212.
+
+## Coroutine path with inline I/O sampling: DKC/access-stop-like, CV4 worse (2026-11-21)
+
+On `SNES_SPC_CORO`, set `defer_io_reads = false` so `$F4-$F7` reads are performed
+inline at the access instant (the host samples the latch then) instead of being
+deferred to the scheduler.
+
+600 frames against freshly captured ares audio:
+
+```
+dkc   0 differing   (100.0000%)
+cv4   69,476 (89.1385%)   <- worse than the default's 11,269 (98.2383%)
+smas  313,782 (50.9452%)  <- unchanged
+```
+
+So sampling the latch at the access instant is not the missing piece: CV4
+regresses below the default, and SMAS is unaffected. This is the same class of
+behaviour as the access-stop rule (which also changes port sampling) and does not
+unify the titles. Reverted to the byte-identical configuration (`defer_io_reads =
+true`); the coroutine seam remains equivalent to the default.
+
+Note: the server restart removed `/tmp/opencode/audiosweep`; ares references for
+dkc/cv4/smas were re-captured for these measurements.
