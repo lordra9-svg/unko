@@ -9494,3 +9494,44 @@ interleaving or the S-SMP instruction stream ordering, not the port handshake.
 
 The committed `SNES_SYM_DRIVER` remains the no-park, credit-paced version
 (default off, DKC 57.9834%). The default gate is unchanged.
+
+## Sym vs default DKC: first audio divergence is a DSP-write phase from whole-instruction pacing (2026-11-22)
+
+Compared the symmetric driver with the default at DKC's first differing sample.
+
+* **First difference: interleaved sample 157,326 = DSP sample 78,663** (about
+  2.45 s), so the two drivers agree for the first ~147 frames.
+* DSP write logs (200 frames): both have 616 writes, but from the first write
+  onward the *sample/tick* differs while register and value sequences match:
+
+```
+index 0  default: s=30682 r=6C v=E0 tick=981825
+         sym    : s=30680 r=6C v=E0 tick=981786   (-39 ticks)
+around the divergence (sample 78660):
+default: s=78660 r=12 v=3B tick=2517123   s=78660 r=13 v=04 tick=2517131
+sym    : (no r=12 at this sample)        s=78660 r=13 v=04 tick=2517127
+```
+
+  The missing/relocated write is voice 1 pitch low (`$12 = 3B`) right at the
+  divergence - a DSP-write *phase* difference, not a value difference.
+* The sym S-SMP instruction trace is empty (0 lines): `step_direct` bypasses
+  `record_instruction`, which is what populates the debug trace. So the
+  instruction stream cannot be compared until the direct path records it.
+
+Cause: the symmetric driver paces the S-SMP in **whole instructions** (carried
+credit, overshoot up to one instruction), while the default drains in
+per-unit/time granularity and advances the DSP per access. The accumulated SMP
+clock at each DSP write therefore differs by a few ticks (up to ~2 samples), and
+that shifts writes across sample boundaries. This is the same DSP-write-phase
+family as the earlier title splits, now caused by the driver's pacing
+granularity.
+
+So the direct driver cannot be made to match the default simply by fixing the
+port park - its pacing granularity is the difference. Matching ares' per-access
+DSP synchronization is exactly what the record/plan layer already does, which is
+why the default is bit-exact for dkc/zelda/fzero. The remaining default-gate
+failures are the per-title boot-handshake/write-phase splits, not the absence of
+a direct driver.
+
+`SNES_SYM_DRIVER` stays default off at 57.9834% (DKC); the default gate is
+unchanged.
