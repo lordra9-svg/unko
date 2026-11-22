@@ -7645,3 +7645,35 @@ dkc/fzero/cv4; ceiling: dkc/metroid/cv4; instr-stop: zelda/fzero), which is
 strong evidence that the remaining error is not a single stop/rounding rule.
 
 Flag retained default-off; the default gate is unchanged.
+
+## Rounding-threshold sweep: no single rule satisfies all titles (2026-11-21)
+
+`SNES_SMP_CEIL=<pct>` rounds the S-SMP up (one extra clock) only when the
+carried-credit remainder exceeds `pct`% of one clock: `0` is ceil, `100` is
+floor (the default). Swept at 600 frames:
+
+```
+threshold   dkc   cv4    metroid  zelda   fzero   smw
+0% (ceil)   ok    ok     ok       97.42%  44.49%  92.83%
+25%         ok    ok     62.67%   99.77%  27.54%  ok
+50%         ok    98.24% 62.67%   99.77%  35.99%  ok
+75%         ok    98.24% 62.67%   ok      ok      ok
+99%         ok    98.24% 62.67%   ok      ok      ok
+default     ok   98.24%  ok       ok      ok      ok
+```
+
+The exact sets are:
+
+```
+ceil/0%    : dkc, cv4, metroid
+25%        : dkc, cv4, smw
+50%        : dkc, smw
+75%-99%    : dkc, zelda, fzero, smw
+floor      : dkc, zelda, metroid, smw (+ lower cv4 98.24%)
+```
+
+**Metroid is only exact at 0%, Zelda/F-Zero only at >=75%, and CV4 only at
+<=25%.** So no value of this threshold can satisfy all five, proving the
+remaining error is not a global rounding/stop rule: it depends on per-access
+sub-clock ordering that a single threshold cannot express. The threshold
+parameter is exhausted; the flag stays default-off.

@@ -95,9 +95,22 @@ pub fn dsp_cpu_phase() -> bool {
 /// `SNES_SMP_CEIL`: run the S-SMP to `ceil` the carried-credit target instead of
 /// `floor` (ares runs whole accesses until the SMP clock is at or past the CPU
 /// clock).
+pub fn smp_ceil_threshold() -> Option<i64> {
+    static C: std::sync::OnceLock<Option<i64>> = std::sync::OnceLock::new();
+    *C.get_or_init(|| {
+        std::env::var("SNES_SMP_CEIL").ok().map(|v| {
+            if v.is_empty() {
+                0
+            } else {
+                v.parse::<i64>().unwrap_or(0)
+            }
+        })
+    })
+}
+
+/// Percentage (0-100) of the credit unit above which the S-SMP is rounded up.
 pub fn smp_ceil() -> bool {
-    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *C.get_or_init(|| std::env::var_os("SNES_SMP_CEIL").is_some())
+    smp_ceil_threshold().is_some()
 }
 
 /// ares `Thread::Second`: the fixed-point base of the scheduler clocks.
@@ -862,11 +875,13 @@ impl Apu {
             }
             self.apu_credit -= den;
         }
-        if smp_ceil() && self.apu_credit > 0 {
+        if let Some(pct) = smp_ceil_threshold() {
+            if self.apu_credit > 0 && self.apu_credit * 100 > den * pct {
             if self.drain_unit() == 0 {
                 return true;
             }
-            self.apu_credit -= den;
+                self.apu_credit -= den;
+            }
         }
         if smp_access_stop() || smp_instr_stop() {
             // ares stops at the end of the access/instruction that crosses the
