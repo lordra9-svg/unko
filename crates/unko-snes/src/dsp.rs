@@ -1096,9 +1096,18 @@ impl Dsp {
             std::env::var("SNES_DSP_STATE"),
             std::env::var("SNES_DSP_STATE_SAMPLE"),
         ) {
-            if target.parse::<u64>().ok() == Some(self.samples_run) {
+            let from = target.parse::<u64>().unwrap_or(u64::MAX);
+            let to = std::env::var("SNES_DSP_STATE_TO")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(from);
+            if self.samples_run >= from && self.samples_run <= to {
                 use std::io::Write;
-                if let Ok(mut f) = std::fs::File::create(&path) {
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                {
                     let _ = writeln!(
                         f,
                         "sample {} left {} right {}",

@@ -8513,3 +8513,29 @@ difference.
 This excludes the DSP-pipeline hypothesis for SMAS as well: the same class as
 CV4 (the failing titles differ in *when* a voice event lands relative to sample
 generation, not in *what* the DSP computes).
+
+## SMAS voice 4 is exactly 2 samples late (2026-11-21)
+
+Dumped voice 4 per sample across 224,895..224,925 in both emulators:
+
+```
+sample   ares env/gauss/off/L        ours env/gauss/off/L
+224897   2008 / 7380 / 1 / -66       2016 / 5238 / 1 / 54
+224898   2008 / 8451 / 1 / -101      2016 / 6309 / 1 / -15
+224907   2008 / 17019 -> 1706 off 3  2016 / 15948 off 1 / -110   (ares wraps)
+224909   2008 / 3848 off 3 / 187     2016 / 1706 off 3 / -10     (ours wraps)
+```
+
+* the gaussian offset advances by pitch (1071) per sample in both;
+* the BRR block wrap (offset 1→3, gauss → 1706) happens 2 samples later in ours;
+* `ours[n]` equals `ares[n-2]` (e.g. 224,897 ares -66 appears at ours 224,899);
+* the envelope is a **constant** 8 higher in ours (one tick ahead), not drifting.
+
+So the whole voice-4 difference is a **pure 2-sample phase delay** of the voice
+plus a one-tick envelope offset. That is the granularity of a KON/BRR-fetch
+event landing two samples later relative to sample generation - far coarser than
+the +-4-tick DSP write phase measured elsewhere.
+
+Next: log the KON (`$4C`) write for voice 4 with its sample index in both and
+compare; a 2-sample (64-tick) displacement of that one write would explain the
+whole SMAS divergence.
