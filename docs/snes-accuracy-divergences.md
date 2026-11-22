@@ -8706,3 +8706,55 @@ Next: compare the S-CPU PC trace with ares over the first ~1-2 s to find the fir
 divergent instruction (area `$8000-$1C86`, likely a CX4 handshake or a status
 wait), then fix that - this is the only failing title whose root is not the
 exhausted DSP write-phase family.
+
+## MMX2's 69% was a missing Cx4 firmware, not an APU defect (2026-11-21)
+
+The 600-frame matrix above lists MMX2 at 69.2303%, but that run did **not** load
+`cx4.rom`. MMX2 is a Cx4 title (cartridge type `$F3`, `has_cx4()` true), so with no
+firmware the chip's `$6000-$7FFF` window reads open bus. Tracking the S-CPU:
+
+```
+frame 1    PC=00:8081         frame 100  PC=00:8100 (main code, NMI running)
+frame 600  PC=00:8100         APU ports: cpu<-apu [AA,BB] / apu<-cpu [00,00,00,00]
+PORT_OUT   1,136,903 S-SMP polls of $F4, 0 S-CPU writes to $2140-$2143
+audio      mean |x| = 0.0 (entirely silent)
+```
+
+The first S-CPU/ares divergence was frame 20: at `$13:F8D1` (`F0 03`, `BEQ +3`)
+ares took the branch, we did not. The operands are identical (`A`/`X` logged
+identical at every iteration). The loop is a boot-time **save/Cx4 data check**
+over `$00:7F52..$00:7F6F`, i.e. the Cx4 window; with the window reading open bus
+the check failed, `$1F53` (its error counter) incremented, and the game never
+reached its sound-driver upload.
+
+Loading the firmware fixes it completely:
+
+```
+CX4_ROM=.../cx4.rom:
+  frames 18..28  S-CPU instruction sets identical to ares (onlyA=0, onlyO=0)
+  S-SMP leaves the IPL (PC=046A), ports live ([67,BB,02,FE])
+  audio mean |x| = 0.02198  (ares 0.02197)
+  600-frame diff:  196,872 differing (69.2222%)
+  per second:      0.00-6.91 s 100.00%, 6..7 s 90.95%, after 7 s ~0%
+```
+
+So MMX2 is **bit-exact for the first 6.91 s** and diverges exactly at the first
+music note (first differing interleaved sample 442,758). The per-voice dump at
+DSP sample 221,379 (with Cx4 loaded):
+
+```
+        ares                              ours
+v2      env=2039 pitch=10880 brr=3AFD   env=0 pitch=0 brr=0000
+v7      env=2039 pitch=5424 brr=3AFD    env=0 pitch=5424 brr=0075
+```
+
+i.e. ares is sustaining voices 2/7 while ours has them re-keyed/reset - the same
+discrete **key-on/event phase** family as SMAS and CT, not a Cx4 or arithmetic
+bug. The `$4C` key-on for voices 2/7 lands at a different sample (ares 221,366 vs
+ours 221,561 in the write log), and our whole `$4C` write sequence is phase
+shifted.
+
+**Gate correction:** every CX4 title must be measured with the 3 KiB `cx4.rom`
+loaded (`CX4_ROM=...`), exactly as ares loads it. Without it the result is
+silent-vs-music and meaningless. The matrix entry for mmx2 above is superseded by
+the numbers in this section.
