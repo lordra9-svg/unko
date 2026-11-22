@@ -877,9 +877,9 @@ impl Apu {
         }
         if let Some(pct) = smp_ceil_threshold() {
             if self.apu_credit > 0 && self.apu_credit * 100 > den * pct {
-            if self.drain_unit() == 0 {
-                return true;
-            }
+                if self.drain_unit() == 0 {
+                    return true;
+                }
                 self.apu_credit -= den;
             }
         }
