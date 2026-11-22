@@ -261,3 +261,103 @@ mod mutual_tests {
         assert_eq!(clock, 10);
     }
 }
+
+/// Experimental engine wiring the **real** S-DSP into the mutual scheduler.
+///
+/// It owns the DSP, APU RAM and the sample queue, and advances the DSP one
+/// micro-step at a time while recording the DSP clock in [`RoundRobin`]. The
+/// S-SMP leg (the real [`crate::spc_coroutine::SpcCoroutine`]) is the next
+/// integration step; this type deliberately does not run the SMP yet, so it is
+/// inert and cannot affect the default driver.
+pub struct SymEngine {
+    /// Thread clocks and DSP resume points.
+    pub rr: RoundRobin,
+    dsp: crate::dsp::Dsp,
+    ram: Box<[u8]>,
+    samples: std::collections::VecDeque<crate::dsp::Sample>,
+    dsp_clock_value: u128,
+}
+
+impl SymEngine {
+    /// Create the engine with a fresh DSP and 64 KiB of APU RAM.
+    pub fn new() -> Self {
+        Self {
+            rr: RoundRobin::new(0, 0, 0),
+            dsp: crate::dsp::Dsp::new(),
+            ram: vec![0; 0x1_0000].into_boxed_slice(),
+            samples: std::collections::VecDeque::new(),
+            dsp_clock_value: 0,
+        }
+    }
+
+    /// Advance the S-DSP one micro-step (24 DSP clocks), recording its clock
+    /// and any finished sample, and queue an S-SMP resume request to the new
+    /// DSP clock. Returns `true` when a sample was produced.
+    pub fn dsp_micro_step(&mut self) -> bool {
+        let finished = self.dsp.tick(&mut self.ram);
+        self.dsp_clock_value += 24;
+        let clock = self.dsp_clock_value;
+        self.rr.set_dsp_clock(clock);
+        self.rr.push_resume(clock, clock);
+        match finished {
+            Some(sample) => {
+                self.samples.push_back(sample);
+                if self.samples.len() > 16_384 {
+                    self.samples.pop_front();
+                }
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Current DSP clock (24 units per micro-step).
+    pub const fn dsp_clock(&self) -> u128 {
+        self.dsp_clock_value
+    }
+
+    /// Finished samples waiting to be consumed.
+    pub fn sample_count(&self) -> usize {
+        self.samples.len()
+    }
+
+    /// Resume points the S-SMP still has to reach.
+    pub fn pending_resumes(&self) -> usize {
+        self.rr.pending_len()
+    }
+}
+
+impl Default for SymEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod engine_tests {
+    use super::*;
+
+    #[test]
+    fn real_dsp_produces_a_sample_every_32_micro_steps() {
+        let mut engine = SymEngine::new();
+        for _ in 0..31 {
+            assert!(!engine.dsp_micro_step());
+        }
+        assert!(engine.dsp_micro_step());
+        assert_eq!(engine.dsp_clock(), 32 * 24);
+        assert_eq!(engine.sample_count(), 1);
+        assert_eq!(engine.pending_resumes(), 32);
+    }
+
+    #[test]
+    fn resume_points_track_the_dsp_clock() {
+        let mut engine = SymEngine::new();
+        for _ in 0..4 {
+            engine.dsp_micro_step();
+        }
+        engine.rr.set_smp_clock(48);
+        let ready = engine.rr.take_ready().unwrap();
+        assert_eq!(ready.resume_smp_at, 24);
+        assert_eq!(engine.rr.pending_len(), 3);
+    }
+}
