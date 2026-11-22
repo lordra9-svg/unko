@@ -778,7 +778,7 @@ impl Apu {
     /// Execute one S-SMP instruction directly against the DSP (`SNES_SYM_DRIVER`),
     /// bypassing the plan so a DSP micro-step and an S-SMP instruction can be
     /// interleaved by the caller.
-    fn step_direct(&mut self) {
+    fn step_direct(&mut self) -> bool {
         let page_flag = self.spc.flags.page;
         let dsp_target =
             if dsp_cpu_phase() && self.master_clock_valid && self.master_clock_rate != 0 {
@@ -816,6 +816,7 @@ impl Apu {
         };
         self.spc.step(&mut bus);
         self.instructions += 1;
+        false
     }
 
     /// Mutually-resumable advance (`SNES_SYM_DRIVER`): run whole S-SMP
@@ -823,16 +824,20 @@ impl Apu {
     /// to the next output-sample boundary after each instruction and pulling the
     /// S-SMP forward to the DSP clock.
     fn advance_symmetric(&mut self, clocks: u32, clock: u64, rate: u64) -> bool {
+        const APU_UNIT_NUM: i64 = 2_050_560;
         self.set_master_clock(clock + u64::from(clocks), rate);
-        let target = self.smp_clock + u128::from(clocks) * SCHEDULER_SECOND / u128::from(rate);
-        let mut guard = 0u64;
-        while self.smp_clock < target && guard < 100_000_000 {
-            self.step_direct();
-            guard += 1;
-            // Per DSP tick: advance the DSP one micro-step, then pull the S-SMP
-            // to the DSP clock (ares `DSP::tick` -> `Thread::synchronize(smp)`).
-            // The DSP tick limit is captured before the pull so the pulled S-SMP
-            // does not feed back into more DSP ticks in the same iteration.
+        self.apu_credit += i64::from(clocks) * APU_UNIT_NUM;
+        let den = rate as i64;
+        let mut guard = 0u32;
+        // Whole-instruction execution against the carried credit, with the
+        // per-tick DSP pull. The instruction cost is charged back after it runs
+        // so the S-SMP keeps the S-CPU's average rate (overshoot <= one
+        // instruction).
+        while self.apu_credit >= den && guard < 10_000_000 {
+            let before = self.smp_clock;
+            if self.step_direct() {
+                return true;
+            }
             let dlimit = self.smp_clock;
             let mut ticks = 0u32;
             while self.dsp_clock + DSP_TICK <= dlimit && ticks < 64 {
@@ -845,12 +850,17 @@ impl Apu {
                     step_to,
                 );
                 let mut inner = 0u32;
-                while self.smp_clock < self.dsp_clock && self.smp_clock < target && inner < 64 {
-                    self.step_direct();
+                while self.smp_clock < self.dsp_clock && inner < 64 {
+                    if self.step_direct() {
+                        return true;
+                    }
                     inner += 1;
                 }
                 ticks += 1;
             }
+            guard += 1;
+            let cost = self.smp_clock.saturating_sub(before).div_ceil(SMP_SCALAR) as i64;
+            self.apu_credit -= cost.max(1) * den;
         }
         false
     }

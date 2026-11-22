@@ -9346,3 +9346,32 @@ So the instruction-entry park alone is not enough: the direct path also needs th
 reached the S-SMP clock), which is exactly what the plan layer provides. The
 changes were reverted; `SNES_SYM_DRIVER` remains the no-park version (DKC first
 60 frames bit-exact, 42.3528% over 600). Default gate unchanged.
+
+## Symmetric driver: carried-credit pacing makes it boot; read park attempt rejected (2026-11-21)
+
+The direct driver originally ran one S-SMP instruction per S-CPU access, which
+over-ran the SMP clock ~11x (rounding: each access owes ~0.57 SMP clocks but a
+whole instruction is charged). Replaced the outer loop with carried-credit
+pacing: accumulate `clocks*APU_UNIT_NUM`, run whole instructions only while
+`credit >= den`, and charge the measured instruction cost (including any DSP-pull
+instructions) back. S-SMP instruction count for 5 frames drops from ~200k to
+19,512 (~normal), and the game boots and renders (DKC 600 frames: nmi 416,
+35,488 non-zero pixels).
+
+Read-side park attempt: adding `port_read_waiting()` parking to `step_direct`,
+plus breaking the in-step forward loop for the symmetric driver, changed the
+boot handshake port0 to `$29`/`$CC` and left `nmi_count 0` / zero pixels - the
+game no longer boots. Reverted; the read park needs the deferred-read handoff
+integrated with the credit loop rather than a plain pre-instruction check.
+
+Current `SNES_SYM_DRIVER` (default off), 600 frames:
+
+```
+dkc    268762 differing (57.9834%)   zelda 104137 (83.7198%)
+fzero   77863 differing (87.8274%)   cv4    85609 (86.6164%)
+smas   370469 differing (42.0831%)   ct    484100 (24.3187%)
+mmx2   212819 differing (66.7291%)
+```
+
+Better than the earlier 42.3528% for DKC but still below the default on every
+title. The default gate is unchanged.
