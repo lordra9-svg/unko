@@ -10167,3 +10167,26 @@ exactly. The residual on dkc/cv4/smas/ct/mmx2 is the same write-phase problem
 already characterised for the default driver.
 
 Default gate unchanged; the engine flag stays default off.
+
+## Engine DSP phase sweep: prime 0 is best; instr sync worse (2026-11-22)
+
+The engine's `StepClock` now honours `SNES_DSP_PRIME`, `SNES_DSP_LAG` and
+`SNES_DSP_INSTR_SYNC` (drain at instruction end instead of per access). DKC
+600-frame sweep:
+
+```
+prime 0 (default)   75.6019%
+prime 2             71.8719%
+prime 4             64.9512%
+prime 6             54.8956%
+prime 8             49.0298%
+DSP_INSTR_SYNC      61.3020%
+```
+
+The engine already writes the DSP 1-15 ticks earlier than ares; priming later
+moves further from the correct audio, so the tick offset is not a correctable
+global phase. Per-instruction DSP sync is also worse. Prime 0 (per-access drain)
+remains the best engine configuration, matching the default path's conclusion
+that the residual is not a phase constant.
+
+Default gate unchanged; engine flags remain default off.

@@ -1076,6 +1076,17 @@ impl Apu {
         }
     }
 
+    /// DSP catch-up target for the engine (`SNES_DSP_LAG`/`SNES_DSP_PRIME`).
+    fn sym_dsp_target(&self) -> u128 {
+        let prime = std::env::var("SNES_DSP_PRIME")
+            .ok()
+            .and_then(|value| value.parse::<u128>().ok())
+            .map_or(0, |ticks| ticks * DSP_TICK);
+        self.smp_clock
+            .saturating_sub(u128::from(dsp_lag()) * DSP_TICK)
+            .saturating_add(prime)
+    }
+
     /// Execute one S-SMP instruction through the coroutine, answering its bus
     /// events against the shared APU state (`SNES_SYM_ENGINE`).
     fn sym_instruction(&mut self) {
@@ -1090,6 +1101,16 @@ impl Apu {
                 corosensei::CoroutineResult::Yield(SpcEvent::Done(core)) => {
                     self.spc = core;
                     self.instructions += 1;
+                    if dsp_instr_sync() {
+                        let target = self.sym_dsp_target();
+                        drain_dsp_to(
+                            &mut self.ram[..],
+                            &mut self.dsp,
+                            &mut self.dsp_clock,
+                            &mut self.samples,
+                            target,
+                        );
+                    }
                     break;
                 }
                 corosensei::CoroutineResult::Yield(event) => {
@@ -1103,14 +1124,16 @@ impl Apu {
                         }
                         SpcEvent::StepClock(clocks) => {
                             self.smp_clock += u128::from(clocks) * SMP_SCALAR;
-                            let target = self.smp_clock;
-                            drain_dsp_to(
-                                &mut self.ram[..],
-                                &mut self.dsp,
-                                &mut self.dsp_clock,
-                                &mut self.samples,
-                                target,
-                            );
+                            if !dsp_instr_sync() {
+                                let target = self.sym_dsp_target();
+                                drain_dsp_to(
+                                    &mut self.ram[..],
+                                    &mut self.dsp,
+                                    &mut self.dsp_clock,
+                                    &mut self.samples,
+                                    target,
+                                );
+                            }
                             SpcResume::Unit
                         }
                         SpcEvent::Advance(clocks) => {
