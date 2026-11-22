@@ -8619,3 +8619,38 @@ phase) is amplified by the discrete KON event into a coarse 2-sample jump. The
 mechanism is fully closed: DSP write micro-step phase = S-SMP clock at the write,
 identical in both for the exact titles and off by a few ticks at block boundaries
 for the failing ones.
+
+## CT and MMX2 first divergences diagnosed (2026-11-21)
+
+### CT - same mechanism as SMAS
+First differing sample 151,022 (DSP 75,511). Per-voice state:
+
+```
+        ares                              ours
+output  left -1 / right -1                 0 / 0
+v1      env=2047 pitch=3068 brr=B606       identical except
+        off=5 gauss=12208                  off=5 gauss=6072
+```
+
+The only difference is v1's gaussian offset: 12,208 vs 6,072 = **2 x pitch (3068)**
+behind, with env/pitch/BRR/offset/mode all identical. Exactly the SMAS voice-4
+pattern (a 2-sample fetch phase).
+
+### MMX2 - voices silent where ares sustains them
+First differing sample 442,758 (DSP 221,379). Per-voice state:
+
+```
+ares: v2 env=2039 pitch=10880 brr=3AFD gauss=16128 (sustain)
+      v7 env=2039 pitch=5424  brr=3AFD gauss=16160 (sustain)
+ours: v2 and v7 env=0 pitch=0 brr=0000 (silent)
+```
+
+And over 221,379..221,403 ares' v2 stays in sustain with the gaussian advancing,
+while ours stays silent. So MMX2 is not a 2-sample phase: our voices 2/7 are
+**not keyed on at all** in that window - a missed or much-later KON.
+
+So three failing titles (CV4, SMAS, CT) share the DSP write micro-step phase
+(a few ticks, amplified by a discrete event), while MMX2 shows a qualitatively
+larger defect (a KON that ours does not perform when ares does), which is the next
+target: locate the `$4C` write for MMX2 v2/v7 and compare its presence/sample in
+both.
