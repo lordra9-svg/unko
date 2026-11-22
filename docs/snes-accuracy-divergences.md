@@ -9736,3 +9736,38 @@ the S-SMP genuinely issues the ack later, so the S-CPU's next byte is later.
 
 Flag stays default off (neutral); default gate unchanged; 236 tests, clippy/fmt
 clean, 212/212 baseline.
+
+## CT ack-write clocks oscillate; the offset is a poll-iteration race (2026-11-22)
+
+Instrumented the S-SMP ack write (`$1185 MOV $F4,X`) per upload cycle and
+compared its S-SMP clock with ares (`aresSmpMono`) across consecutive acks:
+
+```
+#0  ours clk 932886  ares 932838  diff +48
+#1       932994        932960      +34
+#3       933238        933190      +48
+#7       933698        933678      +20
+#8       933806        933800       +6
+#9       933914        933922       -8
+#18      934956        935020      -64
+```
+
+The ack clock does **not** drift monotonically: it swings within about
+`+48 .. -64` SMP clocks over 19 acks. Each swing step is a multiple of the poll
+loop length (2 instructions), i.e. the S-SMP's `$1193/$1195` poll runs one
+iteration more or less around some acks, and those integer differences accumulate
+into the +230-clock offset seen at the KON.
+
+So CT's offset is a genuine **race between the S-CPU write and the S-SMP poll
+phase**, not a one-sided latency:
+* the SMP->CPU latch queue is neutral (writes are visible in time);
+* catching the SMP up at CPU port reads makes it worse;
+* per-instruction clock costs are identical;
+* the S-CPU's upload writes are likewise +196..+426 clocks, oscillating.
+
+No visibility, ordering or catch-up rule can remove an oscillation that comes
+from which side wins each individual poll race. Matching ares on CT requires
+reproducing the exact per-access interleaving of both threads (the original
+symmetric-scheduler problem), not a latch or phase constant.
+
+Default gate unchanged; all flags default off.
