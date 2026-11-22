@@ -228,6 +228,17 @@ pub fn instr_lead() -> bool {
 /// `SNES_CPU_LATCH_PARK`: with `SNES_CPU_LATCH_TIME`, if a pending `$F4-$F7`
 /// read would sample before the clock of a queued S-CPU write to that port,
 /// park the read until the write's clock so it observes the new value.
+/// `SNES_CPU_LATCH_PARK_WINDOW`: narrow `SNES_CPU_LATCH_PARK` to writes whose
+/// clock falls inside the pending read's split window (after the first half,
+/// before the second).
+pub fn cpu_latch_park_window() -> bool {
+    static W: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *W.get_or_init(|| std::env::var_os("SNES_CPU_LATCH_PARK_WINDOW").is_some())
+}
+
+/// `SNES_CPU_LATCH_PARK`: with `SNES_CPU_LATCH_TIME`, if a pending `$F4-$F7`
+/// read would sample before the clock of a queued S-CPU write to that port,
+/// park the read until the write's clock so it observes the new value.
 pub fn cpu_latch_park() -> bool {
     static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *P.get_or_init(|| std::env::var_os("SNES_CPU_LATCH_PARK").is_some())
@@ -1721,10 +1732,15 @@ impl Apu {
                 if cpu_latch_time() && cpu_latch_park() {
                     if let Some(port) = self.pending_read_port() {
                         let now = self.smp_clock_at_position();
+                        let window_end = if cpu_latch_park_window() {
+                            now + u128::from(clocks - resume_at) * SMP_SCALAR
+                        } else {
+                            u128::MAX
+                        };
                         if let Some(&(time, _, _)) = self
                             .cpu_write_queue
                             .iter()
-                            .find(|(time, p, _)| *p == port && *time > now)
+                            .find(|(time, p, _)| *p == port && *time > now && *time <= window_end)
                         {
                             // Keep the S-DSP advancing to the park target while
                             // the S-CPU runs forward, so no samples are lost.

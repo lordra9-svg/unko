@@ -10481,3 +10481,29 @@ CPU->SMP timestamped visibility settles dkc+smas+MMX2-family handshakes but
 shifts zelda/F-Zero.
 
 Default gate unchanged; both flags default off.
+
+## Narrowing the park to the read window: dkc+smas kept, zelda/F-Zero still regress (2026-11-22)
+
+`SNES_CPU_LATCH_PARK_WINDOW` restricts the park to writes whose clock falls
+between the pending split read's two halves (after the first, before the second).
+
+7-title-relevant results (with LATCH_TIME+LATCH_PARK):
+
+```
+dkc    0 differing (100.0000%)
+smas   0 differing (100.0000%)
+zelda  231894 (63.7471%)
+fzero  463471 (27.5437%)
+```
+
+Identical to the unrestricted park: narrowing to the read window keeps DKC and
+SMAS exact but does not stop the zelda/F-Zero regression. The regression is
+caused by the timestamped CPU->SMP visibility itself, not by which reads are
+parked: `SNES_CPU_LATCH_TIME` alone already gives zelda 63.75% / fzero 27.54%.
+
+So the DKC+SMAS result cannot be kept without zelda/F-Zero regression by
+conditioning the park; the discriminator would have to be in the latch-time rule
+itself, which the earlier pending-poll conditioning showed to be effectively
+always-on.
+
+Commit window flag (default off); default gate unchanged.
