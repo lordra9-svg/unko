@@ -7916,3 +7916,24 @@ shows the two-valued delta.
 To continue this line, the ares reference would need its thread-clock logging
 fixed/validated against `dspTicks` first; until then the alternation cannot be
 compared on the SMP-clock axis.
+
+## Concrete route for the resumable recorder: corosensei (not yet tried)
+
+`corosensei = "0.3"` is already used for the S-CPU and S-SMP actors, so the
+resumable per-access recorder does not need the SPC700 core rewritten by hand:
+
+- Run `Spc700::step(&mut YieldBus)` inside a coroutine whose `YieldBus` yields
+  `Yield::Access { clocks, kind }` from every `read`/`write`/`idle`/`step_clock`
+  call. The driver resumes the coroutine once it has decided to retire that
+  access (after interleaving the DSP ticks), passing back nothing (the bus state
+  lives in the `Apu` moved in/out, exactly as the existing `ApuInput::Advance`
+  actor does).
+- The scheduler loop then owns the order: DSP tick (24 clocks) -> resume the
+  SPC700 coroutine through one access -> apply any recorded `$F3` write at the
+  current `dsp_clock` -> repeat. This is the documented step 2 with no recursion.
+- `SNES_DSP_LATE` (committed, default-off) already moves `$F3` writes into
+  `PlanStep` and drains at replay, so the write path is ready; the coroutine only
+  has to replace the eager `spc.step` in `record_instruction`.
+
+Acceptance remains unchanged: F-Zero stream 0 events, CV4/SMAS deltas
+single-valued, 9-title gate, 212/212.
