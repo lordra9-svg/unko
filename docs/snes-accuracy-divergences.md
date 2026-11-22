@@ -10065,3 +10065,29 @@ alone.
 
 The flag stays default off. Default gate unchanged; 236 tests, clippy/fmt clean,
 212/212 baseline.
+
+## `SNES_SYM_ENGINE`: shared-state mutual driver inside Apu, measured (2026-11-22)
+
+Implemented the shared-state version of the mutually-resumable driver, replacing
+the record/plan path behind a flag: `Apu::advance_sym_engine` executes S-SMP
+instructions through the per-access `SpcCoroutine` (real core, direct events for
+RAM/IPL/ports/DSP/timers) over the existing `Spc700`/`Dsp`/RAM/ports/samples, and
+each `StepClock` drains the real DSP to the S-SMP clock. Credit is charged per
+whole instruction.
+
+7-title 600-frame gate with `SNES_SYM_ENGINE=1` (CX4 for MMX2):
+
+```
+dkc    368744 differing (42.3528%)
+zelda  227902 differing (64.3712%)
+fzero  463792 differing (27.4935%)
+cv4     69460 differing (89.1410%)
+smas   369276 differing (42.2696%)
+ct     452725 differing (29.2237%)
+mmx2   196820 differing (69.2303%)
+```
+
+It boots and renders (DKC nmi 416, 35,488 pixels) but is far below the default on
+every title. So the shared-state mutual driver - the last unbuilt form - does not
+recover ares' audio either. The default (record/plan, exact-credit per-access
+drain) remains the best and is unchanged; the flag is default off.

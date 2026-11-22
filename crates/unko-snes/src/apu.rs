@@ -216,6 +216,17 @@ pub fn instr_lead() -> bool {
 /// is advanced only at S-CPU instruction boundaries and `$2140-$2143` accesses,
 /// catching up in whole instructions (ares `scheduler.synchronize()` before each
 /// thread instruction), with the deferred-read park pulling the S-CPU.
+/// `SNES_SYM_ENGINE`: shared-state mutual driver. The S-SMP executes through
+/// the per-access `SpcCoroutine` (real core, direct events) while the S-DSP is
+/// ticked between accesses, replacing the record/plan path.
+pub fn sym_engine() -> bool {
+    static S: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *S.get_or_init(|| std::env::var_os("SNES_SYM_ENGINE").is_some())
+}
+
+/// `SNES_SYMMETRIC`: the symmetric entry-sync driver shape - the S-SMP is
+/// advanced only at S-CPU instruction boundaries and `$2140-$2143` accesses,
+/// catching up in whole instructions.
 pub fn symmetric() -> bool {
     static S: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *S.get_or_init(|| std::env::var_os("SNES_SYMMETRIC").is_some())
@@ -535,6 +546,12 @@ pub struct Apu {
     samples: VecDeque<Sample>,
     /// Debug: S-CPU/S-SMP port handshake trace.
     pub debug: PortDebug,
+}
+
+thread_local! {
+    /// Persistent S-SMP coroutine for `SNES_SYM_ENGINE`.
+    static SYM_CORO: std::cell::RefCell<Option<crate::spc_coroutine::SpcCoroutine>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 impl Default for Apu {
@@ -942,6 +959,173 @@ impl Apu {
     }
 
     /// Execute the next instruction into a fresh micro-op timeline.
+    /// Wait-state units for `address` (`SNES_SYM_ENGINE`).
+    fn sym_wait(&self, address: Option<u16>) -> u32 {
+        const CYCLE_WAIT: [u32; 4] = [1, 2, 5, 10];
+        let selector = match address {
+            None => self.internal_wait,
+            Some(a) if a & 0xFFF0 == 0x00F0 || (a >= 0xFFC0 && self.iplrom_enable) => {
+                self.internal_wait
+            }
+            _ => self.external_wait,
+        };
+        CYCLE_WAIT[usize::from(selector.min(3))]
+    }
+
+    /// Timer wait-state units for `address` (`SNES_SYM_ENGINE`).
+    fn sym_timer(&self, address: Option<u16>) -> u32 {
+        const TIMER_WAIT: [u32; 4] = [2, 4, 8, 16];
+        let selector = match address {
+            None => self.internal_wait,
+            Some(a) if a & 0xFFF0 == 0x00F0 || (a >= 0xFFC0 && self.iplrom_enable) => {
+                self.internal_wait
+            }
+            _ => self.external_wait,
+        };
+        TIMER_WAIT[usize::from(selector.min(3))]
+    }
+
+    /// S-SMP read (`SNES_SYM_ENGINE`), mirroring `ApuBus::read`.
+    fn sym_read(&mut self, address: u16) -> u8 {
+        match address {
+            0xF0 | 0xF1 | 0xFA | 0xFB | 0xFC => 0,
+            0xF2 => self.dsp_address,
+            0xF3 => self.dsp.read(self.dsp_address),
+            0xF4..=0xF7 => self.apu_ports[usize::from(address - 0xF4)],
+            0xF8 => self.aux4,
+            0xF9 => self.aux5,
+            0xFD..=0xFF => {
+                let timer = &mut self.timers[usize::from(address - 0xFD)];
+                let value = timer.stage3;
+                timer.stage3 = 0;
+                value
+            }
+            _ => {
+                if self.ipl_loaded && self.iplrom_enable && address >= 0xFFC0 {
+                    self.ipl[usize::from(address & 0x3F)]
+                } else if self.ram_disable {
+                    0x5A
+                } else {
+                    self.ram[usize::from(address)]
+                }
+            }
+        }
+    }
+
+    /// S-SMP write (`SNES_SYM_ENGINE`), mirroring `ApuBus::write`.
+    fn sym_write(&mut self, address: u16, value: u8) {
+        if self.ram_writable && !self.ram_disable {
+            self.ram[usize::from(address)] = value;
+        }
+        match address {
+            0xF0 => {
+                self.timers_disable = value & 0x01 != 0;
+                self.ram_writable = value & 0x02 != 0;
+                self.ram_disable = value & 0x04 != 0;
+                self.timers_enable = value & 0x08 != 0;
+                self.external_wait = (value >> 4) & 0x03;
+                self.internal_wait = (value >> 6) & 0x03;
+            }
+            0xF1 => {
+                if value & 0x10 != 0 {
+                    self.apu_ports[0] = 0;
+                    self.apu_ports[1] = 0;
+                }
+                if value & 0x20 != 0 {
+                    self.apu_ports[2] = 0;
+                    self.apu_ports[3] = 0;
+                }
+                self.iplrom_enable = value & 0x80 != 0;
+            }
+            0xF2 => self.dsp_address = value,
+            0xF3 => {
+                self.dsp.set_debug_clock(self.smp_clock);
+                self.dsp.write(self.dsp_address, value);
+            }
+            0xF4..=0xF7 => self.cpu_ports[usize::from(address - 0xF4)] = value,
+            0xF8 => self.aux4 = value,
+            0xF9 => self.aux5 = value,
+            _ => {}
+        }
+    }
+
+    /// Execute one S-SMP instruction through the coroutine, answering its bus
+    /// events against the shared APU state (`SNES_SYM_ENGINE`).
+    fn sym_instruction(&mut self) {
+        use crate::spc_coroutine::{SpcEvent, SpcInput, SpcResume};
+        let core = std::mem::take(&mut self.spc);
+        let mut coro = SYM_CORO
+            .with(|slot| slot.borrow_mut().take())
+            .unwrap_or_else(crate::spc_coroutine::new_spc_coroutine);
+        let mut input = SpcInput::Start(core);
+        loop {
+            match coro.resume(input) {
+                corosensei::CoroutineResult::Yield(SpcEvent::Done(core)) => {
+                    self.spc = core;
+                    self.instructions += 1;
+                    break;
+                }
+                corosensei::CoroutineResult::Yield(event) => {
+                    let response = match event {
+                        SpcEvent::Wait(address) => SpcResume::Clocks(self.sym_wait(address)),
+                        SpcEvent::Timer(address) => SpcResume::Clocks(self.sym_timer(address)),
+                        SpcEvent::Read(address) => SpcResume::Byte(self.sym_read(address)),
+                        SpcEvent::Write(address, value) => {
+                            self.sym_write(address, value);
+                            SpcResume::Unit
+                        }
+                        SpcEvent::StepClock(clocks) => {
+                            self.smp_clock += u128::from(clocks) * SMP_SCALAR;
+                            let target = self.smp_clock;
+                            drain_dsp_to(
+                                &mut self.ram[..],
+                                &mut self.dsp,
+                                &mut self.dsp_clock,
+                                &mut self.samples,
+                                target,
+                            );
+                            SpcResume::Unit
+                        }
+                        SpcEvent::Advance(clocks) => {
+                            for (index, timer) in self.timers.iter_mut().enumerate() {
+                                let frequency: u16 = if index == 2 { 16 } else { 128 };
+                                timer.step(
+                                    clocks,
+                                    frequency,
+                                    self.timers_enable,
+                                    self.timers_disable,
+                                );
+                            }
+                            SpcResume::Unit
+                        }
+                        SpcEvent::Idle => SpcResume::Unit,
+                        SpcEvent::Done(_) => SpcResume::Unit,
+                    };
+                    input = SpcInput::Resume(response);
+                }
+                corosensei::CoroutineResult::Return(()) => break,
+            }
+        }
+        SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
+    }
+
+    /// Shared-state mutual advance (`SNES_SYM_ENGINE`).
+    fn advance_sym_engine(&mut self, clocks: u32, clock: u64, rate: u64) -> bool {
+        const APU_UNIT_NUM: i64 = 2_050_560;
+        self.set_master_clock(clock + u64::from(clocks), rate);
+        self.apu_credit += i64::from(clocks) * APU_UNIT_NUM;
+        let den = rate as i64;
+        let mut guard = 0u32;
+        while self.apu_credit >= den && guard < 10_000_000 {
+            let before = self.smp_clock;
+            self.sym_instruction();
+            let cost = self.smp_clock.saturating_sub(before).div_ceil(SMP_SCALAR) as i64;
+            self.apu_credit -= cost.max(1) * den;
+            guard += 1;
+        }
+        false
+    }
+
     fn record_instruction(&mut self) {
         if spc_coro() {
             self.record_instruction_coro();
@@ -1473,6 +1657,9 @@ impl Apu {
     /// clock is ahead of the S-CPU. The remaining credit is carried, so the
     /// next advance (after the S-CPU has caught up) resumes at the same sample.
     pub fn advance_master_clock(&mut self, clocks: u32, clock: u64, rate: u64) -> bool {
+        if sym_engine() {
+            return self.advance_sym_engine(clocks, clock, rate);
+        }
         if sym_driver() {
             return self.advance_symmetric(clocks, clock, rate);
         }
