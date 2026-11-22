@@ -8324,3 +8324,28 @@ block boundary.
 
 This is the correct target: the S-SMP clock trajectory at the block boundary
 (credit/record timing), not the DSP rounding, read grid or write placement.
+
+## ares' S-SMP clock is discontinuous exactly at KOFF writes (2026-11-21)
+
+Analysed the wrap-correct relative clock (`smp.clock() - base`) in ares' write log
+over 300 frames of CV4:
+
+```
+writes 2,313
+relative-clock decreases: 91
+registers at those points: 5C x 88 (KOFF), 76/61/45 x1 (early)
+```
+
+Every discontinuity occurs at a KOFF (`$5C`) write - i.e. exactly at the audio
+block boundaries. The raw `smp.clock()` therefore cannot be used as a monotonic
+time axis across a block, and the earlier "+56 clocks at write 33" derived from it
+is not trustworthy (it coincides with a discontinuity).
+
+This closes the S-SMP-clock-axis route: the reference does not expose a usable
+continuous S-SMP clock at the very boundaries where the residual lives. All other
+axes are measured and excluded (timer, read grid/values, write rounding = pure
+ceil, stream/clock accounting, alignment artefacts).
+
+The residual is therefore characterised, but cannot be compared further against
+this ares build without fixing/replacing its thread-clock logging to a monotonic
+form (e.g. accumulating deltas in a separate counter).
