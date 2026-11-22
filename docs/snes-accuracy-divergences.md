@@ -10364,3 +10364,25 @@ change the v=0x18 loss.
 
 The `SNES_WRITE_MIDREAD_LOG` instrumentation is debug-only (default off); the
 default gate is unchanged.
+
+## Timestamped CPU->SMP latch in the plan drain (2026-11-22)
+
+`SNES_CPU_LATCH_TIME` (default off) records each S-CPU `$2140-$2143` write with
+the S-CPU clock and exposes it to the SPC700 only when `drain_unit` reaches that
+clock (draining the queue at the current plan position).
+
+7-title 600-frame gate with the flag (CX4 for MMX2):
+
+```
+dkc    0 differing (100.0000%)        zelda  231894 (63.7471%)
+fzero  463471 differing (27.5437%)    cv4     69470 (89.1395%)
+smas   313782 differing (50.9452%)    ct     453777 (29.0592%)
+mmx2   0 differing (100.0000%)
+```
+
+The timestamped CPU->SMP latch makes **MMX2 exact without PORT_LEAD/WRITE_PULL**
+and keeps DKC exact, but regresses zelda/F-Zero/CV4/CT exactly like the port-lead
+family. So it is a clean, single-mechanism equivalent of that family: it settles
+MMX2's handshake but shifts the others.
+
+Default gate unchanged; the flag is default off.

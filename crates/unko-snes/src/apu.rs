@@ -219,6 +219,17 @@ pub fn instr_lead() -> bool {
 /// `SNES_SYM_ENGINE`: shared-state mutual driver. The S-SMP executes through
 /// the per-access `SpcCoroutine` (real core, direct events) while the S-DSP is
 /// ticked between accesses, replacing the record/plan path.
+/// `SNES_CPU_LATCH_TIME`: timestamp S-CPU `$2140-$2143` writes with the S-CPU
+/// clock and expose them to the SPC700 only when its own clock reaches that
+/// write (timestamped CPU->SMP latch ordering in the plan drain).
+pub fn cpu_latch_time() -> bool {
+    static Q: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *Q.get_or_init(|| std::env::var_os("SNES_CPU_LATCH_TIME").is_some())
+}
+
+/// `SNES_SYM_ENGINE`: shared-state mutual driver. The S-SMP executes through
+/// the per-access `SpcCoroutine` while the S-DSP is ticked between accesses,
+/// replacing the record/plan path.
 pub fn sym_engine() -> bool {
     static S: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *S.get_or_init(|| std::env::var_os("SNES_SYM_ENGINE").is_some())
@@ -514,6 +525,8 @@ pub struct Apu {
     apu_ports: [u8; 4],
     /// Ports written by the SPC700 and read by the S-CPU.
     cpu_ports: [u8; 4],
+    /// Timestamped S-CPU -> S-SMP port writes (`SNES_CPU_LATCH_TIME`).
+    cpu_write_queue: std::collections::VecDeque<(u128, usize, u8)>,
     /// Timestamped S-SMP -> S-CPU port writes (`SNES_SMP_LATCH_QUEUE`).
     smp_write_queue: std::collections::VecDeque<(u128, usize, u8)>,
     aux4: u8,
@@ -581,6 +594,7 @@ impl Apu {
             dsp: Dsp::new(),
             apu_ports: [0; 4],
             cpu_ports: [0; 4],
+            cpu_write_queue: std::collections::VecDeque::new(),
             smp_write_queue: std::collections::VecDeque::new(),
             aux4: 0,
             aux5: 0,
@@ -683,6 +697,7 @@ impl Apu {
         self.samples.clear();
         self.apu_ports = [0; 4];
         self.cpu_ports = [0; 4];
+        self.cpu_write_queue.clear();
         self.smp_write_queue.clear();
         self.aux4 = 0;
         self.aux5 = 0;
@@ -729,7 +744,12 @@ impl Apu {
                 eprintln!("WM {} {} {:02X}", self.smp_clock, port, value);
             }
         }
-        self.apu_ports[port & 3] = value;
+        if cpu_latch_time() {
+            let time = self.cpu_fixed_clock().unwrap_or(self.smp_clock);
+            self.cpu_write_queue.push_back((time, port & 3, value));
+        } else {
+            self.apu_ports[port & 3] = value;
+        }
     }
 
     /// Enable or disable the port handshake log and clear it.
@@ -1567,6 +1587,17 @@ impl Apu {
     /// two-clock access unit) keeps a port write's visibility window to a single
     /// SMP clock.
     fn drain_unit(&mut self) -> u32 {
+        if cpu_latch_time() {
+            let now = self.smp_clock_at_position();
+            while let Some(&(time, port, value)) = self.cpu_write_queue.front() {
+                if time <= now {
+                    self.apu_ports[port] = value;
+                    self.cpu_write_queue.pop_front();
+                } else {
+                    break;
+                }
+            }
+        }
         if self.plan_pos >= self.plan.len() {
             // ares' SMP thread entry synchronizes the S-CPU to the S-SMP clock
             // before executing each instruction (`Thread::Enter`).
