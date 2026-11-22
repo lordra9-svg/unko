@@ -8137,3 +8137,25 @@ first differing value must be sought there, not at the loop's `$F7` reads.
 
 The constant +22-tick read offset also persists here, matching the earlier
 $049F/$FD read-grid measurement.
+
+## Direct-page compare values: writes are identical, addresses are D-relative (2026-11-21)
+
+Logged writes to absolute `$0006`/`$0007` in both emulators for 300 frames of
+CV4:
+
+```
+writes: 7 in both, values and order identical
+first differing write: none
+tick offset: constant +22 (ours later), same as the read offset
+```
+
+So the compared expected value is not written differently; and because the SPC700
+uses direct-page addressing, the compared bytes are at `D + 6` / `D + 7`, not
+absolute `$0006`/`$0007`. Logging the absolute addresses exercises only the D=0
+cases (7 writes), which match.
+
+Next instrumentation: log the SPC700 `D` register together with the effective
+address for the two `CMP X,dp` operands inside the `$049F` loop, and compare the
+*values read* at the extra iteration. Since `X = $F7 = 0` and the writes match,
+the remaining candidate is the direct-page RAM content read at that instant
+(possibly a D change or a write to D+6/7 that the absolute filter missed).
