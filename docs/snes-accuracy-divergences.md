@@ -9049,3 +9049,36 @@ problem, not a global phase constant.
 
 `SNES_DSP_LAG` is a diagnostic and stays default off (0); the default gate is
 unchanged.
+
+## The default already places zelda's KOFF/KON exactly; the +2 ticks are access-stop's boot phase (2026-11-21)
+
+DSP write ticks for zelda's voice-7 KOFF/KON:
+
+```
+default   : ours 1441830 / 1441854   ares 1441830 / 1441854   (identical)
+access-stop: ours 1441832 / 1441856  ares 1441830 / 1441854   (+2 ticks)
+```
+
+So the requested "boundary write -> previous sample" rule is not needed for the
+default path: it already matches ares tick-for-tick at that pair. The +2-tick
+offset appears only when `SNES_SMP_ACCESS_STOP` is enabled, i.e. it is produced
+by access-stop changing the boot handshake timing (the driver reaches the write
+2 DSP ticks later relative to the sample grid), not by the write's attribution.
+
+Gating access-stop to after boot (`SNES_SMP_ACCESS_STOP=1 SNES_LEAD_AFTER_BOOT=1`,
+the latter now gates the whole stop/pull family) proves the symmetry:
+
+```
+dkc 100.0000%  zelda 100.0000%  fzero 100.0000%
+cv4 98.2383%   smas 50.9452%    ct 31.5316%   mmx2 69.2222%
+```
+
+i.e. gating the boot restores zelda but gives back CV4's access-stop win
+(98.2383%), the exact mirror of `SNES_PORT_LEAD+SNES_SMP_WRITE_PULL` where the
+boot treatment wins MMX2 and loses zelda. `SNES_DSP_LATE` changes none of this.
+
+**Conclusion:** CV4, zelda and MMX2 each need a *different* boot-handshake
+interleaving; a per-write boundary rule cannot help because the default already
+has the right write placement. The remaining fix is the symmetric scheduler at
+the boot handshake, and every expressible stop/pull/phase/gating variant has now
+been measured on the 7-title gate.

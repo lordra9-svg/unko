@@ -43,9 +43,10 @@ pub fn mutual_scheduler() -> bool {
     *MUTUAL.get_or_init(|| std::env::var_os("SNES_MUTUAL").is_some())
 }
 
-/// `SNES_LEAD_AFTER_BOOT`: apply `SNES_PORT_LEAD`/`SNES_SMP_WRITE_PULL` only
-/// after the IPL ROM has been disabled (the boot handshake keeps the default
-/// exact-credit path).
+/// `SNES_LEAD_AFTER_BOOT`: apply the whole-instruction stop/pull family
+/// (`SNES_PORT_LEAD`, `SNES_SMP_WRITE_PULL`, `SNES_SMP_ACCESS_STOP`,
+/// `SNES_SMP_INSTR_STOP`) only after the IPL ROM has been disabled, so the boot
+/// handshake keeps the default exact-credit path.
 pub fn lead_after_boot() -> bool {
     static A: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *A.get_or_init(|| std::env::var_os("SNES_LEAD_AFTER_BOOT").is_some())
@@ -1252,7 +1253,7 @@ impl Apu {
                 self.apu_credit -= den;
             }
         }
-        if smp_access_stop() || smp_instr_stop() {
+        if (smp_access_stop() || smp_instr_stop()) && (!lead_after_boot() || !self.iplrom_enable) {
             // ares stops at the end of the access/instruction that crosses the
             // S-CPU clock; carry the overdraft as negative credit.
             let instr = smp_instr_stop();
