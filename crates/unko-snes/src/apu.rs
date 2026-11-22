@@ -284,6 +284,20 @@ pub fn instr_sync() -> bool {
     *INSTR.get_or_init(|| symmetric() || std::env::var_os("SNES_INSTR_SYNC").is_some())
 }
 
+/// ares `Thread::setFrequency`: `_frequency = frequency + 0.5` (truncated to
+/// `u64`) before `_scalar = Second / _frequency`. For NTSC the S-CPU runs at
+/// `315/88 MHz * 6 = 21,477,272.72...`, so ares' fixed-point scalar is built
+/// from **21,477,273**; the APU frequencies are exact integers and do not
+/// change. Using the unrounded rate drifts the S-CPU/S-SMP clock comparison by
+/// ~5e-8 relative, which flips the stop boundary at long handshakes.
+fn ares_cpu_rate(rate: u64) -> u64 {
+    if rate == 21_477_272 {
+        21_477_273
+    } else {
+        rate
+    }
+}
+
 /// `SNES_PORT_READ_CLOCK`: compare the pending `$F4-$F7` read's **sample**
 /// clock (the position *after* the first half access, i.e. `plan_sub + 1`)
 /// against the S-CPU clock instead of the position before it. ares `SMP::read`
@@ -399,7 +413,7 @@ thread_local! {
 }
 
 /// ares `Thread::Second`: the fixed-point base of the scheduler clocks.
-const SCHEDULER_SECOND: u128 = (1u128 << 62) - 1;
+const SCHEDULER_SECOND: u128 = (1u128 << 63) - 1;
 /// ares `Thread::setFrequency`: `_scalar = Second / frequency`.
 const DSP_FREQUENCY: u128 = 24_606_720;
 const SMP_FREQUENCY: u128 = 2_050_560;
@@ -918,7 +932,7 @@ impl Apu {
     /// S-CPU running to this clock is not behind the S-SMP (ares compares the
     /// two thread clocks directly).
     pub fn smp_master_clock(&self, master_clock: u64) -> u64 {
-        let scalar = SCHEDULER_SECOND / u128::from(master_clock);
+        let scalar = SCHEDULER_SECOND / u128::from(ares_cpu_rate(master_clock));
         let fixed = self.smp_clock_at_position();
         u64::try_from(fixed.div_ceil(scalar)).unwrap_or(u64::MAX)
     }
@@ -950,7 +964,7 @@ impl Apu {
         // ares compares the fixed-point thread clocks (`cpu.clock()` against
         // `smp.clock()`); flooring to master clocks can stop the S-CPU one
         // clock early and change which instruction's writes the read sees.
-        let cpu_scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
+        let cpu_scalar = SCHEDULER_SECOND / u128::from(ares_cpu_rate(self.master_clock_rate));
         let cpu_fixed = u128::from(self.cpu_master_clock) * cpu_scalar;
         // `SNES_PORT_READ_CLOCK`: `readIO` runs after the first half access, so
         // the sampled clock is one S-SMP clock past the current plan position.
@@ -967,7 +981,7 @@ impl Apu {
         if !self.master_clock_valid {
             return None;
         }
-        let scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
+        let scalar = SCHEDULER_SECOND / u128::from(ares_cpu_rate(self.master_clock_rate));
         Some(u128::from(self.cpu_master_clock) * scalar)
     }
 
@@ -978,7 +992,7 @@ impl Apu {
             .park_at
             .take()
             .unwrap_or_else(|| self.smp_clock_at_position());
-        let scalar = SCHEDULER_SECOND / u128::from(master_clock);
+        let scalar = SCHEDULER_SECOND / u128::from(ares_cpu_rate(master_clock));
         u64::try_from(fixed.div_ceil(scalar)).unwrap_or(u64::MAX)
     }
 
@@ -1019,7 +1033,7 @@ impl Apu {
         let page_flag = self.spc.flags.page;
         let dsp_target =
             if dsp_cpu_phase() && self.master_clock_valid && self.master_clock_rate != 0 {
-                let scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
+                let scalar = SCHEDULER_SECOND / u128::from(ares_cpu_rate(self.master_clock_rate));
                 Some(u128::from(self.cpu_master_clock) * scalar)
             } else {
                 None
@@ -1093,7 +1107,7 @@ impl Apu {
         const APU_UNIT_NUM: i64 = 2_050_560;
         self.set_master_clock(clock + u64::from(clocks), rate);
         self.apu_credit += i64::from(clocks) * APU_UNIT_NUM;
-        let den = rate as i64;
+        let den = ares_cpu_rate(rate) as i64;
         let mut guard = 0u32;
         // Whole-instruction execution against the carried credit, with the
         // per-tick DSP pull. The instruction cost is charged back after it runs
@@ -1389,7 +1403,7 @@ impl Apu {
         const APU_UNIT_NUM: i64 = 2_050_560;
         self.set_master_clock(clock + u64::from(clocks), rate);
         self.apu_credit += i64::from(clocks) * APU_UNIT_NUM;
-        let den = rate as i64;
+        let den = ares_cpu_rate(rate) as i64;
         let mut guard = 0u32;
         while self.apu_credit >= den && guard < 10_000_000 {
             let before = self.smp_clock;
@@ -1420,7 +1434,8 @@ impl Apu {
             // SNES_DSP_CPU_PHASE: target derived from the S-CPU clock.
             let dsp_target =
                 if dsp_cpu_phase() && self.master_clock_valid && self.master_clock_rate != 0 {
-                    let scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
+                    let scalar =
+                        SCHEDULER_SECOND / u128::from(ares_cpu_rate(self.master_clock_rate));
                     Some(u128::from(self.cpu_master_clock) * scalar)
                 } else {
                     None
@@ -1515,7 +1530,7 @@ impl Apu {
     fn event_bus(&mut self, page_flag: bool, spc_pc: u16) -> ApuBus<'_> {
         let dsp_target =
             if dsp_cpu_phase() && self.master_clock_valid && self.master_clock_rate != 0 {
-                let scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
+                let scalar = SCHEDULER_SECOND / u128::from(ares_cpu_rate(self.master_clock_rate));
                 Some(u128::from(self.cpu_master_clock) * scalar)
             } else {
                 None
@@ -1724,7 +1739,7 @@ impl Apu {
         // SNES_DSP_CPU_PHASE: target derived from the S-CPU clock.
         let dsp_target =
             if dsp_cpu_phase() && self.master_clock_valid && self.master_clock_rate != 0 {
-                let scalar = SCHEDULER_SECOND / u128::from(self.master_clock_rate);
+                let scalar = SCHEDULER_SECOND / u128::from(ares_cpu_rate(self.master_clock_rate));
                 Some(u128::from(self.cpu_master_clock) * scalar)
             } else {
                 None
@@ -2012,7 +2027,7 @@ impl Apu {
             return self.advance_symmetric(clocks, clock, rate);
         }
         const APU_UNIT_NUM: i64 = 2_050_560;
-        let den = rate as i64;
+        let den = ares_cpu_rate(rate) as i64;
         self.set_master_clock(clock + u64::from(clocks), rate);
         self.apu_credit += i64::from(clocks) * APU_UNIT_NUM;
         while self.apu_credit >= den {
@@ -2110,7 +2125,7 @@ impl Apu {
     /// before a `$2140-$2143` write latches so the write commits after the same
     /// S-SMP accesses ares runs. Returns `true` if the S-SMP parked.
     fn finish_access_to_cpu(&mut self, clock: u64, rate: u64) -> bool {
-        let den = rate as i64;
+        let den = ares_cpu_rate(rate) as i64;
         self.set_master_clock(clock, rate);
         let Some(cpu) = self.cpu_fixed_clock() else {
             return false;
@@ -2126,7 +2141,7 @@ impl Apu {
     /// S-CPU subsequently runs without advancing the S-SMP until it catches
     /// up. Returns `true` if the instruction parked on a deferred port read.
     fn finish_instruction(&mut self, clock: u64, rate: u64) -> bool {
-        let den = rate as i64;
+        let den = ares_cpu_rate(rate) as i64;
         self.set_master_clock(clock, rate);
         // ares `Thread::synchronize` only runs while the S-SMP is behind the
         // S-CPU clock; once it has overshot (negative credit) it does nothing.

@@ -10727,3 +10727,50 @@ is the required next base.
 
 Default gate unchanged: dkc/zelda/fzero 0, cv4 98.2383%, smas 50.9452%,
 ct 34.9427%, mmx2 69.2222%. 244 tests, clippy/fmt clean, 212/212 baseline.
+
+## CPU frequency rounding was the CV4 divergence: default now 4/7 exact (2026-11-22)
+
+ares `Thread::setFrequency` stores `_frequency = frequency + 0.5` in a `u64`
+before `_scalar = Second / _frequency`. For NTSC the S-CPU frequency is
+`315/88 MHz * 6 = 21,477,272.72...`, so ares builds its CPU scalar from
+**21,477,273**. The APU frequencies are exact integers, so their `+0.5` truncates
+back to the same value (`2,050,560` and `24,606,720`).
+
+The driver used `region.master_clock() = 21,477,272` for the S-CPU fixed-point
+clock in `cpu_fixed_clock`, `port_read_waiting`, `park_master_clock`, the DSP
+CPU phase, and the APU credit denominator. That is a relative error of
+`1/21,477,272 = 4.66e-8`; by the time a title's upload handshake runs (hundreds
+of thousands of CPU clocks), it shifts the S-CPU/S-SMP comparison by a fraction
+of an S-SMP clock and flips the stop boundary at long polls.
+
+`ares_cpu_rate` now rounds the NTSC rate to 21,477,273 in every APU clock
+comparison and in the carried-credit denominator; `SCHEDULER_SECOND` is also
+corrected to ares' `Second = (u64)-1 >> 1 = 2^63 - 1` (it was `2^62 - 1`).
+
+7-title default gate after the fix (CX4 for MMX2):
+
+```
+dkc    0 differing (100.0000%)   zelda  0 differing (100.0000%)
+fzero  0 differing (100.0000%)   cv4    0 differing (100.0000%)
+smas   313782 (50.9452%)         ct     416207 (34.9327%)
+mmx2   196872 (69.2222%)
+```
+
+**CV4 is now bit-exact under the default path** (it was 98.2383%), and
+dkc/zelda/F-Zero stay exact. This also changes the earlier flag families: the
+corrected suspension model still gives SMAS 100% but still regresses
+dkc/zelda/F-Zero, and `SNES_SMP_ACCESS_STOP + SNES_PORT_READ_CLOCK +
+SNES_PER_ACCESS_MUTUAL` now gives **CV4 and SMAS both exact** (with
+dkc/zelda/F-Zero regressed).
+
+### Remaining three titles (SMAS, CT, MMX2)
+
+The first DSP-write S-SMP clock offset for SMAS is now `-22` clocks at the
+driver start (it was `-22` before the scalar fix; CV4 moved from the `-6/+22`
+bimodal pattern to exactly 0). Its write stream then settles into a `-6/+10`
+clock split, i.e. the same one-poll-iteration race: dkc/zelda/F-Zero/CV4 no
+longer straddle a sample boundary, SMAS/CT/MMX2 still do. The residual is the
+remaining per-title boot-handshake phase, not the DSP arithmetic or the CPU
+timing (video is unchanged and the instruction clocks match).
+
+Default gate: dkc/zelda/fzero/cv4 0, smas 50.9452%, ct 34.9327%, mmx2 69.2222%.
