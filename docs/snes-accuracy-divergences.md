@@ -7811,3 +7811,61 @@ scrambles the DSP phase (whole-sample drain), regresses other titles
 (clock pull).
 
 Reverted; the verified default is unchanged.
+
+## Design for the mutual scheduler rewrite (the remaining audio work)
+
+Every approximation has been measured and rejected. The one mechanism never
+implemented is a scheduler that owns both the S-SMP plan replay and the S-DSP
+stepping, with the S-SMP resumable between accesses. Concretely:
+
+### Why it is a rewrite, not a patch
+* `drain_unit` -> `record_instruction` -> `step_dsp_clock` -> `drain_dsp_to` is a
+  recursion. The pull (`tick -> synchronize(smp)`) needs to run `drain_unit`
+  inside `drain_dsp_to`.
+* Recording builds a whole instruction's plan at once and advances `smp_clock`
+  for all its accesses in one go; the DSP is drained per access immediately. To
+  pull the S-SMP per DSP tick, recording must be resumable per access.
+
+### Proposed structure
+1. `struct Scheduler { phase, plan, plan_pos, plan_sub, smp_clock, dsp_clock, credit, ... }`
+   owning the loop; no `Apu` method may drain the DSP or record directly.
+2. `recorder` as a resumable state machine: `begin_instruction()`,
+   `next_access() -> Access { clocks, kind }`, `finish_instruction()`. It advances
+   `smp_clock` one access at a time and returns control between accesses.
+3. Main loop (the only executor):
+   ```
+   loop:
+     // 1. if the S-SMP is behind the DSP, execute the next access of its plan
+     if smp_position < dsp_clock { execute_one_access() }
+     // 2. otherwise advance the DSP one micro-step (24 clocks)
+     else if dsp_clock < next_sync_target { dsp.tick(); dsp_clock += DSP_TICK }
+     else break
+   ```
+   DSP register writes are placed at the current `dsp_clock` when the access that
+   writes them executes - so the write phase is a function of the DSP clock, not
+   of a record-time drain target.
+4. Window/credit handling stays external: the S-CPU driver adds credit and asks
+   the scheduler to retire `clocks`; the scheduler never advances the CPU.
+5. Park/resume: a `$F4-$F7` read that samples ahead of the S-CPU yields
+   `Parked { target }` as today; the S-CPU driver runs real instructions to the
+   target and resumes the scheduler. (The write-cycle interleaving then falls out
+   of (3), because the write commits after the scheduler has retired the access.)
+
+### Invariants to assert in tests
+* `smp_clock` and `dsp_clock` are monotonic; `smp_clock - dsp_clock` bounded by
+  one DSP micro-step.
+* Total DSP ticks per frame = 32,040 +- 1 (i.e. 319,828 stereo frames at 600).
+* Five exact titles stay 0 differing at every increment (this is the regression
+  gate, run after each step, not only at the end).
+* Acceptance: CV4/SMAS `$FFD6`@4,299 and the `$0576/$0579` loop parity match ares;
+  `$F3` write delta single-valued for CV4 and DKC; SMAS/CV4/CT/MMX2 at 0.
+
+### Order of work
+1. Extract the resumable recorder with behaviour identical to today (tests must
+   stay green with the old drain path selected).
+2. Add the interleaved loop behind `SNES_SCHEDULER`, compare the instruction
+   stream against ares for F-Zero (must stay 0 events) and CV4.
+3. Only then remove the old path.
+
+Everything else needed (comparison tooling, ares/mesence captures, acceptance
+numbers) is already in place and documented above.
