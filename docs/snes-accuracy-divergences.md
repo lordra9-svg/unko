@@ -7960,3 +7960,25 @@ true`); the coroutine seam remains equivalent to the default.
 
 Note: the server restart removed `/tmp/opencode/audiosweep`; ares references for
 dkc/cv4/smas were re-captured for these measurements.
+
+## Coroutine path with a one-micro-step DSP lead: DKC regresses (2026-11-21)
+
+On `SNES_SPC_CORO` (defer kept true), advanced the S-DSP one full micro-step
+(`+ DSP_TICK` = 24 clocks) beyond the S-SMP clock between accesses, with `$F3`
+applied immediately at the current `dsp_clock` (`SNES_SPC_LEAD`).
+
+600 frames against re-captured ares references:
+
+```
+dkc  177,171 (72.3021%)   <- regressed from 100%
+cv4   11,250 (98.2412%)   <- essentially unchanged (98.2383%)
+smas 313,782 (50.9452%)   <- unchanged
+```
+
+(An earlier attempt using `+1` fixed-point unit was a no-op and reproduced the
+default exactly, confirming the measurement is meaningful.)
+
+So the per-access interleaved lead is negative, consistent with the plan-path
+lead experiment (`{+7,-21}` deltas, DKC 64.5%): moving the DSP ahead of the S-SMP
+does not reproduce ares and destroys the exact titles. Reverted to the
+byte-identical coroutine seam.
