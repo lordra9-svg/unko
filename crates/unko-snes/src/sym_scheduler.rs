@@ -158,3 +158,106 @@ mod tests {
         assert_eq!(rr.pending_len(), 0);
     }
 }
+
+/// Input to the S-DSP coroutine.
+#[derive(Debug)]
+pub enum DspInput {
+    /// Advance one micro-step.
+    Tick,
+}
+
+/// What the S-DSP coroutine yields back to the scheduler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DspEvent {
+    /// A micro-step finished at this DSP clock; the scheduler must resume the
+    /// S-SMP to this clock before ticking the DSP again (ares `DSP::tick` ->
+    /// `Thread::synchronize(smp)`).
+    MicroStep(u128),
+    /// The DSP was handed back for shutdown.
+    Done,
+}
+
+/// Resumable S-DSP micro-step coroutine.
+///
+/// Each `Tick` advances the DSP clock by `step_clocks` (24 DSP clocks) and
+/// yields [`DspEvent::MicroStep`] so the scheduler can pull the S-SMP before
+/// the next tick. The real `Dsp` will replace the clock counter with
+/// `Dsp::tick`; the request/yield shape is what the driver depends on.
+pub struct DspCoroutine(corosensei::Coroutine<DspInput, DspEvent, ()>);
+
+impl DspCoroutine {
+    /// Create a DSP coroutine starting at `clock`, advancing `step_clocks` per
+    /// micro-step.
+    pub fn new(clock: u128, step_clocks: u128) -> Self {
+        Self(corosensei::Coroutine::new(move |yielder, mut input| {
+            let mut clock = clock;
+            loop {
+                input = match input {
+                    DspInput::Tick => {
+                        clock += step_clocks;
+                        yielder.suspend(DspEvent::MicroStep(clock))
+                    }
+                };
+            }
+        }))
+    }
+
+    /// Advance one micro-step, returning its clock.
+    pub fn tick(&mut self) -> u128 {
+        match self.0.resume(DspInput::Tick) {
+            corosensei::CoroutineResult::Yield(DspEvent::MicroStep(clock)) => clock,
+            corosensei::CoroutineResult::Yield(DspEvent::Done) => 0,
+            corosensei::CoroutineResult::Return(()) => 0,
+        }
+    }
+}
+
+/// Drive `smp_step` until its clock reaches `target`, then return that clock.
+///
+/// `smp_step` executes one S-SMP unit/instruction and returns the new S-SMP
+/// clock; it is the hook the real `SpcCoroutine` will be connected to.
+pub fn pull_smp(smp_clock: u128, target: u128, mut smp_step: impl FnMut() -> u128) -> u128 {
+    let mut clock = smp_clock;
+    while clock < target {
+        let next = smp_step();
+        if next <= clock {
+            break;
+        }
+        clock = next;
+    }
+    clock
+}
+
+#[cfg(test)]
+mod mutual_tests {
+    use super::*;
+
+    #[test]
+    fn dsp_micro_step_pulls_the_smp_to_its_clock() {
+        let mut dsp = DspCoroutine::new(0, 24);
+        let mut smp_clock = 0u128;
+        let mut step_clock = 0u128;
+        let mut order = Vec::new();
+        for _ in 0..3 {
+            let dsp_clock = dsp.tick();
+            order.push(("dsp", dsp_clock));
+            smp_clock = pull_smp(smp_clock, dsp_clock, || {
+                order.push(("smp", step_clock));
+                step_clock += 4;
+                step_clock
+            });
+            assert!(smp_clock >= dsp_clock, "SMP must reach the DSP clock");
+        }
+        assert_eq!(smp_clock, 72);
+        assert_eq!(order[0], ("dsp", 24));
+        assert_eq!(order[1], ("smp", 0));
+        assert_eq!(order[2], ("smp", 4));
+    }
+
+    #[test]
+    fn pull_stops_when_the_smp_cannot_advance() {
+        // A stopped core (0-clock step) must not spin forever.
+        let clock = pull_smp(10, 100, || 10);
+        assert_eq!(clock, 10);
+    }
+}
