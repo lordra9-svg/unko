@@ -10236,3 +10236,31 @@ not addressable by a global DSP target/prime, which the earlier sweep already
 showed.
 
 Default gate unchanged; engine flag remains default off.
+
+## CV4: ACCESS_STOP's fix is a within-sample write micro-step, not a sample flip (2026-11-22)
+
+Default CV4 first differs from ares at interleaved 578,847 = **DSP 289,423**;
+`SNES_SMP_ACCESS_STOP` is exact from the first sample. Comparing the two DSP
+write streams (600 frames) shows they differ from the very first write, but by a
+tick offset that changes sign:
+
+```
+first write (r=6C v=20): default tick 3557684 (s 111177)
+                         access-stop tick 3557662 (s 111176)   -22 ticks, sample flips
+at the audible divergence:
+  r=31 v=03 (voice-3 volume): default tick 9261541 (s 289423)
+                              access-stop tick 9261547 (s 289423)  +6 ticks, same sample
+```
+
+So ACCESS_STOP does not simply move all writes by a constant or flip the same
+sample: it changes the **micro-step position within the sample** at which each
+write is observed (earlier at boot, later at the divergence). The first audible
+difference is voice-3 volume `$31=03` at DSP 289,423, where the two runs put the
+write 6 ticks apart inside the same sample.
+
+This confirms CV4's ACCESS_STOP fix is the same within-sample write-phase
+mechanism, not a sample attribution that can be conditioned on a visible event.
+A narrow rule would have to reproduce ares' micro-step write position per write,
+which is the unresolved scheduler/ordering dependency.
+
+Default gate unchanged.
