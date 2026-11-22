@@ -9417,3 +9417,29 @@ at the pending read, but ares' `SMP::readIO` synchronizes the S-CPU to the
 already advanced the SMP clock by half the wait, so the target/completion order
 is off by that half. The park should carry the read's post-wait clock explicitly
 (and resume by advancing to it) rather than using the position clock.
+
+## Post-wait clock target for the deferred-read park: same boot failure (2026-11-21)
+
+Recorded the pending `$F4-$F7` read's first-half wait and parked with the
+post-wait S-SMP clock as the target (so the CPU is pulled to the clock ares
+synchronizes at, before the data fetch). Identical result:
+
+```
+SNES_SYM_DRIVER=1, 5 frames: nmi_count 0, nonzero_pixels 0,
+  cpu<-apu [29, BB, 00, 00], apu<-cpu [A9, 00, 3E, 05]
+```
+
+So the target clock is not the problem; parking the pending read at all changes
+the IPL handshake in the direct driver. Three variants (pre-instruction gate,
+credit-loop top, post-wait target) all fail the same way, while the no-park
+credit-paced driver boots and renders (DKC 57.9834%). Reverted.
+
+The likely reason is architectural: the plan layer's deferred read is completed
+during *replay* at an exact position, while the direct driver completes it by
+re-entering `spc.step`, which applies its own wait/clock accounting a second time
+relative to the parked credit. A correct hybrid must complete the pending read
+through the replay path (or advance the clock by exactly the first half before
+parking and skip that half on completion), not by re-entering `spc.step`.
+
+Default gate unchanged; sym driver remains default off at the no-park,
+credit-paced version.
