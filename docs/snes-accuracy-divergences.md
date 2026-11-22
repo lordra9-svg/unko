@@ -8564,3 +8564,34 @@ window.
 Next: dump `keyonDelay`, `brrOffset` and the gaussian value for a few samples
 right after the KON (sample ~112,399) in both, to see whether the extra sample
 comes from the key-on delay sequence or from one BRR wrap.
+
+## SMAS root: the KON write's micro-step phase shifts the key-on by 2 samples (2026-11-21)
+
+Dumped voice 4 around its KON write (samples 112,380..112,430):
+
+```
+n=112399  ares off=5 gauss=14477 env=0    ours off=5 gauss=14477 env=0
+n=112400  ares kd=5 gauss=15548          ours kd=0 gauss=15548
+n=112401  ares kd=4 off=1 gauss=0 brr=4000   ours kd=0 off=5 gauss=16619
+n=112402  ares kd=3                       ours kd=5 off=7 gauss=1306
+n=112403  ares kd=2 brr=4000              ours kd=4 off=1 gauss=0 brr=4000
+n=112406  ares kd=0 gauss=1071 env=32     ours kd=1 gauss=0
+n=112408  ares gauss=3213                 ours kd=0 gauss=1071 env=0
+```
+
+The entire key-on sequence (`keyonDelay` 5,4,3,2,1,0 then gaussian advance and
+envelope steps) is **shifted by exactly 2 samples** in ours. The KON write itself
+was logged one sample later (112,399 vs 112,400); the extra sample comes from the
+write landing on the other side of the micro-step at which the DSP consumes
+`keyon`.
+
+So the SMAS divergence is a **discrete manifestation of the DSP write-phase
+difference**: a small (few-tick) difference in the write's micro-step decides
+whether the key-on is consumed in this sample or the next, which for KON becomes
+a coarse 1-2 sample jump in the whole voice trajectory.
+
+This unifies all failing titles under one mechanism: the DSP register write lands
+at a slightly different micro-step (S-SMP clock phase at the write), and the
+audible effect depends on which event the write crosses (a volume update for CV4,
+a KON for SMAS). The S-SMP clock at writes is the instruction-granularity
+synchronization already characterised (-44/+12, ceiling family).
