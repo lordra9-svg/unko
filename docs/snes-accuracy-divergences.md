@@ -9375,3 +9375,22 @@ mmx2   212819 differing (66.7291%)
 
 Better than the earlier 42.3528% for DKC but still below the default on every
 title. The default gate is unchanged.
+
+## Read-side park in the direct driver: boot breaks (2026-11-21)
+
+Added the pending-port-read park to `step_direct` (park when `spc.pending` is a
+`$F4-$F7` read and the S-SMP is ahead of the S-CPU clock, target = the S-SMP
+clock). The run completes, but the game stops booting:
+
+```
+SNES_SYM_DRIVER=1, 5 frames: nmi_count 0, nonzero_pixels 0,
+  cpu<-apu [29, BB, 00, 00], apu<-cpu [A9, 00, 3E, 05]
+  spc inst 19512 (correct rate)
+```
+
+The credit-paced direct driver without the read park boots and renders (DKC 600:
+nmi 416, 35,488 pixels, 57.9834%). So the read park as a pre-instruction gate is
+wrong: after the flush the pending read must be completed before the next credit
+loop iteration, and the port value must be sampled at the deferred half, not at
+the pre-instruction check. Reverted to the credit-paced no-park driver (commit
+133659d). The default gate is unchanged.
