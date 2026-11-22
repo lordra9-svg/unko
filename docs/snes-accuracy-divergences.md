@@ -8349,3 +8349,34 @@ ceil, stream/clock accounting, alignment artefacts).
 The residual is therefore characterised, but cannot be compared further against
 this ares build without fixing/replacing its thread-clock logging to a monotonic
 form (e.g. accumulating deltas in a separate counter).
+
+## Monotonic ares S-SMP clock: the write clock is two-valued by 56, flipping at KOFF (2026-11-21)
+
+Replaced the ares write-log clock with a monotonic counter accumulated in
+`SMP::step` (`aresSmpMono += clocks`), which is exact and unaffected by the
+thread-clock resets. Comparing it with our `smp_clock / SMP_SCALAR` at every
+`$F3` write (300 frames, CV4):
+
+```
+writes 2,313, first reg/value mismatch: none
+SMP-clock delta (ares - ours):  -44 : 1,788 writes
+                                +12 :   525 writes
+flips occur exactly at KOFF ($5C) writes:
+  idx 0  (6C)  ares 7,115,322  ours 7,115,366  delta -44   <- first block
+  idx 33 (5C)  ares 7,125,562  ours 7,125,550  delta +12   <- flip (+56)
+  idx 39 (5C)  ares 7,133,732  ours 7,133,776  delta -44   <- flip back
+  ... alternates every block
+```
+
+So with a reliable axis the result is now firm: the S-SMP clock at writes is
+**two-valued with a 56-clock swing**, and it flips exactly at each KOFF block
+boundary. 56 clocks is one `$049F` iteration. This reproduces the earlier
+`{+6,-22}` DSP-tick split (28 ticks = 56 clocks) with a trustworthy clock.
+
+Important correction: the first audio block boundary is at SMP clock ~7,115,000
+(DSP tick 3,557,662), whereas the earlier `$F4`/dp value-level analyses were done
+at DSP tick 1,383,609 - a much earlier (pre-audio) region. Those exoneration
+results do not apply to the actual boundary and must be redone there.
+
+The reference axis is fixed; the target is now precise: the 56-clock gap at the
+KOFF boundary, evaluated at DSP tick ~3,557,662.
