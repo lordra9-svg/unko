@@ -9801,3 +9801,25 @@ under access-stop (measured earlier), so it cannot become the default.
 Conclusion: the per-access mutual scheduler is already expressible with the
 existing switches and is measured; it does not resolve CT or the remaining
 titles. The default gate is unchanged.
+
+## `SNES_PER_ACCESS_MUTUAL`: a distinct per-access mutual path (2026-11-22)
+
+Added a dedicated switch (not the inert `SNES_MUTUAL`): the S-SMP stops at the
+access boundary at/after the S-CPU clock (negative credit) and the deferred
+`$F4-$F7` read park plus the access-granularity flush are wired to it directly.
+
+7-title 600-frame gate (CX4 for MMX2):
+
+```
+dkc    0 differing (100.0000%)
+zelda  1450 differing (99.7733%)
+fzero  0 differing (100.0000%)
+cv4    0 differing (100.0000%)
+smas   313782 differing (50.9452%)
+ct     437900 differing (31.5413%)
+mmx2   196872 differing (69.2222%)
+```
+
+It reproduces access-stop exactly, including CT at 31.5413% - the per-access
+mutual pull does not change the CT `$1193/$1195` poll race, whose ack clocks were
+already measured to oscillate (+48..-64 S-SMP clocks). Default unchanged.

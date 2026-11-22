@@ -165,6 +165,15 @@ pub fn smp_latch_queue() -> bool {
     *Q.get_or_init(|| std::env::var_os("SNES_SMP_LATCH_QUEUE").is_some())
 }
 
+/// `SNES_PER_ACCESS_MUTUAL`: distinct per-access mutual path - the S-SMP stops
+/// at the access boundary at/after the S-CPU clock (negative credit) and a
+/// deferred `$F4-$F7` read parks so the S-CPU is pulled forward at access
+/// granularity.
+pub fn per_access_mutual() -> bool {
+    static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *P.get_or_init(|| std::env::var_os("SNES_PER_ACCESS_MUTUAL").is_some())
+}
+
 /// `SNES_PORT_LEAD`: on every S-CPU write to `$2140-$2143`, finish the
 /// S-SMP's current instruction before latching the value (ares
 /// `CPU::writeAPU`: `synchronize(smp); smp.portWrite(...)`). The overshoot is
@@ -1442,7 +1451,9 @@ impl Apu {
                 self.apu_credit -= den;
             }
         }
-        if (smp_access_stop() || smp_instr_stop()) && (!lead_after_boot() || !self.iplrom_enable) {
+        if (smp_access_stop() || smp_instr_stop() || per_access_mutual())
+            && (!lead_after_boot() || !self.iplrom_enable)
+        {
             // ares stops at the end of the access/instruction that crosses the
             // S-CPU clock; carry the overdraft as negative credit.
             let instr = smp_instr_stop();
