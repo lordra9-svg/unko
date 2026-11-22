@@ -394,6 +394,11 @@ impl ApuPeer<'_> {
         // stepped window, so hand it the window start.
         let clock = clock_end.saturating_sub(u64::from(clocks));
         self.resume_with(clocks, clock, rate);
+        if crate::apu::cpu_latch_park() {
+            if let Some(apu) = self.apu.as_mut() {
+                apu.sync_dsp_to_cpu_clock();
+            }
+        }
     }
 
     fn resume_with(&mut self, clocks: u32, clock: u64, rate: u64) {

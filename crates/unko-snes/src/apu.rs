@@ -983,6 +983,20 @@ impl Apu {
         false
     }
 
+    /// Drain the S-DSP to the current S-CPU clock (`SNES_CPU_LATCH_PARK`),
+    /// covering the CPU's actual catch-up window after a park.
+    pub fn sync_dsp_to_cpu_clock(&mut self) {
+        if let Some(cpu) = self.cpu_fixed_clock() {
+            drain_dsp_to(
+                &mut self.ram[..],
+                &mut self.dsp,
+                &mut self.dsp_clock,
+                &mut self.samples,
+                cpu,
+            );
+        }
+    }
+
     fn advance_symmetric(&mut self, clocks: u32, clock: u64, rate: u64) -> bool {
         const APU_UNIT_NUM: i64 = 2_050_560;
         self.set_master_clock(clock + u64::from(clocks), rate);

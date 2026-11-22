@@ -10458,3 +10458,26 @@ the write clock while the S-CPU actually runs past it by up to one instruction;
 a complete fix must advance the DSP by the CPU's actual elapsed catch-up window.
 
 Default gate unchanged; both flags default off.
+
+## Full catch-up fix: latch-park now gives full-length streams and dkc+smas exact (2026-11-22)
+
+After flushing a park, the DSP is drained to the S-CPU's actual clock
+(`sync_dsp_to_cpu_clock`), covering the whole catch-up window. All 7-title
+streams are now full length (639,656).
+
+7-title 600-frame gate (`SNES_CPU_LATCH_TIME=1 SNES_CPU_LATCH_PARK=1`):
+
+```
+dkc    0 differing (100.0000%)      zelda  231894 (63.7471%)
+fzero  456942 differing (28.5644%)  cv4     69460 (89.1410%)
+smas   0 differing (100.0000%)      ct     452725 (29.2237%)
+mmx2   196820 differing (69.2303%)
+```
+
+So this single rule now makes **DKC and SMAS bit-exact at full length**, but it
+regresses zelda and F-Zero (the default is exact for those). It is another
+mutually-exclusive configuration rather than a universal default: the
+CPU->SMP timestamped visibility settles dkc+smas+MMX2-family handshakes but
+shifts zelda/F-Zero.
+
+Default gate unchanged; both flags default off.
