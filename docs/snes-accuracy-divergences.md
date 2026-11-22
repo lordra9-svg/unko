@@ -9011,3 +9011,41 @@ ct 34.9427%, mmx2 69.2222%). Access-stop gives dkc/fzero/cv4 100% and zelda
 99.7733%. The per-title split now reduces to a single sample-boundary question
 in the DSP write phase: CV4 and zelda want opposite stop rules at their
 respective write pairs, so still no global default.
+
+## DSP write sample phase: the straddle is a 2-tick offset, not a global lag (2026-11-21)
+
+The zelda KOFF/KON pair under access-stop is 2 DSP ticks late, not just on the
+wrong side of the boundary:
+
+```
+ares  $5C tick 1441830  $4C tick 1441854   (both inside sample 45057)
+ours  $5C tick 1441832  $4C tick 1441856   (KON exactly on 45058's boundary)
+```
+
+New default-off `SNES_DSP_LAG=N` holds the S-DSP N micro-steps behind the S-SMP
+(`drain_dsp_to(smp_clock - N*DSP_TICK)`). Sweep:
+
+```
+access-stop + LAG=1 : zelda 1448 differing (first 200 frames)
+access-stop + LAG=2 : zelda 0 differing (first 200 frames, 100.0000%)
+access-stop + LAG=3/4: zelda 0 differing (first 200 frames)
+```
+
+So a 2-tick earlier write placement makes the event exactly match ares. But a
+uniform lag is wrong over the whole run:
+
+```
+LAG=2, 600 frames: dkc 62.8391%, zelda 95.1566%, fzero 89.6213%,
+                   cv4 98.1206%, smas 50.9452%, ct 34.9427%, mmx2 69.2217%
+access-stop+LAG=2, 600 frames: dkc 62.8391%, zelda 99.8541%,
+                   fzero 89.6213%, cv4 98.6855%, others unchanged
+```
+
+So the +2-tick offset at this event is *local*, not a constant DSP phase: shifting
+the entire DSP grid breaks DKC and F-Zero. The fix must place that specific
+register write in the earlier sample without moving the DSP clock globally -
+i.e. the sample attribution at the boundary remains the scheduler/clock-ordering
+problem, not a global phase constant.
+
+`SNES_DSP_LAG` is a diagnostic and stays default off (0); the default gate is
+unchanged.

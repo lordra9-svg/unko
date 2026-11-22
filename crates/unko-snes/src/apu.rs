@@ -60,6 +60,19 @@ pub fn smp_write_pull() -> bool {
     *PULL.get_or_init(|| std::env::var_os("SNES_SMP_WRITE_PULL").is_some())
 }
 
+/// `SNES_DSP_LAG`: hold the S-DSP `N` micro-steps behind the S-SMP, i.e. derive
+/// the catch-up target as `smp_clock - N*DSP_TICK` (diagnostic for the DSP
+/// register-write sample phase).
+pub fn dsp_lag() -> u32 {
+    static L: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *L.get_or_init(|| {
+        std::env::var("SNES_DSP_LAG")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    })
+}
+
 /// `SNES_SMP_ENTRY_PULL`: before the S-SMP starts each instruction, run the
 /// S-CPU forward to the S-SMP clock if the S-SMP is ahead (ares' SMP thread
 /// entry calls `scheduler.synchronize()`, which pulls the S-CPU forward).
@@ -1353,6 +1366,7 @@ impl ApuBus<'_> {
             Some(t) => t,
             None => *self.smp_clock,
         };
+        let target = target.saturating_sub(u128::from(dsp_lag()) * DSP_TICK);
         // Diagnostic: the DSP register-write phase measured +6 micro-steps
         // against ares; prime the DSP catch-up by that many ticks to test
         // whether the offset is a true global phase.
