@@ -8654,3 +8654,26 @@ So three failing titles (CV4, SMAS, CT) share the DSP write micro-step phase
 larger defect (a KON that ours does not perform when ares does), which is the next
 target: locate the `$4C` write for MMX2 v2/v7 and compare its presence/sample in
 both.
+
+## MMX2 root cause: the S-CPU never writes the APU ports (2026-11-21)
+
+Our MMX2 output is **entirely silent** - the 69% "match" is only matching ares'
+pre-music silence (ours mean |x| = 0.0 over the whole window; ares from ~6.9 s).
+
+State at 600 frames:
+
+```
+spc after:  PC=FFCF (IPL ROM)  - the S-SMP never leaves the IPL
+apu ports:  cpu<-apu [AA, BB, 00, 00]  apu<-cpu [00, 00, 00, 00]
+PORT_OUT:   1,136,903 CPU *reads* of $2140-$2143,  0 CPU writes,  2 S-SMP writes
+```
+
+So the S-CPU spins reading `$2140` (about 1,900 reads/frame) and never writes the
+driver bytes; the IPL's `$AA/$BB` handshake is never answered, and the DSP never
+receives a single register write (`$4C` count = 0 vs ares' 113).
+
+This is a **separate, larger defect** from the DSP write-phase family: MMX2's
+APU is never initialised. It explains why MMX2 was insensitive to every DSP
+scheduling variant. Next: determine what the S-CPU boot code is waiting for when
+it polls `$2140-$2143` (value expected, and whether the CX4 boot path is involved)
+by logging the polled port values and the S-CPU PC at the spin.
