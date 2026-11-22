@@ -8406,3 +8406,27 @@ executed, but our S-SMP clock at the writes differs by ±56 depending on the blo
 This is the final consistent characterisation: the residual is entirely in how the
 S-SMP clock is advanced across the block gap (credit/record), with every data
 path (latch, dp, timer, rounding) verified identical.
+
+## The -44/+12 SMP-clock delta is instruction-granularity synchronization (2026-11-21)
+
+Using the monotonic ares clock (`aresSmpMono`, sum of `SMP::step` clocks) the
+delta at writes is -44 (ours ahead) or +12 (ours behind), swinging by 56 at KOFF.
+
+Magnitude interpretation: 44-56 SMP clocks is the size of a short SPC700
+instruction sequence (the `$049F` loop iteration is exactly 56 = 9 instructions).
+That is the signature of ares' **whole-instruction synchronization**:
+`Thread::synchronize(smp)` runs whole instructions until the SMP clock is at or
+past the S-CPU clock, so at any instant the ares SMP clock is behind/ahead of the
+exact credit by up to one instruction, depending on where the boundary falls.
+Our carried-credit loop stops at the exact rational clock.
+
+This is precisely the behaviour already implemented and measured as
+`SNES_SMP_CEIL` (round the credit up to the instruction/access boundary):
+it made CV4 exact (100.0000%) and M68K/Metroid exact, but regressed
+Zelda/F-Zero/SMW, and the threshold sweep showed no single threshold satisfies
+all titles (Metroid only at 0%, Zelda/F-Zero only at >=75%).
+
+So the two-valued clock is not a new mechanism: it is the instruction-granularity
+overshoot, whose per-title sensitivity is already mapped. No new data path or
+rounding is involved - confirming the work is a scheduler-credit policy question,
+not another bug.
