@@ -262,58 +262,66 @@ mod mutual_tests {
     }
 }
 
-/// Experimental engine wiring the **real** S-DSP into the mutual scheduler.
+/// Experimental engine wiring the **real** S-SMP and S-DSP into the mutual
+/// scheduler.
 ///
-/// It owns the DSP, APU RAM and the sample queue, and advances the DSP one
-/// micro-step at a time while recording the DSP clock in [`RoundRobin`]. The
-/// S-SMP leg (the real [`crate::spc_coroutine::SpcCoroutine`]) is the next
-/// integration step; this type deliberately does not run the SMP yet, so it is
-/// inert and cannot affect the default driver.
+/// It owns the SPC700, the per-access [`crate::spc_coroutine::SpcCoroutine`],
+/// the real S-DSP, APU RAM and the sample queue. The S-SMP runs one instruction
+/// at a time; each [`crate::spc_coroutine::SpcEvent`] is answered against the
+/// RAM/DSP. A DSP micro-step advances 2 S-SMP clocks, after which the engine
+/// pulls the S-SMP to the DSP clock ([`pull_smp`]) before the next micro-step.
+///
+/// Not wired into [`crate::system::Snes`]; the default driver is untouched.
 pub struct SymEngine {
     /// Thread clocks and DSP resume points.
     pub rr: RoundRobin,
+    core: Option<crate::spc700::Spc700>,
+    spc: crate::spc_coroutine::SpcCoroutine,
     dsp: crate::dsp::Dsp,
     ram: Box<[u8]>,
     samples: std::collections::VecDeque<crate::dsp::Sample>,
-    dsp_clock_value: u128,
+    smp_clock: u128,
+    dsp_units: u128,
+    instructions: u64,
 }
 
+/// S-SMP clocks per DSP micro-step (24 DSP clocks = 2 S-SMP clocks).
+const SMP_PER_DSP_STEP: u128 = 2;
+
 impl SymEngine {
-    /// Create the engine with a fresh DSP and 64 KiB of APU RAM.
+    /// Create the engine with a fresh S-SMP/DSP and 64 KiB of APU RAM.
     pub fn new() -> Self {
         Self {
             rr: RoundRobin::new(0, 0, 0),
+            core: None,
+            spc: crate::spc_coroutine::new_spc_coroutine(),
             dsp: crate::dsp::Dsp::new(),
             ram: vec![0; 0x1_0000].into_boxed_slice(),
             samples: std::collections::VecDeque::new(),
-            dsp_clock_value: 0,
+            smp_clock: 0,
+            dsp_units: 0,
+            instructions: 0,
         }
     }
 
-    /// Advance the S-DSP one micro-step (24 DSP clocks), recording its clock
-    /// and any finished sample, and queue an S-SMP resume request to the new
-    /// DSP clock. Returns `true` when a sample was produced.
-    pub fn dsp_micro_step(&mut self) -> bool {
-        let finished = self.dsp.tick(&mut self.ram);
-        self.dsp_clock_value += 24;
-        let clock = self.dsp_clock_value;
-        self.rr.set_dsp_clock(clock);
-        self.rr.push_resume(clock, clock);
-        match finished {
-            Some(sample) => {
-                self.samples.push_back(sample);
-                if self.samples.len() > 16_384 {
-                    self.samples.pop_front();
-                }
-                true
-            }
-            None => false,
-        }
+    /// Load an SPC700 core (e.g. one positioned at a test program).
+    pub fn load_core(&mut self, core: crate::spc700::Spc700) {
+        self.core = Some(core);
     }
 
-    /// Current DSP clock (24 units per micro-step).
-    pub const fn dsp_clock(&self) -> u128 {
-        self.dsp_clock_value
+    /// Current S-SMP clock.
+    pub const fn smp_clock(&self) -> u128 {
+        self.smp_clock
+    }
+
+    /// DSP progress in S-SMP-clock units (2 per micro-step).
+    pub const fn dsp_units(&self) -> u128 {
+        self.dsp_units
+    }
+
+    /// Number of retired S-SMP instructions.
+    pub const fn instructions(&self) -> u64 {
+        self.instructions
     }
 
     /// Finished samples waiting to be consumed.
@@ -321,9 +329,95 @@ impl SymEngine {
         self.samples.len()
     }
 
-    /// Resume points the S-SMP still has to reach.
-    pub fn pending_resumes(&self) -> usize {
-        self.rr.pending_len()
+    /// Run one S-DSP micro-step and record it in the round-robin state.
+    fn dsp_micro_step(&mut self) {
+        if let Some(sample) = self.dsp.tick(&mut self.ram) {
+            self.samples.push_back(sample);
+            if self.samples.len() > 16_384 {
+                self.samples.pop_front();
+            }
+        }
+        self.dsp_units += SMP_PER_DSP_STEP;
+        self.rr.set_dsp_clock(self.dsp_units);
+        self.rr.push_resume(self.dsp_units, self.dsp_units);
+    }
+
+    /// Advance the DSP to the current S-SMP clock.
+    fn catch_dsp_to_smp(&mut self) {
+        while self.dsp_units + SMP_PER_DSP_STEP <= self.smp_clock {
+            self.dsp_micro_step();
+        }
+    }
+
+    /// Answer one bus event from the S-SMP coroutine.
+    fn handle(&mut self, event: crate::spc_coroutine::SpcEvent) -> crate::spc_coroutine::SpcResume {
+        use crate::spc_coroutine::{SpcEvent, SpcResume};
+        match event {
+            SpcEvent::Wait(Some(address)) if (0x00F0..=0x00FF).contains(&address) => {
+                SpcResume::Clocks(1)
+            }
+            SpcEvent::Wait(_) => SpcResume::Clocks(2),
+            SpcEvent::Timer(_) => SpcResume::Clocks(2),
+            SpcEvent::Read(address) => SpcResume::Byte(self.ram[usize::from(address)]),
+            SpcEvent::Write(address, value) => {
+                self.ram[usize::from(address)] = value;
+                SpcResume::Unit
+            }
+            SpcEvent::StepClock(clocks) => {
+                self.smp_clock += u128::from(clocks);
+                self.rr.set_smp_clock(self.smp_clock);
+                self.catch_dsp_to_smp();
+                SpcResume::Unit
+            }
+            SpcEvent::Advance(clocks) => {
+                self.smp_clock += u128::from(clocks);
+                self.rr.set_smp_clock(self.smp_clock);
+                SpcResume::Unit
+            }
+            SpcEvent::Idle => SpcResume::Unit,
+            SpcEvent::Done(_) => SpcResume::Unit,
+        }
+    }
+
+    /// Execute one S-SMP instruction through the resumable coroutine.
+    ///
+    /// Returns `false` when there is no core to run.
+    pub fn smp_step(&mut self) -> bool {
+        use crate::spc_coroutine::{SpcEvent, SpcInput};
+        let Some(core) = self.core.take() else {
+            return false;
+        };
+        let mut input = SpcInput::Start(core);
+        loop {
+            match self.spc.resume(input) {
+                corosensei::CoroutineResult::Yield(SpcEvent::Done(core)) => {
+                    self.core = Some(core);
+                    self.instructions += 1;
+                    return true;
+                }
+                corosensei::CoroutineResult::Yield(event) => {
+                    let resume = self.handle(event);
+                    input = SpcInput::Resume(resume);
+                }
+                corosensei::CoroutineResult::Return(()) => return false,
+            }
+        }
+    }
+
+    /// Run `micro_steps` DSP micro-steps, pulling the S-SMP to each DSP clock
+    /// before the next step (ares `DSP::tick -> synchronize(smp)`).
+    pub fn run_mutual(&mut self, micro_steps: u32) {
+        for _ in 0..micro_steps {
+            self.dsp_micro_step();
+            let target = self.dsp_units;
+            let mut guard = 0u32;
+            while self.smp_clock < target && guard < 100_000 {
+                if !self.smp_step() {
+                    break;
+                }
+                guard += 1;
+            }
+        }
     }
 }
 
@@ -337,27 +431,35 @@ impl Default for SymEngine {
 mod engine_tests {
     use super::*;
 
-    #[test]
-    fn real_dsp_produces_a_sample_every_32_micro_steps() {
-        let mut engine = SymEngine::new();
-        for _ in 0..31 {
-            assert!(!engine.dsp_micro_step());
-        }
-        assert!(engine.dsp_micro_step());
-        assert_eq!(engine.dsp_clock(), 32 * 24);
-        assert_eq!(engine.sample_count(), 1);
-        assert_eq!(engine.pending_resumes(), 32);
+    fn test_core() -> crate::spc700::Spc700 {
+        let mut core = crate::spc700::Spc700::new();
+        // `BRA -2` at $0200: a tight loop that retires one instruction.
+        core.pc = 0x0200;
+        core
     }
 
     #[test]
-    fn resume_points_track_the_dsp_clock() {
+    fn real_dsp_produces_a_sample_every_32_micro_steps() {
         let mut engine = SymEngine::new();
-        for _ in 0..4 {
-            engine.dsp_micro_step();
-        }
-        engine.rr.set_smp_clock(48);
-        let ready = engine.rr.take_ready().unwrap();
-        assert_eq!(ready.resume_smp_at, 24);
-        assert_eq!(engine.rr.pending_len(), 3);
+        engine.run_mutual(31);
+        assert_eq!(engine.sample_count(), 0);
+        engine.run_mutual(1);
+        assert_eq!(engine.sample_count(), 1);
+        assert_eq!(engine.dsp_units(), 32 * SMP_PER_DSP_STEP);
+    }
+
+    #[test]
+    fn smp_coroutine_retires_instructions_and_pulls_dsp() {
+        let mut engine = SymEngine::new();
+        engine.load_core(test_core());
+        engine.ram[0x0200] = 0x2F; // BRA
+        engine.ram[0x0201] = 0xFE; // -2
+        engine.run_mutual(4);
+        assert!(engine.instructions() >= 1, "S-SMP must run instructions");
+        assert!(engine.dsp_units() >= 4 * SMP_PER_DSP_STEP);
+        // The S-SMP's own StepClock events pull the DSP too, so the DSP may run
+        // ahead of the four scheduler ticks; the invariant is the SMP clock
+        // keeping up with the DSP.
+        assert!(engine.smp_clock() >= engine.dsp_units());
     }
 }
