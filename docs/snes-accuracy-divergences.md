@@ -9123,3 +9123,46 @@ So there is now a second, independent split axis:
 
 The default gate is unchanged; `SNES_DSP_INSTR_SYNC` stays default off, and SMAS
 is now reachable bit-exact with `SNES_DSP_INSTR_SYNC=1`.
+
+## The "DSP-sync axis" is a ~5-tick clock drift, not a visible mode (2026-11-21)
+
+ares synchronizes the DSP at **every** S-SMP access, not at instruction entry:
+`SMP::wait` -> `SMP::step(clocks)` -> `Thread::step(clocks);
+Thread::synchronize(cpu); Thread::synchronize(dsp);`. So the default per-access
+drain is the faithful model, and `SNES_DSP_INSTR_SYNC` is not what ares does.
+
+Yet the DSP write ticks show that SMAS matches the *instruction-sync* position:
+
+```
+SMAS, voice writes near DSP sample 112456 (the first default/instr-sync audio
+difference is interleaved sample 224916 = DSP 112458):
+
+ares                         KOFF tick 3598621  (sample 112456, step 29)
+ours DSP_INSTR_SYNC          KOFF tick 3598621  (exact match)
+ours default (per-access)    KOFF tick 3598626  (sample 112457, +5 ticks)
+```
+
+and zelda (default) matches ares exactly (KOFF/KON 1441830/1441854), where the
+per-access and per-instruction positions coincide.
+
+So SMAS's preference is not a different sync mode: it is an accumulated **+5 DSP
+tick drift** of our clock relative to ares by that point (~3.6 M ticks), and
+`SNES_DSP_INSTR_SYNC` happens to subtract that drift at writes. This is the same
+family as the documented +2..+8 S-SMP clock drift over ~500 K instructions.
+
+`SNES_DSP_WRITE_AT=start` and `=mid` (per-write placement inside the access) do
+not reproduce it:
+
+```
+start/mid: dkc 64.5414%  zelda 99.8329%  fzero 99.5670%  cv4 98.2211%
+           smas 50.9452%  ct 34.9427%   mmx2 69.2219%
+```
+
+because SMAS's difference survives a per-write placement change and needs the
+whole per-instruction drain pattern.
+
+No state-conditioned rule is therefore justified: there is no visible hardware
+state that selects the mode, only a small cumulative clock difference whose
+audible effect depends on where a register write lands relative to the 32-tick
+sample grid. The remaining work is to eliminate the residual S-SMP/DSP clock
+drift (instruction-clock accounting) rather than to condition the DSP drain.
