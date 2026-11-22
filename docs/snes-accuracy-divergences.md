@@ -8114,3 +8114,26 @@ read value differs from ares' (the latch content at the read instant). This is
 the same latch-ordering question measured exhaustively (immediate / timestamped /
 inline / hidden); the next instrumentation is to log the `$F7` value and clock at
 the extra iteration in both and compare the two reads directly.
+
+## The extra loop iteration is not a `$F7` value difference (2026-11-21)
+
+Logged every `$F7` read with its DSP tick and value in both emulators for the
+write-32 -> write-33 gap:
+
+```
+gap $F7 reads: ares 271, ours 269
+first value difference: NONE  (every read returns 0x00 in both)
+time offset: a constant +22 DSP ticks (ours later)
+```
+
+So the latch value is **not** what differs: `X = $F7` is `0x00` throughout in
+both. The loop's exit at `$04AE` is `CMP X,dp$07` / `BEQ`, so the differing
+branch means the **direct-page expected value** (`dp$06`/`dp$07`) differs at that
+iteration - ours has already reached the exit value one iteration earlier.
+
+That shifts the root one level deeper: the direct-page bytes are written by the
+sound driver from an earlier handshake/timer read (outside this gap), so the
+first differing value must be sought there, not at the loop's `$F7` reads.
+
+The constant +22-tick read offset also persists here, matching the earlier
+$049F/$FD read-grid measurement.
