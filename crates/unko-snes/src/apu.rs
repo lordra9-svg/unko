@@ -836,6 +836,16 @@ impl Apu {
             self.plan_pos += 1;
             self.plan_sub = 0;
         }
+        if dsp_late() {
+            let pos = self.smp_clock_at_position();
+            drain_dsp_to(
+                &mut self.ram[..],
+                &mut self.dsp,
+                &mut self.dsp_clock,
+                &mut self.samples,
+                pos,
+            );
+        }
         1
     }
 
