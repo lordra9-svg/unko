@@ -8217,3 +8217,30 @@ Two conclusions:
 So the next target is the divergence at 371,351, not the `$049F` loop: identify
 which latch/timer read at that IPL handshake differs. This supersedes the
 previous "one extra `$049F` iteration at the first block" localization.
+
+## The "extra iteration" divergences are alignment artefacts (2026-11-21)
+
+Logged `$F4` reads at instruction 371,351 in both emulators:
+
+```
+window F4 reads: ares 70, ours 69
+k=0  ares(t=1383609, v=255)   ours(t=1383609, v=FF)   (identical value; ares prints decimal)
+...
+```
+
+Values are **identical (255)** and, unlike every other point measured, the
+**timestamps are identical too** (1383609 in both). The apparent extra
+`FFE9/FFDA/FFDC` at that index is a **difflib alignment artifact**: the region is
+a 3-instruction repeating loop, so an insertion can be placed at any equivalent
+position in the repetition.
+
+This matches the cumulative-clock measurement (+2..+8 clocks over 500k
+instructions): there is no genuine 56-clock control-flow divergence at 371,351.
+The earlier "$049F extra iteration" was placed in another tight repeating loop
+and is subject to the same ambiguity.
+
+So the two "control-flow divergence" localizations are not real; the only
+*consistent* measured difference remains the DSP/read **phase** (+22 DSP ticks at
+reads, +6/-22 write deltas). The next step should therefore treat the residual as
+a phase/rounding offset, not a branch/control-flow difference - and the earlier
+alignment-based localizations must not be used as targets.
