@@ -8380,3 +8380,29 @@ results do not apply to the actual boundary and must be redone there.
 
 The reference axis is fixed; the target is now precise: the 56-clock gap at the
 KOFF boundary, evaluated at DSP tick ~3,557,662.
+
+## At the real boundary the handshake values are identical; the difference is timing (2026-11-21)
+
+Repeated the value-level comparison at the **actual** first audio block boundary
+(DSP tick ~3,557,662):
+
+```
+$F7 reads in window: ares 63, ours 62; first value difference: NONE (all 0x00)
+dp$06/$07 reads:     ares 64, ours 62; first (addr,value) difference: NONE
+  dp  ares(t=3558775, 7, 1, pc 04AE)   ours(t=3558797, 7, 1, pc 04AC)
+  dp  ares(t=3558780, 6, 0, pc 04B2)   ours(t=3558802, 6, 0, pc 04B0)
+```
+
+The values and addresses match everywhere; only the logged PC differs by exactly
++2 (ares' `r.pc` has advanced past the instruction; ours records the instruction
+start) and the tick offset is the usual +22 (ours later). The read counts differ
+by one, consistent with that +22 offset moving the window edge.
+
+So even at the correct boundary there is **no value/control-flow difference** in
+the `$049F` handshake. The two-valued SMP clock (-44/+12, 56-clock swing) is
+therefore a **credit/timing** phenomenon: the same reads/instructions are
+executed, but our S-SMP clock at the writes differs by ±56 depending on the block.
+
+This is the final consistent characterisation: the residual is entirely in how the
+S-SMP clock is advanced across the block gap (credit/record), with every data
+path (latch, dp, timer, rounding) verified identical.
