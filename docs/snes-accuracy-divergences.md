@@ -8595,3 +8595,27 @@ at a slightly different micro-step (S-SMP clock phase at the write), and the
 audible effect depends on which event the write crosses (a volume update for CV4,
 a KON for SMAS). The S-SMP clock at writes is the instruction-granularity
 synchronization already characterised (-44/+12, ceiling family).
+
+## SMAS KON micro-step: ares step 30, ours step 3 of the next sample (2026-11-21)
+
+Extracted the micro-step of the voice-4 KON (`$4C`, bit 4) write from both logs:
+
+```
+ares KON(v4): dspTick 3,596,798  -> sample 112,399, step 30
+ours KON(v4): dspTick 3,596,803  -> sample 112,400, step  3   (5 ticks later)
+```
+
+And the DSP micro-step sequence in `dsp.rs` matches ares' `main()` call-for-call,
+so the **consumption order is identical** - the order hypothesis is refuted.
+
+What happens is now exact: ares' write lands at step 30, i.e. just before the
+voice-4 key-on consumption; ours lands at step 3 of the *next* sample, just after
+it. Missing that consumption forces the key-on (keyonDelay 5..0, gaussian start)
+to begin one sample later, and the write itself is one sample late, giving the
+observed **2-sample shift**.
+
+So a 5-tick write-phase difference (the already-measured -44/+12 SMP-clock
+phase) is amplified by the discrete KON event into a coarse 2-sample jump. The
+mechanism is fully closed: DSP write micro-step phase = S-SMP clock at the write,
+identical in both for the exact titles and off by a few ticks at block boundaries
+for the failing ones.
