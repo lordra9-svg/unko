@@ -23,7 +23,7 @@ fn drain_dsp_to(
     samples: &mut std::collections::VecDeque<Sample>,
     target: u128,
 ) {
-    while *dsp_clock < target {
+    while (*dsp_clock + if dsp_floor() { DSP_TICK } else { 0 }) < target {
         if let Some(sample) = dsp.tick(ram) {
             samples.push_back(sample);
             if samples.len() > 16_384 {
@@ -71,6 +71,15 @@ pub fn lead_after_boot() -> bool {
 pub fn smp_write_pull() -> bool {
     static PULL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *PULL.get_or_init(|| std::env::var_os("SNES_SMP_WRITE_PULL").is_some())
+}
+
+/// `SNES_DSP_FLOOR`: stop the S-DSP at the last micro-step at or below the
+/// S-SMP clock (never crossing it), instead of advancing to the first step at
+/// or past it. Models the `Thread::synchronize` pull direction where the
+/// observation point is the last micro-step the SMP was pulled to.
+pub fn dsp_floor() -> bool {
+    static F: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *F.get_or_init(|| std::env::var_os("SNES_DSP_FLOOR").is_some())
 }
 
 /// `SNES_DSP_SAMPLE_SYNC`: advance the S-DSP in whole output samples when it

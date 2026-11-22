@@ -9230,3 +9230,39 @@ cannot express (we cannot run SMP instructions from inside the DSP drain).
 This confirms the architectural requirement precisely: the missing piece is the
 DSP pulling the SMP forward *inside* `DSP::main`, not the DSP's stopping
 granularity. The flag stays default off; the default gate is unchanged.
+
+## Floor-direction DSP observation equals start placement, not a fix (2026-11-21)
+
+The remaining expressible part of the "DSP pulls the SMP" inversion is the
+observation direction: stop the DSP at the last micro-step at or below the SMP
+clock instead of the first at or above it. New default-off `SNES_DSP_FLOOR`
+implements exactly that.
+
+Measured (600 frames):
+
+```
+dkc    226813 differing (64.5414%)   zelda 1069 (99.8329%)
+fzero    2770 differing (99.5670%)   cv4  11379 (98.2211%)
+smas   313782 differing (50.9452%)   ct  416143 (34.9427%)
+mmx2   196874 differing (69.2219%)
+```
+
+These are bit-identical to `SNES_DSP_WRITE_AT=start` / `=mid`, so the floor
+direction and the start placement are the same experiment. Neither fixes SMAS
+(50.9452%) and both break dkc.
+
+So every expressible piece of the control inversion is now measured:
+
+* per-instruction DSP sync (`SNES_DSP_INSTR_SYNC`) - fixes SMAS, breaks
+  dkc/zelda/fzero;
+* whole-sample DSP observation (`SNES_DSP_SAMPLE_SYNC`) - breaks everything;
+* floor/start observation (`SNES_DSP_FLOOR`, `SNES_DSP_WRITE_AT`) - same, breaks
+  dkc;
+* DSP catch-up phase (`SNES_DSP_PRIME`, `SNES_DSP_LAG`) - cannot move SMAS.
+
+The only remaining form of the inversion is a true mutually-resumable scheduler:
+the DSP drain executing S-SMP instructions recursively (`DSP::tick ->
+Thread::synchronize(smp)` -> `SMP::step -> synchronize(dsp)`). That requires
+replacing the record/plan architecture (which exists to make the S-CPU port
+sync rewindable) with direct mutual coroutining, i.e. a core rewrite rather than
+a flag. All default-off flags leave the default gate unchanged.
