@@ -10774,3 +10774,48 @@ remaining per-title boot-handshake phase, not the DSP arithmetic or the CPU
 timing (video is unchanged and the instruction clocks match).
 
 Default gate: dkc/zelda/fzero/cv4 0, smas 50.9452%, ct 34.9327%, mmx2 69.2222%.
+
+## Direct access-granularity engine: same 4 exact, CT up to 44.3% (2026-11-22)
+
+Added `SNES_SYM_STOP`: `SNES_SYM_ENGINE` now executes the SPC700 coroutine
+directly (no plan/speculation), stops at the first access suspension at or past
+the S-CPU clock, and advances the S-DSP per access in execution order. 600-frame
+gate:
+
+```
+dkc 0   zelda 0   fzero 0   cv4 0   smas 313782 (50.9452%)
+ct 356307 (44.2971%)   mmx2 196870 (69.2225%)
+```
+
+The direct engine reproduces the **same four exact titles** as the plan/default
+and improves CT by ~9 points, with SMAS/MMX2 bit-identical to the plan
+(313782/196870). Two independent schedulers agreeing byte-for-byte on the
+failing titles means their residual is not the plan's speculative recording or
+the CPU/SMP stop cadence; it is shared by both (the per-access DSP sync and port
+latch paths) and deterministic.
+
+Adding `SNES_DSP_INSTR_SYNC` makes SMAS exact here too (and regresses the four),
+exactly as in the plan path; `SNES_CPU_LATCH_TIME` reproduces the same latch
+family.
+
+## Per-access park flush alone is inert (2026-11-22)
+
+`SNES_ACCESS_FLUSH` resolves a parked `$F4-$F7` read at the S-CPU's first bus
+access boundary (ares `Thread::synchronize` only suspends at `CPU::step` ends)
+without changing the S-SMP stop. 7-title gate is byte-identical to the default
+(dkc/zelda/fzero/cv4 0, smas 50.9452%, ct 34.9327%, mmx2 69.2222%), so the
+parked-read resolution point is not the remaining discriminator.
+
+## Status: 4/7 exact on the default path (2026-11-22)
+
+```
+dkc 0   zelda 0   fzero 0   cv4 0      (bit-exact, both implementations)
+smas 313782 (50.9452%)   ct 416207 (34.9327%)   mmx2 196872 (69.2222%)
+```
+
+The CPU fixed-point rounding was the CV4 fix. The remaining three are the
+per-title boot-handshake phase: both the plan and the direct engine land their
+S-SMP clock `-22` (SMAS) and `-6/+10` (SMAS after the init block) clocks from
+ares at the same writes, and the same 16-S-SMP-clock (8 DSP tick) classes
+reappear. Fixing them needs the handshake itself to tick identically, i.e. the
+full mutual recursion, not a stop/latch/flush rule.

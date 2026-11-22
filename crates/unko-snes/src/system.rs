@@ -1252,7 +1252,10 @@ impl Snes {
                     // `$F4-$F7` sample as soon as the S-CPU has reached its
                     // clock, at S-CPU *access* granularity rather than waiting
                     // for the instruction boundary.
-                    if crate::apu::mutual_scheduler() || crate::apu::per_access_mutual() {
+                    if crate::apu::mutual_scheduler()
+                        || crate::apu::per_access_mutual()
+                        || crate::apu::access_flush()
+                    {
                         if let Some(target) = peer.waiting {
                             if self.clock >= target {
                                 peer.flush_parked(self.clock, rate);
@@ -1275,7 +1278,9 @@ impl Snes {
                     let flush = match peer.waiting {
                         None => false,
                         Some(target) => {
-                            !(crate::apu::mutual_scheduler() || crate::apu::per_access_mutual())
+                            !(crate::apu::mutual_scheduler()
+                                || crate::apu::per_access_mutual()
+                                || crate::apu::access_flush())
                                 || self.clock >= target
                         }
                     };

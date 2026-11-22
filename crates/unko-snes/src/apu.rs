@@ -190,6 +190,15 @@ pub fn per_access_mutual() -> bool {
     *P.get_or_init(|| std::env::var_os("SNES_PER_ACCESS_MUTUAL").is_some())
 }
 
+/// `SNES_ACCESS_FLUSH`: resolve a parked `$F4-$F7` read at the S-CPU's first
+/// bus-access boundary at or past the park clock (ares `Thread::synchronize`
+/// only suspends the S-CPU at `CPU::step` ends), without changing the S-SMP
+/// stop rule (`SNES_PER_ACCESS_MUTUAL` couples both).
+pub fn access_flush() -> bool {
+    static A: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *A.get_or_init(|| std::env::var_os("SNES_ACCESS_FLUSH").is_some())
+}
+
 /// `SNES_PORT_LEAD`: on every S-CPU write to `$2140-$2143`, finish the
 /// S-SMP's current instruction before latching the value (ares
 /// `CPU::writeAPU`: `synchronize(smp); smp.portWrite(...)`). The overshoot is
@@ -353,6 +362,24 @@ pub fn smp_port_stop() -> bool {
 pub fn sym_pull() -> bool {
     static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *P.get_or_init(|| std::env::var_os("SNES_SYM_PULL").is_some())
+}
+
+/// `SNES_SYM_STOP`: run `SNES_SYM_ENGINE` at ares' access granularity. The
+/// S-SMP is stopped at the first suspension point at or past the S-CPU clock
+/// (instead of at an instruction boundary with carried credit), and the DSP is
+/// advanced per access in direct execution order. This is the direct
+/// (non-speculative) form of `SNES_SMP_ACCESS_STOP`.
+pub fn sym_stop() -> bool {
+    static S: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *S.get_or_init(|| std::env::var_os("SNES_SYM_STOP").is_some())
+}
+
+/// Outcome of one step of the direct shared-state engine.
+enum SymStep {
+    /// The S-SMP advanced (to an instruction end or a pause point).
+    Advanced,
+    /// The S-SMP parked at a `$F4-$F7` access needing the S-CPU.
+    Parked,
 }
 
 /// `SNES_WRITE_ACCESS_STOP`: before an S-CPU `$2140-$2143` write latches, run
@@ -669,6 +696,10 @@ pub struct Apu {
     /// Pending `$F4-$F7` write parked by the shared-state engine: the S-SMP has
     /// suspended before latching and the S-CPU must reach the park clock first.
     sym_pending_write: Option<(u16, u8)>,
+    /// The shared-state engine paused at an access boundary (`SNES_SYM_STOP`);
+    /// the coroutine is suspended awaiting the `StepClock` response.
+    #[serde(skip)]
+    sym_paused: bool,
     samples: VecDeque<Sample>,
     /// Debug: S-CPU/S-SMP port handshake trace.
     pub debug: PortDebug,
@@ -728,6 +759,7 @@ impl Apu {
             park_at: None,
             sym_pending_read: None,
             sym_pending_write: None,
+            sym_paused: false,
             samples: VecDeque::new(),
             debug: PortDebug::default(),
         }
@@ -1400,6 +1432,9 @@ impl Apu {
 
     /// Shared-state mutual advance (`SNES_SYM_ENGINE`).
     fn advance_sym_engine(&mut self, clocks: u32, clock: u64, rate: u64) -> bool {
+        if sym_stop() {
+            return self.advance_sym_engine_stop(clocks, clock, rate);
+        }
         const APU_UNIT_NUM: i64 = 2_050_560;
         self.set_master_clock(clock + u64::from(clocks), rate);
         self.apu_credit += i64::from(clocks) * APU_UNIT_NUM;
@@ -1415,6 +1450,149 @@ impl Apu {
             guard += 1;
         }
         false
+    }
+
+    /// Direct, access-granularity advance (`SNES_SYM_ENGINE` + `SNES_SYM_STOP`).
+    ///
+    /// ares `Thread::synchronize(smp)` runs the S-SMP until its clock reaches
+    /// the S-CPU clock, stopping at the first access suspension at or past it.
+    /// The S-SMP is executed directly from the coroutine (no plan/speculation)
+    /// and the S-DSP advances per access in execution order.
+    fn advance_sym_engine_stop(&mut self, clocks: u32, clock: u64, rate: u64) -> bool {
+        self.set_master_clock(clock + u64::from(clocks), rate);
+        let Some(target) = self.cpu_fixed_clock() else {
+            return false;
+        };
+        let mut guard = 0u32;
+        while self.smp_clock < target {
+            match self.sym_step_to(target) {
+                SymStep::Parked => return true,
+                SymStep::Advanced => {}
+            }
+            guard += 1;
+            if guard > 1_000_000 {
+                break;
+            }
+        }
+        false
+    }
+
+    /// Resume the direct engine, pausing after the first `StepClock` that
+    /// reaches `target` (`SNES_SYM_STOP`).
+    fn sym_step_to(&mut self, target: u128) -> SymStep {
+        use crate::spc_coroutine::{SpcEvent, SpcInput, SpcResume};
+        let mut coro = SYM_CORO
+            .with(|slot| slot.borrow_mut().take())
+            .unwrap_or_else(crate::spc_coroutine::new_spc_coroutine);
+        let mut input = if let Some(address) = self.sym_pending_read.take() {
+            SpcInput::Resume(SpcResume::Byte(self.sym_read(address)))
+        } else if let Some((address, value)) = self.sym_pending_write.take() {
+            self.sym_write(address, value);
+            SpcInput::Resume(SpcResume::Unit)
+        } else if self.sym_paused {
+            // Resume from an access-boundary pause (`StepClock` response).
+            self.sym_paused = false;
+            SpcInput::Resume(SpcResume::Unit)
+        } else {
+            let core = std::mem::take(&mut self.spc);
+            SpcInput::Start(core)
+        };
+        loop {
+            match coro.resume(input) {
+                corosensei::CoroutineResult::Yield(SpcEvent::Done(core)) => {
+                    self.spc = core;
+                    self.instructions += 1;
+                    if dsp_instr_sync() {
+                        let target = self.sym_dsp_target();
+                        drain_dsp_to(
+                            &mut self.ram[..],
+                            &mut self.dsp,
+                            &mut self.dsp_clock,
+                            &mut self.samples,
+                            target,
+                        );
+                    }
+                    SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
+                    return SymStep::Advanced;
+                }
+                corosensei::CoroutineResult::Yield(event) => {
+                    if sym_pull() {
+                        if let Some(cpu) = self.cpu_fixed_clock() {
+                            if self.smp_clock > cpu {
+                                match &event {
+                                    SpcEvent::Read(address)
+                                        if (0x00F4..=0x00F7).contains(address) =>
+                                    {
+                                        self.park_at = Some(self.smp_clock);
+                                        self.sym_pending_read = Some(*address);
+                                        SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
+                                        return SymStep::Parked;
+                                    }
+                                    SpcEvent::Write(address, value)
+                                        if (0x00F4..=0x00F7).contains(address) =>
+                                    {
+                                        self.park_at = Some(self.smp_clock);
+                                        self.sym_pending_write = Some((*address, *value));
+                                        SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
+                                        return SymStep::Parked;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    let is_step = matches!(&event, SpcEvent::StepClock(_));
+                    let response = match event {
+                        SpcEvent::Wait(address) => SpcResume::Clocks(self.sym_wait(address)),
+                        SpcEvent::Timer(address) => SpcResume::Clocks(self.sym_timer(address)),
+                        SpcEvent::Read(address) => SpcResume::Byte(self.sym_read(address)),
+                        SpcEvent::Write(address, value) => {
+                            self.sym_write(address, value);
+                            SpcResume::Unit
+                        }
+                        SpcEvent::StepClock(clocks) => {
+                            self.smp_clock += u128::from(clocks) * SMP_SCALAR;
+                            if !dsp_instr_sync() {
+                                let target = self.sym_dsp_target();
+                                drain_dsp_to(
+                                    &mut self.ram[..],
+                                    &mut self.dsp,
+                                    &mut self.dsp_clock,
+                                    &mut self.samples,
+                                    target,
+                                );
+                            }
+                            SpcResume::Unit
+                        }
+                        SpcEvent::Advance(clocks) => {
+                            for (index, timer) in self.timers.iter_mut().enumerate() {
+                                let frequency: u16 = if index == 2 { 16 } else { 128 };
+                                timer.step(
+                                    clocks,
+                                    frequency,
+                                    self.timers_enable,
+                                    self.timers_disable,
+                                );
+                            }
+                            SpcResume::Unit
+                        }
+                        SpcEvent::Idle => SpcResume::Unit,
+                        SpcEvent::Done(_) => SpcResume::Unit,
+                    };
+                    if is_step && self.smp_clock >= target {
+                        // Pause at the access suspension; keep the coroutine
+                        // suspended awaiting the `StepClock` response.
+                        self.sym_paused = true;
+                        SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
+                        return SymStep::Advanced;
+                    }
+                    input = SpcInput::Resume(response);
+                }
+                corosensei::CoroutineResult::Return(()) => break,
+            }
+        }
+        SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
+        SymStep::Advanced
     }
 
     fn record_instruction(&mut self) {
