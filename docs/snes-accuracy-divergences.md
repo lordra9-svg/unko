@@ -8480,3 +8480,36 @@ elsewhere in the DSP pipeline (BRR decode / Gaussian / pitch / KON timing) or in
 the voice's key-on instant. The next step requires a per-voice DSP state dump at
 sample 224,916 (instrument the local ares `DSP::sample`) to compare voice
 envelope/envx/pitch/BRR state against ours.
+
+## SMAS per-voice state at sample 224,916: a timing phase, not arithmetic (2026-11-21)
+
+Added a one-sample, per-voice DSP state dump (`ARES_DSP_STATE` /
+`SNES_DSP_STATE` + `*_SAMPLE`) and compared at SMAS sample 224,916:
+
+```
+                 ares                       ours
+output L/R       681 / 681                  723 / 723
+v4 envx          125                        126
+v4 envelope      2008                       2016      (one step higher)
+v4 pitch         1071                       1071      (same)
+v4 brr           80A7                       80A7      (same)
+v4 brrOffset     3                          3         (same)
+v4 gaussianOff   11345                      9203      (2142 lower)
+v4 mode          3 (sustain)                3
+v6 pitch/brr    8121 / 65D4                 8121 / 65D4   (same)
+```
+
+Every other voice is identical. The only differences are on voice 4 and are
+**timing quantities**:
+* envelope one step ahead (2016 vs 2008, +8);
+* gaussian offset 2142 behind (roughly two pitch steps at pitch 1071);
+* pitch, BRR address, BRR offset, source and mode are all identical.
+
+So the voice is in the same state but **~2 samples earlier in its gaussian/BRR
+phase** and one envelope tick ahead. That is a key-on/envelope-event timing
+difference of a couple of samples, not a DSP arithmetic, table or accumulation
+difference.
+
+This excludes the DSP-pipeline hypothesis for SMAS as well: the same class as
+CV4 (the failing titles differ in *when* a voice event lands relative to sample
+generation, not in *what* the DSP computes).

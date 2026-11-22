@@ -1092,6 +1092,38 @@ impl Dsp {
             right = 0;
         }
         self.sample_out = (left as i16, right);
+        if let (Ok(path), Ok(target)) = (
+            std::env::var("SNES_DSP_STATE"),
+            std::env::var("SNES_DSP_STATE_SAMPLE"),
+        ) {
+            if target.parse::<u64>().ok() == Some(self.samples_run) {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::File::create(&path) {
+                    let _ = writeln!(
+                        f,
+                        "sample {} left {} right {}",
+                        self.samples_run,
+                        left as i16,
+                        right
+                    );
+                    for (index, voice) in self.voice.iter().enumerate() {
+                        let _ = writeln!(
+                            f,
+                            "v{index} envx={} env={} pitch={} brr={:04X} off={} gauss={} kdelay={} mode={} src={:02X}",
+                            voice.envx,
+                            voice.envelope,
+                            voice.pitch,
+                            voice.brr_address,
+                            voice.brr_offset,
+                            voice.gaussian_offset,
+                            voice.keyon_delay,
+                            voice.envelope_mode as i32,
+                            voice.source
+                        );
+                    }
+                }
+            }
+        }
         // ares emits the DAC sample from `echo27`, so a full trace must be
         // captured here (not at the end of the 32-step cycle) to compare the
         // voice pipeline at the same point.
