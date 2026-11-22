@@ -9443,3 +9443,30 @@ parking and skip that half on completion), not by re-entering `spc.step`.
 
 Default gate unchanged; sym driver remains default off at the no-park,
 credit-paced version.
+
+## Half-advance + skip-first-half park: boot still fails (2026-11-21)
+
+Implemented the suggested variant: on a pending `$F4-$F7` read, advance the
+split read's first half immediately, park with that clock as the target, set a
+`skip_read_first_half` flag on the SPC700, and skip the first half when the read
+completes (so the wait is not applied twice).
+
+Result:
+
+```
+SNES_SYM_DRIVER=1, 5 frames: nmi_count 0, nonzero_pixels 0,
+  cpu<-apu [29, BB, 00, 00], apu<-cpu [29, 00, 40, 05]
+  spc inst 19383, master clock 1756896
+```
+
+Boot still fails. Four park variants (pre-instruction gate, credit-loop top,
+post-wait target, half-advance+skip) all fail the same way, while the no-park
+credit-paced driver boots and renders (DKC 57.9834%). So the problem is not the
+timing of the park but the handshake protocol: the S-SMP is already past the
+initial `AA/BB` and into the upload (`$29` echoed on both sides) while the S-CPU
+has not acknowledged, i.e. the direct driver's port-write/read latching order
+differs from the plan layer's replay order.
+
+Reverted. Conclusion: the symmetric driver's port handshake needs to be built on
+the plan/replay read-and-write ordering (or a port-latch queue with explicit
+timestamps), not by parking individual reads inside the direct loop.
