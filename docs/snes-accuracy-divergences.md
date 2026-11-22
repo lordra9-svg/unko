@@ -10111,3 +10111,32 @@ poll-race mechanism measured for CT, now in the engine path.
 
 The `SYM_DSP_LOG` instrumentation is debug-only (default off); the engine and
 default gate are unchanged.
+
+## SNES_SYM_ENGINE handshake fixed: full \$F0/\$F1 timer/control handling (2026-11-22)
+
+The engine's `sym_write` was only handling `$F2`-`$F9`; the sound driver's
+`$F0`/`$F1` writes (wait-state selection, timer enable/reset, timer targets
+`$FA-$FC`) were ignored, so the driver stalled after its initial commands
+(56 `$F3` writes over 200 frames vs ares' 616).
+
+Porting the full `ApuBus::write` control/timer logic into `sym_write` (including
+the `$F0` P-pin guard, `$F1` timer stage/enable handling and `$FA-$FC` targets)
+makes the engine emit **617** `$F3` writes over 200 frames (ares: 616) - the
+driver now runs its whole command stream.
+
+7-title 600-frame gate with `SNES_SYM_ENGINE=1` after the fix (CX4 for MMX2):
+
+```
+dkc    156064 differing (75.6019%)
+zelda       0 differing (100.0000%)
+fzero       0 differing (100.0000%)
+cv4     85603 differing (86.6173%)
+smas   370472 differing (42.0826%)
+ct     484101 differing (24.3185%)
+mmx2   212818 differing (66.7293%)
+```
+
+This is a large improvement over the stalled engine (dkc 42.35%, zelda 64.37%,
+fzero 27.49%) and now matches the default for zelda/fzero exactly, but dkc, cv4,
+smas, ct and mmx2 remain below the default. The flag stays default off; the
+default gate is unchanged.

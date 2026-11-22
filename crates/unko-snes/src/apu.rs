@@ -1019,14 +1019,30 @@ impl Apu {
         }
         match address {
             0xF0 => {
+                // ares: writes are only valid when the SPC700 P flag is clear.
+                if self.spc.flags.page {
+                    return;
+                }
                 self.timers_disable = value & 0x01 != 0;
                 self.ram_writable = value & 0x02 != 0;
                 self.ram_disable = value & 0x04 != 0;
                 self.timers_enable = value & 0x08 != 0;
                 self.external_wait = (value >> 4) & 0x03;
                 self.internal_wait = (value >> 6) & 0x03;
+                for timer in self.timers.iter_mut() {
+                    timer.synchronize(self.timers_enable, self.timers_disable);
+                }
             }
             0xF1 => {
+                for (index, timer) in self.timers.iter_mut().enumerate() {
+                    let enable = value & (1 << index) != 0;
+                    let rising = enable && !timer.enable;
+                    timer.enable = enable;
+                    if rising != (index == 2) {
+                        timer.stage2 = 0;
+                        timer.stage3 = 0;
+                    }
+                }
                 if value & 0x10 != 0 {
                     self.apu_ports[0] = 0;
                     self.apu_ports[1] = 0;
@@ -1051,6 +1067,11 @@ impl Apu {
             0xF4..=0xF7 => self.cpu_ports[usize::from(address - 0xF4)] = value,
             0xF8 => self.aux4 = value,
             0xF9 => self.aux5 = value,
+            0xFA..=0xFC => {
+                let index = usize::from(address - 0xFA);
+                self.timer_targets[index] = value;
+                self.timers[index].target = value;
+            }
             _ => {}
         }
     }
