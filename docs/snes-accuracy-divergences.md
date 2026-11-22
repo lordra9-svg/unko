@@ -8758,3 +8758,87 @@ shifted.
 loaded (`CX4_ROM=...`), exactly as ares loads it. Without it the result is
 silent-vs-music and meaningless. The matrix entry for mmx2 above is superseded by
 the numbers in this section.
+
+## MMX2 handshake instrumentation and whole-instruction catch-up flags (2026-11-21)
+
+### The extra `$4C` write is a driver handshake iteration, not a DSP event
+
+Captured the full S-SMP instruction streams (ours `SPC_TRACE`, ares
+`ARES_SPC_TRACE`) for 430 frames of MMX2 with `cx4.rom` and aligned them by PC.
+
+* First difference, index 883,130 of 1,744,079: the **IPL upload handshake**
+  `FFCF CC F4 CMP $F4,#$CC / FFD2 D0 FB BNE` - ours executes one extra poll
+  iteration; ares exits with `Z=1` one iteration earlier. The streams converge
+  again (both continue at `FFD6`) but stay one instruction out of phase.
+* First *driver* divergence, index 966,597, at the S-SMP echo loop:
+
+```
+0715: E5 F5 00   MOV A,$00F5      ; read DSP data port
+0718: D7 A0      MOV ($A0)+Y,A    ; store byte
+071A: CC F4 00   MOV $00F4,Y      ; echo Y to the S-CPU
+071D: 5E F4 00   CMP Y,$00F4      ; wait for the S-CPU to change it
+0720: F0 FB      BEQ $071D
+```
+
+  ours executes one extra `CMP/BEQ` iteration, then runs on. This is the same
+  CPU->S-SMP port-visibility phase as the IPL handshake. It shifts the driver
+  by one handshake step; in the `$4C` write log ours then emits one extra
+  `$4C=00` (114 writes vs ares' 113) and the real `$4C=$84` key-on lands later.
+
+Root: ares' scheduler is symmetric - every thread entry runs
+`scheduler.synchronize()`, catching all other threads up by **whole
+instructions**, and `CPU::writeAPU` calls `synchronize(smp)` before latching.
+Our driver only advances the S-SMP forward with exact credit, so at a port
+access the S-SMP is mid-instruction instead of at an instruction boundary.
+The `$4C` write PC difference (`0D81` vs ares `0D84`) is only the log site
+(ours logs the instruction start, ares the post-instruction PC).
+
+### Two new default-off flags, both measured
+
+`SNES_PORT_LEAD`: at every S-CPU write to `$2140-$2143`, finish the S-SMP
+instruction in progress before latching (ares `writeAPU`), carrying the
+overshoot as negative credit. 600-frame audio:
+
+| title | default | `SNES_PORT_LEAD` |
+|---|---|---|
+| dkc | 100.0000% | **100.0000%** |
+| zelda | 100.0000% | 63.7471% |
+| fzero | 100.0000% | 27.5437% |
+| cv4 | 98.2383% | 89.1395% |
+| smas | 50.9452% | 50.9452% |
+| ct | 34.9427% | 29.0592% |
+| mmx2 | 69.2222% | **89.9995%** (first diff 6.91 s -> 7.07 s) |
+
+`SNES_INSTR_LEAD`: at every S-CPU instruction boundary, finish the S-SMP
+instruction (ares' per-thread `scheduler.synchronize()`):
+
+| title | default | `SNES_INSTR_LEAD` |
+|---|---|---|
+| dkc | 100.0000% | 70.7730% |
+| zelda | 100.0000% | 99.9997% (2 samples) |
+| fzero | 100.0000% | **100.0000%** |
+| cv4 | 98.2383% | 87.2805% |
+| smas | 50.9452% | 42.0826% |
+| ct | 34.9427% | 24.4506% |
+| mmx2 | 69.2222% | 66.9685% |
+
+`SNES_INSTR_LEAD` reproduces the already-measured instruction-stop family
+(dkc 70.7730% matches the matrix above), so it is not a new behaviour.
+
+Also re-measured with the current build:
+
+```
+default                      = pre-change result (dkc/zelda/fzero 100%)
+SNES_INSTR_SYNC=1            = identical to default on all seven
+SNES_SMP_CEIL=0              dkc 100, cv4 100, zelda 97.4200, fzero 44.4888,
+                             smas 50.9452, ct 34.7942, mmx2 88.2850
+SNES_INSTR_SYNC=1 CEIL=0     = same as CEIL=0
+```
+
+Each rule is exact for a different subset: exact-credit for dkc/zelda/fzero,
+`SNES_PORT_LEAD` for dkc+MMX2, `SNES_INSTR_LEAD` for fzero (+zelda to 2
+samples), `SNES_SMP_CEIL=0` for dkc+cv4. No unidirectional stop rule satisfies
+all seven. Reconciling them requires the bidirectional whole-instruction
+scheduler (the S-SMP pulling the S-CPU forward mid-instruction), which the
+current CPU-coroutine driver cannot express. Both new flags stay default off;
+the verified default path is unchanged.

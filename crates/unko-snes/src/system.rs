@@ -424,6 +424,26 @@ impl ApuPeer<'_> {
             .cpu_read(usize::from(port))
     }
 
+    /// Advance the S-SMP to the end of its current instruction (`SNES_PORT_LEAD`).
+    fn finish_instruction(&mut self, clock: u64, rate: u64) {
+        if self.waiting.is_some() {
+            return;
+        }
+        let apu = self.apu.take().expect("actor is not idle");
+        let input = crate::apu::ApuInput::FinishInstruction { apu, clock, rate };
+        match self.coro.resume(input) {
+            corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Stopped(apu)) => {
+                self.apu = Some(apu);
+                self.waiting = None;
+            }
+            corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Parked { apu, target }) => {
+                self.apu = Some(apu);
+                self.waiting = Some(target);
+            }
+            _ => unreachable!(),
+        }
+    }
+
     fn port_write(&mut self, port: u8, value: u8) {
         self.apu
             .as_mut()
@@ -1113,6 +1133,9 @@ impl Snes {
                                 && (0x2140..=0x2143).contains(&(address & 0xFFFF)) =>
                         {
                             let port = ((address & 0xFFFF) - 0x2140) as u8;
+                            if crate::apu::port_lead() {
+                                peer.finish_instruction(self.clock, rate);
+                            }
                             peer.port_write(port, value);
                             BusResponse::None
                         }
@@ -1186,6 +1209,11 @@ impl Snes {
                         peer.flush_deferred(self.clock, rate);
                     }
                     if peer.waiting.is_none() {
+                        if crate::apu::instr_lead() {
+                            // ares synchronizes the whole S-SMP instruction at
+                            // each S-CPU instruction boundary.
+                            peer.finish_instruction(self.clock, rate);
+                        }
                         break;
                     }
                     // Keep the debug PC on the instruction about to run: the

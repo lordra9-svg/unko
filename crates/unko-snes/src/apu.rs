@@ -70,6 +70,25 @@ pub fn port_sync() -> bool {
     *PORT.get_or_init(|| std::env::var_os("SNES_PORT_SYNC").is_some())
 }
 
+/// `SNES_PORT_LEAD`: on every S-CPU write to `$2140-$2143`, finish the
+/// S-SMP's current instruction before latching the value (ares
+/// `CPU::writeAPU`: `synchronize(smp); smp.portWrite(...)`). The overshoot is
+/// carried as negative credit, so the S-CPU then runs ahead until it catches
+/// up - the pull-forward direction ares gets from its symmetric scheduler.
+pub fn port_lead() -> bool {
+    static LEAD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *LEAD.get_or_init(|| std::env::var_os("SNES_PORT_LEAD").is_some())
+}
+
+/// `SNES_INSTR_LEAD`: at every S-CPU instruction boundary, finish the S-SMP's
+/// current instruction (ares' `scheduler.synchronize()` before each thread
+/// instruction), carrying the overshoot as negative credit. This is the whole-
+/// instruction catch-up ares uses instead of the exact-credit stop.
+pub fn instr_lead() -> bool {
+    static LEAD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *LEAD.get_or_init(|| std::env::var_os("SNES_INSTR_LEAD").is_some())
+}
+
 /// `SNES_INSTR_SYNC`: hold the S-SMP until the S-CPU instruction end (ares'
 /// per-instruction `scheduler.synchronize()`), plus `$2140-$2143` accesses,
 /// with the exact-credit stop (no overshoot).
@@ -1153,6 +1172,30 @@ impl Apu {
         false
     }
 
+    /// Finish the S-SMP instruction currently in progress (`SNES_PORT_LEAD`).
+    ///
+    /// ares synchronizes the S-SMP to the S-CPU clock at a `$2140-$2143`
+    /// access by running whole instructions until the S-SMP clock is at or
+    /// past the S-CPU clock. The overdraft is left as negative credit so the
+    /// S-CPU subsequently runs without advancing the S-SMP until it catches
+    /// up. Returns `true` if the instruction parked on a deferred port read.
+    fn finish_instruction(&mut self, clock: u64, rate: u64) -> bool {
+        let den = rate as i64;
+        self.set_master_clock(clock, rate);
+        // ares `Thread::synchronize` only runs while the S-SMP is behind the
+        // S-CPU clock; once it has overshot (negative credit) it does nothing.
+        if self.apu_credit < 0 {
+            return false;
+        }
+        while self.plan_pos < self.plan.len() {
+            if self.drain_unit() == 0 {
+                return true;
+            }
+            self.apu_credit -= den;
+        }
+        false
+    }
+
     /// Test hook: pre-load master-clock credit so a `$F4-$F7` read parks with
     /// the S-CPU behind the S-SMP (the only case ares synchronizes the S-CPU).
     #[cfg(test)]
@@ -1964,6 +2007,15 @@ pub enum ApuInput {
         /// Master clock rate paired with `clock`.
         rate: u64,
     },
+    /// Finish the S-SMP instruction in progress at `clock` (`SNES_PORT_LEAD`).
+    FinishInstruction {
+        /// The APU, owned by the scheduler between advances.
+        apu: Box<Apu>,
+        /// S-CPU master clock at the port write.
+        clock: u64,
+        /// Master clock rate paired with `clock`.
+        rate: u64,
+    },
 }
 
 /// Output from the S-SMP actor coroutine.
@@ -1984,33 +2036,35 @@ pub enum ApuOutput {
 
 /// Build the S-SMP actor coroutine.
 pub fn new_apu_coroutine() -> ApuCoroutine {
-    corosensei::Coroutine::new(|yielder, input| {
-        let ApuInput::Advance {
-            apu,
-            clocks,
-            clock,
-            rate,
-        } = input;
-        let mut apu = apu;
-        let (mut clocks, mut clock, mut rate) = (clocks, clock, rate);
-        loop {
-            let output = if apu.advance_master_clock(clocks, clock, rate) {
-                let target = apu.smp_master_clock(rate);
-                ApuOutput::Parked { apu, target }
-            } else {
-                ApuOutput::Stopped(apu)
-            };
-            let ApuInput::Advance {
-                apu: next,
-                clocks: c,
-                clock: k,
-                rate: r,
-            } = yielder.suspend(output);
-            apu = next;
-            clocks = c;
-            clock = k;
-            rate = r;
-        }
+    corosensei::Coroutine::new(|yielder, mut input| loop {
+        let output = match input {
+            ApuInput::Advance {
+                mut apu,
+                clocks,
+                clock,
+                rate,
+            } => {
+                if apu.advance_master_clock(clocks, clock, rate) {
+                    let target = apu.smp_master_clock(rate);
+                    ApuOutput::Parked { apu, target }
+                } else {
+                    ApuOutput::Stopped(apu)
+                }
+            }
+            ApuInput::FinishInstruction {
+                mut apu,
+                clock,
+                rate,
+            } => {
+                if apu.finish_instruction(clock, rate) {
+                    let target = apu.smp_master_clock(rate);
+                    ApuOutput::Parked { apu, target }
+                } else {
+                    ApuOutput::Stopped(apu)
+                }
+            }
+        };
+        input = yielder.suspend(output);
     })
 }
 
