@@ -9714,3 +9714,25 @@ PORT_READ_LEAD+ACCESS_STOP        24.4558%
 (default 34.9427%). So the ack must become visible at the exact S-SMP write clock
 (a timestamped SMP->CPU latch queue sampled at the S-CPU's clock), not by
 catching the S-SMP up at the read. Reverted; default gate unchanged.
+
+## Timestamped SMP->CPU latch queue: implemented, measured neutral (2026-11-22)
+
+`SNES_SMP_LATCH_QUEUE` (default off) records each S-SMP `$F4-$F7` write with its
+S-SMP clock and makes an S-CPU `$2140-$2143` read return the value whose write
+clock is at or before the S-CPU clock (the mirror of the earlier CPU->SMP
+direction).
+
+7-title 600-frame gate with the flag (CX4 for MMX2) - bit-identical to default:
+
+```
+dkc 100.0000%   zelda 100.0000%   fzero 100.0000%
+cv4  98.2383%   smas  50.9452%    ct 34.9427%   mmx2 69.2222%
+```
+
+So the SMP writes were already visible to the S-CPU by its read clock in every
+case - the queue never holds a value back at the read. The CT upload delay
+(+196..+426 master clocks per byte) is therefore not an SMP->CPU visibility bug:
+the S-SMP genuinely issues the ack later, so the S-CPU's next byte is later.
+
+Flag stays default off (neutral); default gate unchanged; 236 tests, clippy/fmt
+clean, 212/212 baseline.

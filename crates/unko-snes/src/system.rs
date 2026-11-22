@@ -419,7 +419,7 @@ impl ApuPeer<'_> {
 
     fn port_read(&mut self, port: u8) -> u8 {
         self.apu
-            .as_ref()
+            .as_mut()
             .expect("actor is not idle")
             .cpu_read(usize::from(port))
     }

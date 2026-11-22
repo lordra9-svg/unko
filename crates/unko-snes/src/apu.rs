@@ -157,6 +157,14 @@ pub fn port_sync() -> bool {
     *PORT.get_or_init(|| std::env::var_os("SNES_PORT_SYNC").is_some())
 }
 
+/// `SNES_SMP_LATCH_QUEUE`: timestamp S-SMP writes to `$F4-$F7` and let an
+/// S-CPU read of `$2140-$2143` return the value whose write clock is at or
+/// before the S-CPU clock (mirror of the CPU->SMP direction).
+pub fn smp_latch_queue() -> bool {
+    static Q: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *Q.get_or_init(|| std::env::var_os("SNES_SMP_LATCH_QUEUE").is_some())
+}
+
 /// `SNES_PORT_LEAD`: on every S-CPU write to `$2140-$2143`, finish the
 /// S-SMP's current instruction before latching the value (ares
 /// `CPU::writeAPU`: `synchronize(smp); smp.portWrite(...)`). The overshoot is
@@ -458,6 +466,8 @@ pub struct Apu {
     apu_ports: [u8; 4],
     /// Ports written by the SPC700 and read by the S-CPU.
     cpu_ports: [u8; 4],
+    /// Timestamped S-SMP -> S-CPU port writes (`SNES_SMP_LATCH_QUEUE`).
+    smp_write_queue: std::collections::VecDeque<(u128, usize, u8)>,
     aux4: u8,
     aux5: u8,
     timer_targets: [u8; 3],
@@ -517,6 +527,7 @@ impl Apu {
             dsp: Dsp::new(),
             apu_ports: [0; 4],
             cpu_ports: [0; 4],
+            smp_write_queue: std::collections::VecDeque::new(),
             aux4: 0,
             aux5: 0,
             timer_targets: [0; 3],
@@ -618,6 +629,7 @@ impl Apu {
         self.samples.clear();
         self.apu_ports = [0; 4];
         self.cpu_ports = [0; 4];
+        self.smp_write_queue.clear();
         self.aux4 = 0;
         self.aux5 = 0;
         self.timer_targets = [0; 3];
@@ -630,7 +642,19 @@ impl Apu {
     }
 
     /// S-CPU read from `$2140-$2143`.
-    pub fn cpu_read(&self, port: usize) -> u8 {
+    pub fn cpu_read(&mut self, port: usize) -> u8 {
+        if smp_latch_queue() {
+            if let Some(now) = self.cpu_fixed_clock() {
+                while let Some(&(time, p, value)) = self.smp_write_queue.front() {
+                    if time <= now {
+                        self.cpu_ports[p] = value;
+                        self.smp_write_queue.pop_front();
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
         self.cpu_ports[port & 3]
     }
 
@@ -1310,7 +1334,13 @@ impl Apu {
             if let Some((port, value)) = step.port_write {
                 // S-SMP -> S-CPU latch ($2140-$2143), committed at the end of
                 // the access, which is when the S-CPU can observe it.
-                self.cpu_ports[usize::from(port)] = value;
+                if smp_latch_queue() {
+                    let time = self.smp_clock_at_position();
+                    self.smp_write_queue
+                        .push_back((time, usize::from(port), value));
+                } else {
+                    self.cpu_ports[usize::from(port)] = value;
+                }
                 let clock = self.debug.clock;
                 self.debug.record_smp_write(clock, port, value);
             }
