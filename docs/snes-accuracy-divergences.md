@@ -10908,3 +10908,31 @@ difference.
 
 Default gate unchanged: dkc/zelda/fzero/cv4 0, smas 50.9452%, ct 34.9327%,
 mmx2 69.2222%.
+
+## Re-entrant three-thread scheduler implemented and validated (2026-11-22)
+
+`SNES_SYM_SCHED` replaces the driver with a re-entrant S-CPU/S-SMP/S-DSP
+scheduler in ares' fixed-point clock domain. Each thread runs one suspension
+interval (S-CPU to the next bus `step`/access end, S-SMP to the next access
+end, S-DSP one micro-step); the thread with the smallest clock runs next. The
+S-SMP and S-DSP therefore pull the S-CPU at the same clocks ares uses, without
+Rust stack recursion. The S-CPU coroutine is resumed only for its turn and can
+be suspended mid-instruction by the other threads. The instruction's DMA tail
+runs as S-CPU time and the S-SMP/S-DSP catch up afterwards.
+
+7-title 600-frame gate (`SNES_SYM_SCHED=1`, CX4 for MMX2):
+
+```
+dkc    0 differing (100.0000%)   zelda  0 differing (100.0000%)
+fzero  0 differing (100.0000%)   cv4    0 differing (100.0000%)
+smas   313782 (50.9452%)         ct     356307 (44.2971%)
+mmx2   196870 (69.2225%)
+```
+
+This is byte-identical to `SNES_SYM_ENGINE+SNES_SYM_STOP` and, for the exact
+four and SMAS/MMX2, to the default carried-credit driver (CT gains 9.4 points).
+Three structurally different schedulers now agree on every failing title, so
+the residual is **not** the thread schedule. The default stays the
+carried-credit driver. Default 600-frame gate re-verified after the DMA-tail
+refactor: dkc/zelda/fzero/cv4 0, smas 50.9452%, ct 34.9327%, mmx2 69.2222%;
+212/212 baseline green; 244 tests, clippy/fmt clean.

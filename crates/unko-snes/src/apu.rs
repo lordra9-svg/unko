@@ -218,6 +218,17 @@ pub fn defer_clocks() -> bool {
     *D.get_or_init(|| std::env::var_os("SNES_DEFER_CLOCKS").is_some())
 }
 
+/// `SNES_SYM_SCHED`: re-entrant three-thread S-CPU/S-SMP/S-DSP scheduler.
+pub fn sym_sched() -> bool {
+    static S: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *S.get_or_init(|| std::env::var_os("SNES_SYM_SCHED").is_some())
+}
+
+/// ares `Thread::_scalar` for the S-CPU in the scheduler fixed-point base.
+pub fn scheduler_cpu_scalar(rate: u64) -> u128 {
+    SCHEDULER_SECOND / u128::from(ares_cpu_rate(rate))
+}
+
 thread_local! {
     /// True while replaying a deferred read whose clocks were already
     /// accounted at record time.
@@ -1634,6 +1645,99 @@ impl Apu {
         }
         SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
         SymStep::Advanced
+    }
+
+    /// S-SMP clock in the scheduler's fixed-point base.
+    pub fn smp_fixed_clock(&self) -> u128 {
+        self.smp_clock
+    }
+
+    /// S-DSP clock in the scheduler's fixed-point base.
+    pub fn dsp_fixed_clock(&self) -> u128 {
+        self.dsp_clock
+    }
+
+    /// Run the S-SMP for exactly one access suspension (`SNES_SYM_SCHED`).
+    ///
+    /// This is ares' `SMP::main` up to the `synchronize` at the end of a
+    /// `wait`: the clock advances and the coroutine is suspended. The S-DSP is
+    /// not advanced here; the scheduler runs it as its own thread.
+    pub fn smp_step_one(&mut self) -> bool {
+        use crate::spc_coroutine::{SpcEvent, SpcInput, SpcResume};
+        let mut coro = SYM_CORO
+            .with(|slot| slot.borrow_mut().take())
+            .unwrap_or_else(crate::spc_coroutine::new_spc_coroutine);
+        let mut input = if let Some(address) = self.sym_pending_read.take() {
+            SpcInput::Resume(SpcResume::Byte(self.sym_read(address)))
+        } else if let Some((address, value)) = self.sym_pending_write.take() {
+            self.sym_write(address, value);
+            SpcInput::Resume(SpcResume::Unit)
+        } else if self.sym_paused {
+            self.sym_paused = false;
+            SpcInput::Resume(SpcResume::Unit)
+        } else {
+            let core = std::mem::take(&mut self.spc);
+            SpcInput::Start(core)
+        };
+        loop {
+            match coro.resume(input) {
+                corosensei::CoroutineResult::Yield(SpcEvent::Done(core)) => {
+                    self.spc = core;
+                    self.instructions += 1;
+                    SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
+                    return true;
+                }
+                corosensei::CoroutineResult::Yield(event) => {
+                    let is_step = matches!(&event, SpcEvent::StepClock(_));
+                    let response = match event {
+                        SpcEvent::Wait(address) => SpcResume::Clocks(self.sym_wait(address)),
+                        SpcEvent::Timer(address) => SpcResume::Clocks(self.sym_timer(address)),
+                        SpcEvent::Read(address) => SpcResume::Byte(self.sym_read(address)),
+                        SpcEvent::Write(address, value) => {
+                            self.sym_write(address, value);
+                            SpcResume::Unit
+                        }
+                        SpcEvent::StepClock(clocks) => {
+                            self.smp_clock += u128::from(clocks) * SMP_SCALAR;
+                            SpcResume::Unit
+                        }
+                        SpcEvent::Advance(clocks) => {
+                            for (index, timer) in self.timers.iter_mut().enumerate() {
+                                let frequency: u16 = if index == 2 { 16 } else { 128 };
+                                timer.step(
+                                    clocks,
+                                    frequency,
+                                    self.timers_enable,
+                                    self.timers_disable,
+                                );
+                            }
+                            SpcResume::Unit
+                        }
+                        SpcEvent::Idle => SpcResume::Unit,
+                        SpcEvent::Done(_) => SpcResume::Unit,
+                    };
+                    if is_step {
+                        SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
+                        return true;
+                    }
+                    input = SpcInput::Resume(response);
+                }
+                corosensei::CoroutineResult::Return(()) => break,
+            }
+        }
+        SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
+        false
+    }
+
+    /// Advance the S-DSP by exactly one micro-step (`SNES_SYM_SCHED`).
+    pub fn dsp_step_one(&mut self) {
+        if let Some(sample) = self.dsp.tick(&mut self.ram) {
+            self.samples.push_back(sample);
+            if self.samples.len() > 16_384 {
+                self.samples.pop_front();
+            }
+        }
+        self.dsp_clock += DSP_TICK;
     }
 
     fn record_instruction(&mut self) {

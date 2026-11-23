@@ -1142,6 +1142,9 @@ impl Snes {
         // case that matters is a `$4200` write, which is its instruction's last
         // access, so clearing once per instruction is equivalent.
         self.nmi_lock = false;
+        if crate::apu::sym_sched() {
+            return self.step_sym_sched();
+        }
         if let Some(sa1) = self.sa1.as_mut() {
             sa1.snes_live_pc = self.cpu.pc_address();
             sa1.master_clock = self.clock;
@@ -1317,6 +1320,111 @@ impl Snes {
         self.apu = apu;
         self.cpu_coroutine.0 = Some(coroutine);
         self.apu_actor.0 = Some(actor_coro);
+        self.run_dma(cycles)
+    }
+
+    /// ares-style re-entrant S-CPU / S-SMP / S-DSP scheduler
+    /// (`SNES_SYM_SCHED`).
+    ///
+    /// Each thread runs one suspension interval: the S-CPU to the next bus
+    /// `step`/access end, the S-SMP to the next access end, the S-DSP one
+    /// micro-step. The thread with the smallest fixed-point clock runs next,
+    /// which reproduces ares' `Thread::synchronize` recursion without growing
+    /// the Rust stack and lets the S-SMP and S-DSP pull the S-CPU at the same
+    /// clocks ares uses.
+    fn step_sym_sched(&mut self) -> u32 {
+        use crate::cpu_coroutine::{BusRequest, CpuInput, CpuOutput};
+        let cpu = std::mem::take(&mut self.cpu);
+        let mut coroutine = self
+            .cpu_coroutine
+            .0
+            .take()
+            .unwrap_or_else(crate::cpu_coroutine::new_coroutine);
+        self.apu_actor_driven = true;
+        let cpu_scalar = crate::apu::scheduler_cpu_scalar(self.region.master_clock());
+        let mut input = Some(CpuInput::Start(cpu));
+        let mut cycles = 0u32;
+        let mut done = false;
+        let mut guard = 0u64;
+        loop {
+            let cpu_fixed = u128::from(self.clock) * cpu_scalar;
+            let smp_fixed = self.apu.smp_fixed_clock();
+            let dsp_fixed = self.apu.dsp_fixed_clock();
+            let pick = if cpu_fixed <= smp_fixed && cpu_fixed <= dsp_fixed {
+                0
+            } else if smp_fixed <= dsp_fixed {
+                1
+            } else {
+                2
+            };
+            match pick {
+                0 => loop {
+                    match coroutine.resume(input.take().expect("CPU input")) {
+                        corosensei::CoroutineResult::Yield(CpuOutput::Request(request)) => {
+                            let stepped =
+                                matches!(request, BusRequest::Advance { .. } | BusRequest::Idle);
+                            input = Some(CpuInput::Response(self.handle_cpu_request(request)));
+                            if stepped {
+                                break;
+                            }
+                        }
+                        corosensei::CoroutineResult::Yield(CpuOutput::Done(cpu, count)) => {
+                            self.cpu = cpu;
+                            cycles += count;
+                            self.apply_interrupts();
+                            done = true;
+                            break;
+                        }
+                        corosensei::CoroutineResult::Return(()) => {
+                            unreachable!("S-CPU coroutine never returns")
+                        }
+                    }
+                },
+                1 => {
+                    if !self.apu.smp_step_one() {
+                        break;
+                    }
+                }
+                _ => self.apu.dsp_step_one(),
+            }
+            if done {
+                break;
+            }
+            guard += 1;
+            if guard > 50_000_000 {
+                break;
+            }
+        }
+        // The instruction's DMA tail is S-CPU time; the S-SMP/S-DSP catch up
+        // to the final S-CPU clock afterwards.
+        let cycles = self.run_dma(cycles);
+        let mut guard = 0u64;
+        loop {
+            let cpu_fixed = u128::from(self.clock) * cpu_scalar;
+            let smp_fixed = self.apu.smp_fixed_clock();
+            let dsp_fixed = self.apu.dsp_fixed_clock();
+            if smp_fixed >= cpu_fixed && dsp_fixed >= cpu_fixed {
+                break;
+            }
+            if smp_fixed <= dsp_fixed {
+                if !self.apu.smp_step_one() {
+                    break;
+                }
+            } else {
+                self.apu.dsp_step_one();
+            }
+            guard += 1;
+            if guard > 50_000_000 {
+                break;
+            }
+        }
+        self.apu_actor_driven = false;
+        self.cpu_coroutine.0 = Some(coroutine);
+        cycles
+    }
+
+    /// Run the pending DMA/HDMA-transfer tail of an instruction.
+    fn run_dma(&mut self, mut cycles: u32) -> u32 {
         let mut dma_clocks = 0u32;
         self.dma.debug_frame = self.ppu.debug_frame;
         if self.dma_transfer.is_none() {
