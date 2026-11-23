@@ -11594,3 +11594,29 @@ Making the lead correct therefore requires replacing the credit bookkeeping with
 ares' absolute-clock `while(smp.clock < cpu.clock) synchronize` in the normal
 advance path too, not just at the port write. Recorded here so the next attempt
 does not re-test the credit gate.
+
+## Absolute-clock scheduler rewrite was implemented and is not the fix (2026-11-23)
+
+The proposed reconciliation was implemented and measured: replace the carried
+credit floor (`apu_credit`) with ares' absolute `while(smp.clock() <
+cpu.clock())` catch-up on the normal advance path (`SNES_SYNC_ABS`), then enable
+the port lead.
+
+| configuration | MMX2 | CT |
+|---|---|---|
+| default (credit floor) | 49253 (92.3001%) | **0** |
+| `SNES_PORT_LEAD=1` only | **0 (100.0000%)** | 452716 (29.2251%) |
+| `SNES_SYNC_ABS=1` (per-access `sync_smp_to`) + lead | 108108 (83.0990%) | 415343 (35.0678%) |
+| `SNES_SYNC_ABS=1` (whole-instruction `sync_smp_instruction`) + lead | 212831 (66.7273%) | 482780 (24.5251%) |
+| `SNES_SYNC_ABS=1` (whole-instruction) alone | 212831 (66.7273%) | 482780 (24.5251%) |
+
+Both absolute-clock forms regress **further** than the default, so the
+carried-credit bookkeeping is not what keeps the six titles exact, and replacing
+it does not reconcile the port lead. The default credit floor is the closest of
+the measured models to ares for the already-exact titles.
+
+Conclusion: the ares-faithful `synchronize(smp)` before `$2140` writes fixes
+MMX2 but the surrounding advance model in this core differs from ares in a way
+that neither the credit floor nor an absolute-clock catch-up reproduces for all
+programs. Landing it requires a from-scratch reproduction of ares' symmetric
+thread scheduler, not an incremental bookkeeping change.
