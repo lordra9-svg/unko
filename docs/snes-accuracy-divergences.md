@@ -12205,3 +12205,25 @@ our boundary+delay), not the vblank detection, NMI line, or scheduler. The next
 research step is to make the service decision use the instruction's penultimate
 cycle against the detection clock (= transition), which is exactly the per-mode
 `L` placement — the one change that has not been completed (only approximated).
+
+## Research: detection-time line + penultimate snapshot (measured, fails) (2026-11-23)
+
+Implemented `SNES_DETECT_NMI`: raise `nmi_line` at the vblank detection instant
+(proved equal to ares' fixed hc=6 transition) and service it with the
+pre-final-access (`lastCycle`) snapshot, instead of the committed hold+22.
+
+| title | detect+snapshot | committed |
+|---|---|---|
+| CT | 304951 (52.3258%) | 0 |
+| DKC | 0 | 0 |
+| MMX2 | 107322 (83.2219%) | 49253 (92.3001%) |
+
+The detection-time snapshot is in the "too early" band: CT breaks (52.3%) and
+MMX2 gets worse. The committed `+22` remains required for CT. So even with the
+line raised at the exact transition, the penultimate sample alone does not
+reproduce ares' service for CT — the per-title conflict persists. Reverted.
+
+This is a direct measurement of the last remaining hypothesis: the service
+sample position by itself cannot satisfy both titles, which means the residual
+is not a single sampling phase but a genuine difference in the instruction
+stream reaching the service point (the jitter measured earlier).
