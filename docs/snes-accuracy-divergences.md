@@ -12373,3 +12373,34 @@ were re-measured: all leave CT/DKC at 0 and MMX2 at 49253. `SNES_DEFER_CLOCKS`
 regresses to CT 32%/DKC 42%/MMX2 68%.
 
 Default remains 6/7 (MMX2 49253, 92.3001%).
+
+## Research: timestamped CPU->SMP port latch (best MMX2 yet, breaks CT) (2026-11-23)
+
+Following the `$FFDC` finding (`$F5` reads one CPU store later than ares), I
+tested the timestamped CPU->SMP latch already present behind `SNES_CPU_LATCH_TIME`
+(ares applies a write at the end of its cycle and exposes it on the next
+Synchronize):
+
+| model | CT | MMX2 |
+|---|---|---|
+| default (immediate latch) | **0** | 49253 (92.3001%) |
+| `SNES_CPU_LATCH_TIME` | 452716 (29.2251%) | **21738 (96.6016%)** |
+| + `SNES_CPU_LATCH_COND` | 29.2251% | 96.6016% |
+| + `SNES_CPU_LATCH_PARK` | 29.2237% | 69.2303% |
+| + `SNES_SMP_STEP_PULL` / `ENTRY_PULL` / `PORT_READ_CLOCK` | 29.2251% | 96.6016% |
+
+A write-exposure shift sweep (`SNES_LATCH_SHIFT`, SMP clocks, diagnostic):
+
+| shift | CT | MMX2 |
+|---|---|---|
+| 0 | 29.2251% | 96.6016% |
+| +1 | 29.5754% | 92.3001% |
+| +2 | 29.2113% | 95.8540% |
+| -1 | 29.6003% | 96.6016% |
+| -2 | 53.8055% | 69.2216% |
+
+The latch is a *real* lever — it moves MMX2 from 92.30% to 96.60%, confirming
+the residual is CPU->SMP port-write visibility — but CT is pinned at ~29% for
+every non-negative offset, so the conflict is not a constant shift. CT's
+divergence under the latch starts at 2.36 s (MMX2 at 6.92 s). Reverted; default
+remains 6/7 (MMX2 49253, 92.3001%).
