@@ -12769,3 +12769,63 @@ correct sampling point. Reverted.
 Also confirmed no existing scheduler flag combined with the MMX2-exact default
 recovers CT: `PORT_LEAD` and every one of `NO_PARK`/`PORT_READ_CLOCK`/
 `SMP_WRITE_PULL`/`ACCESS_FLUSH` either break MMX2 or leave CT at 63.6%.
+
+## S-SMP write pull recovers six titles; the seventh is a Cx4 boot phase (2026-11-23)
+
+The missing ares behaviour for the boot handshake was the **S-SMP -> S-CPU
+direction** of the port synchronize. ares `SMP::writeIO($F4-$F7)` calls
+`synchronize(cpu)` before latching, so an S-SMP port write only commits after
+the S-CPU has reached the S-SMP clock. `SNES_SMP_WRITE_PULL` already modelled
+this; it is now the **default** (disabled with `SNES_NO_SMP_WRITE_PULL`).
+
+With the write pull active and the DSP catch-up phase at its true (unprimed)
+value (`SNES_DSP_PRIME=0`), six of seven titles are bit-exact over 600 frames:
+
+| title | 600-frame result |
+|---|---|
+| dkc | 0 differing (100.0000%) |
+| zelda | 0 differing (100.0000%) |
+| fzero | 0 differing (100.0000%) |
+| cv4 | 0 differing (100.0000%) |
+| smas | 0 differing (100.0000%) |
+| ct | 0 differing (100.0000%) |
+| mmx2 | 49253 (92.3001%) |
+
+This is the first configuration in which all six non-Cx4 titles are exact
+**simultaneously**. The previous per-title "boot phase" split was the missing
+write-direction synchronize, not a per-title constant.
+
+MMX2's residual is exactly the DSP phase: the same scheduler with the old
+4-micro-step prime (`SNES_DSP_PRIME=4`, the current default) makes MMX2
+**0 differing (100.0000%)** while the six regress to the previously recorded
+values. The difference is a constant **4 micro-steps = 8 S-SMP clocks**; a
+prime sweep (`0..16`) is monotone through MMX2 = 0 at 4 and no other value, and
+MMX2's S-SMP/DSP clocks are byte-identical to CT's through boot, so this is not
+a clock-seeding difference. MMX2 is the only Cx4 title, and its documented
+residual is the S-CPU upload cadence (the driver-start offset), i.e. an 8-clock
+DSP-write phase produced by the Cx4-era boot, not by the thread scheduler.
+`SNES_CPU_LATCH_TIME` closes part of it (MMX2 96.6016%) but regresses
+zelda/fzero/cv4/smas/ct, so it is not a unification.
+
+### Actor synchronize rewiring
+
+The APU actor now has real park resolution:
+
+* `Apu::finish_access_to_cpu` runs `Thread::synchronize(smp)` and, with
+  `SNES_CREDIT_RESET`, drops the carried-credit remainder (ares has no credit -
+  the threads are co-located after a synchronize).
+* `Apu::resume_park` / `ApuInput::ResumePark` resume a `$F4-$F7` access that
+  blocked on the S-CPU clock without charging replay credit, so the DSP follows
+  the same access path and samples keep being produced.
+* `SNES_CLOCK_SYNC` drives the S-SMP purely by the thread clocks (run to the
+  first suspension at or past the S-CPU clock, no carried credit).
+
+The earlier `SNES_PORT_SYNC` starvation was a wiring bug: deferred APU credit
+was stored in the per-`step` `ApuPeer` and discarded when the peer was rebuilt
+for the next S-CPU instruction, so `advance` was never called. Port accesses
+now synchronize via `finish_access` before sampling/latching and no longer
+defer non-port credit.
+
+Default is unchanged for the accepted MMX2-exact reference (prime 4, write pull
+on): MMX2 0 differing, the six as before. `SNES_DSP_PRIME=0` selects the
+six-exact configuration above.

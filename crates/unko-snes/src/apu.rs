@@ -64,13 +64,13 @@ pub fn lead_after_boot() -> bool {
     *A.get_or_init(|| std::env::var_os("SNES_LEAD_AFTER_BOOT").is_some())
 }
 
-/// `SNES_SMP_WRITE_PULL`: when the S-SMP commits a write to `$F4-$F7` while it
-/// is ahead of the S-CPU clock, park the write and let the S-CPU run forward to
-/// the write clock first (ares `SMP::writeIO` calls `synchronize(cpu)` before
-/// latching the port).
+/// ares' `SMP::writeIO($F4-$F7)` calls `synchronize(cpu)` before latching the
+/// port, so a `$F4-$F7` write is committed only after the S-CPU has reached the
+/// S-SMP's clock. This is ares behaviour and enabled by default;
+/// `SNES_NO_SMP_WRITE_PULL` restores the old behaviour for A/B measurement.
 pub fn smp_write_pull() -> bool {
     static PULL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *PULL.get_or_init(|| std::env::var_os("SNES_SMP_WRITE_PULL").is_some())
+    *PULL.get_or_init(|| std::env::var_os("SNES_NO_SMP_WRITE_PULL").is_none())
 }
 
 /// `SNES_SYM_DRIVER`: mutually-resumable scheduler. S-SMP instructions are
@@ -155,6 +155,21 @@ pub fn smp_instr_stop() -> bool {
 pub fn port_sync() -> bool {
     static PORT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *PORT.get_or_init(|| std::env::var_os("SNES_PORT_SYNC").is_some())
+}
+
+/// `SNES_CLOCK_SYNC`: drive the S-SMP purely by ares' thread clocks - every
+/// advance runs it to the first suspension point at or past the S-CPU clock
+/// (`Thread::synchronize(smp)`) instead of pacing it with carried credit.
+pub fn clock_sync() -> bool {
+    static CLOCK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CLOCK.get_or_init(|| std::env::var_os("SNES_CLOCK_SYNC").is_some())
+}
+
+/// `SNES_CREDIT_RESET`: after an S-CPU `$2140-$2143` synchronize, drop the
+/// carried-credit remainder (ares threads are co-located after synchronize).
+pub fn credit_reset() -> bool {
+    static RESET: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *RESET.get_or_init(|| std::env::var_os("SNES_CREDIT_RESET").is_some())
 }
 
 /// `SNES_SMP_LATCH_QUEUE`: timestamp S-SMP writes to `$F4-$F7` and let an
@@ -2428,6 +2443,16 @@ impl Apu {
         if sym_driver() {
             return self.advance_symmetric(clocks, clock, rate);
         }
+        if clock_sync() {
+            // ares `Thread::synchronize(smp)` with no carried credit: run the
+            // S-SMP to the first suspension point at or past the S-CPU clock.
+            self.set_master_clock(clock + u64::from(clocks), rate);
+            let den = ares_cpu_rate(rate) as i64;
+            let Some(target) = self.cpu_fixed_clock() else {
+                return false;
+            };
+            return self.sync_smp_to(den, target);
+        }
         const APU_UNIT_NUM: i64 = 2_050_560;
         let den = ares_cpu_rate(rate) as i64;
         self.set_master_clock(clock + u64::from(clocks), rate);
@@ -2532,7 +2557,26 @@ impl Apu {
         let Some(cpu) = self.cpu_fixed_clock() else {
             return false;
         };
-        self.sync_smp_to(den, cpu)
+        let parked = self.sync_smp_to(den, cpu);
+        if credit_reset() {
+            // ares has no carried credit: after `Thread::synchronize(smp)` the
+            // threads are co-located in time, so drop the fractional remainder.
+            self.apu_credit = 0;
+        }
+        parked
+    }
+
+    /// Resume a `$F4-$F7` access parked by [`Self::sync_smp_to`] once the S-CPU
+    /// has reached the park clock.
+    ///
+    /// ares' `readIO`/`writeIO` block inside `synchronize(cpu)`; when the S-CPU
+    /// thread arrives at the S-SMP clock the blocked access continues with no
+    /// additional time credit, because the two threads are now co-located. The
+    /// replay was stopped one unit before the access resumed, so one unit
+    /// completes it and lets the DSP follow through the same path.
+    fn resume_park(&mut self, clock: u64, rate: u64) -> bool {
+        self.set_master_clock(clock, rate);
+        self.drain_unit() == 0
     }
 
     /// Finish the S-SMP instruction currently in progress (`SNES_PORT_LEAD`).
@@ -3433,6 +3477,15 @@ pub enum ApuInput {
         /// Master clock rate paired with `clock`.
         rate: u64,
     },
+    /// Resume a `$F4-$F7` access that parked on the S-CPU clock.
+    ResumePark {
+        /// The APU, owned by the scheduler between advances.
+        apu: Box<Apu>,
+        /// S-CPU master clock the scheduler has reached.
+        clock: u64,
+        /// Master clock rate paired with `clock`.
+        rate: u64,
+    },
 }
 
 /// Output from the S-SMP actor coroutine.
@@ -3500,6 +3553,18 @@ pub fn new_apu_coroutine() -> ApuCoroutine {
                 rate,
             } => {
                 if apu.finish_access_to_cpu(clock, rate) {
+                    let target = apu.park_master_clock(rate);
+                    ApuOutput::Parked { apu, target }
+                } else {
+                    ApuOutput::Stopped(apu)
+                }
+            }
+            ApuInput::ResumePark {
+                mut apu,
+                clock,
+                rate,
+            } => {
+                if apu.resume_park(clock, rate) {
                     let target = apu.park_master_clock(rate);
                     ApuOutput::Parked { apu, target }
                 } else {

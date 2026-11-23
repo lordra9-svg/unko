@@ -399,6 +399,14 @@ impl ApuPeer<'_> {
         if self.waiting.is_none() {
             return;
         }
+        if crate::apu::port_sync() {
+            // ares: the blocked `$F4-$F7` access resumes exactly where it
+            // stopped once the S-CPU reaches the park clock; no replay credit
+            // is consumed or paid back.
+            self.parked_clocks = 0;
+            self.resume_park(clock_end, rate);
+            return;
+        }
         let clocks = std::mem::take(&mut self.parked_clocks);
         // `advance_master_clock` compares the S-CPU clock at the *end* of the
         // stepped window, so hand it the window start.
@@ -467,6 +475,26 @@ impl ApuPeer<'_> {
         }
         let apu = self.apu.take().expect("actor is not idle");
         let input = crate::apu::ApuInput::FinishAccess { apu, clock, rate };
+        match self.coro.resume(input) {
+            corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Stopped(apu)) => {
+                self.apu = Some(apu);
+                self.waiting = None;
+            }
+            corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Parked { apu, target }) => {
+                self.apu = Some(apu);
+                self.waiting = Some(target);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// Resume a parked `$F4-$F7` access once the S-CPU has reached its clock.
+    fn resume_park(&mut self, clock: u64, rate: u64) {
+        if self.waiting.is_none() {
+            return;
+        }
+        let apu = self.apu.take().expect("actor is not idle");
+        let input = crate::apu::ApuInput::ResumePark { apu, clock, rate };
         match self.coro.resume(input) {
             corosensei::CoroutineResult::Yield(crate::apu::ApuOutput::Stopped(apu)) => {
                 self.apu = Some(apu);
@@ -1222,6 +1250,11 @@ impl Snes {
                                 && (0x2140..=0x2143).contains(&(address & 0xFFFF)) =>
                         {
                             let port = ((address & 0xFFFF) - 0x2140) as u8;
+                            if crate::apu::port_sync() {
+                                // ares `CPU::readAPU`: `synchronize(smp)` before
+                                // the port latch is sampled.
+                                peer.finish_access(self.clock, rate);
+                            }
                             let value = peer.port_read(port);
                             if let Some(apu) = peer.apu.as_mut() {
                                 apu.debug
@@ -1234,6 +1267,11 @@ impl Snes {
                                 && (0x2140..=0x2143).contains(&(address & 0xFFFF)) =>
                         {
                             let port = ((address & 0xFFFF) - 0x2140) as u8;
+                            if crate::apu::port_sync() {
+                                // ares `CPU::writeAPU`: `synchronize(smp)` before
+                                // the write latches.
+                                peer.finish_access(self.clock, rate);
+                            }
                             if crate::apu::write_access_stop() {
                                 peer.finish_access(self.clock, rate);
                             }
@@ -1271,8 +1309,7 @@ impl Snes {
                                 let a = apu_last_access;
                                 a & 0x40_FF00 == 0x2100 && (0x2140..=0x2143).contains(&(a & 0xFFFF))
                             };
-                            if (crate::apu::port_sync() || crate::apu::instr_sync()) && !port_access
-                            {
+                            if crate::apu::instr_sync() && !port_access {
                                 peer.defer(clocks);
                                 if extra != 0 {
                                     peer.defer(extra);
@@ -1317,10 +1354,16 @@ impl Snes {
                     let flush = match peer.waiting {
                         None => false,
                         Some(target) => {
-                            !(crate::apu::mutual_scheduler()
-                                || crate::apu::per_access_mutual()
-                                || crate::apu::access_flush())
-                                || self.clock >= target
+                            if crate::apu::port_sync() {
+                                // ares resumes the blocked access only when the
+                                // S-CPU thread actually reaches its clock.
+                                self.clock >= target
+                            } else {
+                                !(crate::apu::mutual_scheduler()
+                                    || crate::apu::per_access_mutual()
+                                    || crate::apu::access_flush())
+                                    || self.clock >= target
+                            }
                         }
                     };
                     if flush {
