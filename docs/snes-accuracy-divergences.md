@@ -12655,3 +12655,25 @@ mechanism: withholding a port write the S-CPU has already executed. That is
 pathologically wrong (ares never withholds an executed write), so the genuine
 default's 92.3% on MMX2 is the correct port behaviour, and MMX2's residual is
 elsewhere (S-SMP/DSP cadence), not port visibility. Reverted; default 6/7.
+
+## Instrumentation: MMX2 S-SMP cadence has no drift; divergence is sub-instruction phase (2026-11-23)
+
+Compared per-instruction S-SMP durations against ares over the whole matched
+prefix (887,720 instructions) of MMX2's default-path trace:
+
+- the cumulative clock delta oscillates in a **bounded 4-14 clocks** and changes
+  on almost every instruction — no monotonic drift;
+- the duration differences are dominated by `$FFCF` **+2** and `$FFD2` **-2**
+  (441,203 times each): the IPL boot spin loop's period is **identical**, the
+   2-clock difference is only attribution between the pair (net zero);
+- remaining differences (`$071D +2/-2`, `$0715 +8`, `$071A -4`, …) are the same
+  small per-access attribution, not a rate mismatch.
+
+So there is **no S-SMP cadence error to fix**. The MMX2 divergence at `$FFDC` is
+a sub-instruction (≤1 S-SMP cycle) phase at a single port read, not a drift or a
+wrong period. This rules out the remaining "fix the cadence" premise: the S-SMP
+and S-CPU run at the correct rate, and the residual is the sub-cycle interrupt/
+port sampling granularity itself.
+
+Side observation: the coroutine `$F1` write path clears `apu_ports[0..1]` twice
+(duplicated block); harmless (idempotent), noted for cleanup.
