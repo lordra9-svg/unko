@@ -12227,3 +12227,23 @@ This is a direct measurement of the last remaining hypothesis: the service
 sample position by itself cannot satisfy both titles, which means the residual
 is not a single sampling phase but a genuine difference in the instruction
 stream reaching the service point (the jitter measured earlier).
+
+## Research: NMI service times jitter per frame, no systematic offset (2026-11-23)
+
+Measured our NMI push clock against ares' (`ARES_NMI_LOG`) directly:
+
+| frame | ours | ares | delta |
+|---|---|---|---|
+| CT NMI 0 | 12100002 | 12100002 | **0** |
+| CT NMI 1 | 12457372 | 12457358 | +14 |
+| CT NMI 2 | 12814754 | 12814732 | +22 |
+| MMX2 NMI 0 | 664320 | 664288 | **+32** |
+| MMX2 NMI 1 | 1021672 | 1021658 | +14 |
+| MMX2 NMI 2 | 1379036 | 1379052 | -16 |
+
+The per-frame delta swings ±32 clocks and is not a constant offset: CT's first
+NMI is exact while its later ones are +14/+22 (audio unaffected), and MMX2's
+upload-frame NMI is +32 (which changes the handshake). This is the final
+confirmation that the residual is per-frame interrupt-sampling jitter, not a
+systematic phase, and that only exact per-instruction `lastCycle` sampling can
+match it. No constant, delay, snapshot, or scheduler model can. Reverted.
