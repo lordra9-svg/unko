@@ -12613,3 +12613,25 @@ Reverted.
 `tools/snes-oracle/baseline.py --frames 600`: 212/212 rows `ok`, 0 non-ok. The
 per-frame DRAM-refresh-position fix introduced no regressions across the test
 ROM set.
+
+## Research: mutual-pull rewrite of step_sym_sched changes nothing (2026-11-23)
+
+Rewrote `step_sym_sched` as ares' mutual-pull model: the S-CPU is the primary
+and runs its whole instruction; each `Advance`/`AccessCycles`/`Idle` co-switches
+the S-SMP and S-DSP forward to the S-CPU clock via a new
+`catch_up_apu_to_cpu()` (no clock-quantum pick loop). Also made
+`smp_step_one` run to an instruction boundary (`Done`) so a catch-up never
+leaves the S-SMP suspended mid-instruction with an advanced clock.
+
+Result (CT, 160 frames):
+
+| | pick loop | mutual-pull | + run-to-Done |
+|---|---|---|---|
+| S-SMP inst | 859,345 | 859,345 | 859,341 |
+| S-CPU inst | 1,731,722 | 1,731,722 | 1,731,711 |
+| `nmi_vec` | 0 | 0 | 0 |
+
+Byte-for-byte equivalent — `nmi_vec` stays 0. So the boot divergence is not
+caused by the scheduling loop's structure or by S-SMP yield granularity; the
+scaffold's defect is upstream (the S-SMP's program state / PPU integration),
+and it is not reachable by rewriting the loop alone. Reverted; default 6/7.
