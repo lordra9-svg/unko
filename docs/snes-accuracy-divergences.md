@@ -12677,3 +12677,35 @@ port sampling granularity itself.
 
 Side observation: the coroutine `$F1` write path clears `apu_ports[0..1]` twice
 (duplicated block); harmless (idempotent), noted for cleanup.
+
+## MMX2-exact configurations: damage patterns and the deadlocking principled fix (2026-11-23)
+
+User direction: make MMX2 the reference, then recover the others. Measured the
+two known MMX2-exact configurations across all seven titles:
+
+| title | default | `PORT_LEAD=1` | `DSP_PRIME=4` |
+|---|---|---|---|
+| dkc | **0** | **0** | 69.15% |
+| zelda | **0** | 63.75% | 95.49% |
+| fzero | **0** | 29.43% | 91.86% |
+| cv4 | **0** | 89.14% | 99.39% |
+| smas | **0** | 50.95% | 47.94% |
+| ct | **0** | 29.06% | 63.59% |
+| mmx2 | 92.30% | **0** | **0** |
+
+Neither MMX2-exact configuration recovers the others; each breaks five, with
+different patterns. `DSP_PRIME=4` is *closer* on cv4/zelda/fzero (95-99%) but
+badly breaks dkc/smas, so the requirement is not one global phase.
+
+### The principled fix deadlocks
+
+Implemented ares' actual order — `readAPU`/`writeAPU` call `synchronize(smp)`
+*then* sample/latch — as `SNES_PORT_SYNC` (`finish_access` before every
+`$2140-$2143` access). Result: CT and MMX2 outputs truncate to ~141/~345 frames
+(150322/442374 samples) and DKC falls to 37.5%. Cause: our `finish_access`
+**parks** when the S-SMP needs the S-CPU, but the S-CPU is mid-access and cannot
+advance, so it stalls. ares avoids this because the S-SMP's `synchronize(cpu)`
+is a no-op while the S-CPU is the active clock; it resolves the port read from
+the current latch instead. That park-vs-resolve behaviour is exactly the
+mutual scheduler that would also fix the per-title phase — and it does not exist
+in the codebase. Reverted; default 6/7.
