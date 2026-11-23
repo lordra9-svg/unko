@@ -11692,3 +11692,26 @@ cadence, DSP phase, or credit quantity. Reproducing it needs ares' actual
 coroutine interleaving (the CPU's `synchronize(smp)` and the SMP's
 `synchronize(cpu)` on port reads both matter and are program-order dependent),
 which this core's event-driven model does not yet express.
+
+## Two-sided handshake via existing flags: all combinations measured (2026-11-23)
+
+Implementing the read-side pull (`$F4-$F7` synchronize(cpu) before sampling) by
+combining the existing flags with the port lead:
+
+| configuration | MMX2 | CT |
+|---|---|---|
+| `PORT_LEAD + PORT_READ_CLOCK` | **0** | 450736 (29.53%) |
+| `PORT_LEAD + DEFER_CLOCKS` | 169302 (72.34%) | 452547 (29.23%) |
+| `PORT_LEAD + PORT_READ_CLOCK + DEFER_CLOCKS` | 169302 (72.34%) | 452547 (29.23%) |
+| `PORT_LEAD + CPU_LATCH_TIME` | **0** | 452716 (29.23%) |
+| `PORT_LEAD + SMP_WRITE_PULL + PORT_READ_CLOCK` | 21738 (96.60%) | 450736 (29.53%) |
+| `CPU_LATCH_TIME` alone | 21738 (96.60%) | 452716 (29.23%) |
+| `PORT_LEAD + CPU_LATCH_PARK + PORT_READ_CLOCK` | **0** | 450736 (29.53%) |
+
+No combination raises CT above 29.5% once the lead is on. The lead breaks CT at
+the **first** handshake (SMP clock 84,606) by inverting the `$FFDC BNE` outcome,
+and none of the read-pull / latch-time / write-pull flags changes that. The
+default credit floor remains the only configuration with six exact titles, and
+the lead remains the only one with MMX2 exact. Every flag-level expression of
+the two-sided ordering has now been measured; the correct interleaving is not
+reachable by toggling them.
