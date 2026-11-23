@@ -12491,3 +12491,29 @@ the S-CPU/S-SMP/S-DSP round-robin itself (the fixed-point thread selection and
 DSP tick granularity), not in any single interrupt or port rule. That is a
 from-scratch reimplementation of ares' nall `Thread` scheduler, not an increment
 on the scaffold. Reverted; default remains 6/7.
+
+## Research: the sym scheduler scaffold is not a viable base (2026-11-23)
+
+Instrumented the combined scheduler for CT (160 frames):
+
+| signal | default | `SNES_SYM_SCHED` |
+|---|---|---|
+| `ppu nmi_count` | 45 | **0** |
+| `nmi_vec` | 45 | **0** |
+| `spc units` | 5,456,305 | **17** |
+| `ppu brightness` / nonzero pixels | 0 / 11928 | 15 / **0** |
+
+So under the sym scheduler the S-CPU never receives an NMI (`nmi_count = 0`;
+`NMI_POLL` still fires 60×/60 frames, so the PPU edge is seen but `nmi_line`
+never latches), the S-SMP clock accounting used by the plan driver is
+effectively frozen (`units = 17`), and the PPU renders black. The combined
+scheduler is a partial scaffold with broken clock/PPU accounting, not ares'
+round-robin; its audio being byte-identical to the direct-NMI model is a
+symptom of it not driving the same code path at all.
+
+Making it faithful means implementing ares' `Scheduler`/`Thread` model
+(`Second = 2^63-1`, `scalar = Second/round(freq)`, `step` = `_clock +=
+scalar*clocks`, `synchronize` = co_switch until target clock >= self, thread
+entry = `while(true){ synchronize-all; entryPoint() }`, append/power clock
+seeding) end-to-end with correct PPU and DMA integration. That is the full
+multi-session rebuild. Default remains 6/7.
