@@ -438,6 +438,18 @@ impl SymTimer {
     }
 }
 
+/// Outcome of one parked-aware S-SMP step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepOutcome {
+    /// One S-SMP instruction retired.
+    Ran,
+    /// The S-SMP parked on an ahead `$F4-$F7` read; the S-CPU must run to this
+    /// fixed-point clock before resuming (ares `SMP::readIO -> synchronize(cpu)`).
+    Parked(u128),
+    /// No core is loaded or the coroutine finished.
+    Halted,
+}
+
 /// Experimental engine wiring the **real** S-SMP and S-DSP into the mutual
 /// scheduler.
 ///
@@ -470,6 +482,8 @@ pub struct SymEngine {
     timers: [SymTimer; 3],
     timers_enable: bool,
     timers_disable: bool,
+    /// A parked `$F4-$F7` read: port index to sample when resumed.
+    pending_port: Option<u8>,
 }
 
 /// S-SMP clocks per DSP micro-step (24 DSP clocks = 2 S-SMP clocks).
@@ -481,7 +495,7 @@ impl SymEngine {
         Self {
             rr: RoundRobin::new(0, 0, 0),
             core: None,
-            spc: crate::spc_coroutine::new_spc_coroutine(),
+            spc: crate::spc_coroutine::new_spc_coroutine_inline(),
             dsp: crate::dsp::Dsp::new(),
             ram: vec![0; 0x1_0000].into_boxed_slice(),
             samples: std::collections::VecDeque::new(),
@@ -497,6 +511,7 @@ impl SymEngine {
             timers: [SymTimer::default(); 3],
             timers_enable: false,
             timers_disable: false,
+            pending_port: None,
         }
     }
 
@@ -655,6 +670,48 @@ impl SymEngine {
                     input = SpcInput::Resume(resume);
                 }
                 corosensei::CoroutineResult::Return(()) => return false,
+            }
+        }
+    }
+
+    /// Latch an S-CPU write to `$2140-$2143` without synchronizing (the parked
+    /// protocol: the caller has already run the S-CPU to the target).
+    pub fn write_apu_latch(&mut self, port: u8, value: u8) {
+        self.apu_ports[usize::from(port & 3)] = value;
+    }
+
+    /// Execute one S-SMP instruction under the **park** protocol: an ahead
+    /// `$F4-$F7` read returns [`StepOutcome::Parked`] with the S-SMP clock the
+    /// S-CPU must reach; the next call resumes the read and samples the
+    /// (possibly updated) latch.
+    pub fn smp_step_parking(&mut self) -> StepOutcome {
+        use crate::spc_coroutine::{SpcEvent, SpcInput, SpcResume};
+        let mut input = if let Some(port) = self.pending_port.take() {
+            SpcInput::Resume(SpcResume::Byte(self.apu_ports[usize::from(port)]))
+        } else if let Some(core) = self.core.take() {
+            SpcInput::Start(core)
+        } else {
+            return StepOutcome::Halted;
+        };
+        loop {
+            match self.spc.resume(input) {
+                corosensei::CoroutineResult::Yield(SpcEvent::Done(core)) => {
+                    self.core = Some(core);
+                    self.instructions += 1;
+                    return StepOutcome::Ran;
+                }
+                corosensei::CoroutineResult::Yield(SpcEvent::Read(address))
+                    if (0x00F4..=0x00F7).contains(&address) && self.smp_clock > self.cpu_clock =>
+                {
+                    self.pending_port = Some((address - 0x00F4) as u8);
+                    return StepOutcome::Parked(self.smp_clock);
+                }
+                corosensei::CoroutineResult::Yield(event) => {
+                    let cpu = self.cpu_clock;
+                    let resume = self.handle(event, &mut |_| cpu);
+                    input = SpcInput::Resume(resume);
+                }
+                corosensei::CoroutineResult::Return(()) => return StepOutcome::Halted,
             }
         }
     }
@@ -1023,5 +1080,35 @@ mod advance_tests {
         });
         assert!(engine.smp_clock() >= 512, "smp={}", engine.smp_clock());
         assert!(engine.dsp_units() > 0);
+    }
+}
+
+#[cfg(test)]
+mod parking_tests {
+    use super::*;
+
+    #[test]
+    fn ahead_port_read_parks_until_the_cpu_catches_up() {
+        let mut core = crate::spc700::Spc700::new();
+        core.pc = 0x0200;
+        let mut engine = SymEngine::new();
+        // `MOV A,$F4` then `BRA -2`.
+        engine.ram[0x0200] = 0xE4;
+        engine.ram[0x0201] = 0xF4;
+        engine.ram[0x0202] = 0x2F;
+        engine.ram[0x0203] = 0xFC;
+        engine.load_core(core);
+        engine.set_cpu_clock(0);
+        let target = match engine.smp_step_parking() {
+            StepOutcome::Parked(t) => t,
+            other => panic!("expected Parked, got {other:?}"),
+        };
+        assert!(target > 0, "the read must park at a positive SMP clock");
+        assert!(engine.smp_clock() >= target);
+        // The S-CPU reaches the target, then writes the latch.
+        engine.set_cpu_clock(target);
+        engine.write_apu_latch(0, 0x55);
+        assert_eq!(engine.smp_step_parking(), StepOutcome::Ran);
+        assert_eq!(engine.apu_port(0), 0x55);
     }
 }

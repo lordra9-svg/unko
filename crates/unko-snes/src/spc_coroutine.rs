@@ -65,6 +65,12 @@ pub fn per_clock() -> bool {
 /// A bus that yields every access instead of performing it.
 struct ResumeBus<F: FnMut(SpcEvent) -> SpcResume> {
     resume: F,
+    /// Defer I/O reads so an external scheduler samples them at the access
+    /// clock (the plan driver). The isolated engine sets this false so
+    /// direct-page `$F4-$F7` reads are emitted inline as `SpcEvent::Read`.
+    defer: bool,
+    /// Split a `$F4-$F7` read around its clock half (plan driver only).
+    split: bool,
 }
 
 impl<F: FnMut(SpcEvent) -> SpcResume> SpcBus for ResumeBus<F> {
@@ -118,17 +124,28 @@ impl<F: FnMut(SpcEvent) -> SpcResume> SpcBus for ResumeBus<F> {
     }
 
     fn split_port_read(&mut self, address: u16) -> bool {
-        address & 0xFFFC == 0x00F4
+        self.split && address & 0xFFFC == 0x00F4
     }
 
     fn defer_io_reads(&self) -> bool {
-        true
+        self.defer
     }
 }
 
 /// Create a recorder coroutine.
 pub fn new_spc_coroutine() -> SpcCoroutine {
-    corosensei::Coroutine::new(|yielder, input| {
+    new_spc_coroutine_with(true, true)
+}
+
+/// Create a recorder whose bus performs I/O reads inline (no deferral), so the
+/// isolated engine observes `$F4-$F7` as ordinary `SpcEvent::Read`s.
+pub fn new_spc_coroutine_inline() -> SpcCoroutine {
+    new_spc_coroutine_with(false, false)
+}
+
+/// Create a recorder with explicit I/O-read deferral and split-read behavior.
+pub fn new_spc_coroutine_with(defer: bool, split: bool) -> SpcCoroutine {
+    corosensei::Coroutine::new(move |yielder, input| {
         let SpcInput::Start(mut spc) = input else {
             return;
         };
@@ -139,6 +156,8 @@ pub fn new_spc_coroutine() -> SpcCoroutine {
                         SpcInput::Resume(resume) => resume,
                         SpcInput::Start(_) => SpcResume::Unit,
                     },
+                    defer,
+                    split,
                 };
                 spc.step(&mut bus);
             }

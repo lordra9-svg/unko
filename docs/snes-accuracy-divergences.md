@@ -11962,3 +11962,23 @@ recorder fix: make `SpcCoroutine` emit the direct-page `$F4-$F7` data read
 deterministically on the first resume that reaches it, independent of whether
 the caller batches the whole instruction. Only then can `smp_step_parking` be
 validated and wired into `step_sym_sched`.
+
+## CA rewrite stage 3c-2 done: recorder emits inline `$F4` reads; park protocol validated
+
+Root cause of the previous blocker: `SpcCoroutine`'s `ResumeBus` hard-coded
+`defer_io_reads() = true`, so a direct-page `$F4-$F7` read is deferred into the
+core's `pending` slot with **no** `SpcEvent::Read` (only the plan driver resolves
+it). The isolated engine never resolved it, so the read vanished.
+
+Fix: `new_spc_coroutine_with(defer, split)` parameterizes the bus;
+`new_spc_coroutine_inline()` (defer = false, split = false) makes the engine
+observe `$F4-$F7` as ordinary `Read` events. The plan driver still uses
+`new_spc_coroutine()` (defer = true, split = true), unchanged.
+
+With that, `SymEngine::smp_step_parking` is validated: an ahead `$F4` read
+returns `StepOutcome::Parked(smp_clock)`; after the S-CPU reaches that clock and
+writes `$2140`, resuming the step samples the updated latch and retires the
+instruction. 257 lib tests pass; the active emulator is unchanged.
+
+Next: wire `smp_step_parking` into `step_sym_sched` (the park target drives the
+S-CPU in the outer loop) behind `SNES_CA`.
