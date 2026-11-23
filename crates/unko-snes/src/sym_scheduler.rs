@@ -482,6 +482,9 @@ pub struct SymEngine {
     timers: [SymTimer; 3],
     timers_enable: bool,
     timers_disable: bool,
+    /// `$F0` wait-state selectors (ares `io.internal/externalWaitStates`).
+    internal_wait: u8,
+    external_wait: u8,
     /// A parked `$F4-$F7` read: port index to sample when resumed.
     pending_port: Option<u8>,
 }
@@ -511,6 +514,8 @@ impl SymEngine {
             timers: [SymTimer::default(); 3],
             timers_enable: false,
             timers_disable: false,
+            internal_wait: 0,
+            external_wait: 0,
             pending_port: None,
         }
     }
@@ -573,11 +578,8 @@ impl SymEngine {
     ) -> crate::spc_coroutine::SpcResume {
         use crate::spc_coroutine::{SpcEvent, SpcResume};
         match event {
-            SpcEvent::Wait(Some(address)) if (0x00F0..=0x00FF).contains(&address) => {
-                SpcResume::Clocks(1)
-            }
-            SpcEvent::Wait(_) => SpcResume::Clocks(2),
-            SpcEvent::Timer(_) => SpcResume::Clocks(2),
+            SpcEvent::Wait(address) => SpcResume::Clocks(self.wait_cycles(address)),
+            SpcEvent::Timer(address) => SpcResume::Clocks(self.timer_cycles(address)),
             SpcEvent::Read(address @ 0x00FD..=0x00FF) => {
                 SpcResume::Byte(self.timers[usize::from(address - 0x00FD)].read())
             }
@@ -598,6 +600,12 @@ impl SymEngine {
                 SpcResume::Byte(self.ipl[usize::from(address & 0x3F)])
             }
             SpcEvent::Read(address) => SpcResume::Byte(self.ram[usize::from(address)]),
+            SpcEvent::Write(0x00F0, value) => {
+                // ares: external = bits 0-3, internal = bits 4-7.
+                self.external_wait = value & 0x0F;
+                self.internal_wait = value >> 4;
+                SpcResume::Unit
+            }
             SpcEvent::Write(0x00F1, value) => {
                 self.timers_enable = value & 0x07 != 0;
                 self.timers_disable = value & 0x80 != 0;
@@ -774,6 +782,33 @@ impl SymEngine {
     /// The S-CPU clock.
     pub const fn cpu_clock(&self) -> u128 {
         self.cpu_clock
+    }
+
+    /// ares `SMP::wait`: cycle wait states `[1,2,5,10]` selected by the
+    /// internal/external wait register for the accessed address class.
+    fn wait_cycles(&self, address: Option<u16>) -> u32 {
+        const CYCLE_WAIT: [u32; 4] = [1, 2, 5, 10];
+        let selector = match address {
+            None => self.internal_wait,
+            Some(a) if a & 0xFFF0 == 0x00F0 || (a >= 0xFFC0 && self.iplrom_enable) => {
+                self.internal_wait
+            }
+            _ => self.external_wait,
+        };
+        CYCLE_WAIT[usize::from(selector.min(3))]
+    }
+
+    /// ares `SMP::timer`: timer wait states `[2,4,8,16]`.
+    fn timer_cycles(&self, address: Option<u16>) -> u32 {
+        const TIMER_WAIT: [u32; 4] = [2, 4, 8, 16];
+        let selector = match address {
+            None => self.internal_wait,
+            Some(a) if a & 0xFFF0 == 0x00F0 || (a >= 0xFFC0 && self.iplrom_enable) => {
+                self.internal_wait
+            }
+            _ => self.external_wait,
+        };
+        TIMER_WAIT[usize::from(selector.min(3))]
     }
 
     /// A timer's current output stage (tests).

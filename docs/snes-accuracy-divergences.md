@@ -12058,3 +12058,22 @@ port latches → `ca_drive` async park → engine samples. It is **worse** than 
 default, as predicted, because the isolated engine still differs from ares in
 its detail (DSP power-on state, timer/DSP sync points, and the upload timing).
 Default emulator unchanged (`mmx2 49253`); 261 lib tests pass.
+
+## CA engine fidelity: ares wait-state tables (no measurable change) (2026-11-23)
+
+`SymEngine` previously hardcoded `$F4-$F7`/timer wait states as 1/2 clocks. It now
+implements ares' tables (`CYCLE_WAIT [1,2,5,10]`, `TIMER_WAIT [2,4,8,16]`) driven
+by the `$F0` selectors, matching `Apu::sym_wait`/`sym_timer`.
+
+Measured effect on the CA path (`SNES_SYM_SCHED=1 SNES_CA=1`):
+
+| title | before | after |
+|---|---|---|
+| MMX2 | 196820 (69.2303%) | 196838 (69.2275%) |
+| CT | 452725 | 452725 |
+
+No change: the IPL boot leaves the wait selectors at 0, so both implementations
+use the minimum wait. The CA engine's large residual (69%/29%) is therefore not
+wait-state timing; it is deeper (SMP/DSP synchronization points or the DSP
+reset/sample phase). The fix is kept because it is correct. 261 lib tests pass;
+default emulator unchanged.
