@@ -11982,3 +11982,18 @@ instruction. 257 lib tests pass; the active emulator is unchanged.
 
 Next: wire `smp_step_parking` into `step_sym_sched` (the park target drives the
 S-CPU in the outer loop) behind `SNES_CA`.
+
+## CA rewrite stage 3d-1: `CaPeer::run_to` outer-loop driver (2026-11-23)
+
+The reusable driver component for the `step_sym_sched` hook is landed:
+
+- `CaPeer` owns a `SymEngine`.
+- `run_to(cpu_clock, run_cpu)` runs the S-SMP to the S-CPU clock; whenever an
+  ahead `$F4-$F7` read parks, it calls `run_cpu(&mut engine, target)` so the
+  caller drives the S-CPU in its outer loop, then resumes the parked read
+  (sampling the updated latch). The loop condition also continues while a read
+  is parked, so a park that overshoots the target is completed.
+
+Test: a `MOV A,$F4` program parks, the caller writes `$2140`, and the engine
+samples it — validating the exact park outer-loop `step_sym_sched` will run.
+Total lib tests: 258. Default emulator unchanged.

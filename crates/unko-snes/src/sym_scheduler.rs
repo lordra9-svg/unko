@@ -674,6 +674,11 @@ impl SymEngine {
         }
     }
 
+    /// Whether a `$F4-$F7` read is parked waiting for the S-CPU.
+    pub const fn is_parked(&self) -> bool {
+        self.pending_port.is_some()
+    }
+
     /// Latch an S-CPU write to `$2140-$2143` without synchronizing (the parked
     /// protocol: the caller has already run the S-CPU to the target).
     pub fn write_apu_latch(&mut self, port: u8, value: u8) {
@@ -816,6 +821,55 @@ impl SymEngine {
     pub fn cpu_read_port(&mut self, port: u8) -> u8 {
         self.pull_smp_to(self.cpu_clock);
         self.cpu_ports[usize::from(port & 3)]
+    }
+}
+
+/// S-CPU-side peer for the cycle-accurate engine, used by `step_sym_sched`
+/// in place of `ApuPeer` when `SNES_CA` is enabled.
+///
+/// It owns the engine and implements ares' outer-loop park pattern: the S-SMP
+/// runs until it retires an instruction or parks on an ahead `$F4-$F7` read;
+/// on a park, `run_cpu(target)` drives the S-CPU to that clock in the caller's
+/// outer loop, then the S-SMP resumes and samples the updated latch.
+pub struct CaPeer {
+    engine: SymEngine,
+}
+
+impl CaPeer {
+    /// Create a peer around an engine.
+    pub fn new(engine: SymEngine) -> Self {
+        Self { engine }
+    }
+
+    /// The owned engine.
+    pub fn engine(&self) -> &SymEngine {
+        &self.engine
+    }
+
+    /// The owned engine (mutable).
+    pub fn engine_mut(&mut self) -> &mut SymEngine {
+        &mut self.engine
+    }
+
+    /// Run the S-SMP toward `cpu_clock`, invoking `run_cpu(target)` whenever an
+    /// ahead `$F4-$F7` read parks so the caller can drive the S-CPU.
+    pub fn run_to(&mut self, cpu_clock: u128, mut run_cpu: impl FnMut(&mut SymEngine, u128)) {
+        self.engine.set_cpu_clock(cpu_clock);
+        let mut guard = 0u32;
+        while (self.engine.smp_clock() < cpu_clock || self.engine.is_parked()) && guard < 2_000_000
+        {
+            match self.engine.smp_step_parking() {
+                StepOutcome::Ran => {}
+                StepOutcome::Parked(target) => {
+                    run_cpu(&mut self.engine, target);
+                    if target > self.engine.cpu_clock() {
+                        self.engine.set_cpu_clock(target);
+                    }
+                }
+                StepOutcome::Halted => break,
+            }
+            guard += 1;
+        }
     }
 }
 
@@ -1110,5 +1164,34 @@ mod parking_tests {
         engine.write_apu_latch(0, 0x55);
         assert_eq!(engine.smp_step_parking(), StepOutcome::Ran);
         assert_eq!(engine.apu_port(0), 0x55);
+    }
+}
+
+#[cfg(test)]
+mod ca_peer_tests {
+    use super::*;
+
+    #[test]
+    fn run_to_drives_the_cpu_on_a_port_park() {
+        let mut core = crate::spc700::Spc700::new();
+        core.pc = 0x0200;
+        let mut engine = SymEngine::new();
+        // `MOV A,$F4` then `BRA -2`.
+        engine.ram[0x0200] = 0xE4;
+        engine.ram[0x0201] = 0xF4;
+        engine.ram[0x0202] = 0x2F;
+        engine.ram[0x0203] = 0xFC;
+        engine.load_core(core);
+        engine.set_cpu_clock(0);
+        let mut peer = CaPeer::new(engine);
+        let mut pulled = Vec::new();
+        peer.run_to(4, |engine, target| {
+            pulled.push(target);
+            // the S-CPU reaches the park target and writes $2140.
+            engine.write_apu_latch(0, 0x5A);
+        });
+        assert!(!pulled.is_empty(), "the $F4 read must drive the CPU");
+        assert!(peer.engine().smp_clock() >= 4);
+        assert_eq!(peer.engine().apu_port(0), 0x5A);
     }
 }
