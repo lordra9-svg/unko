@@ -11328,3 +11328,46 @@ all six exact titles; MMX2 stays at 92.3001%. The remaining work is ares'
 per-instruction `L` placement (including instructions whose `L` precedes an
 internal cycle or the high byte of a 16-bit read), which the access-granularity
 snapshot does not reproduce.
+
+## Per-instruction L placement measured directly against ares (2026-11-23)
+
+A temporary ares hook (`ARES_LASTCYCLE`) logged every `lastCycle()` call with
+`pc`, `nmiTransition`, `irqTransition`, `irqLock` and `nmiLine`. Reading it next
+to `ARES_NMI_POLL` gives the exact flip -> sample gap:
+
+| | `nmiValid` flip | ares `lastCycle` NMI sample | gap |
+|---|---|---|---|
+| CT (12.1M NMI) | 12,099,984 | 12,099,996 | 12 clocks |
+| MMX2 (frame 1) | 664,270 | 664,282 | 12 clocks |
+
+The gap is identical for both titles, so ares' NMI sample is **not**
+title-dependent. Our previous title dependence came entirely from the
+bus-access-quantised `nmi_line` raise.
+
+### What the per-instruction `L` actually is
+
+Reading ares `instructions-read.cpp`/`instructions-write.cpp`, `L` precedes the
+**high byte** of a 16-bit read/write (e.g. `instructionBankRead16`:
+`W.l = readBank(...); L W.h = readBank(...)`), and the final fetch for 8-bit
+forms. Taken branches put `L` before `idle()`, and `idleBranch()` is an empty
+virtual here, so it is the final cycle. At bus-access granularity this is exactly
+"sample before the instruction's final bus access", which the driver-level
+snapshot already reproduces.
+
+### Measurements
+
+- Penultimate-access snapshot + committed `+22`: **behaviourally identical**
+  (`dkc/smas/ct` 0, `mmx2` 49253).
+- Faithful `nmiPoll` timing (valid at line-start+4, transition at
+  line-start+12) + penultimate snapshot, **no phase constant**: `ct` 0,
+  `mmx2` 80734 (87.3785%).
+- Same with a live (instruction-end) sample: `ct` 52.3258%, `mmx2` 69.2225%.
+- Same with the transition at line-start+4 and a consume gate at +12 (the
+  earlier edge-clock sweep): `mmx2` best 39626 (93.8051%) but `ct` 52.3258%.
+
+So the per-instruction `L` placement is already emulated at access granularity;
+it is not the MMX2 blocker. The only configuration that improves MMX2 (93.8051%)
+trades CT's exactness, and the only configuration that keeps CT exact
+(committed `+22`, or the faithful poll model) leaves MMX2 at 92.3001% / 87.3785%.
+The MMX2 residual must therefore be a separate S-CPU/APU phase effect (the
++30-clock upload offset), not the interrupt sample point.
