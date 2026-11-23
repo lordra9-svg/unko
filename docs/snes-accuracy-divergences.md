@@ -11620,3 +11620,25 @@ MMX2 but the surrounding advance model in this core differs from ares in a way
 that neither the credit floor nor an absolute-clock catch-up reproduces for all
 programs. Landing it requires a from-scratch reproduction of ares' symmetric
 thread scheduler, not an incremental bookkeeping change.
+
+## ares' symmetric scheduler variants do not fix MMX2 either (2026-11-23)
+
+The requested isolated symmetric-coroutine scheduler already exists behind
+`SNES_SYMMETRIC` / `SNES_SYM_SCHED` / `SNES_SYM_ENGINE` (absolute per-thread
+clocks, whole-instruction execution, per-tick DSP pull). Measured on MMX2:
+
+| configuration | MMX2 |
+|---|---|
+| default (credit floor) | 49253 (92.3001%) |
+| `SNES_SYMMETRIC=1` | 211810 (66.8869%) |
+| `SNES_SYM_SCHED=1` | 196857 (69.2246%) |
+| `SNES_SYMMETRIC=1 SNES_SYM_SCHED=1` | 196857 (69.2246%) |
+| `SNES_SYM_ENGINE=1` | 212827 (66.7279%) |
+
+Every symmetric/absolute-clock variant is **worse** than the default for MMX2.
+So the remaining divergence is not reproduced by the symmetric scheduler model
+as implemented; it is elsewhere (the port-lead `synchronize(smp)` fixes MMX2,
+but its surrounding advance model breaks the six titles in every form measured:
+credit floor, per-access absolute, whole-instruction absolute, and symmetric).
+At this point every available scheduler model has been measured against the
+7-title gate; none reaches 7/7.
