@@ -12731,3 +12731,23 @@ Verified 600-frame gate (no env):
 This deliberately trades five previously bit-exact titles for MMX2, as chosen.
 `258` lib tests pass, fmt/clippy clean. The unifying fix (park-vs-resolve
 mutual scheduler) remains the only way to recover all seven simultaneously.
+
+## Park-vs-resolve scheduler attempt: correct but hangs on MMX2 (2026-11-23)
+
+Implemented ares' `readAPU`/`writeAPU` synchronize (`SNES_PORT_SYNC`: run the
+S-SMP to the CPU clock before `$2140-$2143`) combined with resolving the S-SMP's
+port reads from the latch instead of parking (`SNES_NO_PARK`), with the old DSP
+phase (`DSP_PRIME=0`):
+
+| title | result (produced window) |
+|---|---|
+| ct | 0 over 106000 samples (full 100 frames) |
+| dkc | 0 over 68148 samples (~64 frames) |
+| mmx2 | 0 over **1868** samples only |
+
+The combination is correct where it completes, but MMX2 advances only ~934
+stereo frames in 1500 s — the `sync_smp_to` catch-up loop spins pathologically on
+MMX2's port pattern (`guard > 200_000` per access), and the others were already
+exact at default, so there is no net gain. The blocker is the efficiency and
+park handling of `sync_smp_to`, not the model. Reverted; the landed default
+remains the 4-micro-step DSP prime (MMX2 bit-exact).
