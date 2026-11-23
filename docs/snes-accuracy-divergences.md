@@ -11642,3 +11642,28 @@ but its surrounding advance model breaks the six titles in every form measured:
 credit floor, per-access absolute, whole-instruction absolute, and symmetric).
 At this point every available scheduler model has been measured against the
 7-title gate; none reaches 7/7.
+
+## Port-lead combinations and CT's divergence point (2026-11-23)
+
+The port lead (`SNES_PORT_LEAD=1`) is the only model that makes MMX2 bit-exact.
+Combining it with every DSP/latch synchronisation flag was measured:
+
+| configuration | MMX2 | CT |
+|---|---|---|
+| `PORT_LEAD` | 0 | 452998 (29.1810%) |
+| `PORT_LEAD + DSP_LATE` | 0 | 452998 (29.1810%) |
+| `PORT_LEAD + DSP_INSTR_SYNC` | 55202 (91.3700%) | 452675 (29.2315%) |
+| `PORT_LEAD + SYM_PULL` | 0 | 452998 (29.1810%) |
+| `PORT_LEAD + CPU_LATCH_PARK` | 0 | 452998 (29.1810%) |
+
+So the CT regression is not the DSP drain or latch queue. CT's first differing
+audio sample under the lead is at **stereo frame 75,511 (t = 2.357 s)**, i.e.
+during gameplay, not the ~0.3 s IPL upload — the lead changes a steady-state
+sound-command `$2140` handshake for CT while fixing MMX2's upload.
+
+Every scheduler and latch-timing model in the tree has now been measured (credit
+floor, per-access absolute, whole-instruction absolute, `SNES_SYMMETRIC`,
+`SNES_SYM_SCHED`, `SNES_SYM_ENGINE`, port lead and its combinations). The only
+configurations reaching MMX2 = 0 break five titles, and no combination keeps
+both. A universal fix requires reproducing ares' scheduler at a level this core
+does not currently model.
