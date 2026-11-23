@@ -47,6 +47,12 @@ pub struct Dma {
     pub hdma_enable: u8,
     /// Completed-frame counter, mirrored from the PPU for debug logging.
     pub debug_frame: u64,
+    /// Clock count of the S-CPU access that triggered the current DMA
+    /// (ares `status.clockCount` at the DMA tick).
+    pub trigger_cycles: u32,
+    /// ares `status.dmaActive` for a `$420B` write: `1` waits one bus access,
+    /// `2` runs the transfer at the next bus access.
+    pub arm: u8,
     hdma: [HdmaState; 8],
 }
 

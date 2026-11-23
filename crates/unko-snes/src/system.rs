@@ -115,6 +115,8 @@ pub struct SnesState {
     pub refresh_position: u32,
     /// ares `counter.cpu`: master clocks advanced in 2-clock ticks.
     pub counter_cpu: u64,
+    /// Master clocks a deferred DMA start consumed in the current step.
+    pub dma_extra_clocks: u32,
     /// PPU hcounter at 2-clock resolution (for line events/comparators).
     pub ppu_hcounter: u32,
     /// Scheduler line paired with `ppu_hcounter`.
@@ -296,6 +298,8 @@ pub struct Snes {
     refresh_position: u32,
     /// ares `counter.cpu`: master clocks advanced in 2-clock ticks.
     counter_cpu: u64,
+    /// Master clocks the deferred DMA start consumed in the current step.
+    dma_extra_clocks: u32,
     /// PPU hcounter at 2-clock resolution (for line events/comparators).
     ppu_hcounter: u32,
     /// Scheduler line paired with `ppu_hcounter`.
@@ -603,6 +607,7 @@ impl Snes {
             refresh_done: false,
             refresh_position: 538,
             counter_cpu: 0,
+            dma_extra_clocks: 0,
             ppu_hcounter: 0,
             ppu_hcounter_line: 0,
             hdma_setup_position: 12,
@@ -708,6 +713,7 @@ impl Snes {
             refresh_done: self.refresh_done,
             refresh_position: self.refresh_position,
             counter_cpu: self.counter_cpu,
+            dma_extra_clocks: self.dma_extra_clocks,
             ppu_hcounter: self.ppu_hcounter,
             ppu_hcounter_line: self.ppu_hcounter_line,
             hdma_setup_position: self.hdma_setup_position,
@@ -806,6 +812,7 @@ impl Snes {
         self.refresh_done = state.refresh_done;
         self.refresh_position = state.refresh_position;
         self.counter_cpu = state.counter_cpu;
+        self.dma_extra_clocks = state.dma_extra_clocks;
         self.ppu_hcounter = state.ppu_hcounter;
         self.ppu_hcounter_line = state.ppu_hcounter_line;
         self.hdma_setup_position = state.hdma_setup_position;
@@ -1180,6 +1187,25 @@ impl Snes {
                     request,
                 )) => {
                     use crate::cpu_coroutine::{BusRequest, BusResponse};
+                    if let Some(wait) = dma_edge_wait(request, self.fast_rom) {
+                        if self.dma_edge_stage(wait) {
+                            let clock = self.clock;
+                            if peer.waiting.is_some() {
+                                let cost = self.dma_edge_run();
+                                peer.advance(cost, clock, rate);
+                                cycles += cost;
+                            } else {
+                                peer.flush_deferred(self.clock, rate);
+                                let apu = peer.apu.take().expect("APU actor idle");
+                                self.apu = *apu;
+                                self.apu_actor_driven = false;
+                                let cost = self.dma_edge_run();
+                                self.apu_actor_driven = true;
+                                peer.apu = Some(Box::new(std::mem::take(&mut self.apu)));
+                                cycles += cost;
+                            }
+                        }
+                    }
                     input = crate::cpu_coroutine::CpuInput::Response(match request {
                         BusRequest::Read { address, .. }
                             if address & 0x40_FF00 == 0x2100
@@ -1320,7 +1346,13 @@ impl Snes {
         self.apu = apu;
         self.cpu_coroutine.0 = Some(coroutine);
         self.apu_actor.0 = Some(actor_coro);
-        self.run_dma(cycles)
+        let extra = std::mem::take(&mut self.dma_extra_clocks);
+        let cycles = cycles + extra;
+        if self.dma.arm != 0 && self.dma_transfer.is_none() {
+            cycles
+        } else {
+            self.run_dma(cycles)
+        }
     }
 
     /// ares-style re-entrant S-CPU / S-SMP / S-DSP scheduler
@@ -1396,8 +1428,15 @@ impl Snes {
             }
         }
         // The instruction's DMA tail is S-CPU time; the S-SMP/S-DSP catch up
-        // to the final S-CPU clock afterwards.
-        let cycles = self.run_dma(cycles);
+        // to the final S-CPU clock afterwards. A transfer armed by `$420B`
+        // waits for the second bus access, which happens in the next step.
+        let extra = std::mem::take(&mut self.dma_extra_clocks);
+        let cycles = cycles + extra;
+        let cycles = if self.dma.arm != 0 && self.dma_transfer.is_none() {
+            cycles
+        } else {
+            self.run_dma(cycles)
+        };
         let mut guard = 0u64;
         loop {
             let cpu_fixed = u128::from(self.clock) * cpu_scalar;
@@ -1421,6 +1460,45 @@ impl Snes {
         self.apu_actor_driven = false;
         self.cpu_coroutine.0 = Some(coroutine);
         cycles
+    }
+
+    /// ares `status.dmaActive` transition at a bus-access edge.
+    ///
+    /// A `$420B` write latches `dmaPending`; the transfer starts two bus
+    /// accesses later, when `dmaActive` has been armed by the intervening
+    /// access. The second edge supplies `status.clockCount` for the trailing
+    /// alignment, which is why the delay is preserved rather than folded into
+    /// the instruction tail.
+    fn dma_access_edge(&mut self, wait: u32) -> u32 {
+        if self.dma.arm == 1 {
+            self.dma.arm = 2;
+            return 0;
+        }
+        if self.dma.arm != 2 {
+            return 0;
+        }
+        self.dma.arm = 0;
+        self.dma.trigger_cycles = wait.max(1);
+        self.run_dma(0)
+    }
+
+    /// Arm the pending transfer without starting it (`dma_edge_stage`), then
+    /// report whether this edge must run it.
+    fn dma_edge_stage(&mut self, wait: u32) -> bool {
+        if self.dma.arm == 1 {
+            self.dma.arm = 2;
+            return false;
+        }
+        if self.dma.arm != 2 {
+            return false;
+        }
+        self.dma.trigger_cycles = wait.max(1);
+        true
+    }
+
+    fn dma_edge_run(&mut self) -> u32 {
+        self.dma.arm = 0;
+        self.run_dma(0)
     }
 
     /// Run the pending DMA/HDMA-transfer tail of an instruction.
@@ -1505,8 +1583,10 @@ impl Snes {
                 dma_clocks += advance_clocks + extra;
                 transfer.accum += clocks;
             }
-            let wait = bus_wait(self.cpu.pc_address(), self.fast_rom).max(1);
-            let post = wait - transfer.accum % wait;
+            // ares `CPU::dmaEdge`: align the trailing stall to the
+            // `status.clockCount` of the bus access that starts the DMA.
+            let denom = self.dma.trigger_cycles.max(1);
+            let post = denom - transfer.accum % denom;
             let extra = self.advance_peripherals(post);
             cycles += post + extra;
             dma_clocks += post + extra;
@@ -1562,8 +1642,9 @@ impl Snes {
                 BusResponse::None
             }
             BusRequest::AccessCycles { address } => {
-                BusResponse::Clocks(CpuBus::access_cycles(self, address))
+                BusResponse::Clocks(self.access_cycles_inner(address))
             }
+            BusRequest::IdleEdge => BusResponse::None,
             BusRequest::IdleCycles => BusResponse::Clocks(CpuBus::idle_cycles(self)),
             BusRequest::Idle => {
                 CpuBus::idle(self);
@@ -2029,7 +2110,70 @@ impl Snes {
     }
 }
 
+impl Snes {
+    fn access_cycles_inner(&mut self, address: u32) -> u32 {
+        if let Ok(path) = std::env::var("BUS_LOG") {
+            use std::io::Write;
+            let from: u64 = std::env::var("BUS_LOG_FROM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            let to: u64 = std::env::var("BUS_LOG_TO")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(u64::MAX);
+            if self.clock >= from && self.clock <= to {
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                {
+                    let _ = writeln!(f, "{} {:06X} pc={:06X}", self.clock, address, self.live_pc);
+                }
+            }
+        }
+        let base = self.bus().access_cycles(address);
+        // HDMA bytes transferred inside hblank and the scanline's DRAM refresh
+        // both steal master clocks from the CPU (ares); the debt is paid on the
+        // next access, which also advances the peripherals by the same amount.
+        let mut stall = std::mem::take(&mut self.cpu_stall);
+        let pending = std::mem::take(&mut self.hdma_pending_cost);
+        if pending != 0 {
+            // ares `CPU::dmaEdge`: align the DMA counter to the 8-clock grid,
+            // run the transfers, then round the steal up to this access's bus
+            // cycle (`status.clockCount`). Without the rounding the CPU is a
+            // little early relative to HDMA on every line.
+            let dma_clock = (8 - (self.counter_cpu as u32 & 7)) + pending;
+            let wait = base.max(1);
+            let mut cost = dma_clock + (wait - dma_clock % wait);
+            let calibrated = if self.smw_calibrated {
+                Some(&hdma_calibration::table(self.hdma_phase)[..])
+            } else {
+                hdma_table(self.hdma_phase)
+            };
+            if let Some(table) = calibrated {
+                let line = usize::from(self.hdma_pending_line).min(table.len() - 1);
+                let setup = pending == 32 && self.ppu.line() == 0 && self.ppu.dot() < 100;
+                cost = if setup { table[0] } else { table[line] };
+            }
+            stall += cost;
+        }
+        base + stall
+    }
+}
+
 impl CpuBus for Snes {
+    fn access_cycles(&mut self, address: u32) -> u32 {
+        let clocks = self.access_cycles_inner(address);
+        let wait = bus_wait(address, self.fast_rom);
+        self.dma_extra_clocks += self.dma_access_edge(wait);
+        clocks
+    }
+
+    fn idle_edge(&mut self) {
+        self.dma_extra_clocks += self.dma_access_edge(6);
+    }
+
     fn read(&mut self, address: u32, mdr: u8) -> u8 {
         let value = self.bus().read(address, mdr);
         if std::env::var_os("READ_WATCH").is_some()
@@ -2210,62 +2354,23 @@ impl CpuBus for Snes {
         }
     }
 
-    fn access_cycles(&mut self, address: u32) -> u32 {
-        if let Ok(path) = std::env::var("BUS_LOG") {
-            use std::io::Write;
-            let from: u64 = std::env::var("BUS_LOG_FROM")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-            let to: u64 = std::env::var("BUS_LOG_TO")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(u64::MAX);
-            if self.clock >= from && self.clock <= to {
-                if let Ok(mut f) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(path)
-                {
-                    let _ = writeln!(f, "{} {:06X} pc={:06X}", self.clock, address, self.live_pc);
-                }
-            }
-        }
-        let base = self.bus().access_cycles(address);
-        // HDMA bytes transferred inside hblank and the scanline's DRAM refresh
-        // both steal master clocks from the CPU (ares); the debt is paid on the
-        // next access, which also advances the peripherals by the same amount.
-        let mut stall = std::mem::take(&mut self.cpu_stall);
-        let pending = std::mem::take(&mut self.hdma_pending_cost);
-        if pending != 0 {
-            // ares `CPU::dmaEdge`: align the DMA counter to the 8-clock grid,
-            // run the transfers, then round the steal up to this access's bus
-            // cycle (`status.clockCount`). Without the rounding the CPU is a
-            // little early relative to HDMA on every line.
-            let dma_clock = (8 - (self.counter_cpu as u32 & 7)) + pending;
-            let wait = base.max(1);
-            let mut cost = dma_clock + (wait - dma_clock % wait);
-            let calibrated = if self.smw_calibrated {
-                Some(&hdma_calibration::table(self.hdma_phase)[..])
-            } else {
-                hdma_table(self.hdma_phase)
-            };
-            if let Some(table) = calibrated {
-                let line = usize::from(self.hdma_pending_line).min(table.len() - 1);
-                let setup = pending == 32 && self.ppu.line() == 0 && self.ppu.dot() < 100;
-                cost = if setup { table[0] } else { table[line] };
-            }
-            stall += cost;
-        }
-        base + stall
-    }
-
     fn idle(&mut self) {
         self.bus().idle();
     }
 
     fn advance(&mut self, clocks: u32) -> u32 {
         self.advance_peripherals(clocks)
+    }
+}
+
+/// The `status.clockCount` an access presents to `dmaEdge`.
+fn dma_edge_wait(request: crate::cpu_coroutine::BusRequest, fast_rom: bool) -> Option<u32> {
+    match request {
+        crate::cpu_coroutine::BusRequest::AccessCycles { address } => {
+            Some(bus_wait(address, fast_rom))
+        }
+        crate::cpu_coroutine::BusRequest::IdleEdge => Some(6),
+        _ => None,
     }
 }
 
@@ -3044,6 +3149,11 @@ impl CpuBus for SnesBus<'_> {
                     self.io.write(offset as u16, value);
                 } else if offset == 0x420B {
                     self.dma.start(value);
+                    if value != 0 {
+                        // ares sets `dmaPending` here; the transfer itself runs
+                        // at the second bus access after this write.
+                        self.dma.arm = 1;
+                    }
                 } else if offset == 0x420C {
                     self.dma.set_hdma_enable(value);
                 } else if offset == 0x420D {

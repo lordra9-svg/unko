@@ -10936,3 +10936,63 @@ the residual is **not** the thread schedule. The default stays the
 carried-credit driver. Default 600-frame gate re-verified after the DMA-tail
 refactor: dkc/zelda/fzero/cv4 0, smas 50.9452%, ct 34.9327%, mmx2 69.2222%;
 212/212 baseline green; 244 tests, clippy/fmt clean.
+
+## DMA starts at the second bus access after `$420B` (2026-11-22)
+
+The SMAS residual was the DMA start edge, not the thread schedule. ares
+latches `status.dmaPending` inside the `$420B` write, but `dmaEdge()` for that
+write already ran *before* the write committed. The transfer therefore starts
+two bus accesses later:
+
+1. `$420B` write sets `dmaPending` (its own `dmaEdge` saw `dmaActive == 0`).
+2. The next access enters `dmaEdge` with `dmaActive == 0`, so it only arms
+   `dmaActive = 1` at the end; the access itself runs normally.
+3. The following access enters with `dmaActive == 1` and runs the transfer
+   using *that* access's `status.clockCount` for the trailing alignment.
+
+Instrumented ares (`ARES_DMA_COST`, with the access sequence counter) confirms
+`seqdelta=2` and the supplied clock:
+
+```
+SMAS  cc=6 lastaddr=ffffffff (internal idle)  accum=8212
+DKC   cc=8 lastaddr=00a904    (WRAM read)      accum=524308
+CT    cc=6 lastaddr=ffffffff (internal idle)  accum=10258 (first upload)
+MMX2  cc=8 lastaddr=7e2077    (WRAM read)      accum=4374
+```
+
+`status.clockCount` is the plain `CPU::wait()` of the access, so the trailing
+stall is `wait - counter.dma % wait` (6 for an internal idle cycle, 8 for a
+slow-ROM/WRAM access). Running the transfer at the instruction boundary with
+either `wait(pc)` or the write's own wait reproduces one title but not the
+other; both are one access early.
+
+Implementation: `CpuBus::idle_edge()` marks the start of an internal cycle
+before it advances (ares `CPU::idle` calls `dmaEdge()` before `step(6)`), and
+the drivers stage the pending transfer on the next `AccessCycles`/`IdleEdge`
+edge. The driver runs the DMA there (taking the S-SMP out of the actor peer so
+`advance_peripherals` drives it, or deferring into `parked_clocks` when the
+S-SMP is parked) and reports the two-access delay. If a step ends with the
+transfer still armed, the next step starts it; a parked frame-boundary
+transfer keeps the existing resume path.
+
+Results on the default driver, 600-frame gate (`CX4_ROM` for MMX2):
+
+```
+dkc    0 differing (100.0000%)   zelda  0 differing (100.0000%)
+fzero  0 differing (100.0000%)   cv4    0 differing (100.0000%)
+smas   0 differing (100.0000%)   ct     347893 (45.6125%)
+mmx2   114455 (82.1068%)
+```
+
+The first DMA start clock, pre/run/post split and accumulated `counter.dma`
+now match ares for every measured title, including SMAS, CT and MMX2. The
+212/212 baseline, 244 lib tests, clippy and fmt are green.
+
+CT and MMX2 residual: their DMA timing matches, and the first S-SMP execution
+divergence is the IPL boot handshake at instruction 7378. ares reads the CPU's
+`CC` boot byte at master clock 678242; this core still reads `AA` there and
+sees `CC` at 678492, ~125 S-SMP clocks later, after the same CPU-side write
+stream (byte-for-byte clocks match through the first 22 port events). SMAS's
+S-SMP PC stream is identical to ares over the whole compared prefix, so the
+residual is the boot port-visibility phase for these two titles, not DSP or
+scheduler timing.

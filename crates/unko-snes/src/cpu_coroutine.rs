@@ -38,6 +38,8 @@ pub enum BusRequest {
     IdleCycles,
     /// Advance one idle CPU cycle.
     Idle,
+    /// ares `dmaEdge()` at the start of an internal cycle.
+    IdleEdge,
     /// Advance the peripherals while the CPU is mid-instruction.
     Advance {
         /// Master clocks to advance.
@@ -156,6 +158,10 @@ impl CpuBus for CoroBus<'_> {
 
     fn idle(&mut self) {
         self.request(BusRequest::Idle);
+    }
+
+    fn idle_edge(&mut self) {
+        self.request(BusRequest::IdleEdge);
     }
 
     fn advance(&mut self, clocks: u32) -> u32 {

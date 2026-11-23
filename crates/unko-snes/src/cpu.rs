@@ -36,6 +36,12 @@ pub trait CpuBus {
     /// Advance one idle CPU cycle.
     fn idle(&mut self) {}
 
+    /// ares `dmaEdge()` at the start of an internal (`idle`) cycle. The DMA
+    /// controller runs a pending `$420B` transfer at a bus-access boundary
+    /// using that access's wait-state count, so the driver must see the edge
+    /// before the idle cycle advances the peripherals.
+    fn idle_edge(&mut self) {}
+
     /// Advance peripherals (S-SMP, S-PPU, DMA/HDMA, IRQ comparators) by
     /// `clocks` master clocks while the CPU is mid-instruction.
     ///
@@ -358,6 +364,7 @@ impl Cpu {
     }
 
     fn idle(&mut self, bus: &mut impl CpuBus) {
+        bus.idle_edge();
         let clocks = bus.idle_cycles();
         self.cycles += u64::from(clocks);
         self.cycles += u64::from(bus.advance(clocks));
