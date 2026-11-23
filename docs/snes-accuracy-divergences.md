@@ -11921,3 +11921,12 @@ engine remains default-off; the active emulator is unchanged.
 
 This validates the isolated engine on real firmware, end to end. Total lib
 tests: 253. The engine remains default-off; the active emulator is unchanged.
+
+## CA rewrite stage 3b: S-SMP timers in `SymEngine` (2026-11-23)
+
+The sound driver needs the three S-SMP timers. `SymEngine` now has `SymTimer`
+(ares `Timer<Frequency>` logic: stage0 divider, stage1 flip, stage2 target
+count, 4-bit stage3) and wires `$F1` (enable/disable), `$FA-$FC` (targets) and
+`$FD-$FF` (read/clear). Timers step on each S-SMP `Advance`. Two tests pin the
+frequency and the read/clear behavior; total lib tests: 255. Engine remains
+default-off; the active emulator is unchanged.

@@ -383,6 +383,61 @@ mod mutual_tests {
     }
 }
 
+/// One S-SMP timer, mirroring ares `SMP::Timer<Frequency>`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SymTimer {
+    stage0: u16,
+    stage1: bool,
+    stage2: u8,
+    stage3: u8,
+    line: bool,
+    enable: bool,
+    target: u8,
+}
+
+impl SymTimer {
+    /// ares `Timer::step`: advance stage 0, then count stage-1 falling edges
+    /// into stage 2 and wrap into the 4-bit stage 3.
+    pub fn step(&mut self, clocks: u32, frequency: u16, timers_enable: bool, timers_disable: bool) {
+        self.stage0 = self.stage0.wrapping_add(clocks as u16);
+        while self.stage0 >= frequency {
+            self.stage0 -= frequency;
+            self.stage1 = !self.stage1;
+            let level = self.stage1 && timers_enable && !timers_disable;
+            if self.line && !level && self.enable {
+                self.stage2 = self.stage2.wrapping_add(1);
+                if self.stage2 == self.target {
+                    self.stage2 = 0;
+                    self.stage3 = (self.stage3 + 1) & 0x0F;
+                }
+            }
+            self.line = level;
+        }
+    }
+
+    /// Read and clear the 4-bit output stage (ares `$FD-$FF` read).
+    pub fn read(&mut self) -> u8 {
+        let value = self.stage3;
+        self.stage3 = 0;
+        value
+    }
+
+    /// Set the stage-2 target (`$FA-$FC`).
+    pub fn set_target(&mut self, target: u8) {
+        self.target = target;
+    }
+
+    /// Enable the timer.
+    pub fn set_enable(&mut self, enable: bool) {
+        self.enable = enable;
+    }
+
+    /// Current output stage (tests).
+    pub const fn stage3(&self) -> u8 {
+        self.stage3
+    }
+}
+
 /// Experimental engine wiring the **real** S-SMP and S-DSP into the mutual
 /// scheduler.
 ///
@@ -414,6 +469,9 @@ pub struct SymEngine {
     cpu_pull: Option<Box<dyn FnMut(u128) -> u128>>,
     ipl: [u8; 64],
     iplrom_enable: bool,
+    timers: [SymTimer; 3],
+    timers_enable: bool,
+    timers_disable: bool,
 }
 
 /// S-SMP clocks per DSP micro-step (24 DSP clocks = 2 S-SMP clocks).
@@ -439,6 +497,9 @@ impl SymEngine {
             cpu_pull: None,
             ipl: [0; 64],
             iplrom_enable: false,
+            timers: [SymTimer::default(); 3],
+            timers_enable: false,
+            timers_disable: false,
         }
     }
 
@@ -496,6 +557,9 @@ impl SymEngine {
             }
             SpcEvent::Wait(_) => SpcResume::Clocks(2),
             SpcEvent::Timer(_) => SpcResume::Clocks(2),
+            SpcEvent::Read(address @ 0x00FD..=0x00FF) => {
+                SpcResume::Byte(self.timers[usize::from(address - 0x00FD)].read())
+            }
             SpcEvent::Read(0x00F2) => SpcResume::Byte(self.dsp_address),
             SpcEvent::Read(0x00F3) => SpcResume::Byte(self.dsp.read(self.dsp_address)),
             SpcEvent::Read(address @ 0x00F4..=0x00F7) => {
@@ -515,6 +579,18 @@ impl SymEngine {
                 SpcResume::Byte(self.ipl[usize::from(address & 0x3F)])
             }
             SpcEvent::Read(address) => SpcResume::Byte(self.ram[usize::from(address)]),
+            SpcEvent::Write(0x00F1, value) => {
+                self.timers_enable = value & 0x07 != 0;
+                self.timers_disable = value & 0x80 != 0;
+                for (index, timer) in self.timers.iter_mut().enumerate() {
+                    timer.set_enable(value & (1 << index) != 0);
+                }
+                SpcResume::Unit
+            }
+            SpcEvent::Write(address @ 0x00FA..=0x00FC, value) => {
+                self.timers[usize::from(address - 0x00FA)].set_target(value & 0x0F);
+                SpcResume::Unit
+            }
             SpcEvent::Write(0x00F2, value) => {
                 self.dsp_address = value;
                 SpcResume::Unit
@@ -538,6 +614,10 @@ impl SymEngine {
                 SpcResume::Unit
             }
             SpcEvent::Advance(clocks) => {
+                for (index, timer) in self.timers.iter_mut().enumerate() {
+                    let frequency: u16 = if index == 2 { 16 } else { 128 };
+                    timer.step(clocks, frequency, self.timers_enable, self.timers_disable);
+                }
                 self.smp_clock += u128::from(clocks);
                 self.rr.set_smp_clock(self.smp_clock);
                 SpcResume::Unit
@@ -598,6 +678,11 @@ impl SymEngine {
     /// The S-CPU clock.
     pub const fn cpu_clock(&self) -> u128 {
         self.cpu_clock
+    }
+
+    /// A timer's current output stage (tests).
+    pub const fn timer_stage3(&self, index: usize) -> u8 {
+        self.timers[index].stage3()
     }
 
     /// Value the S-CPU currently sees on `$2140-$2143` (for tests).
@@ -859,5 +944,32 @@ mod ipl_tests {
         // ares IPL: after clearing RAM it writes $AA to $F4 and $BB to $F5.
         assert_eq!(engine.cpu_port(0), 0xAA);
         assert_eq!(engine.cpu_port(1), 0xBB);
+    }
+}
+
+#[cfg(test)]
+mod timer_tests {
+    use super::*;
+
+    #[test]
+    fn timer_counts_at_its_frequency() {
+        let mut timer = SymTimer::default();
+        timer.set_enable(true);
+        timer.set_target(1);
+        // 128 S-SMP clocks per stage-1 flip; a falling edge needs one high and
+        // one low half, so ~256 clocks per stage-3 increment.
+        timer.step(512, 128, true, false);
+        assert!(timer.stage3() >= 1, "stage3 = {}", timer.stage3());
+    }
+
+    #[test]
+    fn timer_read_clears_the_output_stage() {
+        let mut timer = SymTimer::default();
+        timer.set_enable(true);
+        timer.set_target(1);
+        timer.step(512, 128, true, false);
+        let value = timer.read();
+        assert!(value >= 1);
+        assert_eq!(timer.read(), 0);
     }
 }
