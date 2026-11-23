@@ -2197,6 +2197,14 @@ impl Snes {
         self.ca.0.as_deref_mut()
     }
 
+    /// Drain audio samples from the cycle-accurate peer (empty if not installed).
+    pub fn take_ca_samples(&mut self) -> Vec<crate::dsp::Sample> {
+        match self.ca.0.as_mut() {
+            Some(ca) => ca.engine_mut().take_samples(),
+            None => Vec::new(),
+        }
+    }
+
     /// Build a bus view over the machine's fields for one access.
     /// Install ST018 coprocessor firmware (`st018.rom`, 0x28000 bytes, or the
     /// split `st018.program.rom`).

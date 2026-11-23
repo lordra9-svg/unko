@@ -12040,3 +12040,21 @@ When a `CaPeer` is installed (`Snes::install_ca`), `step_sym_sched` now:
 Tests: an installed peer advances to the published clock (SMP and CPU clocks
 both move). Total lib tests: 261. The `SNES_CA` harness wiring (install + sample
 drain) is the next step; the default driver is unchanged.
+
+## CA rewrite stage 3d-5: first full-title CA measurement (2026-11-23)
+
+The harness now installs the peer under `SNES_CA` (`system.install_ca(ipl)`) and
+drains the engine's samples instead of `apu.drain_samples()`. Run with
+`SNES_SYM_SCHED=1 SNES_CA=1`:
+
+| title | CA result | default |
+|---|---|---|
+| MMX2 | 196820 differing (69.2303%) | 49253 (92.3001%) |
+| CT | 452725 differing (29.2237%) | 0 |
+
+The CA path runs full 600 frames and produces full-length audio (639658
+samples), so the wiring end-to-end is exercised: S-CPU → `install_ca` IPL boot →
+port latches → `ca_drive` async park → engine samples. It is **worse** than the
+default, as predicted, because the isolated engine still differs from ares in
+its detail (DSP power-on state, timer/DSP sync points, and the upload timing).
+Default emulator unchanged (`mmx2 49253`); 261 lib tests pass.

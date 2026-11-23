@@ -127,6 +127,10 @@ fn main() -> ExitCode {
         let mut ipl = [0u8; 64];
         ipl.copy_from_slice(&bytes);
         system.set_ipl(ipl);
+        if std::env::var_os("SNES_CA").is_some() {
+            system.install_ca(ipl);
+            println!("ca peer:     installed");
+        }
         println!("ipl:         {ipl_path}");
     }
     let joypad0 = std::env::var("JOYPAD0")
@@ -282,7 +286,12 @@ fn main() -> ExitCode {
             if let Some(file) = audio_out.as_mut() {
                 use std::io::Write;
                 let mut bytes = Vec::new();
-                for (left, right) in system.apu.drain_samples() {
+                let samples: Vec<(i16, i16)> = if system.ca().is_some() {
+                    system.take_ca_samples()
+                } else {
+                    system.apu.drain_samples().collect()
+                };
+                for (left, right) in samples {
                     bytes.extend_from_slice(&(f32::from(left) / 32768.0).to_le_bytes());
                     bytes.extend_from_slice(&(f32::from(right) / 32768.0).to_le_bytes());
                 }

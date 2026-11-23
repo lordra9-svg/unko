@@ -540,6 +540,11 @@ impl SymEngine {
         self.samples.len()
     }
 
+    /// Drain finished audio samples.
+    pub fn take_samples(&mut self) -> Vec<crate::dsp::Sample> {
+        self.samples.drain(..).collect()
+    }
+
     /// Run one S-DSP micro-step and record it in the round-robin state.
     fn dsp_micro_step(&mut self) {
         if let Some(sample) = self.dsp.tick(&mut self.ram) {
