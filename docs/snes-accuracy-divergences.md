@@ -11371,3 +11371,51 @@ trades CT's exactness, and the only configuration that keeps CT exact
 (committed `+22`, or the faithful poll model) leaves MMX2 at 92.3001% / 87.3785%.
 The MMX2 residual must therefore be a separate S-CPU/APU phase effect (the
 +30-clock upload offset), not the interrupt sample point.
+
+## MMX2 residual localized to the S-SMP/DSP hand-off phase (2026-11-23)
+
+The 49,253 differing samples are not spread over the run: every one lies in
+**stereo frame 226,560-288,140 (7.071-9.180 s)**. The first 7.071 s and the last
+~0.8 s are bit-exact. Both channels differ (left 24,310, right 24,943).
+
+### The APU port handshake is correct
+
+`PORT_OUT` vs `ARES_APU_LOG` shows the `$2140-$2143` upload stream (reads,
+writes, values) is identical, shifted by one poll iteration. The first
+"divergence" is ours reading the echo byte one poll earlier; the values are the
+same. This does not itself change the audio.
+
+### Every DSP register write matches
+
+`DSP_WRITES_OUT` vs `ARES_DSP_WRITES` gives the same 5,618 writes: identical
+`(address, value)` in identical order. Only the timing columns differ.
+
+### The divergence is the echo delay buffer
+
+`DSP_FULL_TRACE_OUT` vs `ARES_DSP_TRACE` (204 columns, same layout):
+- all per-voice state (envx, envelope, pitch, brr address/offset, buffers) is
+  identical at every sample;
+- `mainvol.output`, `echo.input` and all 5,618 writes match;
+- the first audible difference is `echo.output[0]` (ours 0 vs ares 156) at
+  sample 226,560, with `echo._offset` 8 bytes (two output samples) ahead
+  (ours 2436 vs ares 2428).
+
+The echo read/write/FIR/`echo29` code is line-for-line the same as ares
+(`echoRead`, `echoWrite`, `calculateFIR`, `echo29`), and `_page`/`_delay`/
+`_length` all match, so the pointer lead is an input-timing effect, not an
+algorithm difference.
+
+### Origin: the sound program starts two samples early
+
+At the very first DSP write after the IPL hand-off, ours is already
+**66 micro-steps (~2.06 output samples) early** (`dmicro = -66`, `dsample = -2`)
+and the offset drifts to `+42` by the end of the run. That two-sample lead is
+what places the echo pointer two samples ahead. It is the downstream effect of
+the `$2140` hand-off phase (the S-SMP reaching the uploaded program ~2 samples
+before ares), not of the DSP core, the echo algorithm, or the `$8100` poll loop
+(which only changes which poll iteration sees the echo byte).
+
+So MMX2's remaining audio mismatch is a **2-sample S-SMP/DSP start-phase lead
+at the IPL hand-off**, surfacing only when the echo becomes audible at 7.07 s.
+The next fix must align the S-SMP's entry into the uploaded program with ares
+(the hand-off sample boundary), not alter the DSP pipeline.
