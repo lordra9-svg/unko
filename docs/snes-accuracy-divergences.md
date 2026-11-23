@@ -11667,3 +11667,28 @@ floor, per-access absolute, whole-instruction absolute, `SNES_SYMMETRIC`,
 configurations reaching MMX2 = 0 break five titles, and no combination keeps
 both. A universal fix requires reproducing ares' scheduler at a level this core
 does not currently model.
+
+## Port lead inverts the first handshake for CT (2026-11-23)
+
+S-SMP traces under `SNES_PORT_LEAD=1` vs ares, CT:
+
+```
+idx     ours                       ares
+10162   clk 84598  $FFDC           clk 84590  $FFDC
+10163   clk 84606  $FFE9  (spin)    clk 84594  $FFDE  (transfer)
+```
+
+The first PC divergence is at SMP clock **84,606 (0.041 s)**, i.e. the very first
+`$F4/$F5` handshake of the IPL upload, not gameplay. Under the lead ours takes
+`$FFDC BNE` to `$FFE9` (Y != $F4, spin) while ares falls through to `$FFDE`
+(Y == $F4, transfer): the lead makes our S-SMP observe the `$2140` latch in the
+opposite order to ares at the *first* handshake. MMX2 is the reverse (the lead
+fixes its handshake), so the same `synchronize(smp)`-before-latch step helps one
+program and inverts the other.
+
+This confirms the divergence is the exact ordering of "run S-SMP to CPU clock"
+versus "latch $2140" at the handshake — a scheduler semantics detail, not a
+cadence, DSP phase, or credit quantity. Reproducing it needs ares' actual
+coroutine interleaving (the CPU's `synchronize(smp)` and the SMP's
+`synchronize(cpu)` on port reads both matter and are program-order dependent),
+which this core's event-driven model does not yet express.
