@@ -245,6 +245,14 @@ pub fn port_lead() -> bool {
     *LEAD.get_or_init(|| std::env::var_os("SNES_PORT_LEAD").is_some())
 }
 
+/// `SNES_CA`: drive the S-SMP/S-DSP through the isolated `CaPeer` engine
+/// (default-off cycle-accurate path).
+pub fn ca_enabled() -> bool {
+    use std::sync::OnceLock;
+    static E: OnceLock<bool> = OnceLock::new();
+    *E.get_or_init(|| std::env::var_os("SNES_CA").is_some())
+}
+
 /// `SNES_INSTR_LEAD`: at every S-CPU instruction boundary, finish the S-SMP's
 /// current instruction (ares' `scheduler.synchronize()` before each thread
 /// instruction), carrying the overshoot as negative credit. This is the whole-

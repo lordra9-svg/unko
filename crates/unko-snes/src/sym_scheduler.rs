@@ -851,6 +851,23 @@ impl CaPeer {
         &mut self.engine
     }
 
+    /// Publish the S-CPU clock (the outer driver's current clock).
+    pub fn set_cpu_clock(&mut self, clock: u128) {
+        self.engine.set_cpu_clock(clock);
+    }
+
+    /// Advance one S-SMP instruction, or report a park target. This is the
+    /// **asynchronous** form for a driver that cannot run the S-CPU re-entrantly
+    /// (the `step_sym_sched` outer loop): poll, drive the S-CPU, poll again.
+    pub fn poll(&mut self) -> StepOutcome {
+        self.engine.smp_step_parking()
+    }
+
+    /// Whether the engine has caught up to its published S-CPU clock.
+    pub fn caught_up(&self) -> bool {
+        self.engine.smp_clock() >= self.engine.cpu_clock() && !self.engine.is_parked()
+    }
+
     /// Run the S-SMP toward `cpu_clock`, invoking `run_cpu(target)` whenever an
     /// ahead `$F4-$F7` read parks so the caller can drive the S-CPU.
     pub fn run_to(&mut self, cpu_clock: u128, mut run_cpu: impl FnMut(&mut SymEngine, u128)) {
@@ -1193,5 +1210,42 @@ mod ca_peer_tests {
         assert!(!pulled.is_empty(), "the $F4 read must drive the CPU");
         assert!(peer.engine().smp_clock() >= 4);
         assert_eq!(peer.engine().apu_port(0), 0x5A);
+    }
+}
+
+#[cfg(test)]
+mod ca_async_tests {
+    use super::*;
+
+    #[test]
+    fn async_park_is_reported_and_catch_up_terminates() {
+        let mut core = crate::spc700::Spc700::new();
+        core.pc = 0x0200;
+        let mut engine = SymEngine::new();
+        // `MOV A,$F4` then `BRA -2`.
+        engine.ram[0x0200] = 0xE4;
+        engine.ram[0x0201] = 0xF4;
+        engine.ram[0x0202] = 0x2F;
+        engine.ram[0x0203] = 0xFC;
+        engine.load_core(core);
+        let mut peer = CaPeer::new(engine);
+        let mut cpu = 0u128;
+        let mut parks = 0u32;
+        for _ in 0..16 {
+            peer.set_cpu_clock(cpu);
+            match peer.poll() {
+                StepOutcome::Parked(target) => {
+                    parks += 1;
+                    cpu = target;
+                    peer.engine_mut().write_apu_latch(0, 0x66);
+                }
+                StepOutcome::Ran => {}
+                StepOutcome::Halted => break,
+            }
+            if parks > 0 && peer.caught_up() {
+                break;
+            }
+        }
+        assert!(parks > 0, "an async park must be reported");
     }
 }

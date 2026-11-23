@@ -11997,3 +11997,16 @@ The reusable driver component for the `step_sym_sched` hook is landed:
 Test: a `MOV A,$F4` program parks, the caller writes `$2140`, and the engine
 samples it — validating the exact park outer-loop `step_sym_sched` will run.
 Total lib tests: 258. Default emulator unchanged.
+
+## CA rewrite stage 3d-2: async park interface + `SNES_CA` flag (2026-11-23)
+
+- `apu::ca_enabled()` (`SNES_CA`) selects the isolated engine (default-off).
+- `CaPeer` gained the **asynchronous** driver interface the outer
+  `step_sym_sched` loop needs (it cannot run the S-CPU from inside the CPU
+  coroutine): `set_cpu_clock(clock)`, `poll() -> StepOutcome`, and `caught_up()`.
+  On `Parked(target)` the driver records the target, advances the S-CPU to it in
+  its own loop, then polls again; the parked read samples the updated latch.
+
+Test: an async poll reports the park and `caught_up` terminates once the CPU is
+driven. Total lib tests: 259. The engine is still not wired into `Snes`; the
+default emulator is unchanged.
