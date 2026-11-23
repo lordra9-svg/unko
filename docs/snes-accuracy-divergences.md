@@ -12135,3 +12135,23 @@ bit-exact plan driver (which is the ares-faithful model). Matching it means
 charging `CYCLE_WAIT` for every access — including writes — exactly as the plan's
 `PlanStep.clocks` does, i.e. porting the plan's clock accounting into the
 coroutine engine. The default emulator remains 6/7.
+
+## CA differential debug 3: plan emits 5 access steps, coroutine 2 (2026-11-23)
+
+Instrumented the plan driver's `PlanStep` list for `$FFC9` (`MOV $F4,#$AA`):
+
+```
+PLAN pc=FFC9 steps=[(2,0),(2,0),(2,0),(2,0),(2,1)] sum=10
+```
+
+i.e. **five** access steps of 2 clocks each (the last is the `$F4` port write), while
+the CA coroutine charges 2 steps (4 clocks) for the same instruction. The plan's
+`ApuBus` emits extra idle/wait steps (via its deferred/`idle` access accounting)
+that the coroutine's `ResumeBus` does not. So the CA engine's clock deficit is not
+a single formula: the two buses schedule a different *number* of access steps for
+the same SPC700 instruction.
+
+Porting the plan's accounting into the coroutine therefore means making
+`ResumeBus` emit the identical access-step sequence as `ApuBus` (idle + deferred
+read/write steps), i.e. converging the coroutine onto the plan bus model. No
+behavior change landed; default 6/7.
