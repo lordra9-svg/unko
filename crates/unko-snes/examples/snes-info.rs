@@ -129,6 +129,11 @@ fn main() -> ExitCode {
         system.set_ipl(ipl);
         if std::env::var_os("SNES_CA").is_some() {
             system.install_ca(ipl);
+            if std::env::var_os("CA_TRACE").is_some() {
+                if let Some(ca) = system.ca_mut() {
+                    ca.engine_mut().enable_trace();
+                }
+            }
             println!("ca peer:     installed");
         }
         println!("ipl:         {ipl_path}");
@@ -848,6 +853,15 @@ fn main() -> ExitCode {
             ));
         }
         let _ = std::fs::write(path, out);
+    }
+    if let Some(path) = std::env::var_os("CA_TRACE") {
+        if let Some(ca) = system.ca() {
+            let mut out = String::new();
+            for (index, (clock, pc)) in ca.engine().trace().iter().enumerate() {
+                out.push_str(&format!("{index} {clock} {pc:04X}\n"));
+            }
+            let _ = std::fs::write(path, out);
+        }
     }
     if let Some(path) = std::env::var_os("SPC_TRACE") {
         let mut out = String::new();

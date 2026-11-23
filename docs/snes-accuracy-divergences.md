@@ -12093,3 +12093,21 @@ So neither wait states nor power-on state explains the CA engine's ~69%/29%
 residual. The remaining gap is in the engine's SMP/DSP scheduling or sample/DSP
 phase (its per-instruction clocking differs from the plan driver that keeps six
 titles exact). The fix is kept as correct. 261 lib tests; default unchanged.
+
+## CA differential debug: `Advance` double-counted the SMP clock (2026-11-23)
+
+Added an S-SMP `(clock, PC)` trace to `SymEngine` (`CA_TRACE`) and diffed against
+the bit-exact plan driver (`SPC_TRACE`) on CT.
+
+**Bug found:** `SymEngine` advanced `smp_clock` on both `SpcEvent::StepClock` and
+`SpcEvent::Advance`, whereas ares advances it only in `SMP::step` (`StepClock`);
+`Advance` steps the timers only. That doubled the boot instruction rate
+(8 clocks/instr vs the plan's 4). After the fix the CA CPU trace advances
+4 clocks/instruction, matching the plan.
+
+**Remaining divergence:** the first PC mismatch is at CT instruction **728**, in
+the IPL handshake loop, with the CA engine ~10 clocks *behind* (`$FFD2` plan vs
+`$FFD4` CA) and the gap drifting ~1 clock/instr. Audio is still unchanged
+(CT 29.22%, MMX2 69.22%) because the handshake phase, not the instruction rate,
+decides the transfer branch. This is the same upload-phase class as the default
+MMX2 residual.

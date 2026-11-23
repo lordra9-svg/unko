@@ -487,6 +487,10 @@ pub struct SymEngine {
     external_wait: u8,
     /// A parked `$F4-$F7` read: port index to sample when resumed.
     pending_port: Option<u8>,
+    /// Optional `(S-SMP clock, PC)` per retired instruction (debug).
+    trace: Vec<(u128, u16)>,
+    /// Whether tracing is enabled.
+    trace_enabled: bool,
 }
 
 /// S-SMP clocks per DSP micro-step (24 DSP clocks = 2 S-SMP clocks).
@@ -517,6 +521,8 @@ impl SymEngine {
             internal_wait: 0,
             external_wait: 0,
             pending_port: None,
+            trace: Vec::new(),
+            trace_enabled: false,
         }
     }
 
@@ -543,6 +549,16 @@ impl SymEngine {
     /// Finished samples waiting to be consumed.
     pub fn sample_count(&self) -> usize {
         self.samples.len()
+    }
+
+    /// Enable the `(clock, PC)` instruction trace.
+    pub fn enable_trace(&mut self) {
+        self.trace_enabled = true;
+    }
+
+    /// The recorded trace.
+    pub fn trace(&self) -> &[(u128, u16)] {
+        &self.trace
     }
 
     /// Drain finished audio samples.
@@ -641,12 +657,13 @@ impl SymEngine {
                 SpcResume::Unit
             }
             SpcEvent::Advance(clocks) => {
+                // `Advance` steps the timers only; the S-SMP clock is advanced
+                // by `StepClock` (ares `SMP::step` vs `stepTimers`). Counting it
+                // here too doubled the instruction rate.
                 for (index, timer) in self.timers.iter_mut().enumerate() {
                     let frequency: u16 = if index == 2 { 16 } else { 128 };
                     timer.step(clocks, frequency, self.timers_enable, self.timers_disable);
                 }
-                self.smp_clock += u128::from(clocks);
-                self.rr.set_smp_clock(self.smp_clock);
                 SpcResume::Unit
             }
             SpcEvent::Idle => SpcResume::Unit,
@@ -707,6 +724,9 @@ impl SymEngine {
         let mut input = if let Some(port) = self.pending_port.take() {
             SpcInput::Resume(SpcResume::Byte(self.apu_ports[usize::from(port)]))
         } else if let Some(core) = self.core.take() {
+            if !self.trace.is_empty() || self.trace_enabled {
+                self.trace.push((self.smp_clock, core.pc));
+            }
             SpcInput::Start(core)
         } else {
             return StepOutcome::Halted;
