@@ -412,6 +412,8 @@ pub struct SymEngine {
     cpu_ports: [u8; 4],
     /// S-CPU pull used by ares `SMP::readIO($F4-$F7)` -> `synchronize(cpu)`.
     cpu_pull: Option<Box<dyn FnMut(u128) -> u128>>,
+    ipl: [u8; 64],
+    iplrom_enable: bool,
 }
 
 /// S-SMP clocks per DSP micro-step (24 DSP clocks = 2 S-SMP clocks).
@@ -435,6 +437,8 @@ impl SymEngine {
             apu_ports: [0; 4],
             cpu_ports: [0; 4],
             cpu_pull: None,
+            ipl: [0; 64],
+            iplrom_enable: false,
         }
     }
 
@@ -506,6 +510,9 @@ impl SymEngine {
                     }
                 }
                 SpcResume::Byte(self.apu_ports[usize::from(address - 0x00F4)])
+            }
+            SpcEvent::Read(address) if self.iplrom_enable && address >= 0xFFC0 => {
+                SpcResume::Byte(self.ipl[usize::from(address & 0x3F)])
             }
             SpcEvent::Read(address) => SpcResume::Byte(self.ram[usize::from(address)]),
             SpcEvent::Write(0x00F2, value) => {
@@ -593,6 +600,11 @@ impl SymEngine {
         self.cpu_clock
     }
 
+    /// Value the S-CPU currently sees on `$2140-$2143` (for tests).
+    pub const fn cpu_port(&self, port: u8) -> u8 {
+        self.cpu_ports[port as usize & 3]
+    }
+
     /// Value the S-SMP currently sees on `$F4-$F7` (for tests).
     pub const fn apu_port(&self, port: u8) -> u8 {
         self.apu_ports[port as usize & 3]
@@ -613,6 +625,12 @@ impl SymEngine {
             }
             guard += 1;
         }
+    }
+
+    /// Load the 64-byte IPL ROM and enable it at `$FFC0-$FFFF`.
+    pub fn load_ipl(&mut self, ipl: [u8; 64]) {
+        self.ipl = ipl;
+        self.iplrom_enable = true;
     }
 
     /// Install the S-CPU pull used by the S-SMP's `$F4-$F7` read
@@ -805,5 +823,41 @@ mod pull_tests {
         }
         assert!(pulls > 0, "the $F4 read must pull the S-CPU");
         assert!(engine.cpu_clock() > 0);
+    }
+}
+
+#[cfg(test)]
+mod ipl_tests {
+    use super::*;
+
+    // Real ares `ipl.rom`.
+    const IPL: [u8; 64] = [
+        0xCD, 0xEF, 0xBD, 0xE8, 0x00, 0xC6, 0x1D, 0xD0, 0xFC, 0x8F, 0xAA, 0xF4, 0x8F, 0xBB, 0xF5,
+        0x78, 0xCC, 0xF4, 0xD0, 0xFB, 0x2F, 0x19, 0xEB, 0xF4, 0xD0, 0xFC, 0x7E, 0xF4, 0xD0, 0x0B,
+        0xE4, 0xF5, 0xCB, 0xF4, 0xD7, 0x00, 0xFC, 0xD0, 0xF3, 0xAB, 0x01, 0x10, 0xEF, 0x7E, 0xF4,
+        0x10, 0xEB, 0xBA, 0xF6, 0xDA, 0x00, 0xBA, 0xF4, 0xC4, 0xF4, 0xDD, 0x5D, 0xD0, 0xDB, 0x1F,
+        0x00, 0x00, 0xC0, 0xFF,
+    ];
+
+    #[test]
+    fn engine_runs_the_ipl_boot_handshake() {
+        let mut core = crate::spc700::Spc700::new();
+        core.pc = 0xFFC0;
+        core.sp = 0xEF;
+        let mut engine = SymEngine::new();
+        engine.load_ipl(IPL);
+        engine.load_core(core);
+        engine.set_cpu_clock(0);
+        for _ in 0..5000 {
+            if !engine.smp_step() {
+                break;
+            }
+            if engine.cpu_port(0) == 0xAA && engine.cpu_port(1) == 0xBB {
+                break;
+            }
+        }
+        // ares IPL: after clearing RAM it writes $AA to $F4 and $BB to $F5.
+        assert_eq!(engine.cpu_port(0), 0xAA);
+        assert_eq!(engine.cpu_port(1), 0xBB);
     }
 }

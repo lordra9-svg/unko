@@ -11908,3 +11908,16 @@ tests: 251. The engine is still default-off (not wired into `Snes`).
 A unit test runs an `MOV A,$F4` S-SMP program with a puller installed and
 asserts the S-CPU is pulled and the clock advances. Total lib tests: 252. The
 engine remains default-off; the active emulator is unchanged.
+
+## CA rewrite stage 3a: `SymEngine` runs the real IPL boot (2026-11-23)
+
+`SymEngine` can now load the 64-byte IPL ROM and serve `$FFC0-$FFFF`:
+
+- `load_ipl([u8;64])` + `iplrom_enable`, with IPL reads routed to the ROM when
+  the S-SMP address is `>= $FFC0`;
+- a boot test starts the real `Spc700` at `$FFC0` with the actual ares `ipl.rom`
+  bytes and runs until the boot handshake, asserting the engine produces the
+  IPL's `$F4=$AA` / `$F5=$BB` (S-SMP -> S-CPU) latches.
+
+This validates the isolated engine on real firmware, end to end. Total lib
+tests: 253. The engine remains default-off; the active emulator is unchanged.
