@@ -544,7 +544,7 @@ impl PortDebug {
         &self.events
     }
 
-    /// Captured `(master clock, pc, clocks)` instruction trace.
+    /// Captured `(S-SMP clock, pc, clocks)` instruction trace.
     pub fn trace(&self) -> &[(u64, u16, u32)] {
         &self.trace
     }
@@ -914,7 +914,8 @@ impl Apu {
     pub fn cpu_write(&mut self, port: usize, value: u8) {
         if std::env::var_os("SNES_WRITE_MIDREAD_LOG").is_some() {
             let mid = match self.spc.pending {
-                Some(crate::spc700::Pending::DirectRead { address, .. }) => {
+                Some(crate::spc700::Pending::DirectRead { address, .. })
+                | Some(crate::spc700::Pending::DirectCompareImmediate { address, .. }) => {
                     let effective = (u16::from(self.spc.flags.page) << 8) | u16::from(address);
                     (0x00F4..=0x00F7).contains(&effective)
                 }
@@ -928,7 +929,8 @@ impl Apu {
             }
         }
         let mid_poll = match self.spc.pending {
-            Some(crate::spc700::Pending::DirectRead { address, .. }) => {
+            Some(crate::spc700::Pending::DirectRead { address, .. })
+            | Some(crate::spc700::Pending::DirectCompareImmediate { address, .. }) => {
                 let effective = (u16::from(self.spc.flags.page) << 8) | u16::from(address);
                 (0x00F4..=0x00F7).contains(&effective)
             }
@@ -1020,7 +1022,8 @@ impl Apu {
             return false;
         }
         let effective = match self.spc.pending {
-            Some(crate::spc700::Pending::DirectRead { address, .. }) => {
+            Some(crate::spc700::Pending::DirectRead { address, .. })
+            | Some(crate::spc700::Pending::DirectCompareImmediate { address, .. }) => {
                 (u16::from(self.spc.flags.page) << 8) | u16::from(address)
             }
             Some(crate::spc700::Pending::AbsoluteRead { address, .. }) => address,
@@ -1807,7 +1810,8 @@ impl Apu {
             );
         }
         let pending_address = match self.spc.pending {
-            Some(crate::spc700::Pending::DirectRead { address, .. }) => {
+            Some(crate::spc700::Pending::DirectRead { address, .. })
+            | Some(crate::spc700::Pending::DirectCompareImmediate { address, .. }) => {
                 Some((u16::from(self.spc.flags.page) << 8) | u16::from(address))
             }
             Some(crate::spc700::Pending::AbsoluteRead { address, .. }) => Some(address),
@@ -1836,6 +1840,23 @@ impl Apu {
                 split,
                 dsp_write: None,
             });
+            if matches!(
+                self.spc.pending,
+                Some(crate::spc700::Pending::DirectCompareImmediate { .. })
+            ) {
+                // `CMP dp,#imm` has a trailing idle cycle. The deferred replay
+                // executes it (`Cpu::idle` advances the clock/DSP), but the
+                // recorder never saw it, so add its plan clocks here. Without
+                // this the S-SMP boots two clocks per handshake poll early.
+                let idle = CYCLE_WAIT[usize::from(self.internal_wait.min(3))] * 2;
+                plan.push(PlanStep {
+                    clocks: idle,
+                    port_write: None,
+                    deferred: false,
+                    split: false,
+                    dsp_write: None,
+                });
+            }
             true
         } else {
             false
@@ -1851,7 +1872,8 @@ impl Apu {
         }
         if self.debug.enabled && self.debug.trace.len() < 6_000_000 {
             let clocks: u32 = plan.iter().map(|step| u32::from(step.clocks)).sum();
-            self.debug.trace.push((self.debug.clock, entry_pc, clocks));
+            let tick = u64::try_from(self.smp_clock / SMP_SCALAR).unwrap_or(u64::MAX);
+            self.debug.trace.push((tick, entry_pc, clocks));
         }
         self.plan = plan;
         if !deferred {
@@ -2023,7 +2045,8 @@ impl Apu {
             );
         }
         let pending_address = match self.spc.pending {
-            Some(crate::spc700::Pending::DirectRead { address, .. }) => {
+            Some(crate::spc700::Pending::DirectRead { address, .. })
+            | Some(crate::spc700::Pending::DirectCompareImmediate { address, .. }) => {
                 Some((u16::from(self.spc.flags.page) << 8) | u16::from(address))
             }
             Some(crate::spc700::Pending::AbsoluteRead { address, .. }) => Some(address),
@@ -2067,7 +2090,8 @@ impl Apu {
         }
         if self.debug.enabled && self.debug.trace.len() < 6_000_000 {
             let clocks: u32 = plan.iter().map(|step| u32::from(step.clocks)).sum();
-            self.debug.trace.push((self.debug.clock, entry_pc, clocks));
+            let tick = u64::try_from(self.smp_clock / SMP_SCALAR).unwrap_or(u64::MAX);
+            self.debug.trace.push((tick, entry_pc, clocks));
         }
         self.plan = plan;
         if !deferred {
@@ -2138,7 +2162,8 @@ impl Apu {
     /// Port index of the pending deferred read, if it is `$F4-$F7`.
     fn pending_read_port(&self) -> Option<usize> {
         let address = match self.spc.pending {
-            Some(crate::spc700::Pending::DirectRead { address, .. }) => {
+            Some(crate::spc700::Pending::DirectRead { address, .. })
+            | Some(crate::spc700::Pending::DirectCompareImmediate { address, .. }) => {
                 (u16::from(self.spc.flags.page) << 8) | u16::from(address)
             }
             Some(crate::spc700::Pending::AbsoluteRead { address, .. }) => address,

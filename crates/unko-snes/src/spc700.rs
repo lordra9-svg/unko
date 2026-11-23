@@ -76,6 +76,15 @@ pub enum Pending {
         /// Absolute address.
         address: u16,
     },
+    /// A direct-page compare against an immediate (`CMP dp,#imm`) whose
+    /// operand has been fetched. The immediate precedes the address in the
+    /// instruction stream, so it must be carried across the deferred read.
+    DirectCompareImmediate {
+        /// Immediate byte from the instruction.
+        immediate: u8,
+        /// Direct-page operand (the page is taken from the P flag).
+        address: u8,
+    },
 }
 
 /// SPC700 processor status flags.
@@ -238,6 +247,14 @@ impl Spc700 {
             Some(Pending::AbsoluteRead { opcode, address }) => {
                 let value = self.read(bus, address);
                 self.apply_read(bus, opcode, value);
+                return (self.cycles - start) as u32;
+            }
+            Some(Pending::DirectCompareImmediate { immediate, address }) => {
+                let value = self.load(bus, address);
+                let _ = self.apply_binary(0x78, value, immediate);
+                // The instruction's trailing idle cycle: the read was deferred,
+                // so the recorder never executed it.
+                self.idle(bus);
                 return (self.cycles - start) as u32;
             }
             None => {}
@@ -1006,6 +1023,13 @@ impl Spc700 {
     fn direct_immediate_compare(&mut self, bus: &mut impl SpcBus, opcode: u8) {
         let immediate = self.fetch(bus);
         let address = self.fetch(bus);
+        let effective = (u16::from(self.flags.page) << 8) | u16::from(address);
+        if bus.defer_io_reads() && effective & 0xFFF0 == 0x00F0 {
+            // Sample the operand at the access clock like every other I/O
+            // read; the immediate is already consumed, so carry it.
+            self.pending = Some(Pending::DirectCompareImmediate { immediate, address });
+            return;
+        }
         let value = self.load(bus, address);
         let _ = self.apply_binary(opcode, value, immediate);
         self.idle(bus);

@@ -10996,3 +10996,45 @@ stream (byte-for-byte clocks match through the first 22 port events). SMAS's
 S-SMP PC stream is identical to ares over the whole compared prefix, so the
 residual is the boot port-visibility phase for these two titles, not DSP or
 scheduler timing.
+
+## Deferred `CMP dp,#imm` port reads (2026-11-22)
+
+Following the DMA-edge fix, the CT/MMX2 residual was traced to the IPL's
+`CMP $F4,#$CC` handshake. `direct_immediate_compare` (opcode `0x78`) read its
+direct-page operand through `load()` instead of the deferred/parking read
+path used by `MOV A,$F4`, so the S-SMP sampled the port at record time and
+could not pull the S-CPU to the read clock. The first divergence was IPL
+instruction 7378 (ares read `CC`; this core still read `AA`).
+
+Fix: a `Pending::DirectCompareImmediate { immediate, address }` variant carries
+the already-consumed immediate across the deferred read, and the replay runs
+`load + cmp` followed by the instruction's trailing `idle`. Because the
+recorder never executed that idle (it returned at the deferred read), the
+recorder now appends its plan clocks explicitly; without that the S-SMP booted
+two clocks per poll early (SMAS 50.9%, DKC 70.6%). With both halves the S-SMP
+PC stream matches ares for the whole compared prefix, and the S-SMP clock is
+within a few cycles of ares.
+
+600-frame gate:
+
+```
+dkc    0 differing (100.0000%)   zelda  0 differing (100.0000%)
+fzero  0 differing (100.0000%)   cv4    0 differing (100.0000%)
+smas   0 differing (100.0000%)   ct     343802 (46.2520%)
+mmx2   55202 (91.3700%)
+```
+
+CT gains 0.64 points and MMX2 9.26 points (82.1068% -> 91.3700%) with no
+regression on the five exact titles.
+
+Remaining CT/MMX2 residual: the S-SMP **upload poll**. Around SMP clock
+1,704,290 the driver's `MOV A,$F4; BEQ` loop (APU `$0D3E`/`$0D40`) exits one
+iteration earlier here than in ares; ares executes one extra poll (two
+instructions, ~14 S-SMP clocks) before the S-CPU's next upload byte becomes
+visible. Each such event moves the S-SMP clock by ~14 cycles (the S-DSP tick
+count follows the S-SMP clock: a `-7` micro-step difference was measured at
+the first divergent DSP write at `$7F`, sample 26,757). A global
+`SNES_DSP_PRIME` (6..14) makes CT exact over 170 frames and raises MMX2, but
+breaks the five exact titles, confirming the offset is title-specific: the
+fix belongs in the `$F4/$F5` upload handshake (port visibility/park phase),
+not in the DSP clock.
