@@ -12434,3 +12434,37 @@ counter to an S-SMP that reads it immediately; MMX2 pairs `$2140`/`$2141` and
 depends on the write landing after the SMP's synchronize). Resolving it needs
 the combined S-CPU/S-SMP instruction interleaving (ares' single scheduler),
 not a port-level or timing-level change. Default remains 6/7.
+
+## Research: CT's latch divergence is the same IPL handshake, opposite direction (2026-11-23)
+
+The first S-SMP instruction divergence in CT under `SNES_CPU_LATCH_TIME` is at
+instruction 7378 (0.03 s), in the IPL boot poll:
+
+```
+ours: FFCF/FFD2 (spin, $F4 != 0)
+ares: FFD4/FFEF (transfer, $F4 == 0)
+```
+
+This is the *reverse* of MMX2's divergence (ares spins, we transfer). So the two
+titles need opposite `$2140` visibility at the identical IPL instruction. That is
+not a port- or offset-level rule; it is the relative S-CPU/S-SMP **phase**.
+
+## Research: existing combined scheduler is whole-instruction granularity (2026-11-23)
+
+`SNES_SYM_SCHED` (the scaffolded symmetric scheduler) measures:
+
+| title | sym_sched | direct-NMI model | default |
+|---|---|---|---|
+| CT | 452725 (29.2237%) | 452725 (29.2237%) | **0** |
+| DKC | 368744 (42.3528%) | 368744 (42.3528%) | **0** |
+| MMX2 | 196857 (69.2246%) | 196820 (69.2303%) | 49253 (92.3001%) |
+
+CT is **byte-identical** to the direct-NMI stream. Sweeping the NMI service
+delay (env override 0/8/16/22/30/38) changes CT and DKC by *zero* samples and
+MMX2 by <10. So the sym path is not using the per-access NMI clock at all: it
+advances in whole CPU instructions, so the line/`+22` selection is inert. It is
+the direct-trigger model in disguise, i.e. not ares' per-access interleaving.
+
+Making it faithful requires the real per-access S-CPU/S-SMP round-robin with the
+`lastCycle` sample, which is the multi-session rebuild; the current scaffold
+cannot be tuned into it. Default remains 6/7.
