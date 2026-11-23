@@ -11930,3 +11930,18 @@ count, 4-bit stage3) and wires `$F1` (enable/disable), `$FA-$FC` (targets) and
 `$FD-$FF` (read/clear). Timers step on each S-SMP `Advance`. Two tests pin the
 frequency and the read/clear behavior; total lib tests: 255. Engine remains
 default-off; the active emulator is unchanged.
+
+## CA rewrite stage 3c-1: per-step CPU pull + `advance_to_cpu` (2026-11-23)
+
+`SymEngine` now exposes the scheduler entry the `SNES_CA` adapter will call:
+
+- `smp_step_pulling(&mut dyn FnMut(u128)->u128)` — executes one S-SMP
+  instruction and, on an ahead `$F4-$F7` read, invokes the borrowed S-CPU pull
+  (ares `SMP::readIO -> synchronize(cpu)`). The puller is per-call, so it can
+  borrow the live S-CPU (no `'static` box).
+- `advance_to_cpu(cpu_clock, cpu_step)` — runs the S-SMP to the S-CPU clock
+  (invoking `cpu_step` on a port-read pull) and catches the S-DSP up; this is
+  ares' scheduler step from the S-CPU side.
+
+Tests: the S-SMP runs to the targets, the DSP advances, and a `MOV A,$F4`
+program pulls the S-CPU. Total lib tests: 256. Engine remains default-off.

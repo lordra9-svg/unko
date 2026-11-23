@@ -465,8 +465,6 @@ pub struct SymEngine {
     apu_ports: [u8; 4],
     /// S-SMP -> S-CPU `$F4-$F7` latches (read by the S-CPU as `$2140-$2143`).
     cpu_ports: [u8; 4],
-    /// S-CPU pull used by ares `SMP::readIO($F4-$F7)` -> `synchronize(cpu)`.
-    cpu_pull: Option<Box<dyn FnMut(u128) -> u128>>,
     ipl: [u8; 64],
     iplrom_enable: bool,
     timers: [SymTimer; 3],
@@ -494,7 +492,6 @@ impl SymEngine {
             dsp_address: 0,
             apu_ports: [0; 4],
             cpu_ports: [0; 4],
-            cpu_pull: None,
             ipl: [0; 64],
             iplrom_enable: false,
             timers: [SymTimer::default(); 3],
@@ -549,7 +546,11 @@ impl SymEngine {
     }
 
     /// Answer one bus event from the S-SMP coroutine.
-    fn handle(&mut self, event: crate::spc_coroutine::SpcEvent) -> crate::spc_coroutine::SpcResume {
+    fn handle(
+        &mut self,
+        event: crate::spc_coroutine::SpcEvent,
+        pull: &mut dyn FnMut(u128) -> u128,
+    ) -> crate::spc_coroutine::SpcResume {
         use crate::spc_coroutine::{SpcEvent, SpcResume};
         match event {
             SpcEvent::Wait(Some(address)) if (0x00F0..=0x00FF).contains(&address) => {
@@ -565,12 +566,10 @@ impl SymEngine {
             SpcEvent::Read(address @ 0x00F4..=0x00F7) => {
                 // ares `SMP::readIO`: synchronize(cpu) before sampling the port.
                 if self.smp_clock > self.cpu_clock {
-                    if let Some(pull) = self.cpu_pull.as_mut() {
-                        let next = pull(self.smp_clock);
-                        if next > self.cpu_clock {
-                            self.cpu_clock = next;
-                            self.rr.set_cpu_clock(next);
-                        }
+                    let next = pull(self.smp_clock);
+                    if next > self.cpu_clock {
+                        self.cpu_clock = next;
+                        self.rr.set_cpu_clock(next);
                     }
                 }
                 SpcResume::Byte(self.apu_ports[usize::from(address - 0x00F4)])
@@ -631,6 +630,14 @@ impl SymEngine {
     ///
     /// Returns `false` when there is no core to run.
     pub fn smp_step(&mut self) -> bool {
+        let current = self.cpu_clock;
+        self.smp_step_pulling(&mut |_| current)
+    }
+
+    /// Execute one S-SMP instruction, invoking `pull` (ares
+    /// `SMP::readIO -> synchronize(cpu)`) when a `$F4-$F7` read is ahead of the
+    /// S-CPU clock.
+    pub fn smp_step_pulling(&mut self, pull: &mut dyn FnMut(u128) -> u128) -> bool {
         use crate::spc_coroutine::{SpcEvent, SpcInput};
         let Some(core) = self.core.take() else {
             return false;
@@ -644,12 +651,34 @@ impl SymEngine {
                     return true;
                 }
                 corosensei::CoroutineResult::Yield(event) => {
-                    let resume = self.handle(event);
+                    let resume = self.handle(event, pull);
                     input = SpcInput::Resume(resume);
                 }
                 corosensei::CoroutineResult::Return(()) => return false,
             }
         }
+    }
+
+    /// ares scheduler step from the S-CPU side: run the S-SMP and S-DSP up to
+    /// `cpu_clock`, invoking `cpu_step(target)` (which returns the new S-CPU
+    /// clock) whenever an S-SMP `$F4-$F7` read is ahead (ares
+    /// `SMP::readIO -> synchronize(cpu)`).
+    ///
+    /// This is the entry the `SNES_CA` adapter uses to drive the isolated
+    /// engine from [`crate::system::Snes`].
+    pub fn advance_to_cpu(&mut self, cpu_clock: u128, mut cpu_step: impl FnMut(u128) -> u128) {
+        if cpu_clock > self.cpu_clock {
+            self.cpu_clock = cpu_clock;
+            self.rr.set_cpu_clock(cpu_clock);
+        }
+        let mut guard = 0u32;
+        while self.smp_clock < self.cpu_clock && guard < 2_000_000 {
+            if !self.smp_step_pulling(&mut cpu_step) {
+                break;
+            }
+            guard += 1;
+        }
+        self.catch_dsp_to_smp();
     }
 
     /// Run `micro_steps` DSP micro-steps, pulling the S-SMP to each DSP clock
@@ -716,13 +745,6 @@ impl SymEngine {
     pub fn load_ipl(&mut self, ipl: [u8; 64]) {
         self.ipl = ipl;
         self.iplrom_enable = true;
-    }
-
-    /// Install the S-CPU pull used by the S-SMP's `$F4-$F7` read
-    /// (ares `SMP::readIO` -> `synchronize(cpu)`). The callback receives the
-    /// S-SMP clock and returns the new S-CPU clock.
-    pub fn set_cpu_puller(&mut self, f: impl FnMut(u128) -> u128 + 'static) {
-        self.cpu_pull = Some(Box::new(f));
     }
 
     /// ares `CPU::writeAPU`: synchronize the S-SMP to the S-CPU clock, then
@@ -895,13 +917,13 @@ mod pull_tests {
         engine.load_core(core);
         engine.set_cpu_clock(0);
         let mut pulls = 0u32;
-        engine.set_cpu_puller(|smp| {
-            // model the S-CPU running forward in 8-clock steps.
+        let mut pull = |smp: u128| {
+            // model the S-CPU running forward to the S-SMP clock.
             smp
-        });
+        };
         // Run enough S-SMP instructions to execute the port read.
         for _ in 0..64 {
-            engine.smp_step();
+            engine.smp_step_pulling(&mut pull);
             if engine.cpu_clock() > 0 {
                 pulls += 1;
             }
@@ -971,5 +993,35 @@ mod timer_tests {
         let value = timer.read();
         assert!(value >= 1);
         assert_eq!(timer.read(), 0);
+    }
+}
+
+#[cfg(test)]
+mod advance_tests {
+    use super::*;
+
+    fn loop_engine() -> SymEngine {
+        let mut core = crate::spc700::Spc700::new();
+        core.pc = 0x0200;
+        let mut engine = SymEngine::new();
+        engine.ram[0x0200] = 0x2F; // BRA -2
+        engine.ram[0x0201] = 0xFE;
+        engine.load_core(core);
+        engine
+    }
+
+    #[test]
+    fn advance_to_cpu_runs_the_smp_and_dsp() {
+        let mut engine = loop_engine();
+        let mut cpu_clock = 0u128;
+        engine.advance_to_cpu(512, |target| {
+            // model the S-CPU stepping in 6-clock units until it reaches target.
+            while cpu_clock < target {
+                cpu_clock += 6;
+            }
+            cpu_clock
+        });
+        assert!(engine.smp_clock() >= 512, "smp={}", engine.smp_clock());
+        assert!(engine.dsp_units() > 0);
     }
 }
