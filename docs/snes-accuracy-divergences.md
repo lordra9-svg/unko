@@ -11847,3 +11847,35 @@ The remaining difference is the S-CPU/S-SMP race at MMX2's specific mid-game
 upload: our S-SMP reaches the uploaded program 4 micro-steps early there, and
 every synchronization variant either keeps that offset or breaks the six titles
 whose uploads occur at boot with different timing.
+
+## Cycle-accurate core rewrite: foundation landed (2026-11-23)
+
+The full cycle-accurate rewrite is authorized. It is a multi-session project;
+this commit lands its first verifiable block and the staged plan.
+
+### Landed: ares fixed-point thread-clock primitives
+
+`sym_scheduler.rs` (default-off scaffolding, already documented there) now has
+the ares scheduler arithmetic the rewrite depends on:
+
+- `ThreadClock` — `scalar = Second / frequency` with `Second = 2^63-1`,
+  `step(clocks)` = `clock += scalar*clocks`, `cycles()`, `is_behind()`;
+- `synchronize(thread, target, main)` — ares
+  `while(thread.clock() < target) co_switch(thread)`, with the thread entry
+  advancing its own clock.
+
+Unit tests pin the scalars (`SMP = Second/2050560`, `DSP = Second/24606720`),
+whole-cycle stepping, catch-up termination, and the park/stop path. 4 new tests;
+`cargo test -p unko-snes --lib` is 248 passed.
+
+### Staged plan (acceptance: 7-title gate all 0 differing + 212/212)
+
+1. **done** — absolute fixed-point thread clocks + `synchronize` semantics.
+2. Build the three mutually-resumable threads on `spc_coroutine` (access-level
+   S-SMP suspend points) and `DspCoroutine` (micro-step suspend points), driving
+   the real `Spc700`/`Dsp` cores; validate the IPL handshake against ares golden
+   traces at access granularity.
+3. Wire as `SNES_CA` (default-off), run the 7-title 600-frame gate; only make
+   default if all seven reach 0 differing and the 212/212 baseline is green.
+
+The active emulator is unchanged; the verified default remains 6/7.

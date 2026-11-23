@@ -159,6 +159,88 @@ mod tests {
     }
 }
 
+/// ares `Thread::Second`: the fixed-point base of the scheduler clocks.
+pub const SECOND: u128 = (1u128 << 63) - 1;
+
+/// One ares `Thread` clock: an absolute fixed-point value plus the scalar that
+/// converts hardware clocks to it.
+///
+/// ares `Thread::setFrequency(f)` stores `_frequency = f + 0.5` (as a `u64`,
+/// so integer frequencies are unchanged) and `_scalar = Second / _frequency`.
+/// `Thread::step(clocks)` then does `_clock += _scalar * clocks`. Reproducing
+/// this arithmetic exactly is the prerequisite for the cycle-accurate rewrite;
+/// the emulator's active driver still uses its own carried-credit model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThreadClock {
+    scalar: u128,
+    clock: u128,
+}
+
+impl ThreadClock {
+    /// ares `Thread::create(frequency)`: zero clock, `scalar = Second / f`.
+    pub fn new(frequency: u64) -> Self {
+        Self {
+            scalar: SECOND / u128::from(frequency.max(1)),
+            clock: 0,
+        }
+    }
+
+    /// Create at an explicit initial clock (ares `Scheduler::power`).
+    pub fn with_clock(frequency: u64, clock: u128) -> Self {
+        let mut thread = Self::new(frequency);
+        thread.clock = clock;
+        thread
+    }
+
+    /// Fixed-point units per hardware clock.
+    pub const fn scalar(&self) -> u128 {
+        self.scalar
+    }
+
+    /// The absolute fixed-point clock.
+    pub const fn clock(&self) -> u128 {
+        self.clock
+    }
+
+    /// Set the absolute clock (ares `Thread::setClock`).
+    pub fn set_clock(&mut self, clock: u128) {
+        self.clock = clock;
+    }
+
+    /// ares `Thread::step(clocks)`.
+    pub fn step(&mut self, clocks: u32) {
+        self.clock += self.scalar * u128::from(clocks);
+    }
+
+    /// The clock in whole hardware cycles: `clock() / scalar()`.
+    pub fn cycles(&self) -> u64 {
+        u64::try_from(self.clock / self.scalar).unwrap_or(u64::MAX)
+    }
+
+    /// Whether this thread is behind `target` and must be run.
+    pub const fn is_behind(&self, target: u128) -> bool {
+        self.clock < target
+    }
+}
+
+/// ares `Thread::synchronize(thread)`: run `main` until `thread` reaches
+/// `target`, i.e. `while(thread.clock() < target) co_switch(thread)`.
+///
+/// `main` is responsible for advancing `thread`'s clock (ares' thread entry
+/// does this inside `Thread::step`). Returning `false` stops the catch-up (used
+/// when a thread parks on an S-CPU pull).
+pub fn synchronize(
+    thread: &mut ThreadClock,
+    target: u128,
+    mut main: impl FnMut(&mut ThreadClock) -> bool,
+) {
+    while thread.is_behind(target) {
+        if !main(thread) {
+            break;
+        }
+    }
+}
+
 /// Input to the S-DSP coroutine.
 #[derive(Debug)]
 pub enum DspInput {
@@ -500,5 +582,57 @@ mod engine_tests {
         // ahead of the four scheduler ticks; the invariant is the SMP clock
         // keeping up with the DSP.
         assert!(engine.smp_clock() >= engine.dsp_units());
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+
+    #[test]
+    fn scalars_match_ares_thread_create() {
+        let smp = ThreadClock::new(2_050_560);
+        let dsp = ThreadClock::new(24_606_720);
+        assert_eq!(smp.scalar(), SECOND / 2_050_560);
+        assert_eq!(dsp.scalar(), SECOND / 24_606_720);
+        // DSP runs 12x the S-SMP, so its scalar is ~1/12.
+        assert!(dsp.scalar() * 12 < smp.scalar() * 13);
+    }
+
+    #[test]
+    fn step_advances_whole_cycles() {
+        let mut t = ThreadClock::new(2_050_560);
+        t.step(64);
+        assert_eq!(t.cycles(), 64);
+        t.step(0);
+        assert_eq!(t.cycles(), 64);
+    }
+
+    #[test]
+    fn synchronize_runs_until_caught_up() {
+        let mut other = ThreadClock::new(1_000);
+        let target = ThreadClock::new(1_000).scalar() * 10; // 10 cycles
+        let mut runs = 0;
+        synchronize(&mut other, target, |t| {
+            runs += 1;
+            t.step(3);
+            true
+        });
+        assert!(other.clock() >= target);
+        assert_eq!(runs, 4); // 3,6,9,12 cycles
+    }
+
+    #[test]
+    fn synchronize_stops_when_main_parks() {
+        let mut other = ThreadClock::new(1_000);
+        let target = 10_000 * other.scalar();
+        let mut calls = 0;
+        synchronize(&mut other, target, |t| {
+            calls += 1;
+            t.step(1);
+            calls < 2
+        });
+        assert_eq!(calls, 2);
+        assert!(other.is_behind(target));
     }
 }
