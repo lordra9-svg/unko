@@ -1424,7 +1424,13 @@ impl Snes {
                         break;
                     }
                 }
-                _ => self.apu.dsp_step_one(),
+                _ => {
+                    if crate::apu::dsp_sample_atomic() {
+                        self.apu.dsp_step_sample();
+                    } else {
+                        self.apu.dsp_step_one();
+                    }
+                }
             }
             if done {
                 break;
@@ -1456,6 +1462,8 @@ impl Snes {
                 if !self.apu.smp_step_one() {
                     break;
                 }
+            } else if crate::apu::dsp_sample_atomic() {
+                self.apu.dsp_step_sample();
             } else {
                 self.apu.dsp_step_one();
             }

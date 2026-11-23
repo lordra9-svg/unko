@@ -484,6 +484,14 @@ const DSP_SCALAR: u128 = SCHEDULER_SECOND / DSP_FREQUENCY;
 const SMP_SCALAR: u128 = SCHEDULER_SECOND / SMP_FREQUENCY;
 /// One DSP `tick()` steps the thread by `3 * 8` DSP clocks.
 const DSP_TICK: u128 = 24 * DSP_SCALAR;
+/// Experimental: run the S-DSP one whole 32-step sample at a time (ares
+/// `DSP::main` is atomic in the coroutine scheduler), so an S-SMP register
+/// write can never take effect mid-sample.
+pub fn dsp_sample_atomic() -> bool {
+    use std::sync::OnceLock;
+    static E: OnceLock<bool> = OnceLock::new();
+    *E.get_or_init(|| std::env::var_os("SNES_DSP_SAMPLE_ATOMIC").is_some())
+}
 use crate::spc700::{Spc700, SpcBus};
 
 /// Which side produced a port event and in which direction.
@@ -1741,6 +1749,14 @@ impl Apu {
             }
         }
         self.dsp_clock += DSP_TICK;
+    }
+
+    /// Advance the S-DSP by one whole 32-step sample, mirroring ares
+    /// `DSP::main` being atomic in the cooperative scheduler.
+    pub fn dsp_step_sample(&mut self) {
+        for _ in 0..32 {
+            self.dsp_step_one();
+        }
     }
 
     fn record_instruction(&mut self) {

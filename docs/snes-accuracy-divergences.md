@@ -11472,3 +11472,19 @@ So the ARAM comparison neither proves nor disproves a content bug at
 frame-granularity; resolving it needs a same-clock ARAM dump. The upload
 handshake remains the only measured divergence (one poll iteration), and it is
 sub-frame.
+
+## Experimental whole-sample DSP stepping (`SNES_DSP_SAMPLE_ATOMIC`)
+
+ares `DSP::main` runs a whole 32-micro-step sample atomically in the coroutine
+scheduler, so an S-SMP DSP-register write can never take effect mid-sample. Our
+scheduler interleaves the DSP one micro-step at a time, which in principle lets
+a write land mid-sample.
+
+An experimental default-off path (`SNES_DSP_SAMPLE_ATOMIC`, `Apu::dsp_step_sample`
+= 32x `dsp_step_one` in both scheduler loops) reproduces the atomic stepping.
+
+Result: the MMX2 output is **byte-identical** with and without the flag, and
+`dkc/smas/ct` stay bit-exact. So mid-sample register application is not the MMX2
+cause; the DSP stepping granularity does not change the produced samples for
+these titles. The flag is retained default-off as a documented negative result
+and a tool for further APU timing experiments.
