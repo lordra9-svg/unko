@@ -11945,3 +11945,20 @@ default-off; the active emulator is unchanged.
 
 Tests: the S-SMP runs to the targets, the DSP advances, and a `MOV A,$F4`
 program pulls the S-CPU. Total lib tests: 256. Engine remains default-off.
+
+## CA rewrite stage 3c-2 blocked: parking the `$F4` read in `SymEngine` (2026-11-23)
+
+Attempted the `Parked{target}` protocol (`smp_step_parking`: on an ahead
+`$F4-$F7` read, return the S-SMP clock the S-CPU must reach, then resume and
+sample the latch). It could not be validated in isolation: a test program
+`MOV A,#0; MOV A,$F4` retires the second instruction without the engine ever
+yielding `SpcEvent::Read($F4)` on the parking path, whereas the closure path
+(`smp_step_pulling`) does see `Read(0x00F4)` with `smp > cpu`. So the recorder's
+per-resume instruction state does not emit the direct-page data read when the
+step is driven instruction-by-instruction, which the parked protocol requires.
+
+Reverted to the green state (`09e48da`, 256 tests). The next CA step is a
+recorder fix: make `SpcCoroutine` emit the direct-page `$F4-$F7` data read
+deterministically on the first resume that reaches it, independent of whether
+the caller batches the whole instruction. Only then can `smp_step_parking` be
+validated and wired into `step_sym_sched`.
