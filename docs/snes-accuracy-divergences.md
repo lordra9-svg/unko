@@ -12303,3 +12303,17 @@ The residual is solely the interrupt-service instruction selection (ares
 `lastCycle` per instruction), confirming that only exact per-instruction
 sampling can close MMX2. Any global timing change fixes the attribution on one
 frame and breaks it on another.
+
+## Research: the ±40 is DRAM-refresh attribution; the CPU clock is ares-exact (2026-11-23)
+
+Logging the DRAM refresh charge shows it fires once per scanline (~1364 master
+clocks) and lands at `$8100`/`$8103` in the poll loop. The trace's ±40
+per-instruction differences are this 40-clock refresh stall, attributed to a
+different instruction of the same loop pair; the **pair total is identical**.
+
+Consequence: the S-CPU clock at every poll-loop boundary is **identical to
+ares**. The "+30 CPU phase" premise is therefore refuted: our S-CPU is
+cycle-exact across the upload window (all 336 cost differences are the ±40
+refresh attribution, and they cancel pairwise). The MMX2 divergence is not a
+CPU cycle-accounting error and not a CPU phase drift — it is on the S-SMP/DSP
+side of the hand-off, where the relative phase shifts despite the CPU matching.
