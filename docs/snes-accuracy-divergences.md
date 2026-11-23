@@ -12565,3 +12565,30 @@ instruction count is not a unit mismatch either. The remaining difference is
 the coroutine cadence itself (which step boundaries the S-SMP yields at and how
 `SpcResume::Clocks` is counted), not port synchronization. Reverted; default
 remains 6/7.
+
+## Research: sym boot handshake takes 730 spins vs immediate in default (2026-11-23)
+
+Measured the actual `$2140/$2141` reads at the first sym divergence `$C7005A`
+(`CPX $2140`, X = `$BBAA`):
+
+```
+C70050: A9 F0     LDA #$F0
+C70052: 8D 41 21  STA $2141
+C70055: A9 FF     LDA #$FF
+C70057: 8D 40 21  STA $2140
+C7005A: EC 40 21  CPX $2140    ; waits for S-SMP echo $BBAA
+C7005D: D0 F1     BNE $C70050
+```
+
+Under `SNES_SYM_SCHED` the CPU reads 00/00 for **730 iterations** (~87 k master
+clocks) before the IPL echo appears; in default it resolves almost immediately.
+So the boot deadlock is the scheduler failing to give the S-SMP timely headway
+during the handshake — the S-SMP is *ahead in clock* but paused mid-instruction,
+which is why adding ares' `synchronize(smp)` catch-up (a `smp_clock >= cpu`
+loop) is a no-op: it never resumes the paused thread.
+
+This is the concrete cadence defect: ares' `synchronize` co-switches to the
+target thread and *runs it* until its clock catches up, whereas the sym path's
+`smp_fixed >= cpu_fixed` guard exits while the S-SMP coroutine is suspended.
+Fixing it requires resuming the S-SMP at the handshake, not just comparing
+clocks — part of the full `Scheduler`/`Thread` rebuild. Default remains 6/7.
