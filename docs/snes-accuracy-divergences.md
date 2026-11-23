@@ -11789,3 +11789,35 @@ lead is the only one with MMX2 exact.
 This is the end of the event-model space: all 4 synchronize granularities × all
 read-pull/latch flags were measured, plus 3 symmetric schedulers and 3 DSP-phase
 models. None reaches 7/7.
+
+## The scheduler is already ares-faithful; the rewrite cannot fix MMX2 (2026-11-23)
+
+Reading ares `SMP::step` (timing.cpp) gives the exact mutual semantics:
+
+```
+SMP::step(clocks) { Thread::step(clocks); Thread::synchronize(cpu); Thread::synchronize(dsp); }
+SMP::readIO($F4)  { synchronize(cpu); return io.apu0; }
+```
+
+So after **every S-SMP access** the CPU is run forward to the S-SMP clock
+(mid-instruction), and the `$F4-$F7` read also pulls the CPU. That is the mutual
+scheduler. The codebase already implements it (`SNES_MUTUAL`, `SNES_ACCESS_FLUSH`):
+
+| configuration | MMX2 | CT |
+|---|---|---|
+| default | 49253 (92.3001%) | 0 |
+| `SNES_MUTUAL` | 49253 | 0 |
+| `SNES_ACCESS_FLUSH` | 49253 | 0 |
+| `SNES_PER_ACCESS_MUTUAL` | 108108 (83.10%) | 415343 (35.07%) |
+
+And `cmp` shows `SNES_MUTUAL` output is **byte-identical to the default** for both
+MMX2 and CT. Therefore the default already matches ares' scheduler semantics at
+the observable output, and a from-scratch scheduler rewrite would reproduce
+exactly this 6/7 result — it cannot fix MMX2.
+
+Conclusion: the remaining MMX2 divergence is **not** the APU/S-CPU scheduler. Two
+facts point elsewhere: (1) the only non-exact title is also the only CX4
+(Super FX-style co-processor) title, and (2) the divergence is a 4-micro-step
+S-SMP phase at the IPL handshake that the faithful scheduler reproduces as
+correct for the six non-CX4 titles. The next investigation should be the CX4's
+concurrent effect on S-CPU timing during the upload, not another scheduler.
