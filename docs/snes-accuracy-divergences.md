@@ -11488,3 +11488,33 @@ Result: the MMX2 output is **byte-identical** with and without the flag, and
 cause; the DSP stepping granularity does not change the produced samples for
 these titles. The flag is retained default-off as a documented negative result
 and a tool for further APU timing experiments.
+
+## MMX2 is a +4 micro-step DSP phase at the upload hand-off (2026-11-23)
+
+Two independent knobs were used to probe the DSP write-application phase:
+
+| knob | meaning | MMX2 | CT |
+|---|---|---|---|
+| default | - | 49253 (92.3001%) | 0 |
+| `SNES_DSP_PRIME=4` | prime the DSP catch-up by 4 micro-steps | **0 (100.0000%)** | 232868 (63.5948%) |
+| `SNES_DSP_PRIME=5` | +5 | 3092 (99.5166%) | 238075 (62.7808%) |
+| `SNES_DSP_PRIME=6` | +6 | 20959 (96.7234%) | 238081 (62.7798%) |
+| new `SNES_DSP_WRITE_DELAY=5` | defer DSP register decode 4 micro-steps | **0 (100.0000%)** | - |
+| same, delay 4 / 6 | 3 / 5 micro-steps | 26520 / 3092 | - |
+
+So MMX2 becomes **bit-exact** with a +4 micro-step DSP phase (via either a global
+catch-up prime or a per-write decode deferral), while the six titles that are
+already exact require +0 and are broken by the same shift.
+
+This pins the residual precisely: our S-SMP reaches its DSP register writes
+**4 micro-steps earlier (8 S-SMP clocks)** than ares for MMX2, but at the same
+phase for CT (`CT`'s write micro-step delta is 0 for all 12,517 writes; MMX2's
+is -4 for 80% of its 5,618 writes). Because the S-SMP program and all DSP
+register writes/values match, this phase difference comes from the **upload
+handshake instruction timing** (the IPL `$FFDE`/`$FFE9` divergence), not from
+the DSP core or the write pipeline.
+
+A universal fix therefore has to make the S-SMP execute the upload handshake in
+the same number of clocks as ares; a constant phase shift cannot do it (it
+trades one title for six). The two DSP-phase knobs above remain as default-off
+experimental tools for that work.
