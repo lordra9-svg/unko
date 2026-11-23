@@ -1374,6 +1374,58 @@ impl Snes {
     /// which reproduces ares' `Thread::synchronize` recursion without growing
     /// the Rust stack and lets the S-SMP and S-DSP pull the S-CPU at the same
     /// clocks ares uses.
+    /// Drive the installed cycle-accurate peer to the current S-CPU clock,
+    /// parking when an S-SMP port read needs the S-CPU moved forward (the next
+    /// `Advance` resumes it).
+    fn ca_drive(&mut self) {
+        // Engine clocks are S-SMP cycles; convert the S-CPU master clock.
+        let clock = u128::from(self.clock) * 2_050_560 / u128::from(self.region.master_clock());
+        let Some(ca) = self.ca.0.as_mut() else {
+            return;
+        };
+        ca.set_cpu_clock(clock);
+        let mut guard = 0u32;
+        loop {
+            if ca.caught_up() || guard > 1_000_000 {
+                break;
+            }
+            match ca.poll() {
+                crate::sym_scheduler::StepOutcome::Parked(target) => {
+                    if target > clock {
+                        break;
+                    }
+                }
+                crate::sym_scheduler::StepOutcome::Ran => {}
+                crate::sym_scheduler::StepOutcome::Halted => break,
+            }
+            guard += 1;
+        }
+    }
+
+    /// Handle an S-CPU `$2140-$2143` access against the CA peer, if installed.
+    fn ca_port_response(
+        &mut self,
+        request: crate::cpu_coroutine::BusRequest,
+    ) -> Option<crate::cpu_coroutine::BusResponse> {
+        use crate::cpu_coroutine::{BusRequest, BusResponse};
+        let is_port = |address: u32| {
+            address & 0x40_FF00 == 0x2100 && (0x2140..=0x2143).contains(&(address & 0xFFFF))
+        };
+        let ca = self.ca.0.as_mut()?;
+        match request {
+            BusRequest::Read { address, .. } if is_port(address) => {
+                let port = ((address & 0xFFFF) - 0x2140) as u8;
+                Some(BusResponse::Byte(ca.engine().cpu_port(port)))
+            }
+            BusRequest::Write { address, value } if is_port(address) => {
+                let port = ((address & 0xFFFF) - 0x2140) as u8;
+                ca.engine_mut().write_apu_latch(port, value);
+                Some(BusResponse::None)
+            }
+            _ => None,
+        }
+    }
+
     fn step_sym_sched(&mut self) -> u32 {
         use crate::cpu_coroutine::{BusRequest, CpuInput, CpuOutput};
         let cpu = std::mem::take(&mut self.cpu);
@@ -1383,6 +1435,7 @@ impl Snes {
             .take()
             .unwrap_or_else(crate::cpu_coroutine::new_coroutine);
         self.apu_actor_driven = true;
+        let use_ca = self.ca.0.is_some();
         let cpu_scalar = crate::apu::scheduler_cpu_scalar(self.region.master_clock());
         let mut input = Some(CpuInput::Start(cpu));
         let mut cycles = 0u32;
@@ -1392,7 +1445,7 @@ impl Snes {
             let cpu_fixed = u128::from(self.clock) * cpu_scalar;
             let smp_fixed = self.apu.smp_fixed_clock();
             let dsp_fixed = self.apu.dsp_fixed_clock();
-            let pick = if cpu_fixed <= smp_fixed && cpu_fixed <= dsp_fixed {
+            let pick = if use_ca || (cpu_fixed <= smp_fixed && cpu_fixed <= dsp_fixed) {
                 0
             } else if smp_fixed <= dsp_fixed {
                 1
@@ -1405,8 +1458,19 @@ impl Snes {
                         corosensei::CoroutineResult::Yield(CpuOutput::Request(request)) => {
                             let stepped =
                                 matches!(request, BusRequest::Advance { .. } | BusRequest::Idle);
-                            input = Some(CpuInput::Response(self.handle_cpu_request(request)));
+                            let ca_response = if use_ca {
+                                self.ca_port_response(request)
+                            } else {
+                                None
+                            };
+                            input = Some(CpuInput::Response(match ca_response {
+                                Some(response) => response,
+                                None => self.handle_cpu_request(request),
+                            }));
                             if stepped {
+                                if use_ca {
+                                    self.ca_drive();
+                                }
                                 break;
                             }
                         }
@@ -1453,26 +1517,28 @@ impl Snes {
         } else {
             self.run_dma(cycles)
         };
-        let mut guard = 0u64;
-        loop {
-            let cpu_fixed = u128::from(self.clock) * cpu_scalar;
-            let smp_fixed = self.apu.smp_fixed_clock();
-            let dsp_fixed = self.apu.dsp_fixed_clock();
-            if smp_fixed >= cpu_fixed && dsp_fixed >= cpu_fixed {
-                break;
-            }
-            if smp_fixed <= dsp_fixed {
-                if !self.apu.smp_step_one() {
+        if !use_ca {
+            let mut guard = 0u64;
+            loop {
+                let cpu_fixed = u128::from(self.clock) * cpu_scalar;
+                let smp_fixed = self.apu.smp_fixed_clock();
+                let dsp_fixed = self.apu.dsp_fixed_clock();
+                if smp_fixed >= cpu_fixed && dsp_fixed >= cpu_fixed {
                     break;
                 }
-            } else if crate::apu::dsp_sample_atomic() {
-                self.apu.dsp_step_sample();
-            } else {
-                self.apu.dsp_step_one();
-            }
-            guard += 1;
-            if guard > 50_000_000 {
-                break;
+                if smp_fixed <= dsp_fixed {
+                    if !self.apu.smp_step_one() {
+                        break;
+                    }
+                } else if crate::apu::dsp_sample_atomic() {
+                    self.apu.dsp_step_sample();
+                } else {
+                    self.apu.dsp_step_one();
+                }
+                guard += 1;
+                if guard > 50_000_000 {
+                    break;
+                }
             }
         }
         self.apu_actor_driven = false;
@@ -3565,6 +3631,17 @@ mod tests {
         0x10, 0xEB, 0xBA, 0xF6, 0xDA, 0x00, 0xBA, 0xF4, 0xC4, 0xF4, 0xDD, 0x5D, 0xD0, 0xDB, 0x1F,
         0x00, 0x00, 0xC0, 0xFF,
     ];
+
+    #[test]
+    fn ca_drive_advances_the_engine_to_the_clock() {
+        let mut system = Snes::new(cartridge(&[0xDB]));
+        system.install_ca(IPL);
+        system.clock = 200_000;
+        system.ca_drive();
+        let engine = system.ca().expect("ca").engine();
+        assert!(engine.smp_clock() > 0, "SMP must run");
+        assert!(engine.cpu_clock() > 0, "CPU clock must be published");
+    }
 
     #[test]
     fn install_ca_runs_the_ipl_boot() {

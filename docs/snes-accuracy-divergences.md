@@ -12023,3 +12023,20 @@ default emulator is unchanged.
 
 Total lib tests: 260. The `step_sym_sched` driver is not yet branching to the
 peer (next step), so the default emulator is unchanged.
+
+## CA rewrite stage 3d-4: `step_sym_sched` drives the CaPeer (2026-11-23)
+
+When a `CaPeer` is installed (`Snes::install_ca`), `step_sym_sched` now:
+
+- selects only the S-CPU thread (`pick = 0`) so the main `Apu` is not driven;
+- routes `$2140-$2143` reads to `CaPeer::engine().cpu_port` and writes to
+  `write_apu_latch` (ares' continuous-advance port latch);
+- on each CPU `Advance`/`Idle`, calls `ca_drive`, which converts the S-CPU
+  master clock to S-SMP cycles, publishes it, and polls the peer until
+  `caught_up`; an ahead port-read park (`target > clock`) is left for the next
+  `Advance`, which resumes and samples the updated latch (the async park);
+- skips the main-Apu catch-up loop.
+
+Tests: an installed peer advances to the published clock (SMP and CPU clocks
+both move). Total lib tests: 261. The `SNES_CA` harness wiring (install + sample
+drain) is the next step; the default driver is unchanged.
