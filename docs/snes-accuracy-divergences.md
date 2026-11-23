@@ -12247,3 +12247,16 @@ upload-frame NMI is +32 (which changes the handshake). This is the final
 confirmation that the residual is per-frame interrupt-sampling jitter, not a
 systematic phase, and that only exact per-instruction `lastCycle` sampling can
 match it. No constant, delay, snapshot, or scheduler model can. Reverted.
+
+## Research: service *time* is not the determinant; the service *instruction* is (2026-11-23)
+
+With `SNES_DETECT_NMI` (line at detection, penultimate snapshot) our CT NMI
+service clocks vs ares are 12100002/12457372/12814728/13172102, i.e. deltas
+0/+14/-4/+20 — the same jitter magnitude as the committed `+22` model (0/+14/+22).
+Yet committed keeps CT bit-exact and detect breaks it to 52%.
+
+Conclusion: the per-frame service *time* jitter is tolerated by CT; what matters
+is the exact **instruction (PC)** on which the NMI is taken (the interrupted PC
+that RTI returns to), because that determines the observable program behavior.
+`lastCycle` selects that instruction per mode; a global sample position selects
+the same instruction only coincidentally. Reverted; default 6/7.
