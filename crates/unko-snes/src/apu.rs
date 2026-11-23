@@ -1604,12 +1604,28 @@ impl Apu {
                         SpcEvent::Idle => SpcResume::Unit,
                         SpcEvent::Done(_) => SpcResume::Unit,
                     };
-                    if is_step && self.smp_clock >= target {
-                        // Pause at the access suspension; keep the coroutine
-                        // suspended awaiting the `StepClock` response.
-                        self.sym_paused = true;
-                        SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
-                        return SymStep::Advanced;
+                    if is_step {
+                        // ares `SMP::step` ends with `synchronize(cpu)`: when
+                        // the S-SMP has stepped past the S-CPU clock, run the
+                        // S-CPU forward to it before continuing.
+                        if smp_step_pull() {
+                            if let Some(cpu) = self.cpu_fixed_clock() {
+                                if self.smp_clock > cpu {
+                                    self.park_at = Some(self.smp_clock);
+                                    self.sym_paused = true;
+                                    SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
+                                    return SymStep::Parked;
+                                }
+                            }
+                        }
+                        if self.smp_clock >= target {
+                            // Pause at the access suspension; keep the
+                            // coroutine suspended awaiting the `StepClock`
+                            // response.
+                            self.sym_paused = true;
+                            SYM_CORO.with(|slot| *slot.borrow_mut() = Some(coro));
+                            return SymStep::Advanced;
+                        }
                     }
                     input = SpcInput::Resume(response);
                 }

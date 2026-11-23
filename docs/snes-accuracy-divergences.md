@@ -10877,3 +10877,34 @@ knob closes it.
 
 Default gate unchanged: dkc/zelda/fzero/cv4 0, smas 50.9452%, ct 34.9327%,
 mmx2 69.2222%. 244 tests, clippy/fmt clean, 212/212 baseline.
+
+## Mutual step-pull and MMX2's upload cadence audit (2026-11-22)
+
+Implemented the S-SMP -> S-CPU step pull in the direct engine
+(`SNES_SYM_STEP_PULL`): after any `StepClock` that leaves the S-SMP past the
+S-CPU clock, the engine parks and lets the scheduler run the S-CPU to the
+S-SMP clock before continuing (ares `SMP::step` -> `synchronize(cpu)`).
+Measured with `SNES_SYM_ENGINE+SNES_SYM_STOP+SNES_SYM_STEP_PULL`:
+
+```
+dkc 0   zelda 0   fzero 0   cv4 0   smas 50.9452%
+ct 44.2971%   mmx2 69.2225%
+```
+
+i.e. identical to the engine without it. The S-SMP never crosses the S-CPU
+window end at a suspension the engine visits before the pause point, so the
+pull is a no-op. The engine remains the best direct base (4 exact, CT 44.3%).
+
+**MMX2 upload audit.** Captured the S-CPU `$2140` write cadence for 260 frames
+and matched it to ares by counter value. The first 20 upload writes are
+register/value identical but land **260-404 master clocks earlier** in ours;
+after a rebase they settle at **-104** clocks (vcounter), matching the -114
+S-SMP driver-start offset. The write interval is ~500 master clocks in both,
+so the per-byte cost matches. Because each write is paced by the S-SMP's ack,
+the cadence is the same closed handshake loop, not an independent Cx4 timing
+signal; no Cx4-specific stall was found in the upload path. The MMX2 residual
+is therefore the same boot-phase port ordering, not a coprocessor clock
+difference.
+
+Default gate unchanged: dkc/zelda/fzero/cv4 0, smas 50.9452%, ct 34.9327%,
+mmx2 69.2222%.
