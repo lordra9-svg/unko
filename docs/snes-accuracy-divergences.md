@@ -12404,3 +12404,33 @@ the residual is CPU->SMP port-write visibility — but CT is pinned at ~29% for
 every non-negative offset, so the conflict is not a constant shift. CT's
 divergence under the latch starts at 2.36 s (MMX2 at 6.92 s). Reverted; default
 remains 6/7 (MMX2 49253, 92.3001%).
+
+## Research: the CT/MMX2 conflict is isolated to port 0 (`$2140`) ordering (2026-11-23)
+
+The timestamped latch was applied selectively per port (`SNES_LATCH_PORT`), 600
+frames:
+
+| latched ports | CT | DKC | MMX2 |
+|---|---|---|---|
+| all / **0** | 29.2-29.6% | 0 | **96.6016%** |
+| 1 only | **0** | 0 | 49253 (92.3001%) |
+| 2 only | **0** | 0 | 49253 (92.3001%) |
+| 3 only | **0** | 0 | 49253 (92.3001%) |
+
+So *all* of the effect is on **port 0 / `$2140`/`$F4`**. Ports 1-3 are inert:
+latching them changes nothing, and latching 0 alone reproduces the full
+CT-break / MMX2-improvement.
+
+The write clock offset (`SNES_WRITE_OFFSET_LOG`, CT 200 frames) is `cpu - smp`
+in SMP clocks: min -14, median -2, max +1 — the S-SMP is normally *ahead* of the
+S-CPU at each port write, so the timestamped latch still delays visibility by
+one drain unit. A second flush placed at the exact deferred-read sampling clock
+(half-access) changed CT only from 452716 to 450316 differing — still ~29.6%.
+
+Conclusion: the two titles require *opposite* `$2140` visibility orderings and
+the offset sweep (+2..-2) cannot reconcile them. This is not a constant phase;
+CT's and MMX2's `$2140` handshakes are structurally different (CT streams a
+counter to an S-SMP that reads it immediately; MMX2 pairs `$2140`/`$2141` and
+depends on the write landing after the SMP's synchronize). Resolving it needs
+the combined S-CPU/S-SMP instruction interleaving (ares' single scheduler),
+not a port-level or timing-level change. Default remains 6/7.
