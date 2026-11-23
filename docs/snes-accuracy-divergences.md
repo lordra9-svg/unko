@@ -11879,3 +11879,19 @@ whole-cycle stepping, catch-up termination, and the park/stop path. 4 new tests;
    default if all seven reach 0 differing and the 212/212 baseline is green.
 
 The active emulator is unchanged; the verified default remains 6/7.
+
+## CA rewrite stage 2a: S-CPU-facing port latches in `SymEngine` (2026-11-23)
+
+`SymEngine` (the default-off engine over the real `Spc700`/`Dsp`, driven by the
+mutual scheduler) now exposes the S-CPU side of the `$2140-$2143` handshake:
+
+- `cpu_write_port(port, value)` — ares `CPU::writeAPU`: `synchronize(smp)` to
+  the published S-CPU clock, **then** latch into the `$F4-$F7` view;
+- `cpu_read_port(port)` — ares `CPU::readAPU`: synchronize, then sample the
+  S-SMP's `$F4-$F7` latches;
+- the coroutine bus now routes `$F2/$F3` to the DSP address/data and
+  `$F4-$F7`/`$2140-$2143` through explicit CPU<->SMP latch arrays.
+
+Three unit tests pin the ordering: the SMP is advanced to the CPU clock before
+latching, reads return the SMP latch, and channels are independent. Total lib
+tests: 251. The engine is still default-off (not wired into `Snes`).

@@ -404,6 +404,12 @@ pub struct SymEngine {
     smp_clock: u128,
     dsp_units: u128,
     instructions: u64,
+    cpu_clock: u128,
+    dsp_address: u8,
+    /// S-CPU -> S-SMP `$2140-$2143` latches (read by the S-SMP as `$F4-$F7`).
+    apu_ports: [u8; 4],
+    /// S-SMP -> S-CPU `$F4-$F7` latches (read by the S-CPU as `$2140-$2143`).
+    cpu_ports: [u8; 4],
 }
 
 /// S-SMP clocks per DSP micro-step (24 DSP clocks = 2 S-SMP clocks).
@@ -422,6 +428,10 @@ impl SymEngine {
             smp_clock: 0,
             dsp_units: 0,
             instructions: 0,
+            cpu_clock: 0,
+            dsp_address: 0,
+            apu_ports: [0; 4],
+            cpu_ports: [0; 4],
         }
     }
 
@@ -479,7 +489,24 @@ impl SymEngine {
             }
             SpcEvent::Wait(_) => SpcResume::Clocks(2),
             SpcEvent::Timer(_) => SpcResume::Clocks(2),
+            SpcEvent::Read(0x00F2) => SpcResume::Byte(self.dsp_address),
+            SpcEvent::Read(0x00F3) => SpcResume::Byte(self.dsp.read(self.dsp_address)),
+            SpcEvent::Read(address @ 0x00F4..=0x00F7) => {
+                SpcResume::Byte(self.apu_ports[usize::from(address - 0x00F4)])
+            }
             SpcEvent::Read(address) => SpcResume::Byte(self.ram[usize::from(address)]),
+            SpcEvent::Write(0x00F2, value) => {
+                self.dsp_address = value;
+                SpcResume::Unit
+            }
+            SpcEvent::Write(0x00F3, value) => {
+                self.dsp.write(self.dsp_address, value);
+                SpcResume::Unit
+            }
+            SpcEvent::Write(address @ 0x00F4..=0x00F7, value) => {
+                self.cpu_ports[usize::from(address - 0x00F4)] = value;
+                SpcResume::Unit
+            }
             SpcEvent::Write(address, value) => {
                 self.ram[usize::from(address)] = value;
                 SpcResume::Unit
@@ -539,6 +566,54 @@ impl SymEngine {
                 guard += 1;
             }
         }
+    }
+}
+
+impl SymEngine {
+    /// Publish the S-CPU clock.
+    pub fn set_cpu_clock(&mut self, clock: u128) {
+        self.cpu_clock = clock;
+    }
+
+    /// The S-CPU clock.
+    pub const fn cpu_clock(&self) -> u128 {
+        self.cpu_clock
+    }
+
+    /// Value the S-SMP currently sees on `$F4-$F7` (for tests).
+    pub const fn apu_port(&self, port: u8) -> u8 {
+        self.apu_ports[port as usize & 3]
+    }
+
+    /// Latch a value the S-CPU will see on `$2140-$2143` (for tests).
+    pub fn set_cpu_port(&mut self, port: u8, value: u8) {
+        self.cpu_ports[port as usize & 3] = value;
+    }
+
+    /// Run the S-SMP until its clock reaches `target` (ares
+    /// `Thread::synchronize(smp)`).
+    fn pull_smp_to(&mut self, target: u128) {
+        let mut guard = 0u32;
+        while self.smp_clock < target && guard < 1_000_000 {
+            if !self.smp_step() {
+                break;
+            }
+            guard += 1;
+        }
+    }
+
+    /// ares `CPU::writeAPU`: synchronize the S-SMP to the S-CPU clock, then
+    /// latch `$2140-$2143`.
+    pub fn cpu_write_port(&mut self, port: u8, value: u8) {
+        self.pull_smp_to(self.cpu_clock);
+        self.apu_ports[usize::from(port & 3)] = value;
+    }
+
+    /// ares `CPU::readAPU`: synchronize the S-SMP to the S-CPU clock, then
+    /// sample `$2140-$2143` (the S-SMP's `$F4-$F7` latches).
+    pub fn cpu_read_port(&mut self, port: u8) -> u8 {
+        self.pull_smp_to(self.cpu_clock);
+        self.cpu_ports[usize::from(port & 3)]
     }
 }
 
@@ -634,5 +709,48 @@ mod clock_tests {
         });
         assert_eq!(calls, 2);
         assert!(other.is_behind(target));
+    }
+}
+
+#[cfg(test)]
+mod port_tests {
+    use super::*;
+
+    fn engine_with_core() -> SymEngine {
+        let mut core = crate::spc700::Spc700::new();
+        core.pc = 0x0200;
+        let mut engine = SymEngine::new();
+        engine.ram[0x0200] = 0x2F; // BRA -2
+        engine.ram[0x0201] = 0xFE;
+        engine.load_core(core);
+        engine
+    }
+
+    #[test]
+    fn cpu_write_synchronizes_smp_then_latches() {
+        let mut engine = engine_with_core();
+        engine.set_cpu_clock(100);
+        engine.cpu_write_port(0, 0xAB);
+        // ares `writeAPU`: synchronize(smp) to cpu.clock, then latch.
+        assert!(engine.smp_clock() >= 100, "SMP must reach the CPU clock");
+        assert_eq!(engine.apu_port(0), 0xAB);
+    }
+
+    #[test]
+    fn cpu_read_returns_the_smp_latch() {
+        let mut engine = engine_with_core();
+        engine.set_cpu_clock(50);
+        engine.set_cpu_port(1, 0xBB);
+        assert_eq!(engine.cpu_read_port(1), 0xBB);
+        assert!(engine.smp_clock() >= 50);
+    }
+
+    #[test]
+    fn port_latches_are_independent_per_channel() {
+        let mut engine = engine_with_core();
+        engine.set_cpu_clock(10);
+        engine.cpu_write_port(0, 1);
+        engine.cpu_write_port(3, 4);
+        assert_eq!((engine.apu_port(0), engine.apu_port(3)), (1, 4));
     }
 }
