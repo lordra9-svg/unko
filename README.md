@@ -48,7 +48,7 @@ test-ROM baseline and the `unko-snes` test suite are green. Retail-music audio
 parity is measured per title against ares' pre-resampler stream with its exact
 DSP thread clocks: **Donkey Kong Country, Zelda, F-Zero, Castlevania IV and
 Super Mario All-Stars are bit-exact** (0 differing samples over the 600-frame
-gate, 639,656 interleaved i16); Chrono Trigger is 46.2520% and Mega Man X2
+gate, 639,656 interleaved i16); Chrono Trigger is 52.9259% and Mega Man X2
 91.3700% (its CX4 firmware must be supplied via `CX4_ROM`). Two real clock
 bugs drove the gains: ares rounds each thread frequency with `+0.5` before
 building its fixed-point scalar, so the NTSC CPU scalar uses 21,477,273, not

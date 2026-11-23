@@ -11038,3 +11038,39 @@ the first divergent DSP write at `$7F`, sample 26,757). A global
 breaks the five exact titles, confirming the offset is title-specific: the
 fix belongs in the `$F4/$F5` upload handshake (port visibility/park phase),
 not in the DSP clock.
+
+## V-IRQ ten-clock line delay and ares `lastCycle()` (2026-11-22)
+
+The CT residual after the deferred `CMP` read was a CPU IRQ delivered one loop
+instruction early. ares samples the V-IRQ comparator against `vcounter(10)`
+(the line ten clocks in the past), while `poll_irq` compared the live line, so
+the IRQ rose on the line boundary instead of ten clocks into it. ares also
+tests IRQ/NMI at `lastCycle()`, one cycle before the instruction ends, so an
+IRQ that rises in the final cycle is latched one instruction later.
+
+Fix:
+- `poll_irq` now receives a delayed line (`line_now - 1` for the boundary dot
+  340 and the first two dots of a line), matching `vcounter(10)`. The V-IRQ
+  then rises at hcounter 10, exactly as ares (`ARES_IRQ_LOG`: both at master
+  clock 17,798,750, `live_pc=$C0EC74`).
+- `Snes` records `irq_assert_clock` when the IRQ level rises and
+  `apply_interrupts` feeds it only when `assert <= clock - 2` (ares'
+  two-stage-pipeline `lastCycle`). An IRQ rising in an instruction's final
+  cycles is therefore latched at the next instruction, as in ares.
+
+600-frame gate:
+
+```
+dkc    0 differing (100.0000%)   zelda  0 differing (100.0000%)
+fzero  0 differing (100.0000%)   cv4    0 differing (100.0000%)
+smas   0 differing (100.0000%)   ct     301112 (52.9259%)
+mmx2   55202 (91.3700%)
+```
+
+CT gains 6.67 points (46.2520% -> 52.9259%), MMX2 is unchanged, and the five
+exact titles stay exact. The 212/212 baseline, 244 lib tests, clippy/fmt and
+the CT/Zelda/SMAS 600-frame video diffs (`worst |d|: 0`) are green.
+
+CT's first audio difference is still the music onset at 2.3567 s (ours starts
+the note about six samples early), so the remaining gap is the DSP/music
+scheduler phase after the boot; MMX2 is unaffected by the IRQ change.

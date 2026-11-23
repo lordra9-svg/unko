@@ -140,6 +140,8 @@ pub struct SnesState {
     pub hdma_phase: u32,
     /// Latched IRQ output.
     pub irq_line: bool,
+    /// Master clock at which the current IRQ level last rose.
+    pub irq_assert_clock: u64,
     /// NMI edge waiting for an instruction boundary.
     pub nmi_line: bool,
     /// NMI edges delivered (debug).
@@ -324,6 +326,8 @@ pub struct Snes {
     /// IRQ line state latched by the H/V comparator, applied at the next
     /// instruction boundary.
     irq_line: bool,
+    /// Master clock at which the current IRQ level last rose.
+    irq_assert_clock: u64,
     /// NMI edge seen while the CPU was mid-instruction, applied at the next
     /// instruction boundary.
     nmi_line: bool,
@@ -620,6 +624,7 @@ impl Snes {
             hdma_phase: 0,
             smw_calibrated,
             irq_line: false,
+            irq_assert_clock: 0,
             nmi_line: false,
             nmi_hold: 0,
             nmi_line_clock: 0,
@@ -725,6 +730,7 @@ impl Snes {
             hdma_pending_line: self.hdma_pending_line,
             hdma_phase: self.hdma_phase,
             irq_line: self.irq_line,
+            irq_assert_clock: self.irq_assert_clock,
             nmi_line: self.nmi_line,
             nmi_count: self.nmi_count,
             clock: self.clock,
@@ -824,6 +830,7 @@ impl Snes {
         self.hdma_pending_line = state.hdma_pending_line;
         self.hdma_phase = state.hdma_phase;
         self.irq_line = state.irq_line;
+        self.irq_assert_clock = state.irq_assert_clock;
         self.nmi_line = state.nmi_line;
         self.nmi_lock = false;
         self.nmi_count = state.nmi_count;
@@ -1596,13 +1603,25 @@ impl Snes {
         cycles
     }
 
+    fn update_irq_line(&mut self, line: u16, hcounter: u32, clock: u64) {
+        let before = self.irq_line;
+        self.irq_line = self.io.poll_irq(line, hcounter);
+        if !before && self.irq_line {
+            self.irq_assert_clock = clock;
+        }
+    }
+
     /// Feed the latched IRQ/NMI edges to the CPU at an instruction boundary.
     fn apply_interrupts(&mut self) {
         let gsu_irq = self.gsu.as_ref().is_some_and(|gsu| gsu.irq_line);
         let cx4_irq = self.cx4.as_ref().is_some_and(|cx4| cx4.irq_line());
         let sa1_irq = self.sa1.as_ref().is_some_and(|sa1| sa1.cpu_irq_line());
-        self.cpu
-            .set_irq(self.irq_line || gsu_irq || cx4_irq || sa1_irq);
+        // ares `CPU::lastCycle()` tests IRQ/NMI **one cycle before** the
+        // instruction ends (the two-stage pipeline). An IRQ that rises in the
+        // final cycle is therefore latched one instruction later. Compare
+        // against the assertion instant instead of feeding the live level.
+        let irq = self.irq_line && self.irq_assert_clock <= self.clock.saturating_sub(2);
+        self.cpu.set_irq(irq || gsu_irq || cx4_irq || sa1_irq);
         if self.nmi_line && !self.nmi_lock && self.clock >= self.nmi_line_clock + 6 {
             self.nmi_line = false;
             self.cpu.trigger_nmi();
@@ -1832,11 +1851,24 @@ impl Snes {
             phase -= 4;
             let pre_dot = self.ppu.dot();
             self.ppu.tick();
-            // Sample the comparator at the midpoint of the dot just completed;
-            // ares polls every two master clocks with `hcounter(10)`.
-            self.irq_line = self
-                .io
-                .poll_irq(self.ppu.line(), u32::from(pre_dot) * 4 + 2);
+            // ares compares `vcounter(10)`/`hcounter(10)`: both counters are
+            // sampled ten clocks in the past (the interrupt pipeline delay).
+            // `hcounter` is handled inside `poll_irq`; the line must be delayed
+            // here. At the line boundary (pre_dot 340) and the first two dots
+            // the delayed counter still reads the previous line, so a V-IRQ
+            // asserts ten clocks into the new line, not on the boundary.
+            let line_now = self.ppu.line();
+            let delayed_line = if pre_dot == 340 || pre_dot <= 1 {
+                if line_now == 0 {
+                    261
+                } else {
+                    line_now - 1
+                }
+            } else {
+                line_now
+            };
+            let poll_clock = self.clock - u64::try_from(rem).unwrap_or(0);
+            self.update_irq_line(delayed_line, u32::from(pre_dot) * 4 + 2, poll_clock);
             if pre_dot == 32 && self.ppu.line() == 225 && !self.auto_poll_started {
                 // ares `CPU::joypadEdge` starts the sequence on line 225 at
                 // hcounter 130-384, not at the start of the line.
@@ -1991,9 +2023,18 @@ impl Snes {
             }
         }
         self.io.step(clocks);
-        self.irq_line = self
-            .io
-            .poll_irq(self.ppu.line(), u32::from(self.ppu.dot()) * 4 + 2);
+        let dot_now = self.ppu.dot();
+        let line_now = self.ppu.line();
+        let delayed_line = if dot_now <= 1 {
+            if line_now == 0 {
+                261
+            } else {
+                line_now - 1
+            }
+        } else {
+            line_now
+        };
+        self.update_irq_line(delayed_line, u32::from(dot_now) * 4 + 2, self.clock);
         // ares `nmiPoll`: `nmiLine` follows the vblank state on both edges, so
         // `$4210` bit 7 drops when vblank ends even if it was never read. The
         // CPU interrupt output is still gated by $4200 bit 7.
