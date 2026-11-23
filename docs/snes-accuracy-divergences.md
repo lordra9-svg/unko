@@ -11565,3 +11565,32 @@ bit-exact configurations for MMX2 (`SNES_PORT_LEAD=1`, and `SNES_DSP_PRIME=4` /
 +4 micro-step DSP phase), each at the cost of the other titles. The remaining
 work is a scheduler that reproduces ares' symmetric `synchronize(smp)` for both
 programs, not a constant.
+
+## Reconciling the port-lead default: the credit gate is not the cause (2026-11-23)
+
+The task was to make ares' `synchronize(smp)` before every `$2140` write the
+faithful default and explain why `SNES_PORT_LEAD=1` (MMX2 exact) regresses
+CT/zelda/fzero/cv4/smas.
+
+First hypothesis tested: `Apu::finish_instruction` short-circuits when
+`apu_credit < 0`, which is not ares' condition (`while(thread.clock() <
+clock())`). An experimental `SNES_LEAD_STRICT` removed that gate and compared
+the S-SMP clock directly:
+
+| configuration | MMX2 | CT |
+|---|---|---|
+| `SNES_PORT_LEAD=1` | 0 (100.0000%) | 452716 (29.2251%) |
+| `SNES_PORT_LEAD=1 SNES_LEAD_STRICT=1` | 0 (100.0000%) | 452716 (29.2251%) |
+
+Identical, so the credit-sign gate is **not** what breaks CT. The regression is
+in the cadence/clock bookkeeping of running the S-SMP to the S-CPU clock at a
+port write: the whole-instruction overshoot (`apu_credit`) after
+`finish_instruction` is not consumed by the subsequent
+`advance_peripherals` the way ares' absolute `thread.clock()` comparison is, so
+a phase drift accumulates for the titles whose drivers write `$2140`
+periodically (CT/zelda/fzero/cv4/smas) but not for MMX2.
+
+Making the lead correct therefore requires replacing the credit bookkeeping with
+ares' absolute-clock `while(smp.clock < cpu.clock) synchronize` in the normal
+advance path too, not just at the port write. Recorded here so the next attempt
+does not re-test the credit gate.
