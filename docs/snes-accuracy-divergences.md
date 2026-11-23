@@ -11821,3 +11821,29 @@ facts point elsewhere: (1) the only non-exact title is also the only CX4
 S-SMP phase at the IPL handshake that the faithful scheduler reproduces as
 correct for the six non-CX4 titles. The next investigation should be the CX4's
 concurrent effect on S-CPU timing during the upload, not another scheduler.
+
+## CX4 redirect disproved: the coprocessor is idle during the handshake (2026-11-23)
+
+Checked whether MMX2's CX4 runs across the 3.87-3.95 s upload handshake (the
+only-non-exact title is the only CX4 title):
+
+- Our `CX4_INSN_LOG` (from frame 229): 16 entries, all at master clocks
+  <= 22.1 M; **none** in 83.0-85.0 M.
+- ares `ARES_CX4_INSN_LOG` (234 frames): 21,714 instructions, range
+  21.76-22.15 M; **none** in 83.0-85.0 M.
+- No CX4 job starts in frames 220-245 in either emulator.
+
+So the CX4 is idle during the handshake in *both* emulators; the "only CX4
+title fails" correlation is coincidental with "only MMX2 performs a mid-game
+sound-program upload at 3.89 s". The CX4 is not the cause.
+
+Combined with the previous section (the mutual scheduler is byte-identical to
+the default), both commissioned directions are now disproved:
+
+- scheduler rewrite -> reproduces the default (6/7),
+- CX4 investigation -> CX4 idle during the divergence.
+
+The remaining difference is the S-CPU/S-SMP race at MMX2's specific mid-game
+upload: our S-SMP reaches the uploaded program 4 micro-steps early there, and
+every synchronization variant either keeps that offset or breaks the six titles
+whose uploads occur at boot with different timing.
