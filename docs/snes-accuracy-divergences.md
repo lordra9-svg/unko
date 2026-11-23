@@ -12517,3 +12517,35 @@ scalar*clocks`, `synchronize` = co_switch until target clock >= self, thread
 entry = `while(true){ synchronize-all; entryPoint() }`, append/power clock
 seeding) end-to-end with correct PPU and DMA integration. That is the full
 multi-session rebuild. Default remains 6/7.
+
+## Research: root cause of the sym-scheduler failure is CPU starvation (2026-11-23)
+
+Instrumented `SNES_SYM_SCHED` for CT and found why NMI never enables:
+`nmi_enable` is never set because the game only writes `$4200` **4x (all
+`0x00`)** vs 62x in default (including `0x81`/`0xA1`). The boot diverges first at
+CPU `$C7005D`:
+
+```
+C70050: A9 F0     LDA #$F0
+C70052: 8D 41 21  STA $2141
+C70055: A9 FF     LDA #$FF
+C70057: 8D 40 21  STA $2140
+C7005A: EC 40 21  CPX $2140    ; read S-SMP port
+C7005D: D0 F1     BNE $C70050  ; default: not taken; sym: taken
+```
+
+At the same 160 frames (same master clock 57.1 M):
+
+| | CPU instructions | S-SMP instructions |
+|---|---|---|
+| default | 2,335,862 | 718,615 |
+| sym | **1,731,722** | **859,345** |
+
+So the sym round-robin starves the S-CPU by ~26% and runs the S-SMP ~20% fast;
+the CPU falls behind the handshake and the branch is taken the wrong way. This is
+the cadence defect, not NMI delivery. Routing NMI into the coroutine cannot help
+because the game never reaches `$4200`-enable.
+
+Also tried: publish S-SMP `$F4-$F7` writes via the latch queue in `sym_write`
+(matching the plan path) — inert, because `smp_latch_queue()` defaults off.
+Reverted. Default remains 6/7.
