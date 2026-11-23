@@ -1339,6 +1339,15 @@ impl Snes {
                 } else {
                     8 - (self.counter_cpu as u32 & 7)
                 };
+                // ares `Channel::readA/readB` advance the scheduler in two
+                // four-clock halves around the bus read. Model the first half
+                // before the read so a `$F4-$F7` poll sees the same clock.
+                let split_read = crate::apu::dma_split() && pre == 0 && transfer.next_is_read();
+                if split_read {
+                    let extra = self.advance_peripherals(4);
+                    cycles += 4 + extra;
+                    dma_clocks += 4 + extra;
+                }
                 let clocks = {
                     let vblank = self.ppu.in_vblank();
                     let hblank = self.ppu.in_hblank();
@@ -1375,12 +1384,17 @@ impl Snes {
                     };
                     transfer.step(&mut bus) + pre
                 };
-                let extra = self.advance_peripherals(clocks);
-                cycles += clocks + extra;
+                let advance_clocks = if split_read {
+                    clocks.saturating_sub(4)
+                } else {
+                    clocks
+                };
+                let extra = self.advance_peripherals(advance_clocks);
+                cycles += advance_clocks + extra;
                 // DMA time is master time: keep the CPU's cumulative clock
                 // equal to the system clock, otherwise any timing analysis
                 // based on `cpu.cycles` is short by the DMA/stall time.
-                dma_clocks += clocks + extra;
+                dma_clocks += advance_clocks + extra;
                 transfer.accum += clocks;
             }
             let wait = bus_wait(self.cpu.pc_address(), self.fast_rom).max(1);

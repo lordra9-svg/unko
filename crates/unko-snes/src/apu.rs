@@ -199,6 +199,31 @@ pub fn access_flush() -> bool {
     *A.get_or_init(|| std::env::var_os("SNES_ACCESS_FLUSH").is_some())
 }
 
+/// `SNES_DMA_SPLIT`: advance the S-SMP/PPU in the middle of each DMA byte, as
+/// ares `Channel::readA/readB` does (`step(4); read; step(4)`), instead of once
+/// after the byte. This changes the S-SMP clock at which a `$F4-$F7` poll can
+/// observe a DMA-time CPU write during boot uploads.
+pub fn dma_split() -> bool {
+    static D: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *D.get_or_init(|| std::env::var_os("SNES_DMA_SPLIT").is_some())
+}
+
+/// `SNES_DEFER_CLOCKS`: account a deferred `$F4-$F7`/IO read's clocks at
+/// record time (so the plan, the eager clock and the position agree) and
+/// suppress the duplicate clock advance when the read is replayed. Combined
+/// with the read-clock comparison this makes the S-SMP park at the true read
+/// clock instead of up to an access early.
+pub fn defer_clocks() -> bool {
+    static D: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *D.get_or_init(|| std::env::var_os("SNES_DEFER_CLOCKS").is_some())
+}
+
+thread_local! {
+    /// True while replaying a deferred read whose clocks were already
+    /// accounted at record time.
+    static SUPPRESS_APU_CLOCK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// `SNES_PORT_LEAD`: on every S-CPU write to `$2140-$2143`, finish the
 /// S-SMP's current instruction before latching the value (ares
 /// `CPU::writeAPU`: `synchronize(smp); smp.portWrite(...)`). The overshoot is
@@ -1000,7 +1025,7 @@ impl Apu {
         let cpu_fixed = u128::from(self.cpu_master_clock) * cpu_scalar;
         // `SNES_PORT_READ_CLOCK`: `readIO` runs after the first half access, so
         // the sampled clock is one S-SMP clock past the current plan position.
-        let position = if port_read_clock() {
+        let position = if port_read_clock() || defer_clocks() {
             self.smp_clock_at_position() + SMP_SCALAR
         } else {
             self.smp_clock_at_position()
@@ -1673,6 +1698,17 @@ impl Apu {
             const CYCLE_WAIT: [u8; 4] = [1, 2, 5, 10];
             let clocks = CYCLE_WAIT[usize::from(self.internal_wait.min(3))] * 2;
             let split = effective & 0xFFFC == 0x00F4;
+            if defer_clocks() {
+                // The read is replayed at drain time; account its clocks now
+                // so the plan total, eager clock and execution position agree.
+                let timer = {
+                    let mut bus = self.event_bus(false, self.spc.pc);
+                    bus.timer_cycles(Some(effective))
+                };
+                let mut bus = self.event_bus(false, self.spc.pc);
+                bus.step_clock(u32::from(clocks));
+                bus.advance(timer);
+            }
             plan.push(PlanStep {
                 clocks,
                 port_write: None,
@@ -1874,9 +1910,21 @@ impl Apu {
             None => None,
         };
         let deferred = if let Some(effective) = pending_address {
+            // ares `SMP::wait`: the I/O window uses the internal wait selector.
             const CYCLE_WAIT: [u8; 4] = [1, 2, 5, 10];
             let clocks = CYCLE_WAIT[usize::from(self.internal_wait.min(3))] * 2;
             let split = effective & 0xFFFC == 0x00F4;
+            if defer_clocks() {
+                // The read is replayed at drain time; account its clocks now
+                // so the plan total, eager clock and execution position agree.
+                let timer = {
+                    let mut bus = self.event_bus(false, self.spc.pc);
+                    bus.timer_cycles(Some(effective))
+                };
+                let mut bus = self.event_bus(false, self.spc.pc);
+                bus.step_clock(u32::from(clocks));
+                bus.advance(timer);
+            }
             plan.push(PlanStep {
                 clocks,
                 port_write: None,
@@ -1949,7 +1997,14 @@ impl Apu {
             spc_pc: self.spc.pc,
             debug: Some(&mut self.debug),
         };
+        let suppress = defer_clocks();
+        if suppress {
+            SUPPRESS_APU_CLOCK.with(|c| c.set(true));
+        }
         self.spc.step(&mut bus);
+        if suppress {
+            SUPPRESS_APU_CLOCK.with(|c| c.set(false));
+        }
         self.instructions += 1;
     }
 
@@ -2033,7 +2088,7 @@ impl Apu {
             // the S-CPU catches up; the system runs CPU instructions in the
             // meantime (the S-SMP clock is frozen, so this terminates).
             if self.plan_sub + 1 == resume_at && self.port_read_waiting() {
-                if port_read_clock() {
+                if port_read_clock() || defer_clocks() {
                     // The read samples after the first half access; the S-CPU
                     // must reach that clock (ares `readIO` -> `synchronize(cpu)`).
                     self.park_at = Some(self.smp_clock_at_position() + SMP_SCALAR);
@@ -2454,6 +2509,9 @@ impl ApuBus<'_> {
 
 impl SpcBus for ApuBus<'_> {
     fn advance(&mut self, clocks: u32) {
+        if SUPPRESS_APU_CLOCK.with(|c| c.get()) {
+            return;
+        }
         for (index, timer) in self.timers.iter_mut().enumerate() {
             let frequency = if index == 2 { 16 } else { 128 };
             timer.step(clocks, frequency, *self.timers_enable, *self.timers_disable);
@@ -2461,6 +2519,9 @@ impl SpcBus for ApuBus<'_> {
     }
 
     fn step_clock(&mut self, clocks: u32) {
+        if SUPPRESS_APU_CLOCK.with(|c| c.get()) {
+            return;
+        }
         if dsp_instr_sync() || sym_driver() {
             self.advance_smp_clock(clocks);
         } else {
@@ -2543,6 +2604,9 @@ impl SpcBus for ApuBus<'_> {
                 // ares: writes are only valid when the SPC700 P flag is clear.
                 if self.page_flag {
                     return;
+                }
+                if std::env::var_os("SNES_F0_LOG").is_some() {
+                    eprintln!("F0 {:02X}", value);
                 }
                 *self.timers_disable = value & 0x01 != 0;
                 *self.ram_writable = value & 0x02 != 0;

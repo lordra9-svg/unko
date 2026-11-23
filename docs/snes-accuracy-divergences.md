@@ -10838,3 +10838,42 @@ The ares change is PS1-only, so the SNES behavioural reference and the stored
 re-run against them and still reports dkc/zelda/fzero/cv4 at 0 differing. The
 new Mednafen peer is documented in `docs/oracle-feature-matrix.md` and
 `docs/emulator-tooling.md`.
+
+## Deferred-read clock accounting, DMA split, and the remaining blocker (2026-11-22)
+
+Three more scheduler details were measured; none changes the default gate.
+
+* **Deferred-read clock accounting.** A replayed `$F4-$F7` read advances the
+  eager S-SMP clock by its full access length at drain time, but the plan
+  already contains those clocks, so `smp_clock_at_position` jumps by the read
+  length when the read resumes (measured: +2 S-SMP clocks for a split read).
+  `SNES_DEFER_CLOCKS` accounts the clocks at record time and suppresses the
+  replay's duplicate advance (plus the read-clock comparison). It is inert on
+  the default gate because the carried-credit driver never parks: the S-SMP is
+  always behind the S-CPU, so `port_read_waiting` is false.
+* **DMA split.** `SNES_DMA_SPLIT` advances the scheduler in ares' two
+  four-clock halves around each DMA byte (`step(4); read; step(4)`) instead of
+  once after the byte. Byte-identical gate: the boot uploads that matter are
+  not DMA writes to `$2140-$2143`.
+* **Wait states.** Logging `$F0` writes shows none of the seven titles change
+  the IPL/IO wait-state selectors; all run with the default 2-clock accesses,
+  so wait states are not the per-title discriminator.
+
+`$F0` also re-confirms that the remaining split is in the boot port exchange,
+not the DSP arithmetic. MMX2 is the clearest case: its first 34 DSP writes are
+register/value identical with a constant **-114 S-SMP clocks** offset, then the
+stream diverges in **order** at write 34 (`$77=9E` vs `$5C=FF`) and ends with
+five fewer writes over 600 frames. So MMX2's driver desyncs from the boot phase
+rather than differing by a sample. SMAS is -22 clocks at the driver start and
+then splits -6/+10 (16-clock classes). The four exact titles are 0.
+
+Retested after the CPU-scalar fix, the old exact families moved rather than
+unified: `PORT_LEAD+WRITE_PULL` is now dkc-only (MMX2 90.0%), the plan
+`SUSPEND`/ceil model is SMAS-100 but loses the other four, and the direct
+`SNES_SYM_ENGINE`+`SNES_SYM_STOP` is the best base (dkc/zelda/F-Zero/CV4 exact,
+CT 44.2971%, SMAS/MMX2 unchanged). The residual is the exact mutual
+CPU/SMP/DSP recursion during the IPL upload; no stop/latch/flush/wait-state
+knob closes it.
+
+Default gate unchanged: dkc/zelda/fzero/cv4 0, smas 50.9452%, ct 34.9327%,
+mmx2 69.2222%. 244 tests, clippy/fmt clean, 212/212 baseline.

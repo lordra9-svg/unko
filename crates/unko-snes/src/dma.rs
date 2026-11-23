@@ -380,6 +380,12 @@ impl DmaTransfer {
         self.mask != 0
     }
 
+    /// Whether the next [`Self::step`] performs an A/B bus read (and can
+    /// therefore be split around the read like ares `Channel::readA/readB`).
+    pub const fn next_is_read(&self) -> bool {
+        self.mask != 0 && self.whole_charged && !self.setup
+    }
+
     /// Execute one DMA step and return the master clocks it consumed.
     ///
     /// A channel begins with an eight-clock setup step, then transfers one A/B
