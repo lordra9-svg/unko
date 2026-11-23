@@ -12549,3 +12549,19 @@ because the game never reaches `$4200`-enable.
 Also tried: publish S-SMP `$F4-$F7` writes via the latch queue in `sym_write`
 (matching the plan path) — inert, because `smp_latch_queue()` defaults off.
 Reverted. Default remains 6/7.
+
+## Research: ares readAPU/writeAPU synchronize(smp) is a no-op in the sym path (2026-11-23)
+
+ares `CPU::readAPU`/`writeAPU` call `synchronize(smp)` before touching
+`$2140-$2143`. Added that catch-up to `handle_cpu_request` under
+`SNES_SYM_SCHED` (run the S-SMP/S-DSP forward to the S-CPU clock before a
+`$2140-$2143` access). Result: **byte-for-byte identical** to before
+(CT 1,731,722 instructions, 57,148,396 cycles, `nmi_vec=0`).
+
+So the S-SMP is *not* behind at the port access — the catch-up breaks
+immediately. The sym path's S-SMP clock advance per access is already
+`clocks * SMP_SCALAR` in both the plan and coroutine paths, so the +20 % S-SMP
+instruction count is not a unit mismatch either. The remaining difference is
+the coroutine cadence itself (which step boundaries the S-SMP yields at and how
+`SpcResume::Clocks` is counted), not port synchronization. Reverted; default
+remains 6/7.
