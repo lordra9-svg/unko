@@ -11283,3 +11283,48 @@ WDC65816 interrupt-sampling refactor. Every partial form measured this session
 (access-start, instruction-end, IRQ-only, NMI-only, `read_op` L placements,
 deferred peek/apply/clear, full `nmiPoll`) either stalls DKC or regresses the
 six exact titles, and was reverted.
+
+## NMI sample point: penultimate-access snapshot and the phase conflict (2026-11-23)
+
+Two ares-faithful elements were implemented and measured against the 600-frame
+gate, then reverted because no single configuration serves both CT and MMX2.
+
+**1. Penultimate-access snapshot (`CpuBus::last_cycle`).** The driver snapshots
+`nmi_line` at the start of every bus access (ares `L`), and `Cpu::step` samples
+it after `execute`, so an edge raised by the instruction's own final access is
+excluded exactly as in ares. With the committed `+22` gate this is behaviourally
+identical (`dkc/smas/ct` 0, `mmx2` 49253): the clock gate, not the sample, was
+selecting the instruction.
+
+**2. Edge-aligned NMI line clock.** Setting `nmi_line_clock` to the vblank
+line start plus the 4-clock hold, instead of the CPU bus-access end, removes the
+per-title dot jitter (`NMI_LOG` dot 5/7/9/10/13/14). Sweeping the sample phase
+with this clock:
+
+| phase | CT | MMX2 |
+|---|---|---|
+| 0 | 52.3258% | 83.2219% |
+| 8 | 52.3258% | **93.8051%** |
+| 16 | 52.3258% | 69.2225% |
+| 19-20 | **100.0000%** | 92.3001% |
+| 22 | 79.1066% | 92.3001% |
+| 24 | 79.1066% | 87.3785% |
+| 32 | 52.3258% | 69.2224% |
+
+CT requires `19-20`; MMX2 is best at `8` (`39626`, 93.8051%, a new best for
+MMX2). The two requirements differ by ~11 clocks, so a global phase cannot
+satisfy both, and per-title phases are exactly the kind of hack forbidden by the
+accuracy policy.
+
+Why the penultimate snapshot does not remove the title dependence: the phase
+still selects the *instruction* at which the NMI is taken, and CT's and MMX2's
+NMI-edge instruction phases differ. Decoding the CT NMI at 12,100,002 shows the
+serviced PC sequence (`$C0EC71 -> $FF10 -> $000500`) is matched by the p=8
+configuration, yet CT's audio needs p=20 — the NMI service PC is not the only
+timing-sensitive point, so the phase cannot be calibrated from the vector alone.
+
+The committed hold-expiry `+22` model remains the only configuration that keeps
+all six exact titles; MMX2 stays at 92.3001%. The remaining work is ares'
+per-instruction `L` placement (including instructions whose `L` precedes an
+internal cycle or the high byte of a 16-bit read), which the access-granularity
+snapshot does not reproduce.
