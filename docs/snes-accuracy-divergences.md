@@ -12709,3 +12709,25 @@ is a no-op while the S-CPU is the active clock; it resolves the port read from
 the current latch instead. That park-vs-resolve behaviour is exactly the
 mutual scheduler that would also fix the per-title phase — and it does not exist
 in the codebase. Reverted; default 6/7.
+
+## Landed: MMX2 bit-exact by default via DSP catch-up prime (user decision) (2026-11-23)
+
+Per explicit user direction ("A"), the S-DSP catch-up target is now primed by
+**4 micro-steps** by default (`SNES_DSP_PRIME` still overrides). This is the
+MMX2-exact configuration.
+
+Verified 600-frame gate (no env):
+
+| title | result |
+|---|---|
+| **mmx2** | **0 differing (100.0000%)** |
+| dkc | 197318 (69.1525%) |
+| zelda | 28841 (95.4912%) |
+| fzero | 52055 (91.8620%) |
+| cv4 | 3891 (99.3917%) |
+| smas | 333008 (47.9395%) |
+| ct | 232868 (63.5948%) |
+
+This deliberately trades five previously bit-exact titles for MMX2, as chosen.
+`258` lib tests pass, fmt/clippy clean. The unifying fix (park-vs-resolve
+mutual scheduler) remains the only way to recover all seven simultaneously.

@@ -1366,7 +1366,7 @@ impl Apu {
         let prime = std::env::var("SNES_DSP_PRIME")
             .ok()
             .and_then(|value| value.parse::<u128>().ok())
-            .map_or(0, |ticks| ticks * DSP_TICK);
+            .map_or(4 * DSP_TICK, |ticks| ticks * DSP_TICK);
         self.smp_clock
             .saturating_sub(u128::from(dsp_lag()) * DSP_TICK)
             .saturating_add(prime)
@@ -2639,10 +2639,13 @@ impl ApuBus<'_> {
         // Diagnostic: the DSP register-write phase measured +6 micro-steps
         // against ares; prime the DSP catch-up by that many ticks to test
         // whether the offset is a true global phase.
+        // Default DSP catch-up is primed by 4 micro-steps: this is the
+        // configuration that makes Mega Man X2 bit-exact (the accepted
+        // MMX2-first tradeoff). `SNES_DSP_PRIME` overrides it.
         let prime = std::env::var("SNES_DSP_PRIME")
             .ok()
             .and_then(|value| value.parse::<u128>().ok())
-            .map_or(0, |ticks| ticks * DSP_TICK);
+            .map_or(4 * DSP_TICK, |ticks| ticks * DSP_TICK);
         drain_dsp_to(
             self.ram,
             self.dsp,
