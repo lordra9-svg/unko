@@ -11126,3 +11126,34 @@ write stream now matches through write 3854 and first diverges at write 3855
 1.64 s), and a +34-clock S-CPU drift first visible at the 20,368,752 port
 write precedes it. CT's first audio difference is still the music onset at
 2.3567 s.
+
+## DRAM refresh at the start of the step, with the counter phase (2026-11-22)
+
+The +34 drift at the 20,368,752 port write came from the DRAM refresh. ares
+tests `!status.dramRefresh && hcounter() >= dramRefreshPosition` at the start
+of each `CPU::step`, so a refresh reached inside a DMA is paid inside that DMA
+(ARES_DMA_COST showed `run=72` for a 32-clock transfer); this core paid it at
+the end of the preceding CPU access (`steps=32, extra=0`). The position itself
+was also wrong: `dramRefreshPosition = 538 - (counter.cpu & 7)` uses the S-CPU
+2-clock counter phase, while the core used `538 - (master_clock & 7)`.
+
+Fix:
+- `refresh_position = 538 - (counter_cpu & 7)` at the line wrap.
+- `advance_peripherals` runs the refresh at the **start** of the next step when
+  `hcounter >= refresh_position` (or when a crossing was carried in
+  `refresh_pending`), instead of at the end of the crossing slice. The
+  `dram_refresh_stalls_the_cpu_once_per_scanline` test now expects the first
+  line to return 0 and the stall to be paid on the following step.
+
+600-frame gate:
+
+```
+dkc    0 differing (100.0000%)   zelda  0 differing (100.0000%)
+fzero  0 differing (100.0000%)   cv4    0 differing (100.0000%)
+smas   0 differing (100.0000%)   ct     133646 (79.1066%)
+mmx2   49253 (92.3001%)
+```
+
+CT jumps 55.8503% -> 79.1066% with the five exact titles unchanged. The
+212/212 baseline, 244 lib tests, clippy/fmt and CT/Zelda/SMAS video diffs
+(`worst |d|: 0`) are green.

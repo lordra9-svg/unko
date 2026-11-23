@@ -1681,10 +1681,37 @@ impl Snes {
     /// clocks. NMI/IRQ edges are latched for the next instruction boundary.
     ///
     /// Returns the extra master clocks the CPU must account for, which is
-    /// `DRAM_REFRESH_CLOCKS` whenever this step crossed the scanline's refresh
-    /// point (ares `CPU::step` runs the five 6+2-clock stalls at the end of the
-    /// step call that reaches `dramRefreshPosition`).
+    /// ares `CPU::step` tests the DRAM refresh at the **start** of the step:
+    /// a refresh point reached in the previous slice is paid here, before this
+    /// slice's clocks. Deferring it keeps the 40-clock stall inside the same
+    /// DMA byte/access in which ares charges it instead of at the end of the
+    /// preceding CPU access.
     fn advance_peripherals(&mut self, clocks: u32) -> u32 {
+        // ares `CPU::step`: the refresh fires at the start of the first step
+        // whose hcounter has reached the line's refresh position, *including*
+        // a step inside a DMA. A crossing detected on the previous slice (or a
+        // multi-line slice) is carried in `refresh_pending`.
+        let due = !self.refresh_active
+            && !self.refresh_done
+            && self.ppu_hcounter >= self.refresh_position;
+        let mut refresh = 0u32;
+        if due || self.refresh_pending {
+            if due {
+                self.refresh_done = true;
+            }
+            self.refresh_pending = false;
+            self.refresh_active = true;
+            // ares runs the refresh as five `step(6); step(2)` pairs, each of
+            // which ends with `synchronize(smp, ppu)`. Advance in the same
+            // slices so the S-SMP stops at the same suspension points ares
+            // visits during the stall.
+            for _ in 0..5 {
+                self.advance_peripherals_inner(6);
+                self.advance_peripherals_inner(2);
+            }
+            self.refresh_active = false;
+            refresh = DRAM_REFRESH_CLOCKS;
+        }
         self.advance_peripherals_inner(clocks);
         // The SPC7110's pending units stall the S-CPU for their latency
         // (20 clocks for a DCU transfer, 30/40 for multiply/divide).
@@ -1693,22 +1720,7 @@ impl Snes {
         } else {
             0
         };
-        if self.refresh_pending {
-            self.refresh_pending = false;
-            self.refresh_active = true;
-            // ares `CPU::step` runs the refresh as five `step(6); step(2)`
-            // pairs, each of which ends with `synchronize(smp, ppu)`. Advance
-            // in the same slices so the S-SMP stops at the same suspension
-            // points ares visits during the stall.
-            for _ in 0..5 {
-                self.advance_peripherals_inner(6);
-                self.advance_peripherals_inner(2);
-            }
-            self.refresh_active = false;
-            DRAM_REFRESH_CLOCKS + spc7110
-        } else {
-            spc7110
-        }
+        refresh + spc7110
     }
 
     fn advance_peripherals_inner(&mut self, clocks: u32) {
@@ -1933,7 +1945,7 @@ impl Snes {
                 // before re-arming the new line.
                 let old_refresh = !self.refresh_done && hc_before <= self.refresh_position;
                 self.refresh_done = false;
-                self.refresh_position = 538 - (event_clock as u32 & 7);
+                self.refresh_position = 538 - (self.counter_cpu as u32 & 7);
                 if old_refresh {
                     self.refresh_pending = true;
                 }
@@ -1947,10 +1959,6 @@ impl Snes {
                         hdma_phase_for(self.ppu.debug_frame).unwrap_or(event_clock as u32 & 6)
                     };
                     self.hdma_setup_done = false;
-                }
-                if !self.refresh_done && hc_after >= self.refresh_position {
-                    self.refresh_done = true;
-                    self.refresh_pending = true;
                 }
                 if !self.hdma_setup_done && next_zero && hc_after >= self.hdma_setup_position {
                     self.hdma_setup_done = true;
@@ -1974,13 +1982,6 @@ impl Snes {
                 }
             } else {
                 let hc_start = hc_before;
-                if !self.refresh_done
-                    && hc_start < self.refresh_position
-                    && hc_after >= self.refresh_position
-                {
-                    self.refresh_done = true;
-                    self.refresh_pending = true;
-                }
                 if !self.hdma_setup_done
                     && self.ppu_hcounter_line == 0
                     && hc_start < self.hdma_setup_position
@@ -4818,8 +4819,11 @@ mod tests {
         // CPU executes ~2.9% more work per frame than the reference and the game
         // loop drifts (Super Mario World's title screen ran two frames ahead).
         let mut system = Snes::new(cartridge(&[0xDB]));
-        // 341 dots x 4 master clocks = one NTSC scanline.
-        assert_eq!(system.advance_peripherals(1364), DRAM_REFRESH_CLOCKS);
+        // 341 dots x 4 master clocks = one NTSC scanline. ares tests the
+        // refresh at the *start* of a step, so the first line only reaches the
+        // position; the 40-clock stall is paid at the next step and then once
+        // per line.
+        assert_eq!(system.advance_peripherals(1364), 0);
         assert_eq!(system.advance_peripherals(1364), DRAM_REFRESH_CLOCKS);
         assert_eq!(system.advance_peripherals(1364), DRAM_REFRESH_CLOCKS);
         assert_eq!(system.cpu_stall, 0);
