@@ -11895,3 +11895,16 @@ mutual scheduler) now exposes the S-CPU side of the `$2140-$2143` handshake:
 Three unit tests pin the ordering: the SMP is advanced to the CPU clock before
 latching, reads return the SMP latch, and channels are independent. Total lib
 tests: 251. The engine is still default-off (not wired into `Snes`).
+
+## CA rewrite stage 2b: two-sided handshake in `SymEngine` (2026-11-23)
+
+`SymEngine` now completes ares' two-sided `$2140` handshake in isolation:
+
+- the S-SMP's `$F4-$F7` read, when the S-SMP is ahead, calls the installed
+  S-CPU puller (`ares SMP::readIO -> synchronize(cpu)`) and adopts the returned
+  S-CPU clock before sampling the latch;
+- `cpu_write_port` still does `synchronize(smp)`-then-latch.
+
+A unit test runs an `MOV A,$F4` S-SMP program with a puller installed and
+asserts the S-CPU is pulled and the clock advances. Total lib tests: 252. The
+engine remains default-off; the active emulator is unchanged.

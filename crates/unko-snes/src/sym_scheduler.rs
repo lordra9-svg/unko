@@ -410,6 +410,8 @@ pub struct SymEngine {
     apu_ports: [u8; 4],
     /// S-SMP -> S-CPU `$F4-$F7` latches (read by the S-CPU as `$2140-$2143`).
     cpu_ports: [u8; 4],
+    /// S-CPU pull used by ares `SMP::readIO($F4-$F7)` -> `synchronize(cpu)`.
+    cpu_pull: Option<Box<dyn FnMut(u128) -> u128>>,
 }
 
 /// S-SMP clocks per DSP micro-step (24 DSP clocks = 2 S-SMP clocks).
@@ -432,6 +434,7 @@ impl SymEngine {
             dsp_address: 0,
             apu_ports: [0; 4],
             cpu_ports: [0; 4],
+            cpu_pull: None,
         }
     }
 
@@ -492,6 +495,16 @@ impl SymEngine {
             SpcEvent::Read(0x00F2) => SpcResume::Byte(self.dsp_address),
             SpcEvent::Read(0x00F3) => SpcResume::Byte(self.dsp.read(self.dsp_address)),
             SpcEvent::Read(address @ 0x00F4..=0x00F7) => {
+                // ares `SMP::readIO`: synchronize(cpu) before sampling the port.
+                if self.smp_clock > self.cpu_clock {
+                    if let Some(pull) = self.cpu_pull.as_mut() {
+                        let next = pull(self.smp_clock);
+                        if next > self.cpu_clock {
+                            self.cpu_clock = next;
+                            self.rr.set_cpu_clock(next);
+                        }
+                    }
+                }
                 SpcResume::Byte(self.apu_ports[usize::from(address - 0x00F4)])
             }
             SpcEvent::Read(address) => SpcResume::Byte(self.ram[usize::from(address)]),
@@ -600,6 +613,13 @@ impl SymEngine {
             }
             guard += 1;
         }
+    }
+
+    /// Install the S-CPU pull used by the S-SMP's `$F4-$F7` read
+    /// (ares `SMP::readIO` -> `synchronize(cpu)`). The callback receives the
+    /// S-SMP clock and returns the new S-CPU clock.
+    pub fn set_cpu_puller(&mut self, f: impl FnMut(u128) -> u128 + 'static) {
+        self.cpu_pull = Some(Box::new(f));
     }
 
     /// ares `CPU::writeAPU`: synchronize the S-SMP to the S-CPU clock, then
@@ -752,5 +772,38 @@ mod port_tests {
         engine.cpu_write_port(0, 1);
         engine.cpu_write_port(3, 4);
         assert_eq!((engine.apu_port(0), engine.apu_port(3)), (1, 4));
+    }
+}
+
+#[cfg(test)]
+mod pull_tests {
+    use super::*;
+
+    #[test]
+    fn smp_port_read_pulls_the_cpu() {
+        // `MOV A,$F4` then `BRA -2`.
+        let mut core = crate::spc700::Spc700::new();
+        core.pc = 0x0200;
+        let mut engine = SymEngine::new();
+        engine.ram[0x0200] = 0xE4;
+        engine.ram[0x0201] = 0xF4;
+        engine.ram[0x0202] = 0x2F;
+        engine.ram[0x0203] = 0xFC;
+        engine.load_core(core);
+        engine.set_cpu_clock(0);
+        let mut pulls = 0u32;
+        engine.set_cpu_puller(|smp| {
+            // model the S-CPU running forward in 8-clock steps.
+            smp
+        });
+        // Run enough S-SMP instructions to execute the port read.
+        for _ in 0..64 {
+            engine.smp_step();
+            if engine.cpu_clock() > 0 {
+                pulls += 1;
+            }
+        }
+        assert!(pulls > 0, "the $F4 read must pull the S-CPU");
+        assert!(engine.cpu_clock() > 0);
     }
 }
