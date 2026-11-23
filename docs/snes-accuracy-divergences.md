@@ -11715,3 +11715,30 @@ default credit floor remains the only configuration with six exact titles, and
 the lead remains the only one with MMX2 exact. Every flag-level expression of
 the two-sided ordering has now been measured; the correct interleaving is not
 reachable by toggling them.
+
+## "Do not advance the APU in the generic access" starves the APU (2026-11-23)
+
+The structural model ("advance the S-SMP only in the `$2140` handler, not in the
+generic bus-access advance") already exists as `SNES_PORT_SYNC`. It defers the
+APU clocks at every non-port access and flushes them at the next `$2140-$2143`
+access. Measured:
+
+| configuration | MMX2 | CT |
+|---|---|---|
+| `SNES_PORT_SYNC` | 0 over 84754 (**truncated**) | 9 over 84458 (**truncated**) |
+| `+ PORT_LEAD` | 0 over 226724 (**truncated**) | 181076 over 366988 (truncated) |
+| `+ PORT_LEAD + PORT_READ_CLOCK` | 0 over 226724 (**truncated**) | 181074 over 366986 |
+
+The audio is **truncated** (84754–366988 samples instead of 639656): deferring
+all APU advance to `$2140` accesses starves the S-SMP whenever the game is not
+polling the ports (e.g. during gameplay), freezing the APU. ares does **not**
+work that way — its scheduler runs whichever thread is behind continuously, and
+`CPU::writeAPU`'s `synchronize(smp)` is *additional*. So the requested structural
+change is not ares-faithful and stalls the APU; it cannot be the fix.
+
+This closes the space of structural variants: continuous advance (default/most
+faithful) keeps six titles exact; port-only advance stalls; instruction- and
+access-granularity synchronize break CT at the first handshake; the port lead
+makes MMX2 exact but breaks five. The remaining difference is inside ares'
+actual coroutine interleaving of CPU `step` and SMP `synchronize`, which this
+event-driven model does not express.
