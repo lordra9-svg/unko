@@ -12468,3 +12468,26 @@ the direct-trigger model in disguise, i.e. not ares' per-access interleaving.
 Making it faithful requires the real per-access S-CPU/S-SMP round-robin with the
 `lastCycle` sample, which is the multi-session rebuild; the current scaffold
 cannot be tuned into it. Default remains 6/7.
+
+## Research: per-access apply_interrupts in the sym scheduler (no effect) (2026-11-23)
+
+Attempted the first real step of ares' per-access interleaving: the combined
+scheduler only applied NMI at instruction boundaries (via `CpuOutput::Done`),
+so I added `apply_interrupts()` after every `BusRequest::AccessCycles` and
+`BusRequest::Advance` in `handle_cpu_request`, matching the interpreter's
+per-access polling.
+
+Result (600 frames):
+
+| title | before | after |
+|---|---|---|
+| CT | 452725 (29.2237%) | 452725 (29.2237%) — **byte-identical** |
+| DKC | 368744 (42.3528%) | 368744 (42.3528%) — **byte-identical** |
+| MMX2 | 196857 (69.2246%) | 196820 (69.2303%) |
+
+So the NMI sampling point is not the defect: the sym scheduler produces bad
+audio even with per-access interrupt polling. Its defect is in the *cadence* of
+the S-CPU/S-SMP/S-DSP round-robin itself (the fixed-point thread selection and
+DSP tick granularity), not in any single interrupt or port rule. That is a
+from-scratch reimplementation of ares' nall `Thread` scheduler, not an increment
+on the scaffold. Reverted; default remains 6/7.
