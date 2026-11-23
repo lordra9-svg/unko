@@ -2179,6 +2179,8 @@ impl Snes {
     /// the IPL ROM with the S-SMP positioned at the reset vector `$FFC0`.
     pub fn install_ca(&mut self, ipl: [u8; 64]) {
         let mut engine = crate::sym_scheduler::SymEngine::new();
+        let (ram, dsp_registers) = crate::random::power_on_apu();
+        engine.load_power_on_state(&ram, &dsp_registers);
         engine.load_ipl(ipl);
         let mut core = crate::spc700::Spc700::new();
         core.pc = 0xFFC0;

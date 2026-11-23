@@ -12077,3 +12077,19 @@ use the minimum wait. The CA engine's large residual (69%/29%) is therefore not
 wait-state timing; it is deeper (SMP/DSP synchronization points or the DSP
 reset/sample phase). The fix is kept because it is correct. 261 lib tests pass;
 default emulator unchanged.
+
+## CA engine fidelity: power-on APU/DSP state (no measurable change) (2026-11-23)
+
+`SymEngine` now applies ares' deterministic power-on APU RAM + S-DSP register
+file (the same `random::power_on_apu()` stream the main `Apu` uses) in
+`install_ca`. Measured CA results are unchanged:
+
+| title | before | after |
+|---|---|---|
+| MMX2 | 196838 (69.2275%) | 196838 |
+| CT | 452725 | 452725 |
+
+So neither wait states nor power-on state explains the CA engine's ~69%/29%
+residual. The remaining gap is in the engine's SMP/DSP scheduling or sample/DSP
+phase (its per-instruction clocking differs from the plan driver that keeps six
+titles exact). The fix is kept as correct. 261 lib tests; default unchanged.

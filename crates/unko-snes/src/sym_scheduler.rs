@@ -843,6 +843,16 @@ impl SymEngine {
         }
     }
 
+    /// Apply ares' deterministic APU RAM + S-DSP power-on state (the same
+    /// stream `Apu::load_power_on_state` uses).
+    pub fn load_power_on_state(&mut self, ram: &[u8], dsp_registers: &[u8]) {
+        if ram.len() == self.ram.len() {
+            self.ram.copy_from_slice(ram);
+        }
+        let count = dsp_registers.len().min(crate::dsp::DSP_REGISTERS);
+        self.dsp.registers[..count].copy_from_slice(&dsp_registers[..count]);
+    }
+
     /// Load the 64-byte IPL ROM and enable it at `$FFC0-$FFFF`.
     pub fn load_ipl(&mut self, ipl: [u8; 64]) {
         self.ipl = ipl;
