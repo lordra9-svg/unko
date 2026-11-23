@@ -11765,3 +11765,27 @@ Every concrete form of the two-sided handshake has now been implemented and
 measured: generic-advance + lead (MMX2 0, five break), port-only advance
 (starves), and single-synchronize-per-port (both worse). None reaches 7/7. The
 default six-title state remains the best verified configuration.
+
+## Per-access synchronize + read-side pull: still breaks CT (2026-11-23)
+
+The oracle (ARES_APU_LOG + ARES_SMP_READ_LOG at CT's first handshake) shows the
+whole-instruction lead **overshoots**: it advances the S-SMP past the S-CPU's
+index, so the S-SMP spins at `$FFDC BNE` while ares transfers. Tested the
+access-granularity synchronize with every read-side companion:
+
+| configuration | MMX2 | CT |
+|---|---|---|
+| `WRITE_ACCESS_STOP + PORT_READ_CLOCK` | 21738 (96.60%) | 450316 (29.60%) |
+| `+ SMP_WRITE_PULL` | 21738 | 450316 |
+| `WRITE_ACCESS_STOP + SMP_WRITE_PULL` | 21738 | 452716 (29.23%) |
+| `WRITE_ACCESS_STOP + PORT_READ_CLOCK + CPU_LATCH_TIME` | 21738 | 452716 |
+
+Access-granularity synchronize plus the read-side pull still leaves CT at ~29.6%
+and MMX2 at 96.6%. So neither whole-instruction nor access-granularity
+`synchronize(smp)` recovers CT, even with the two-sided read pull. The default
+(no synchronize at writes) is the only configuration with CT exact; the port
+lead is the only one with MMX2 exact.
+
+This is the end of the event-model space: all 4 synchronize granularities × all
+read-pull/latch flags were measured, plus 3 symmetric schedulers and 3 DSP-phase
+models. None reaches 7/7.
