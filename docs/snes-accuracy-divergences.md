@@ -11157,3 +11157,38 @@ mmx2   49253 (92.3001%)
 CT jumps 55.8503% -> 79.1066% with the five exact titles unchanged. The
 212/212 baseline, 244 lib tests, clippy/fmt and CT/Zelda/SMAS video diffs
 (`worst |d|: 0`) are green.
+
+## NMI service phase: `nmi_line_clock + 22` (2026-11-22)
+
+After the refresh fix, CT's first remaining drift was a **+26-clock shift at the
+12.1 M interrupt service**. The S-CPU trace showed the delta jump from 0 to +26
+exactly at `$FF10`, the NMI handler entry:
+
+```
+i 24123 ours 12100088 ares 12100062 pc 0xff10 d 26
+```
+
+`ARES_INTR_PC` puts the NMI push at master clock 12,100,002 (`vector=ffea`,
+`pushpc=c0:ec71`), 26 clocks before ours. The NMI trigger used
+`nmi_line_clock + 24`; ares' `/NMI` hold plus the one-cycle-early `lastCycle`
+test lands one instruction earlier for this phase. Changing the trigger to
+`nmi_line_clock + 22` flips the service to the same instruction as ares:
+
+```
+extra=18 CT 52.3258%   extra=22 CT 100.0000%
+extra=24 CT 79.1066%   extra=30 CT 54.9226%
+```
+
+600-frame gate with `+22`:
+
+```
+dkc 0  zelda 0  fzero 0  cv4 0  smas 0  ct 0  (all 100.0000%)
+mmx2 49253 (92.3001%)
+```
+
+Six of seven reference titles are now bit-exact. The 212/212 baseline, 244 lib
+tests, clippy/fmt are green; CT/Zelda/SMAS/F-Zero/CV4 600-frame video diffs are
+`worst |d|: 0` (DKC's pre-existing reference-frame mismatch is byte-identical).
+
+Mega Man X2 remains at 92.3001%; its DMA/refresh/NMI timing matches and the
+residual is the CX4/upload phase, not the scheduler constants above.

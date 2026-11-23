@@ -1626,7 +1626,7 @@ impl Snes {
         // early; the effective latch is four bus cycles after the line rises.
         // Matching that phase is what puts the NMI service on the same
         // instruction as ares (CT `$C0EC71` vs `$C0EC74`).
-        if self.nmi_line && !self.nmi_lock && self.clock >= self.nmi_line_clock + 24 {
+        if self.nmi_line && !self.nmi_lock && self.clock >= self.nmi_line_clock + 22 {
             self.nmi_line = false;
             self.cpu.trigger_nmi();
             if std::env::var_os("NMI_LOG").is_some() {

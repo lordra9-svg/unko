@@ -46,16 +46,16 @@ Country / Chrono Trigger 1200/1200, Mega Man X3 and Star Fox 10000/10000, and
 Mega Man X2 9996/10000 with only three proved torn presents excluded. The 212
 test-ROM baseline and the `unko-snes` test suite are green. Retail-music audio
 parity is measured per title against ares' pre-resampler stream with its exact
-DSP thread clocks: **Donkey Kong Country, Zelda, F-Zero, Castlevania IV and
-Super Mario All-Stars are bit-exact** (0 differing samples over the 600-frame
-gate, 639,656 interleaved i16); Chrono Trigger is 79.1066% and Mega Man X2
-92.3001% (its CX4 firmware must be supplied via `CX4_ROM`). Two real clock
+DSP thread clocks: **Donkey Kong Country, Zelda, F-Zero, Castlevania IV,
+Super Mario All-Stars and Chrono Trigger are bit-exact** (0 differing samples
+over the 600-frame gate, 639,656 interleaved i16); Mega Man X2 is 92.3001%
+(its CX4 firmware must be supplied via `CX4_ROM`). Two real clock
 bugs drove the gains: ares rounds each thread frequency with `+0.5` before
 building its fixed-point scalar, so the NTSC CPU scalar uses 21,477,273, not
 21,477,272 (CV4); and a `$420B` DMA starts at the **second** bus access after
 the write, with `status.clockCount` taken from that access (SMAS, and the
-shared boot alignment that also improved the rest). The remaining two
-residuals are an S-SMP boot-handshake visibility phase in the port exchange,
+shared boot alignment that also improved the rest). The remaining
+residual is an S-SMP boot-handshake visibility phase in the port exchange,
 tracked in the SNES ledger. The reference oracles are
 ares (primary, ISC), MesenCE (GPL-3.0, black-box), Mednafen 1.32.1 (GPL-2.0,
 black-box) and RustySNES (Apache-2.0).
