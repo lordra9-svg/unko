@@ -12111,3 +12111,27 @@ the IPL handshake loop, with the CA engine ~10 clocks *behind* (`$FFD2` plan vs
 (CT 29.22%, MMX2 69.22%) because the handshake phase, not the instruction rate,
 decides the transfer branch. This is the same upload-phase class as the default
 MMX2 residual.
+
+## CA differential debug 2: the coroutine under-charges I/O-write waits (2026-11-23)
+
+Per-instruction clock comparison (CT, plan vs CA) around the first divergence
+shows the offset is not a uniform drift but a **specific instruction cost**:
+
+```
+idx  pc      plan_clk plan_cost | ca_clk ca_cost
+718  $FFC6   4784     4        | 4780   4
+719  $FFC7   4788     4        | 4784   4
+720  $FFC9   4798    10        | 4788   4      <-- mismatch
+721  $FFCC   4808    10        | 4798  10
+```
+
+`$FFC9` is `MOV $F4,#$AA` (`8F AA F4`). The bit-exact plan charges **10** clocks
+(three access waits), the CA coroutine charges **4**: the recorder does not
+charge the same wait for the `$F4` write. This shifts the IPL handshake by the
+observed ~6-10 clocks and makes the transfer branch differ.
+
+So the CA engine's residual is a per-access clock-accounting mismatch with the
+bit-exact plan driver (which is the ares-faithful model). Matching it means
+charging `CYCLE_WAIT` for every access — including writes — exactly as the plan's
+`PlanStep.clocks` does, i.e. porting the plan's clock accounting into the
+coroutine engine. The default emulator remains 6/7.
