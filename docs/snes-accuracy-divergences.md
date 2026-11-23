@@ -12260,3 +12260,21 @@ is the exact **instruction (PC)** on which the NMI is taken (the interrupted PC
 that RTI returns to), because that determines the observable program behavior.
 `lastCycle` selects that instruction per mode; a global sample position selects
 the same instruction only coincidentally. Reverted; default 6/7.
+
+## Research: 2-clock-tick NMI sampling measured (fails) (2026-11-23)
+
+Implemented `SNES_TICK_NMI`: raise `nmi_line` on ares' 2-clock tick grid at the
+fixed transition (`line 225 start + 8`), service via the penultimate
+(`lastCycle`) sample, no `+22`.
+
+| title | tick model | committed |
+|---|---|---|
+| CT | 304951 (52.3258%) | 0 |
+| DKC | 0 | 0 |
+| MMX2 | 196871 (69.2224%) | 49253 (92.3001%) |
+
+The sub-access tick model is worse than the committed `+22` for both CT and
+MMX2. Combined with the detection+snapshot measurement (52.3%/83.2%) and the
+per-access/whole-instruction absolute models (83-69%/24-35%), this confirms that
+no sampling grid or granularity reproduces ares' CT service except the committed
+`+22`, and none reproduces MMX2. Reverted; default remains 6/7.
