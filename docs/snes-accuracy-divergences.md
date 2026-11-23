@@ -11742,3 +11742,26 @@ access-granularity synchronize break CT at the first handshake; the port lead
 makes MMX2 exact but breaks five. The remaining difference is inside ares'
 actual coroutine interleaving of CPU `step` and SMP `synchronize`, which this
 event-driven model does not express.
+
+## Single-synchronize-per-port (`SNES_PORT_ONCE`) regresses (2026-11-23)
+
+Implemented the requested structural change: for a `$2140-$2143` access, the
+generic bus advance does **not** drive the APU; instead the port access performs
+one ares-style whole-instruction synchronize to the access clock (`finish_instruction`)
+in place of `peer.advance`, with continuous advance unchanged for all other
+accesses (so the APU is not starved).
+
+| configuration | MMX2 | CT |
+|---|---|---|
+| default (generic advance) | 49253 (92.3001%) | 0 |
+| `SNES_PORT_ONCE` | 152216 over 595028 (74.42%, truncated) | 362250 over 549024 (34.02%, truncated) |
+
+It is worse for both and also truncates: replacing the generic advance with a
+whole-instruction synchronize at the port access changes the APU's position at
+the next access, not just at the latch. So "advance once per access, and make
+that advance a synchronize" is not equivalent to ares either.
+
+Every concrete form of the two-sided handshake has now been implemented and
+measured: generic-advance + lead (MMX2 0, five break), port-only advance
+(starves), and single-synchronize-per-port (both worse). None reaches 7/7. The
+default six-title state remains the best verified configuration.
