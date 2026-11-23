@@ -12592,3 +12592,24 @@ target thread and *runs it* until its clock catches up, whereas the sym path's
 `smp_fixed >= cpu_fixed` guard exits while the S-SMP coroutine is suspended.
 Fixing it requires resuming the S-SMP at the handshake, not just comparing
 clocks — part of the full `Scheduler`/`Thread` rebuild. Default remains 6/7.
+
+## Research: sym `smp_step_one` to instruction boundary is inert (2026-11-23)
+
+Hypothesis: `smp_step_one` returns after each `StepClock`, leaving the S-SMP
+suspended mid-instruction with an already-advanced clock, so the clock-based
+scheduler stops picking it (the boot handshake then spins). Changed it to run to
+`Done` (ares' thread runs whole instructions):
+
+```
+sym CT 160f before: spc inst 859345, ran 1731722, nmi_vec 0
+sym CT 160f after:  spc inst 859341, ran 1731711, nmi_vec 0
+```
+
+Effectively unchanged. So the S-SMP yield granularity is not the lever either.
+Reverted.
+
+## Baseline: 212/212 green with the refresh-position fix (2026-11-23)
+
+`tools/snes-oracle/baseline.py --frames 600`: 212/212 rows `ok`, 0 non-ok. The
+per-frame DRAM-refresh-position fix introduced no regressions across the test
+ROM set.
