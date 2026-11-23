@@ -12278,3 +12278,28 @@ MMX2. Combined with the detection+snapshot measurement (52.3%/83.2%) and the
 per-access/whole-instruction absolute models (83-69%/24-35%), this confirms that
 no sampling grid or granularity reproduces ares' CT service except the committed
 `+22`, and none reproduces MMX2. Reverted; default remains 6/7.
+
+## Research: the +30/+40 CPU phase is entirely interrupt-instruction attribution (2026-11-23)
+
+Regenerated S-CPU traces around MMX2's 3.89 s upload (83.0-83.6 M) and compared
+per-instruction cycle cost at matching PCs (22,973 instructions):
+
+- Exactly **336** instructions differ in cost, and **all** are `±40` clocks
+  (168 at −40, 168 at +40); **zero** other differences.
+- They occur in pairs at the `$8100 LDA $09CE` / `$8103 BEQ $8100` spin loop:
+  ours `LDA=32, BEQ=62` vs ares `LDA=72, BEQ=22` (or the reverse). The **pair
+  total is identical (94 clocks in both)**.
+
+So our S-CPU cycle accounting is otherwise *exactly* ares-compatible across the
+whole upload window. The entire phase discrepancy is that the 40-clock interrupt
+service is attributed to the adjacent instruction in the poll loop: ares services
+it during `$8100`, we during `$8103` (or vice versa). The loop period is
+unchanged; only which instruction carries the interrupt differs, which shifts
+the CPU PC at the service boundary and, downstream, the `$2140` write phase the
+S-SMP handshake sees.
+
+This definitively answers the "+30 source": there is **no cycle-accounting bug**.
+The residual is solely the interrupt-service instruction selection (ares
+`lastCycle` per instruction), confirming that only exact per-instruction
+sampling can close MMX2. Any global timing change fixes the attribution on one
+frame and breaks it on another.
