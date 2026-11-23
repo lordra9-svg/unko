@@ -12155,3 +12155,26 @@ Porting the plan's accounting into the coroutine therefore means making
 `ResumeBus` emit the identical access-step sequence as `ApuBus` (idle + deferred
 read/write steps), i.e. converging the coroutine onto the plan bus model. No
 behavior change landed; default 6/7.
+
+## Research: ares' NMI transition is fixed at line 225, hc=6 (2026-11-23)
+
+Added an `ARES_NMI_TRANS` oracle hook (logs the instant `nmiTransition` is set in
+`nmiPoll`). For every NMI of both reference titles:
+
+```
+CT:   12099986 hc=6 vc=225   12457352 hc=6 vc=225   12814720 hc=6 vc=225
+MMX2:   664274 hc=6 vc=225    1021638 hc=6 vc=225    1379008 hc=6 vc=225
+```
+
+The transition is always at **vc=225, hc=6** — a fixed dot, title-independent
+(hc is the 2-clock-unit counter, so this is line start + 12 master clocks; the
+`nmiValid` flip is the earlier poll at hc=2, and the hold is consumed at hc=6).
+All transition timestamps are ≡ 2 (mod 4), on the poll grid.
+
+This confirms the correct NMI transition time is `line_start + 12` with no
+per-title constant. The remaining discrepancy is therefore the *service sampling*
+(ares `lastCycle` at the penultimate instruction cycle) relative to where we raise
+`nmi_line`; the fixed hc=6 position removes the transition as a source of
+title-dependence. Next: derive `line_start` in our PPU in the same units and
+compare our `nmi_edge_clock` against these absolute values (CT 12099986,
+MMX2 664274).
