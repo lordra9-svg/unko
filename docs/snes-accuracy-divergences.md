@@ -12751,3 +12751,21 @@ MMX2's port pattern (`guard > 200_000` per access), and the others were already
 exact at default, so there is no net gain. The blocker is the efficiency and
 park handling of `sync_smp_to`, not the model. Reverted; the landed default
 remains the 4-micro-step DSP prime (MMX2 bit-exact).
+
+## Rejected: read sample at half the access wait (2026-11-23)
+
+Tested ares `CPU::read`'s `wait(1)` as sampling at **half** the access wait
+(`SNES_READ_HALF`) instead of our `wait - 4`:
+
+| model | CT | DKC | MMX2 |
+|---|---|---|---|
+| default (`wait-4`) | 0 | 0 | 0 (with prime=4) |
+| `READ_HALF`, prime=0 | 25.57% | 31.37% | 69.22% |
+| `READ_HALF`, prime=4 | 25.58% | 31.37% | 69.22% |
+
+Much worse and the same "too early" signature — our `wait - 4` split is the
+correct sampling point. Reverted.
+
+Also confirmed no existing scheduler flag combined with the MMX2-exact default
+recovers CT: `PORT_LEAD` and every one of `NO_PARK`/`PORT_READ_CLOCK`/
+`SMP_WRITE_PULL`/`ACCESS_FLUSH` either break MMX2 or leave CT at 63.6%.
