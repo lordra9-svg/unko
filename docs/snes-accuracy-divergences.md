@@ -12178,3 +12178,30 @@ per-title constant. The remaining discrepancy is therefore the *service sampling
 title-dependence. Next: derive `line_start` in our PPU in the same units and
 compare our `nmi_edge_clock` against these absolute values (CT 12099986,
 MMX2 664274).
+
+## Research: our NMI detection already matches ares' transition (2026-11-23)
+
+Compared our `NMI_POLL` detection clock with the ares `ARES_NMI_TRANS` transition
+(the fixed `vc=225, hc=6`):
+
+| title | ours detection | ares transition | delta |
+|---|---|---|---|
+| CT | 12099984 | 12099986 | -2 |
+| CT | 12457352 | 12457352 | 0 |
+| CT | 12814714 | 12814720 | -6 |
+| MMX2 | 664274 | 664274 | 0 |
+| MMX2 | 1021640 | 1021638 | +2 |
+
+So our vblank/NMI detection is already at ares' **transition** instant (not at
+the earlier `nmiValid` flip, which ares has at hc=2, 8 clocks earlier). The
+committed model then waits `nmi_hold=4` and services at `line_clock + 22`, i.e.
+~26 clocks after the transition, whereas ares' `lastCycle` consumes it ~8 clocks
+after the transition. The delay is ~18 clocks too long, yet CT is bit-exact with
+it and every sweep value below 22 breaks CT.
+
+Since the line time is already correct, the residual is conclusively the
+**service-instruction selection** (ares `lastCycle` at the penultimate cycle vs
+our boundary+delay), not the vblank detection, NMI line, or scheduler. The next
+research step is to make the service decision use the instruction's penultimate
+cycle against the detection clock (= transition), which is exactly the per-mode
+`L` placement — the one change that has not been completed (only approximated).
