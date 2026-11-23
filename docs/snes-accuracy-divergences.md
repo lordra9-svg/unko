@@ -12635,3 +12635,23 @@ Byte-for-byte equivalent — `nmi_vec` stays 0. So the boot divergence is not
 caused by the scheduling loop's structure or by S-SMP yield granularity; the
 scaffold's defect is upstream (the S-SMP's program state / PPU integration),
 and it is not reachable by rewriting the loop alone. Reverted; default 6/7.
+
+## Decisive: CT latch break and MMX2 latch gain are the same withheld-write race (2026-11-23)
+
+Under `SNES_CPU_LATCH_TIME`, a deferred `$F4-$F7` read only saw queued S-CPU
+writes with `time <= now`. ares `readIO -> synchronize(cpu)` guarantees the S-CPU
+has already run to the read clock, so *all* executed writes must be visible. Added
+`flush_all_cpu_writes()` before resuming the deferred read:
+
+| model | CT | DKC | MMX2 |
+|---|---|---|---|
+| default (immediate latch) | **0** | 0 | 49253 (92.3001%) |
+| `CPU_LATCH_TIME` (time-gated) | 29.2% | 0 | **21738 (96.6016%)** |
+| `CPU_LATCH_TIME` + flush-all | **0** | 0 | 49253 (92.3001%) |
+
+Flushing all queued writes restores CT exactly and removes the MMX2 gain
+completely. Therefore the CT regression and the MMX2 improvement are the *same*
+mechanism: withholding a port write the S-CPU has already executed. That is
+pathologically wrong (ares never withholds an executed write), so the genuine
+default's 92.3% on MMX2 is the correct port behaviour, and MMX2's residual is
+elsewhere (S-SMP/DSP cadence), not port visibility. Reverted; default 6/7.
