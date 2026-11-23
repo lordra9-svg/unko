@@ -1620,9 +1620,13 @@ impl Snes {
         // instruction ends (the two-stage pipeline). An IRQ that rises in the
         // final cycle is therefore latched one instruction later. Compare
         // against the assertion instant instead of feeding the live level.
-        let irq = self.irq_line && self.irq_assert_clock <= self.clock.saturating_sub(2);
+        let irq = self.irq_line && self.irq_assert_clock <= self.clock.saturating_sub(6);
         self.cpu.set_irq(irq || gsu_irq || cx4_irq || sa1_irq);
-        if self.nmi_line && !self.nmi_lock && self.clock >= self.nmi_line_clock + 6 {
+        // ares holds `/NMI` for four poll cycles and tests it one CPU cycle
+        // early; the effective latch is four bus cycles after the line rises.
+        // Matching that phase is what puts the NMI service on the same
+        // instruction as ares (CT `$C0EC71` vs `$C0EC74`).
+        if self.nmi_line && !self.nmi_lock && self.clock >= self.nmi_line_clock + 24 {
             self.nmi_line = false;
             self.cpu.trigger_nmi();
             if std::env::var_os("NMI_LOG").is_some() {

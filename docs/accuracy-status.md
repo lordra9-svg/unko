@@ -88,7 +88,7 @@ using that access's `status.clockCount` for the trailing alignment (an internal
 exact access reproduces ares' DMA start clock, pre/run/post split and total for
 SMAS, DKC, CT and MMX2.
 
-Chrono Trigger (52.9259%) and Mega Man X2 (91.3700%, CX4 firmware via
+Chrono Trigger (55.8503%) and Mega Man X2 (92.3001%, CX4 firmware via
 `CX4_ROM`) still differ. Their DMA starts and totals now match ares exactly, so
 the residual is the **S-SMP upload poll phase**: the `MOV A,$F4; BEQ` byte-handshake
 loop can exit one poll iteration earlier than ares, moving the S-SMP clock by
@@ -669,8 +669,8 @@ Validation so far:
   *Correction (2026-11-22):* these 350,000-frame figures predate the canonical
   CX4 image and the CPU thread-scalar fix. On the current 600-frame gate
   (639,656 interleaved samples) the default driver is 0 differing for DKC,
-  Zelda, F-Zero, Castlevania IV and Super Mario All-Stars, 52.9259% for
-  Chrono Trigger and 91.3700% for Mega Man X2 with the canonical
+  Zelda, F-Zero, Castlevania IV and Super Mario All-Stars, 55.8503% for
+  Chrono Trigger and 92.3001% for Mega Man X2 with the canonical
   `cx4.rom`. The earlier MMX2 99.44% used a non-canonical firmware image and is
   not reproducible; see the SNES ledger.
 

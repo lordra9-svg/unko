@@ -11074,3 +11074,55 @@ the CT/Zelda/SMAS 600-frame video diffs (`worst |d|: 0`) are green.
 CT's first audio difference is still the music onset at 2.3567 s (ours starts
 the note about six samples early), so the remaining gap is the DSP/music
 scheduler phase after the boot; MMX2 is unaffected by the IRQ change.
+
+## NMI service phase and the one-bus-cycle IRQ latch (2026-11-22)
+
+After the `vcounter(10)` + `lastCycle` change, CT still drifted +12 clocks at
+the 17.843M port write. Instrumenting the **pushed return PC** at each
+interrupt (ares hook correctly scoped to `SuperFamicom::oracleNow`) showed the
+difference is the **NMI**, not the IRQ:
+
+```
+IRQ (FFEE)  ours cyc=19791470 pc=C0EC71   ares 17798772 pushpc=c0:ec71   match
+NMI (FFEA)  ours cyc=19810562 pc=C0EC74   ares 17817866 pushpc=c0:ec71   diff
+```
+
+The NMI line's hold/pipeline phase was wrong, so the NMI was serviced one loop
+instruction early (`$C0EC74` instead of `$C0EC71`) and its `RTI` returned to the
+wrong point in the `$C0EC71`/`$C0EC74` wait loop. ares holds `/NMI` for four
+poll cycles and tests it one CPU cycle early; the effective latch is four bus
+cycles (24 master clocks) after the line rises.
+
+Fix: the NMI trigger uses `nmi_line_clock + 24` (was `+6`), and the IRQ
+`lastCycle` margin is one bus cycle (`clock - 6`, was `- 2`). With both, the
+S-CPU trace matches ares **instruction-for-instruction and clock-for-clock**
+through the previously divergent region:
+
+```
+ours 17836912 C0EC5E  17836946 C0EC5F  17836996 C0EC71  17837022 C0EC74 ...
+ares 17836912 c0ec5e  17836946 c0ec5f  17836996 c0ec71  17837022 c0ec74 ...
+```
+
+600-frame gate:
+
+```
+dkc    0 differing (100.0000%)   zelda  0 differing (100.0000%)
+fzero  0 differing (100.0000%)   cv4    0 differing (100.0000%)
+smas   0 differing (100.0000%)   ct     282406 (55.8503%)
+mmx2   49253 (92.3001%)
+```
+
+CT gains 2.92 points (52.9259% -> 55.8503%) and MMX2 0.93 points
+(91.3700% -> 92.3001%), with the five exact titles unchanged. The 212/212
+baseline, 244 lib tests, clippy/fmt are green; CT/Zelda/SMAS 600-frame video
+diffs are `worst |d|: 0`, and DKC's pre-existing reference-frame diff is
+byte-identical before and after this change (the `ares-dkc-ref` capture is a
+different screen, not a regression).
+
+The remaining CT/MMX2 gap moved to the later music-driver handshake. The DSP
+write stream now matches through write 3854 and first diverges at write 3855
+(`$6C`, 2.245 s) by -133 micro-steps. The first S-SMP PC divergence is the
+`CMP X,$F4; BEQ` loop at APU `$10AE`/`$10B0` (ares polls one extra time,
+1.64 s), and a +34-clock S-CPU drift first visible at the 20,368,752 port
+write precedes it. CT's first audio difference is still the music onset at
+2.3567 s.
