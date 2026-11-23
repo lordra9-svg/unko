@@ -11445,3 +11445,30 @@ divergence is the *discrete* output-sample boundary at which the echo registers
 are written, which depends on this jitter plus the exact S-SMP/DSP interleaving.
 Matching it bit-exactly needs cycle-exact S-SMP/DSP co-scheduling (the APU
 scheduler), not a CPU-phase constant.
+
+## MMX2 ARAM comparison at the upload (2026-11-23)
+
+Added an `ARAM_OUT` debug dump (mirrors `WRAM_OUT`; `ares` already has
+`ARES_APURAM_FRAME`/`ARES_APURAM_AT`) and compared APU RAM during the upload:
+
+| video frame | differing bytes | runs |
+|---|---|---|
+| 100 | 0 | - |
+| 175/200/225 | 0 | - |
+| 250 | 384 | `0xA1`, `0xF4`, `0x2A84-0x2C02` |
+| 275 | 386 | `0xA1`, `0xF4`, `0x54BB-0x563A` |
+| 300 | 385 | `0xA1`, `0xF4`, `0x7A0A-0x7B88` |
+
+Two zero-page bytes (`$A1`, `$F4`) and one ~383-byte window differ after the
+upload. The window **moves forward** each dump (0x2A84 -> 0x54BB -> 0x7A0A) while
+the rest of ARAM is identical, which is the signature of a small time skew
+between the two dumps (ares dumps at `aresLineFrames >= frame`, ours at the end
+of the run) over a buffer the driver is actively writing, rather than a
+persistent content difference. The earlier "0x1A1A block" was a frame-300
+snapshot of that moving window; at frame 250 the same bytes are identical (the
+block is present in both at 0x1A1A).
+
+So the ARAM comparison neither proves nor disproves a content bug at
+frame-granularity; resolving it needs a same-clock ARAM dump. The upload
+handshake remains the only measured divergence (one poll iteration), and it is
+sub-frame.

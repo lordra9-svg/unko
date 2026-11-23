@@ -947,6 +947,9 @@ fn main() -> ExitCode {
     if let Some(path) = std::env::var_os("WRAM_OUT") {
         let _ = std::fs::write(path, system.wram());
     }
+    if let Some(path) = std::env::var_os("ARAM_OUT") {
+        let _ = std::fs::write(path, system.apu.ram());
+    }
     if let Some(path) = std::env::var_os("FRAME_OUT") {
         if let Err(error) = std::fs::write(&path, system.ppu.frame_buffer()) {
             eprintln!("{}: {error}", path.to_string_lossy());
