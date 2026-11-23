@@ -11230,3 +11230,56 @@ model is the only configuration that keeps all six exact titles. Closing the
 last title therefore needs a coherent S-CPU/interrupt scheduler change (exact
 per-instruction `lastCycle`, `nmiPoll` phase, and `irqLock` lifecycle together),
 not another sampling approximation.
+
+## MMX2: the residual is interrupt-sampling phase, measured at instruction granularity (2026-11-23)
+
+Instruction-boundary traces (`CPU_TRACE_LOG` / ares `ARES_CPU_TRACE`) over the
+same clock windows show that the MMX2 S-CPU **PC stream is identical**; only
+the clock at each boundary drifts. The drift is not DMA or APU accounting: it
+originates in the NMI service phase and is then amplified by the DMA's 8-clock
+alignment.
+
+### First NMI (frame 1, vblank line 225)
+
+| Event | ours | ares |
+|---|---|---|
+| vblank edge / `nmiValid` flip | `take_nmi` 664274 (dot 0) | `nmiPoll` 664270 (`hc=2`) |
+| NMI vector fetch (`$00:1FEF`) | 664382 | 664350 |
+
+Ours services the first NMI **32 master clocks late**. The instruction-boundary
+delta goes `0 -> +32` across that service and stays ~+32 (with the spin loop at
+`$00:8100 LDA $09CE / $8103 BEQ` re-synchronising it every frame). This is the
+same residual the upload handshake sees: by 3.89 s the accumulated phase puts
+the S-CPU +30 clocks late at the first `$2140` read.
+
+### The DMA amplification is faithful, not a separate bug
+
+The NMI handler's `STA $420B` OAM transfer (size `$0220`, 544 bytes) has:
+
+| | ours | ares |
+|---|---|---|
+| DMA start | 80001126 (`counter_cpu&7 = 6`) | 80001128 (`counter.cpu&7 = 0`) |
+| pre / run / post | 2 + 4528 + 6 | 8 + 4528 + 8 |
+| total | **4536** | **4544** |
+
+The `+8` total difference is exactly the 2-clock phase offset crossing ares'
+`8 - (counter.cpu & 7)` pre-alignment boundary (a phase-0 start pays a full
+8-clock pre). ares' own `ARES_DMA_COST` log shows totals of both 4536 and 4544
+for this transfer depending on phase, so the implementation follows the formula;
+the input phase is what is wrong.
+
+### Why the fixed `+22` cannot fix it
+
+The `+22` service margin (chosen for CT) is a *phase* compensation, not a
+duration. CT is extremely sensitive to it (`SNES_NMI_EXTRA`: 18 -> 52.3%,
+22 -> 100%, 24 -> 79.1%), while MMX2 needs the vector 32 clocks earlier. Ours'
+interrupt sequence is also ~10 clocks shorter than ares' (`interrupt()` uses
+slow stack/vector cycles), so the margin absorbs both effects and cannot be
+correct for two titles with different instruction phases at the NMI edge.
+
+Correcting this requires ares' `lastCycle` at the exact per-instruction cycle
+(penultimate fetch/read/write) plus the 4-clock `nmiPoll` grid, i.e. the full
+WDC65816 interrupt-sampling refactor. Every partial form measured this session
+(access-start, instruction-end, IRQ-only, NMI-only, `read_op` L placements,
+deferred peek/apply/clear, full `nmiPoll`) either stalls DKC or regresses the
+six exact titles, and was reverted.
