@@ -11518,3 +11518,50 @@ A universal fix therefore has to make the S-SMP execute the upload handshake in
 the same number of clocks as ares; a constant phase shift cannot do it (it
 trades one title for six). The two DSP-phase knobs above remain as default-off
 experimental tools for that work.
+
+## MMX2 handshake: decoded IPL loop and the port-latch timing (2026-11-23)
+
+The IPL upload loop (correct byte decode) is:
+
+```
+FFD6: MOV Y,$F4        ; Y = CPU byte index
+FFD8: BNE $FFD6        ; wait for $F4 != 0
+FFDA: CMP Y,$F4        ; Y == CPU index?
+FFDC: BNE $FFE9        ; no -> spin via FFE9/FFDA
+FFDE: MOV A,$F5        ; yes -> A = data byte
+FFE0: MOV Y,$F4
+FFE2: MOV (0)+Y,A      ; ARAM[Y] = A
+FFE4: INC Y
+FFE5: BNE $FFDA
+FFE9: BPL $FFDA
+```
+
+The first S-SMP divergence (`$FFDE` ours vs `$FFE9` ares at the same 7,979,250
+SMP clock) is exactly the `$FFDC BNE`: ours takes the transfer path because
+`Y == $F4`, ares spins because `Y != $F4`. So the difference is the **S-CPU to
+S-SMP `$2140` port latch timing**, not the DSP.
+
+`SNES_PORT_LEAD=1` makes the S-CPU finish the S-SMP's current instruction before
+latching `$2140` (ares `CPU::writeAPU`: `synchronize(smp); smp.portWrite`):
+
+| configuration | MMX2 | CT |
+|---|---|---|
+| default | 49253 | 0 |
+| `SNES_PORT_LEAD=1` | **0 (100.0000%)** | 452998 (29.18%) |
+| `+ SNES_LEAD_AFTER_BOOT=1` | 21738 (96.6016%) | 450736 (29.53%) |
+| `SNES_WRITE_ACCESS_STOP=1` | 21738 (96.6016%) | 452716 (29.23%) |
+| `SNES_SMP_WRITE_PULL=1` | 49253 | 0 |
+| `SNES_SMP_ACCESS_STOP=1` | 108108 (83.10%) | 415343 (35.07%) |
+| `SNES_SMP_INSTR_STOP=1` | 212821 (66.73%) | - |
+
+`SNES_PORT_LEAD` alone makes MMX2 **bit-exact (0/639656)** but breaks five
+titles; every other latch-timing variant that keeps CT exact leaves MMX2 at its
+92.3% (or worse). The latch timing that ares needs is therefore per S-SMP
+program: MMX2's driver requires the S-SMP to be caught up before every `$2140`
+write, while the other titles' drivers match the default exact-credit path.
+
+Combined with the previous section, there are now two independent, fully
+bit-exact configurations for MMX2 (`SNES_PORT_LEAD=1`, and `SNES_DSP_PRIME=4` /
++4 micro-step DSP phase), each at the cost of the other titles. The remaining
+work is a scheduler that reproduces ares' symmetric `synchronize(smp)` for both
+programs, not a constant.
