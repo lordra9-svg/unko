@@ -11419,3 +11419,29 @@ So MMX2's remaining audio mismatch is a **2-sample S-SMP/DSP start-phase lead
 at the IPL hand-off**, surfacing only when the echo becomes audible at 7.07 s.
 The next fix must align the S-SMP's entry into the uploaded program with ares
 (the hand-off sample boundary), not alter the DSP pipeline.
+
+## The MMX2 " +30-clock upload offset" is jitter, not accumulation (2026-11-23)
+
+The +30-clock offset at the first `$2140` read of the upload was proposed as a
+cumulative S-CPU phase error. A per-frame probe of the NMI handler's
+`$7E2034 STA $09CE` write (212 compared writes, `W09CE_LOG` vs
+`ARES_WRAM_TRACE=9CE-9CF`) gives:
+
+| metric | value |
+|---|---|
+| mean delta (ours - ares) | +11.3 clocks |
+| median delta | +14 clocks |
+| stdev | 13.4 clocks |
+| linear slope | **-0.04 clocks/frame** (~ -9 clocks over 232 frames) |
+
+The delta oscillates over a -18..+38 range with **no drift**, so the S-CPU phase
+at the NMI handler is not accumulating; the +30 seen at one instant is a sample
+of the inherent per-frame interrupt-service jitter (the NMI lands on a different
+instruction each frame, in both emulators). The constant +8 is the measurement
+point difference (our trace logs the access start, ares the write completion).
+
+Consequence: "fix the accumulating +30" is not a well-posed fix. The MMX2 audio
+divergence is the *discrete* output-sample boundary at which the echo registers
+are written, which depends on this jitter plus the exact S-SMP/DSP interleaving.
+Matching it bit-exactly needs cycle-exact S-SMP/DSP co-scheduling (the APU
+scheduler), not a CPU-phase constant.
