@@ -12317,3 +12317,59 @@ cycle-exact across the upload window (all 336 cost differences are the ±40
 refresh attribution, and they cancel pairwise). The MMX2 divergence is not a
 CPU cycle-accounting error and not a CPU phase drift — it is on the S-SMP/DSP
 side of the hand-off, where the relative phase shifts despite the CPU matching.
+
+## Fix: per-frame DRAM refresh position (ares `CPU::scanline`) (2026-11-23)
+
+ares sets `status.dramRefreshPosition` **once per frame**, in `CPU::scanline()`
+at `vcounter() == 0`:
+
+```cpp
+if(io.version == 2) status.dramRefreshPosition = 530 + 8 - dmaCounter();
+```
+
+Our `advance_peripherals_inner` was re-arming it on **every scanline** from the
+live `counter.cpu & 7`. That is not what ares does: the position is a fixed
+value for the whole frame, so the refresh lands at the same hcounter each line.
+
+Fixed to update only when the line wraps to 0 (`next_zero`). Effect:
+
+| | before | after |
+|---|---|---|
+| S-CPU trace cost diffs vs ares (MMX2 83.0-83.6 M) | 336 | **332** |
+| audio CT / DKC / MMX2 | 0 / 0 / 49253 | 0 / 0 / 49253 |
+
+The audio is unchanged (as expected: the residual is S-SMP-side), but the CPU
+cycle attribution is now closer to ares. All seven titles unchanged; 261 lib
+tests pass; clippy/fmt clean.
+
+## Research: first S-SMP stream divergence is the IPL `$FFDC` handshake (2026-11-23)
+
+Correcting a long-standing measurement error: the first **audio** difference in
+MMX2 is sample 453120 (7.08 s), not 3.89 s. Tracing the S-SMP (`SPC_TRACE` vs
+ares `ARES_SPC_TRACE`) shows the first **instruction-stream** divergence at
+3.896 s (index 887720 of 1.79 M), in the IPL handshake:
+
+```
+FFDA: EB F4   MOV Y,$F4
+FFDC: D0 0B   BNE $FFE9      ; Y != 0 -> spin
+FFDE: E4 F5   MOV A,$F5      ; Y == 0 -> transfer
+FFE0: CB F4   MOV $F4,Y
+...
+```
+
+At the divergence ares takes `BNE` (Y = `$F4` != 0, spins); we fall through and
+transfer. The port read logs show the cause is `$F5` visibility, not `$F4`:
+
+- ares at `$F4 = 0x76` reads `$F5 = 0xFF` (the CPU's `$2141` store has **not**
+  happened yet at the synchronize point);
+- we read `$F5 = 0x4D` (the CPU's `$2140=0x76`/`$2141=0x4D` pair has both
+  landed).
+
+So our S-SMP `$F5` read is one S-CPU store **later** relative to ares than it
+should be. The CPU instruction stream itself is identical (verified through
+154 M), so this is purely the sub-access `SMP::readIO -> synchronize(cpu)`
+ordering. `SNES_PORT_READ_CLOCK`, `SNES_SMP_WRITE_PULL` (and their combination)
+were re-measured: all leave CT/DKC at 0 and MMX2 at 49253. `SNES_DEFER_CLOCKS`
+regresses to CT 32%/DKC 42%/MMX2 68%.
+
+Default remains 6/7 (MMX2 49253, 92.3001%).

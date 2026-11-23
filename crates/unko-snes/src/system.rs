@@ -2022,7 +2022,14 @@ impl Snes {
                 // before re-arming the new line.
                 let old_refresh = !self.refresh_done && hc_before <= self.refresh_position;
                 self.refresh_done = false;
-                self.refresh_position = 538 - (self.counter_cpu as u32 & 7);
+                // ares sets `dramRefreshPosition` **once per frame**, at
+                // `vcounter() == 0` (`CPU::scanline`): `530 + 8 - dmaCounter()`.
+                // Re-arming it on every scanline moved the 40-clock refresh to a
+                // different instruction each line, which is what made our S-CPU
+                // trace differ from ares by one +-40 stall per line.
+                if next_zero {
+                    self.refresh_position = 538 - (self.counter_cpu as u32 & 7);
+                }
                 if old_refresh {
                     self.refresh_pending = true;
                 }
