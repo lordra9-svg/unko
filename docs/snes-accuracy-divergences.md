@@ -11192,3 +11192,41 @@ tests, clippy/fmt are green; CT/Zelda/SMAS/F-Zero/CV4 600-frame video diffs are
 
 Mega Man X2 remains at 92.3001%; its DMA/refresh/NMI timing matches and the
 residual is the CX4/upload phase, not the scheduler constants above.
+
+## MMX2 residual and the exhaustive interrupt-sampling matrix (2026-11-23)
+
+After CT became bit-exact (six of seven titles), MMX2 remains at 92.3001%
+(49,253 differing samples). Its divergence chain:
+
+- first audio difference at 7.071 s (a single-sample value that self-realigns);
+  total 49,253 differing samples over 600 frames;
+- DSP write stream matches addresses/values but the first write is 66 micro-steps
+  early (`$6C`, 2.245 s; delta flips at discrete events);
+- first S-SMP PC divergence at 3.89 s in the IPL upload (`$10AE`/`$10B0`,
+  `CMP X,$F4; BEQ`, ours exits one iteration early);
+- the upload begins with the S-CPU **+30 master clocks** late
+  (ours 83,229,368, ares 83,229,338), the S-SMP **+6 clocks** ahead, so the
+  first `$2140` read returns `CC` vs ares' `AA`;
+- the per-frame `$09CE` flag at WRAM `$7E2034` is written 8 clocks early
+  (ours 82,512,192, ares 82,512,200); the `$8100`/`$8103` poll trace
+  misalignment is a logging artifact.
+
+Every interrupt-feed variant was implemented and measured on the 600-frame
+gate; all regress DKC or the exact titles and were reverted:
+
+| Model | CT | DKC | SMAS | MMX2 |
+|---|---|---|---|---|
+| committed (hold-expiry `+22`, IRQ `-6`) | 0 | 0 | 0 | 49253 |
+| sample at every access start | 53.5% | - | - | 83.2% |
+| instruction-end hook, no margins | 0 | 275927 (35.7%) | 0 | **41458 (93.5187%)** |
+| IRQ-only hook (committed NMI) | 53.5% | 0 | 0 | 49253 |
+| `read_op` L + full hook | 0 | 275927 (35.7%) | 0 | 41458 |
+| `read_op` L + IRQ hook, committed NMI | 29.2% | 275927 (35.7%) | 42.3% | 69.2% |
+| full `nmiPoll`/`nmiHold`/`nmiTransition` | 53.5% | 275927 (35.7%) | 0 | 69.2% |
+
+The instruction-end hook is the only variant that improves MMX2 (93.5187%) while
+keeping CT exact, but it stalls DKC's audio. The committed hold-expiry `+22`
+model is the only configuration that keeps all six exact titles. Closing the
+last title therefore needs a coherent S-CPU/interrupt scheduler change (exact
+per-instruction `lastCycle`, `nmiPoll` phase, and `irqLock` lifecycle together),
+not another sampling approximation.
