@@ -225,6 +225,8 @@ pub struct Snes {
     pub st018: Option<St018>,
     /// The S-SMP/S-DSP audio unit.
     pub apu: Apu,
+    /// Optional cycle-accurate APU peer (`SNES_CA`, default-off).
+    ca: crate::sym_scheduler::CaSlot,
     /// The S-PPU pair.
     pub ppu: Ppu,
     /// Console video region, taken from the cartridge header.
@@ -564,6 +566,7 @@ impl Snes {
             bsx,
             st018: None,
             apu,
+            ca: crate::sym_scheduler::CaSlot::default(),
             ppu,
             region,
             gsu: if has_superfx { Some(Gsu::new()) } else { None },
@@ -2106,6 +2109,28 @@ impl Snes {
 }
 
 impl Snes {
+    /// Install the cycle-accurate APU peer (`SNES_CA`): a `SymEngine` carrying
+    /// the IPL ROM with the S-SMP positioned at the reset vector `$FFC0`.
+    pub fn install_ca(&mut self, ipl: [u8; 64]) {
+        let mut engine = crate::sym_scheduler::SymEngine::new();
+        engine.load_ipl(ipl);
+        let mut core = crate::spc700::Spc700::new();
+        core.pc = 0xFFC0;
+        engine.load_core(core);
+        self.ca =
+            crate::sym_scheduler::CaSlot(Some(Box::new(crate::sym_scheduler::CaPeer::new(engine))));
+    }
+
+    /// The installed cycle-accurate peer, if any.
+    pub fn ca(&self) -> Option<&crate::sym_scheduler::CaPeer> {
+        self.ca.0.as_deref()
+    }
+
+    /// The installed cycle-accurate peer (mutable), if any.
+    pub fn ca_mut(&mut self) -> Option<&mut crate::sym_scheduler::CaPeer> {
+        self.ca.0.as_deref_mut()
+    }
+
     /// Build a bus view over the machine's fields for one access.
     /// Install ST018 coprocessor firmware (`st018.rom`, 0x28000 bytes, or the
     /// split `st018.program.rom`).
@@ -3531,6 +3556,33 @@ mod tests {
 
     fn cartridge(code: &[u8]) -> Cartridge {
         Cartridge::from_bytes(&build_lorom(code)).expect("valid LoROM")
+    }
+
+    const IPL: [u8; 64] = [
+        0xCD, 0xEF, 0xBD, 0xE8, 0x00, 0xC6, 0x1D, 0xD0, 0xFC, 0x8F, 0xAA, 0xF4, 0x8F, 0xBB, 0xF5,
+        0x78, 0xCC, 0xF4, 0xD0, 0xFB, 0x2F, 0x19, 0xEB, 0xF4, 0xD0, 0xFC, 0x7E, 0xF4, 0xD0, 0x0B,
+        0xE4, 0xF5, 0xCB, 0xF4, 0xD7, 0x00, 0xFC, 0xD0, 0xF3, 0xAB, 0x01, 0x10, 0xEF, 0x7E, 0xF4,
+        0x10, 0xEB, 0xBA, 0xF6, 0xDA, 0x00, 0xBA, 0xF4, 0xC4, 0xF4, 0xDD, 0x5D, 0xD0, 0xDB, 0x1F,
+        0x00, 0x00, 0xC0, 0xFF,
+    ];
+
+    #[test]
+    fn install_ca_runs_the_ipl_boot() {
+        let mut system = Snes::new(cartridge(&[0xDB]));
+        system.install_ca(IPL);
+        assert!(system.ca().is_some());
+        let ca = system.ca_mut().expect("ca installed");
+        for _ in 0..5000 {
+            ca.set_cpu_clock(0);
+            let _ = ca.poll();
+            if ca.engine().cpu_port(0) == 0xAA && ca.engine().cpu_port(1) == 0xBB {
+                break;
+            }
+        }
+        let engine = system.ca().expect("ca").engine();
+        assert_eq!(engine.cpu_port(0), 0xAA, "IPL must write $AA to $F4 view");
+        assert_eq!(engine.cpu_port(1), 0xBB, "IPL must write $BB to $F5 view");
+        assert!(system.ca().unwrap().engine().smp_clock() > 0);
     }
 
     #[test]

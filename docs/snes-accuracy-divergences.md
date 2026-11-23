@@ -12010,3 +12010,16 @@ Total lib tests: 258. Default emulator unchanged.
 Test: an async poll reports the park and `caught_up` terminates once the CPU is
 driven. Total lib tests: 259. The engine is still not wired into `Snes`; the
 default emulator is unchanged.
+
+## CA rewrite stage 3d-3: `Snes` now owns an optional CaPeer (2026-11-23)
+
+- `Snes` has a transient `ca: CaSlot` (a derivable slot like
+  `CpuCoroutineSlot`; cloning drops the engine, equality is structural).
+- `Snes::install_ca([u8;64])` builds a `SymEngine` with the IPL ROM and the
+  S-SMP at `$FFC0`, wraps it in a `CaPeer`, and stores it; `ca()`/`ca_mut()`
+  expose it.
+- Test: an installed CA peer runs the real IPL boot to the `$F4=$AA` /
+  `$F5=$BB` handshake inside a `Snes` instance.
+
+Total lib tests: 260. The `step_sym_sched` driver is not yet branching to the
+peer (next step), so the default emulator is unchanged.

@@ -890,6 +890,32 @@ impl CaPeer {
     }
 }
 
+/// Derivable-transient slot for the optional CA peer inside [`Snes`], mirroring
+/// `CpuCoroutineSlot`/`ApuActorSlot`: cloning drops the engine (it is rebuilt on
+/// reset) and equality is by structure only.
+#[derive(Default)]
+pub struct CaSlot(pub Option<Box<CaPeer>>);
+
+impl Clone for CaSlot {
+    fn clone(&self) -> Self {
+        Self(None)
+    }
+}
+
+impl PartialEq for CaSlot {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for CaSlot {}
+
+impl std::fmt::Debug for CaSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CaPeer")
+    }
+}
+
 impl Default for SymEngine {
     fn default() -> Self {
         Self::new()
