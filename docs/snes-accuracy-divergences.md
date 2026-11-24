@@ -12970,3 +12970,27 @@ pinned to a single event with the ares reference available.
 The next change is at the IPL transfer ack: delay the S-SMP's exit from the poll
 loop by one iteration so it matches ares, without touching the six titles that
 are already exact.
+
+## One-poll ack delay: right direction, MMX2-specific (2026-11-24)
+
+Aligning the ares and our CPU-side `$2140-$2143` streams with difflib shows a
+clean per-byte pattern: for every uploaded byte ares polls the *old* value one
+extra time before the new one (one more `R0 <prev>` in ares, one more
+`R0 <new>` in ours), i.e. our S-SMP ack becomes visible one poll iteration early.
+
+Implemented `SNES_SMP_LATCH_DELAY=N`: the timestamped S-SMP->S-CPU latch queue
+holds each `$F4-$F7` write back by N S-SMP clocks (one poll iteration is ~5).
+600-frame gate with `SNES_DSP_PRIME=0`:
+
+| delay | mmx2 | ct |
+|---|---|---|
+| 0 | 49253 (92.3001%) | 0 (100%) |
+| 4 | 63969 (89.9995%) | 450582 (29.5587%) |
+| 5 | 41458 (93.5187%) | 452524 (29.2551%) |
+| 6 | 41458 (93.5187%) | 476014 (25.5828%) |
+
+The delay moves MMX2 in the right direction (92.3 -> 93.5%) but is ruinous for
+CT, so the one-poll difference is **MMX2-specific boot timing**, not a protocol
+rule: applying it to every title is wrong. It therefore cannot be the unifying
+fix, and a title test is not acceptable. Reverted. Default remains mmx2 0,
+261 lib tests, fmt/clippy clean.
