@@ -1522,10 +1522,12 @@ impl Snes {
                                 Some(response) => response,
                                 None => self.handle_cpu_request(request),
                             }));
+                            if use_ca {
+                                // ares `CPU::step` calls `scheduler.synchronize()`
+                                // at every access, not only on `Advance`.
+                                self.ca_drive();
+                            }
                             if stepped {
-                                if use_ca {
-                                    self.ca_drive();
-                                }
                                 break;
                             }
                         }
