@@ -13206,3 +13206,29 @@ behaviourally neutral: relative timing is invariant under the scalar change, so
 the CA driver's residual is **not** the clock base. It is the co-scheduling and
 port-visibility semantics (the `$FFDC` bracket), which is where the next change
 must go.
+
+## Sub-access CPU->SMP visibility is discrete, not continuous (2026-11-24)
+
+Tested interpolating the timestamped S-CPU->S-SMP port write between immediate
+and full-clock by publishing it N S-SMP clocks early
+(`SNES_CPU_LATCH_OFFSET`), checking the first PC divergence against ares'
+instruction stream:
+
+| offset | first mismatch | ares | ours |
+|---|---|---|---|
+| 0 (full timestamp) | 883130 | FFD4 | FFCF (one poll more) |
+| 2 | 883130 | FFD4 | FFCF (one poll more) |
+| 4 | 887720 | FFE9 | FFDE (one poll fewer) |
+| 6 | 887720 | FFE9 | FFDE (one poll fewer) |
+
+The result jumps between the two existing polarities with no offset matching
+ares: the `$FFDC` divergence is a **discrete poll-iteration/scheduling**
+difference, not a sub-access timing phase that a visibility offset can
+interpolate. Every visibility model (immediate, timestamped, offsets 2/4/6,
+charged `PORT_SYNC`, credit-neutral synchronize) has now been measured and none
+reproduces ares.
+
+The remaining requirement is exact co-switch ordering at the S-SMP instruction /
+S-CPU access boundary (which poll iteration runs before the latch is observed),
+i.e. the full coroutine scheduler, not another visibility knob. Reverted; default
+and six-exact mode verified unchanged.
