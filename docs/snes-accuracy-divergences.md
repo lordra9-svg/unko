@@ -13264,3 +13264,25 @@ This is the reference needed to reproduce ares' exact switch order at the
 final switches before ares' instruction 887,720, and make the co-switch loop
 issue the same sequence. It is a diagnostic for the scheduler rewrite, not a
 change to the current driver; the default and six-exact modes are unchanged.
+
+## ares switch topology (3-frame ARES_SWITCH_LOG): DSP-dominated (2026-11-24)
+
+Parsed 104,224 switches / 3 MMX2 frames. Thread IDs 0..4 are present
+(CPU=1, SMP=2, DSP=3, Cx4=4, plus 0), and the switch pairs are:
+
+| pair | per direction | per frame |
+|---|---|---|
+| SMP(2) <-> DSP(3) | 49,802 | ~16,600 |
+| CPU(1) <-> SMP(2) | 770 | ~257 |
+| CPU(1) <-> Cx4/4 | 778 | ~259 |
+| CPU(1) <-> 0 | 765 | ~255 |
+
+The schedule is **DSP-driven**: the DSP co-switches to the SMP ~16,600 times per
+frame (once per 24-clock micro-step), while the CPU only synchronizes with the
+SMP ~257 times per frame (per instruction; ~1/64 of the DSP rate). This is the
+structural difference from our driver, where `ca_drive` runs the SMP to the CPU
+clock after every CPU bus request.
+
+The 262-frame switch log captures the sequence across the 4.2 s divergence for
+the rewrite; the co-switch loop must reproduce this DSP-dominated order (SMP
+pulled by the DSP, CPU pulling the SMP sparsely), not a CPU-per-request catch-up.
