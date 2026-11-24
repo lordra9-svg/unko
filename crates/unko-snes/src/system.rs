@@ -913,6 +913,9 @@ impl Snes {
     /// Install a user-supplied 64-byte SPC700 IPL ROM.
     pub fn set_ipl(&mut self, ipl: [u8; crate::apu::IPL_SIZE]) {
         self.apu.set_ipl(ipl);
+        if crate::apu::ca_enabled() {
+            self.install_ca(ipl);
+        }
     }
 
     /// Attach an MSU1 data ROM (`msu1.data.rom`), enabling `$2000-$2007`.
@@ -1427,6 +1430,10 @@ impl Snes {
             return;
         };
         ca.set_cpu_clock(clock);
+        if ca.engine().dsp_thread_mode() {
+            let _ = ca.engine_mut().run_threads_to(clock);
+            return;
+        }
         let mut guard = 0u32;
         loop {
             if ca.caught_up() || guard > 1_000_000 {
@@ -1454,7 +1461,12 @@ impl Snes {
         let is_port = |address: u32| {
             address & 0x40_FF00 == 0x2100 && (0x2140..=0x2143).contains(&(address & 0xFFFF))
         };
+        // ares `CPU::readAPU`/`writeAPU` synchronizes the S-SMP to the S-CPU
+        // clock before the port is sampled or latched.
+        let clock = u128::from(self.clock) * 2_050_560 / u128::from(self.region.master_clock());
         let ca = self.ca.0.as_mut()?;
+        ca.set_cpu_clock(clock);
+        ca.engine_mut().synchronize_cpu_clock();
         match request {
             BusRequest::Read { address, .. } if is_port(address) => {
                 let port = ((address & 0xFFFF) - 0x2140) as u8;

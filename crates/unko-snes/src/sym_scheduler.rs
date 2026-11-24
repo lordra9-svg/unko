@@ -491,6 +491,8 @@ pub struct SymEngine {
     trace: Vec<(u128, u16)>,
     /// Whether tracing is enabled.
     trace_enabled: bool,
+    /// Run the S-DSP as an independent thread (`SNES_DSP_THREAD`).
+    dsp_thread: bool,
 }
 
 /// S-SMP clocks per DSP micro-step (24 DSP clocks = 2 S-SMP clocks).
@@ -523,6 +525,7 @@ impl SymEngine {
             pending_port: None,
             trace: Vec::new(),
             trace_enabled: false,
+            dsp_thread: crate::apu::dsp_thread(),
         }
     }
 
@@ -653,7 +656,9 @@ impl SymEngine {
             SpcEvent::StepClock(clocks) => {
                 self.smp_clock += u128::from(clocks);
                 self.rr.set_smp_clock(self.smp_clock);
-                self.catch_dsp_to_smp();
+                if !self.dsp_thread {
+                    self.catch_dsp_to_smp();
+                }
                 SpcResume::Unit
             }
             SpcEvent::Advance(clocks) => {
@@ -700,6 +705,71 @@ impl SymEngine {
                     input = SpcInput::Resume(resume);
                 }
                 corosensei::CoroutineResult::Return(()) => return false,
+            }
+        }
+    }
+
+    /// ares `CPU::readAPU`/`writeAPU` -> `synchronize(smp)`: run the S-SMP to
+    /// the published S-CPU clock before the port is sampled or latched.
+    ///
+    /// An ahead `$F4-$F7` read is sampled from the current latch instead of
+    /// blocking the S-CPU, matching ares `Scheduler::synchronizing()`, so this
+    /// terminates even though the S-CPU cannot be run from inside its access.
+    pub fn synchronize_cpu_clock(&mut self) {
+        let target = self.cpu_clock;
+        let mut guard = 0u32;
+        while self.smp_clock < target && guard < 200_000 {
+            match self.smp_step_parking() {
+                StepOutcome::Ran | StepOutcome::Parked(_) => {}
+                StepOutcome::Halted => break,
+            }
+            guard += 1;
+        }
+    }
+
+    /// Whether the S-DSP runs as an independent thread.
+    pub const fn dsp_thread_mode(&self) -> bool {
+        self.dsp_thread
+    }
+
+    /// ares' three-thread round-robin: run the S-DSP and S-SMP to `cpu_clock`,
+    /// with each DSP micro-step pulling the S-SMP to the DSP clock.
+    ///
+    /// `dsp_units` is in S-SMP-clock units (2 per micro-step); the DSP phase
+    /// from `SNES_DSP_PRIME` is applied in those units.
+    pub fn run_threads_to(&mut self, cpu_clock: u128) -> StepOutcome {
+        self.set_cpu_clock(cpu_clock);
+        let phase = std::env::var("SNES_DSP_PRIME")
+            .ok()
+            .and_then(|value| value.parse::<u128>().ok())
+            .map_or(0, |ticks| ticks * SMP_PER_DSP_STEP);
+        let dsp_target = cpu_clock.saturating_add(phase);
+        let mut guard = 0u32;
+        loop {
+            if self.smp_clock >= cpu_clock && self.dsp_units >= dsp_target {
+                return StepOutcome::Ran;
+            }
+            if self.dsp_units <= self.smp_clock {
+                self.dsp_micro_step();
+                let mut pull = 0u32;
+                while self.smp_clock < self.dsp_units && pull < 4096 {
+                    match self.smp_step_parking() {
+                        StepOutcome::Parked(target) => return StepOutcome::Parked(target),
+                        StepOutcome::Halted => return StepOutcome::Halted,
+                        StepOutcome::Ran => {}
+                    }
+                    pull += 1;
+                }
+            } else {
+                match self.smp_step_parking() {
+                    StepOutcome::Parked(target) => return StepOutcome::Parked(target),
+                    StepOutcome::Halted => return StepOutcome::Halted,
+                    StepOutcome::Ran => {}
+                }
+            }
+            guard += 1;
+            if guard > 10_000_000 {
+                return StepOutcome::Ran;
             }
         }
     }

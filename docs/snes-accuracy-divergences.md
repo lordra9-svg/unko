@@ -12901,3 +12901,25 @@ next target is the `$2140-$2143` upload hand-off itself.
 
 Default unchanged (prime 4, MMX2 exact); the DSP-thread model is opt-in via
 those flags. 212/212 baseline and 261 lib tests remain green.
+
+## CPU->SMP synchronize on the CA engine: still not the hand-off fix (2026-11-24)
+
+Wired the `SNES_CA` peer to `set_ipl` (it was only installed by tests) and added
+ares `CPU::readAPU`/`writeAPU` -> `synchronize(smp)` to `ca_port_response`, with
+the S-SMP resolving an ahead `$F4-$F7` read against the current latch (ares
+`Scheduler::synchronizing()`). Also wired `SNES_DSP_THREAD` into `SymEngine`
+(`run_threads_to`: DSP micro-step pulls the S-SMP, StepClock no longer catches
+the DSP up).
+
+600-frame gate (`SNES_CA SNES_SYM_SCHED SNES_DSP_THREAD SNES_DSP_PRIME=0`):
+
+```
+ct   452725 (29.2237%)   mmx2 196838 (69.2275%)
+```
+
+The synchronize alone drops CT to 29%: in this engine the S-SMP lags the S-CPU
+clock far enough at port accesses that running it forward there shifts the whole
+handshake. ares gets away with the same call because its scheduler keeps every
+thread synchronised at each `CPU::step`, so the synchronize is near a no-op; the
+CA engine's `ca_drive` only runs on `Advance` requests. Opt-in/off by default.
+Default is unchanged (mmx2 0, 212/212). The upload hand-off remains open.
