@@ -13286,3 +13286,16 @@ clock after every CPU bus request.
 The 262-frame switch log captures the sequence across the 4.2 s divergence for
 the rewrite; the co-switch loop must reproduce this DSP-dominated order (SMP
 pulled by the DSP, CPU pulling the SMP sparsely), not a CPU-per-request catch-up.
+
+## Switch-log absolute clock reconstruction is still off (2026-11-24)
+
+Added a `Thread::_clockBase` accumulated from `Scheduler::exit` reductions and
+logged `(_clockBase + clock()) / scalar()`. The 262-frame capture then reports
+CPU max 42.95M and SMP max 4.10M cycles, but the SPC trace at the divergence has
+CPU 83.57M / SMP mono 7.98M - a uniform factor ~1.95. So the reconstruction is
+still wrong (roughly half), and the switch times cannot yet be matched to
+instruction 887,720. The oracle scheduler files were restored and rebuilt.
+
+Before the co-switch rewrite can be driven by the log, the absolute clock must be
+made exact (the factor-2 error suggests the reduction/step accounting differs
+from `oracleClock`), then the switch sequence at CPU 83,574,544 extracted.
