@@ -13179,3 +13179,30 @@ This is the concrete calibration target for the co-scheduled driver: when the
 S-CPU writes `$2140`, the S-SMP must see it at the same point in the poll loop as
 ares, which the instruction-level trace now measures directly. The 600-frame
 audio gate and the `$FFDC` index are the two acceptance checks.
+
+## SymEngine converted to ares Second-based ThreadClock (2026-11-24)
+
+`SymEngine`'s internal clocks are now the ares `Thread::Second` fixed-point base:
+
+* `smp_clock += SMP_FIXED` per S-SMP clock (`SMP_FIXED = Second / 2_050_560`);
+* `dsp_units += DSP_TICK_FIXED` per micro-step (`= 2 * SMP_FIXED`, exactly
+  24 DSP clocks = 2 S-SMP clocks);
+* `ca_drive`/`ca_port_response` publish the S-CPU clock with
+  `apu::scheduler_cpu_scalar(rate)` instead of a raw `* 2050560 / rate`;
+* public `smp_clock()`/`dsp_units()`/`cpu_clock()` still return S-SMP cycles, so
+  the instruction-level and unit tests keep their units.
+
+261 lib tests pass, fmt/clippy clean, and the default path (MMX2 0 over 639656
+samples) is untouched because `SymEngine` is only instantiated under `SNES_CA`.
+
+Result on the co-scheduled CA driver (`SNES_CA+SYM_SCHED+DSP_THREAD+prime0`):
+
+```
+ct   452725 (29.2237%)   mmx2 196830 (69.2288%)
+```
+
+i.e. **byte-identical to the raw-clock engine**. Converting the clock units is
+behaviourally neutral: relative timing is invariant under the scalar change, so
+the CA driver's residual is **not** the clock base. It is the co-scheduling and
+port-visibility semantics (the `$FFDC` bracket), which is where the next change
+must go.

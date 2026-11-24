@@ -1425,11 +1425,12 @@ impl Snes {
     /// `Advance` resumes it).
     fn ca_drive(&mut self) {
         // Engine clocks are S-SMP cycles; convert the S-CPU master clock.
-        let clock = u128::from(self.clock) * 2_050_560 / u128::from(self.region.master_clock());
+        let clock =
+            u128::from(self.clock) * crate::apu::scheduler_cpu_scalar(self.region.master_clock());
         let Some(ca) = self.ca.0.as_mut() else {
             return;
         };
-        ca.set_cpu_clock(clock);
+        ca.set_cpu_clock_fixed(clock);
         if ca.engine().dsp_thread_mode() {
             let _ = ca.engine_mut().run_threads_to(clock);
             return;
@@ -1441,6 +1442,7 @@ impl Snes {
             }
             match ca.poll() {
                 crate::sym_scheduler::StepOutcome::Parked(target) => {
+                    let target = crate::sym_scheduler::SymEngine::smp_units_to_fixed(target);
                     if target > clock {
                         break;
                     }
@@ -1463,9 +1465,10 @@ impl Snes {
         };
         // ares `CPU::readAPU`/`writeAPU` synchronizes the S-SMP to the S-CPU
         // clock before the port is sampled or latched.
-        let clock = u128::from(self.clock) * 2_050_560 / u128::from(self.region.master_clock());
+        let clock =
+            u128::from(self.clock) * crate::apu::scheduler_cpu_scalar(self.region.master_clock());
         let ca = self.ca.0.as_mut()?;
-        ca.set_cpu_clock(clock);
+        ca.set_cpu_clock_fixed(clock);
         ca.engine_mut().synchronize_cpu_clock();
         match request {
             BusRequest::Read { address, .. } if is_port(address) => {

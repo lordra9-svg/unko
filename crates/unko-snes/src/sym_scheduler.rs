@@ -496,7 +496,13 @@ pub struct SymEngine {
 }
 
 /// S-SMP clocks per DSP micro-step (24 DSP clocks = 2 S-SMP clocks).
+#[cfg(test)]
 const SMP_PER_DSP_STEP: u128 = 2;
+
+/// `Thread::Second` units per S-SMP clock (ares `_scalar`).
+const SMP_FIXED: u128 = SECOND / 2_050_560;
+/// `Thread::Second` units per DSP micro-step (24 DSP clocks = 2 S-SMP clocks).
+const DSP_TICK_FIXED: u128 = 2 * SMP_FIXED;
 
 impl SymEngine {
     /// Create the engine with a fresh S-SMP/DSP and 64 KiB of APU RAM.
@@ -534,14 +540,24 @@ impl SymEngine {
         self.core = Some(core);
     }
 
-    /// Current S-SMP clock.
+    /// Current S-SMP clock, in S-SMP cycles (fixed-point internally).
     pub const fn smp_clock(&self) -> u128 {
+        self.smp_clock / SMP_FIXED
+    }
+
+    /// Fixed-point (`Thread::Second`) S-SMP clock.
+    pub const fn smp_fixed(&self) -> u128 {
         self.smp_clock
     }
 
-    /// DSP progress in S-SMP-clock units (2 per micro-step).
+    /// Convert S-SMP cycles to `Thread::Second` units.
+    pub const fn smp_units_to_fixed(units: u128) -> u128 {
+        units * SMP_FIXED
+    }
+
+    /// DSP progress in S-SMP-clock units (2 per micro-step; fixed-point internal).
     pub const fn dsp_units(&self) -> u128 {
-        self.dsp_units
+        self.dsp_units / SMP_FIXED
     }
 
     /// Number of retired S-SMP instructions.
@@ -577,14 +593,14 @@ impl SymEngine {
                 self.samples.pop_front();
             }
         }
-        self.dsp_units += SMP_PER_DSP_STEP;
+        self.dsp_units += DSP_TICK_FIXED;
         self.rr.set_dsp_clock(self.dsp_units);
         self.rr.push_resume(self.dsp_units, self.dsp_units);
     }
 
     /// Advance the DSP to the current S-SMP clock.
     fn catch_dsp_to_smp(&mut self) {
-        while self.dsp_units + SMP_PER_DSP_STEP <= self.smp_clock {
+        while self.dsp_units + DSP_TICK_FIXED <= self.smp_clock {
             self.dsp_micro_step();
         }
     }
@@ -654,7 +670,7 @@ impl SymEngine {
                 SpcResume::Unit
             }
             SpcEvent::StepClock(clocks) => {
-                self.smp_clock += u128::from(clocks);
+                self.smp_clock += u128::from(clocks) * SMP_FIXED;
                 self.rr.set_smp_clock(self.smp_clock);
                 if !self.dsp_thread {
                     self.catch_dsp_to_smp();
@@ -738,11 +754,11 @@ impl SymEngine {
     /// `dsp_units` is in S-SMP-clock units (2 per micro-step); the DSP phase
     /// from `SNES_DSP_PRIME` is applied in those units.
     pub fn run_threads_to(&mut self, cpu_clock: u128) -> StepOutcome {
-        self.set_cpu_clock(cpu_clock);
+        self.set_cpu_clock_fixed(cpu_clock);
         let phase = std::env::var("SNES_DSP_PRIME")
             .ok()
             .and_then(|value| value.parse::<u128>().ok())
-            .map_or(0, |ticks| ticks * SMP_PER_DSP_STEP);
+            .map_or(0, |ticks| ticks * DSP_TICK_FIXED);
         let dsp_target = cpu_clock.saturating_add(phase);
         let mut guard = 0u32;
         loop {
@@ -795,7 +811,7 @@ impl SymEngine {
             SpcInput::Resume(SpcResume::Byte(self.apu_ports[usize::from(port)]))
         } else if let Some(core) = self.core.take() {
             if !self.trace.is_empty() || self.trace_enabled {
-                self.trace.push((self.smp_clock, core.pc));
+                self.trace.push((self.smp_clock / SMP_FIXED, core.pc));
             }
             SpcInput::Start(core)
         } else {
@@ -812,7 +828,7 @@ impl SymEngine {
                     if (0x00F4..=0x00F7).contains(&address) && self.smp_clock > self.cpu_clock =>
                 {
                     self.pending_port = Some((address - 0x00F4) as u8);
-                    return StepOutcome::Parked(self.smp_clock);
+                    return StepOutcome::Parked(self.smp_clock / SMP_FIXED);
                 }
                 corosensei::CoroutineResult::Yield(event) => {
                     let cpu = self.cpu_clock;
@@ -832,13 +848,15 @@ impl SymEngine {
     /// This is the entry the `SNES_CA` adapter uses to drive the isolated
     /// engine from [`crate::system::Snes`].
     pub fn advance_to_cpu(&mut self, cpu_clock: u128, mut cpu_step: impl FnMut(u128) -> u128) {
-        if cpu_clock > self.cpu_clock {
-            self.cpu_clock = cpu_clock;
-            self.rr.set_cpu_clock(cpu_clock);
+        let target = cpu_clock * SMP_FIXED;
+        if target > self.cpu_clock {
+            self.cpu_clock = target;
+            self.rr.set_cpu_clock(target);
         }
+        let mut step = |fixed: u128| cpu_step(fixed / SMP_FIXED) * SMP_FIXED;
         let mut guard = 0u32;
         while self.smp_clock < self.cpu_clock && guard < 2_000_000 {
-            if !self.smp_step_pulling(&mut cpu_step) {
+            if !self.smp_step_pulling(&mut step) {
                 break;
             }
             guard += 1;
@@ -864,8 +882,13 @@ impl SymEngine {
 }
 
 impl SymEngine {
-    /// Publish the S-CPU clock.
+    /// Publish the S-CPU clock (S-SMP cycles; converted to fixed point).
     pub fn set_cpu_clock(&mut self, clock: u128) {
+        self.cpu_clock = clock * SMP_FIXED;
+    }
+
+    /// Publish the S-CPU clock in `Thread::Second` units.
+    pub fn set_cpu_clock_fixed(&mut self, clock: u128) {
         self.cpu_clock = clock;
     }
 
@@ -994,6 +1017,11 @@ impl CaPeer {
     /// Publish the S-CPU clock (the outer driver's current clock).
     pub fn set_cpu_clock(&mut self, clock: u128) {
         self.engine.set_cpu_clock(clock);
+    }
+
+    /// Publish the S-CPU clock in `Thread::Second` units.
+    pub fn set_cpu_clock_fixed(&mut self, clock: u128) {
+        self.engine.set_cpu_clock_fixed(clock);
     }
 
     /// Advance one S-SMP instruction, or report a park target. This is the
