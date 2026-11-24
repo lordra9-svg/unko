@@ -157,6 +157,13 @@ pub fn port_sync() -> bool {
     *PORT.get_or_init(|| std::env::var_os("SNES_PORT_SYNC").is_some())
 }
 
+/// `SNES_SYM_NESTED`: nested co-switch scheduler (S-CPU resumable from inside
+/// the APU advance). Used with `SNES_CA`/`SNES_SYM_SCHED`.
+pub fn sym_nested() -> bool {
+    static N: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *N.get_or_init(|| std::env::var_os("SNES_SYM_NESTED").is_some())
+}
+
 /// `SNES_CLOCK_SYNC`: drive the S-SMP purely by ares' thread clocks - every
 /// advance runs it to the first suspension point at or past the S-CPU clock
 /// (`Thread::synchronize(smp)`) instead of pacing it with carried credit.

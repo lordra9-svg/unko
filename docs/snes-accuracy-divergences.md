@@ -13361,3 +13361,24 @@ S-CPU from inside that loop. Reproducing it requires the S-CPU coroutine to be
 resumable from inside the APU advance (`ca_drive` currently cannot re-enter the
 S-CPU while handling one of its requests). That is the remaining architectural
 piece; the reference sequence and the `$FFDC` acceptance point are now exact.
+
+## Nested co-switch scheduler implemented (`SNES_SYM_NESTED`) (2026-11-24)
+
+`step_sym_sched_nested` keeps the CA peer out of `Snes`, runs the APU
+(`run_threads_to`) with the DSP/SMP, and when it parks (the S-SMP ahead after an
+access, `SNES_SMP_ACCESS_PULL`) resumes the **S-CPU coroutine** to answer its next
+request before driving the APU again. This is the first implementation where the
+CPU is resumable from inside the APU advance.
+
+It runs (2,110,844 instructions, 100,032,312 cycles over 280 frames) and produces
+a *different* schedule from every previous model. Against the ares instruction
+stream the first PC divergence is at instruction **883,130**: ares takes
+`$FFD4 -> $FFEF` while we keep the `$FFCF/$FFD2` poll loop (we now poll one
+iteration more, the opposite polarity from the non-nested immediate latch).
+
+So the nested plumbing is real, but the loop order is not yet ares': the CPU
+resume happens after the APU turn in each iteration. The next step is to order
+the resume inside the APU turn at the exact point the S-SMP synchronizes the CPU
+(every 4 micro-steps per the extracted log) and verify `$FFDC -> $FFE9`.
+Opt-in (`SNES_SYM_NESTED`); default verified unchanged (mmx2 0), 261 tests,
+fmt/clippy clean.

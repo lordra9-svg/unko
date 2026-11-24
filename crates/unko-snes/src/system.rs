@@ -1191,6 +1191,9 @@ impl Snes {
         // access, so clearing once per instruction is equivalent.
         self.nmi_lock = false;
         if crate::apu::sym_sched() {
+            if crate::apu::sym_nested() && self.ca.0.is_some() {
+                return self.step_sym_sched_nested();
+            }
             return self.step_sym_sched();
         }
         if let Some(sa1) = self.sa1.as_mut() {
@@ -1482,6 +1485,80 @@ impl Snes {
             }
             _ => None,
         }
+    }
+
+    /// Nested ares scheduler (`SNES_SYM_NESTED`): the S-CPU coroutine is
+    /// resumable from inside the APU advance, so the DSP/SMP loop can
+    /// `synchronize(cpu)` at every access (the extracted ares order).
+    fn step_sym_sched_nested(&mut self) -> u32 {
+        use crate::cpu_coroutine::{BusRequest, BusResponse, CpuInput, CpuOutput};
+        use crate::sym_scheduler::StepOutcome;
+        let cpu = std::mem::take(&mut self.cpu);
+        let mut coroutine = self
+            .cpu_coroutine
+            .0
+            .take()
+            .unwrap_or_else(crate::cpu_coroutine::new_coroutine);
+        self.apu_actor_driven = true;
+        let mut ca = self.ca.0.take().expect("CA peer installed");
+        let cpu_scalar = crate::apu::scheduler_cpu_scalar(self.region.master_clock());
+        let mut input = Some(CpuInput::Start(cpu));
+        let mut cycles = 0u32;
+        let mut done = false;
+        let mut guard = 0u64;
+        loop {
+            guard += 1;
+            if guard > 50_000_000 {
+                break;
+            }
+            let clock = u128::from(self.clock) * cpu_scalar;
+            ca.set_cpu_clock_fixed(clock);
+            let outcome = ca.engine_mut().run_threads_to(clock);
+            let need_cpu = matches!(outcome, StepOutcome::Parked(_));
+            if done && !need_cpu {
+                break;
+            }
+            // Resume the S-CPU by one yield (Request -> answer, Done -> finish).
+            match coroutine.resume(input.take().expect("CPU input")) {
+                corosensei::CoroutineResult::Yield(CpuOutput::Request(request)) => {
+                    let is_port = |address: u32| {
+                        address & 0x40_FF00 == 0x2100
+                            && (0x2140..=0x2143).contains(&(address & 0xFFFF))
+                    };
+                    let response = match request {
+                        BusRequest::Read { address, .. } if is_port(address) => {
+                            let port = ((address & 0xFFFF) - 0x2140) as u8;
+                            let c = u128::from(self.clock) * cpu_scalar;
+                            ca.set_cpu_clock_fixed(c);
+                            ca.engine_mut().synchronize_cpu_clock();
+                            BusResponse::Byte(ca.engine().cpu_port(port))
+                        }
+                        BusRequest::Write { address, value } if is_port(address) => {
+                            let port = ((address & 0xFFFF) - 0x2140) as u8;
+                            let c = u128::from(self.clock) * cpu_scalar;
+                            ca.set_cpu_clock_fixed(c);
+                            ca.engine_mut().synchronize_cpu_clock();
+                            ca.engine_mut().write_apu_latch(port, value);
+                            BusResponse::None
+                        }
+                        other => self.handle_cpu_request(other),
+                    };
+                    input = Some(CpuInput::Response(response));
+                }
+                corosensei::CoroutineResult::Yield(CpuOutput::Done(cpu, count)) => {
+                    self.cpu = cpu;
+                    cycles += count;
+                    self.apply_interrupts();
+                    done = true;
+                    input = Some(CpuInput::Start(std::mem::take(&mut self.cpu)));
+                }
+                corosensei::CoroutineResult::Return(()) => unreachable!(),
+            }
+        }
+        self.apu_actor_driven = false;
+        self.cpu_coroutine.0 = Some(coroutine);
+        self.ca.0 = Some(ca);
+        cycles
     }
 
     fn step_sym_sched(&mut self) -> u32 {
