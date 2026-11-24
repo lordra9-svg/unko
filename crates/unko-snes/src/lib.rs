@@ -22,6 +22,7 @@
 
 pub mod apu;
 pub mod bsx;
+pub mod co_scheduler;
 pub mod cpu;
 pub mod cpu_coroutine;
 pub mod cx4;
