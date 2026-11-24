@@ -12923,3 +12923,49 @@ handshake. ares gets away with the same call because its scheduler keeps every
 thread synchronised at each `CPU::step`, so the synchronize is near a no-op; the
 CA engine's `ca_drive` only runs on `Advance` requests. Opt-in/off by default.
 Default is unchanged (mmx2 0, 212/212). The upload hand-off remains open.
+
+## ares hand-off capture fixed; first MMX2 divergence at CPU event 17 (2026-11-24)
+
+The earlier "ares hooks do not fire" was two separate issues, both now fixed:
+
+* the captures were only 30 frames long, but MMX2 initialises the sound driver
+  around 7 s (the APU handshake simply had not happened yet);
+* the `ARES_DSP_WRITES` hook never flushed, and the ares process exits with
+  `_Exit(0)`, losing the buffered log. Adding `fflush(dspWriteLog)` after each
+  line fixed it.
+
+With a 540-frame capture both references now exist:
+
+```
+ares APU log     483623 CPU-side $2140-$2143 accesses
+ares DSP writes     4320        ours 4320   (address/value order identical)
+```
+
+### DSP writes
+
+All 4,320 `(address, value)` pairs match in order. The absolute `dspTicks`
+column starts 62 ticks from ours and converges to 0 (jitter -46..+82), i.e. the
+DSP stream is the same; the residual is sub-sample phase, not order. A naive
+`SNES_DSP_PRIME=62` is *not* the fix (mmx2 69.26%, ct 38.26%), confirming the
+tick counters are not directly comparable across DSP resets.
+
+### CPU-side hand-shake
+
+Aligning the two CPU-side `$2140-$2143` sequences, the first **17** events match
+exactly with a constant clock offset of **-30 master clocks** (ours earlier).
+Event 17 diverges:
+
+```
+i=17  ares R0 = AA   (clock 83230732)
+      ours R0 = CC   (clock 83230762)
+i=18  ares R0 = CC ; ours W0 = 00
+```
+
+i.e. our S-SMP has advanced **one poll iteration** ahead of ares at the same
+handshake step (we read the next byte one iteration early), and the byte streams
+then interleave differently. This is the 8-S-SMP-clock program-entry lead, now
+pinned to a single event with the ares reference available.
+
+The next change is at the IPL transfer ack: delay the S-SMP's exit from the poll
+loop by one iteration so it matches ares, without touching the six titles that
+are already exact.
