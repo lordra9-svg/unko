@@ -13025,3 +13025,20 @@ DSP after entry), MMX2 exposes it immediately at the first DSP writes.
 The remaining fix is therefore the exact `SMP::writeIO -> synchronize(cpu) ->
 latch` ordering, not a constant delay: commit the latch only after the CPU
 access that triggered the synchronize has retired, for every `$F4-$F7` write.
+
+## writeIO synchronize-then-latch staging rejected (2026-11-24)
+
+Implemented `SNES_WRITEIO_ORDER`: an S-SMP `$F4-$F7` write is staged in
+`pending_latch` and published at the next S-CPU `Advance` boundary, so the poll
+that triggered `synchronize(cpu)` misses the byte. 600-frame gate with
+`SNES_DSP_PRIME=0`:
+
+```
+dkc 0 (100%)   ct 350411 (45.2188%)   mmx2 49253 (92.3001%)
+```
+
+MMX2 is unchanged and CT regresses, so the ack timing is not fixed by deferring
+the latch one access boundary. With the earlier fixed-delay result (mmx2 up to
+93.5% but ct 29%), the "one poll early" observation is a symptom of the S-SMP
+entry phase, not a latch-order bug that can be corrected at the port write.
+Reverted; default verified unchanged (mmx2 0, ct prime0 0), 261 lib tests.
