@@ -13142,3 +13142,19 @@ leaving the credit for subsequent advances untouched.
 The divergence region can now be validated instruction-by-instruction against
 `ARES_SPC_TRACE` (PC + absolute SMP clock), which is the acceptance metric short
 of the 7-title audio gate.
+
+## Credit-neutral writeAPU synchronize rejected: pathological backlog (2026-11-24)
+
+Implemented `SNES_WRITEAPU_SYNC`: before latching an S-CPU `$2140-$2143` write,
+run the S-SMP to the S-CPU clock (`sync_smp_nocredit`) without charging the
+carried credit, leaving the credit untouched. Measured: dkc 0 over 41,830
+samples, then the run stalled - the creditless drain runs the whole SMP backlog
+forward on every write while the backlog never shrinks, i.e. O(n^2) work, and
+the emulator is unusable (30 min for <1 s). Reverted.
+
+This closes the "credit-neutral synchronize" variant. The ordering must charge
+the work it performs (as `sync_smp_to`/`SNES_PORT_SYNC` do) so the backlog is
+accounted; that variant is fast but regressed the six. The exact ares
+`writeAPU` semantics therefore need a scheduler that co-locates the threads
+continuously (so the synchronize is ~zero work), not a per-write catch-up on top
+of the carried-credit driver.
