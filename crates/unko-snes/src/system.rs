@@ -1505,6 +1505,66 @@ impl Snes {
         let mut input = Some(CpuInput::Start(cpu));
         let mut cycles = 0u32;
         let mut done = false;
+        let mut at_done = false;
+
+        let is_port = |address: u32| {
+            address & 0x40_FF00 == 0x2100 && (0x2140..=0x2143).contains(&(address & 0xFFFF))
+        };
+
+        macro_rules! answer {
+            ($request:expr) => {{
+                let request = $request;
+                match request {
+                    BusRequest::Read { address, .. } if is_port(address) => {
+                        let port = ((address & 0xFFFF) - 0x2140) as u8;
+                        let c = u128::from(self.clock) * cpu_scalar;
+                        ca.set_cpu_clock_fixed(c);
+                        ca.engine_mut().synchronize_cpu_clock();
+                        BusResponse::Byte(ca.engine().cpu_port(port))
+                    }
+                    BusRequest::Write { address, value } if is_port(address) => {
+                        let port = ((address & 0xFFFF) - 0x2140) as u8;
+                        let c = u128::from(self.clock) * cpu_scalar;
+                        ca.set_cpu_clock_fixed(c);
+                        ca.engine_mut().synchronize_cpu_clock();
+                        ca.engine_mut().write_apu_latch(port, value);
+                        BusResponse::None
+                    }
+                    other => self.handle_cpu_request(other),
+                }
+            }};
+        }
+
+        // Resume the S-CPU by one yield. `at_done` means the coroutine is parked
+        // at `Done`, so the next resume must be `Start`; otherwise it must be the
+        // pending `Response`.
+        macro_rules! cpu_step {
+            () => {{
+                let payload = if at_done {
+                    at_done = false;
+                    done = false; // a new instruction has begun
+                    CpuInput::Start(std::mem::take(&mut self.cpu))
+                } else {
+                    input.take().expect("CPU input")
+                };
+                match coroutine.resume(payload) {
+                    corosensei::CoroutineResult::Yield(CpuOutput::Request(request)) => {
+                        input = Some(CpuInput::Response(answer!(request)));
+                        false
+                    }
+                    corosensei::CoroutineResult::Yield(CpuOutput::Done(cpu, count)) => {
+                        self.cpu = cpu;
+                        cycles += count;
+                        self.apply_interrupts();
+                        done = true;
+                        at_done = true;
+                        true
+                    }
+                    corosensei::CoroutineResult::Return(()) => unreachable!(),
+                }
+            }};
+        }
+
         let mut guard = 0u64;
         loop {
             guard += 1;
@@ -1513,46 +1573,23 @@ impl Snes {
             }
             let clock = u128::from(self.clock) * cpu_scalar;
             ca.set_cpu_clock_fixed(clock);
-            let outcome = ca.engine_mut().run_threads_to(clock);
-            let need_cpu = matches!(outcome, StepOutcome::Parked(_));
-            if done && !need_cpu {
-                break;
-            }
-            // Resume the S-CPU by one yield (Request -> answer, Done -> finish).
-            match coroutine.resume(input.take().expect("CPU input")) {
-                corosensei::CoroutineResult::Yield(CpuOutput::Request(request)) => {
-                    let is_port = |address: u32| {
-                        address & 0x40_FF00 == 0x2100
-                            && (0x2140..=0x2143).contains(&(address & 0xFFFF))
-                    };
-                    let response = match request {
-                        BusRequest::Read { address, .. } if is_port(address) => {
-                            let port = ((address & 0xFFFF) - 0x2140) as u8;
-                            let c = u128::from(self.clock) * cpu_scalar;
-                            ca.set_cpu_clock_fixed(c);
-                            ca.engine_mut().synchronize_cpu_clock();
-                            BusResponse::Byte(ca.engine().cpu_port(port))
-                        }
-                        BusRequest::Write { address, value } if is_port(address) => {
-                            let port = ((address & 0xFFFF) - 0x2140) as u8;
-                            let c = u128::from(self.clock) * cpu_scalar;
-                            ca.set_cpu_clock_fixed(c);
-                            ca.engine_mut().synchronize_cpu_clock();
-                            ca.engine_mut().write_apu_latch(port, value);
-                            BusResponse::None
-                        }
-                        other => self.handle_cpu_request(other),
-                    };
-                    input = Some(CpuInput::Response(response));
+            match ca.engine_mut().run_threads_to(clock) {
+                StepOutcome::Parked(target) => {
+                    let target = crate::sym_scheduler::SymEngine::smp_units_to_fixed(target);
+                    let mut pull = 0u32;
+                    while u128::from(self.clock) * cpu_scalar < target && pull < 4096 {
+                        cpu_step!();
+                        pull += 1;
+                    }
+                    // If the cap was hit, keep going in the outer loop.
                 }
-                corosensei::CoroutineResult::Yield(CpuOutput::Done(cpu, count)) => {
-                    self.cpu = cpu;
-                    cycles += count;
-                    self.apply_interrupts();
-                    done = true;
-                    input = Some(CpuInput::Start(std::mem::take(&mut self.cpu)));
+                StepOutcome::Halted => break,
+                StepOutcome::Ran => {
+                    if done && at_done {
+                        break;
+                    }
+                    cpu_step!();
                 }
-                corosensei::CoroutineResult::Return(()) => unreachable!(),
             }
         }
         self.apu_actor_driven = false;

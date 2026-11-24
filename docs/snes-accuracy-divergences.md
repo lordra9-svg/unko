@@ -13382,3 +13382,20 @@ the resume inside the APU turn at the exact point the S-SMP synchronizes the CPU
 (every 4 micro-steps per the extracted log) and verify `$FFDC -> $FFE9`.
 Opt-in (`SNES_SYM_NESTED`); default verified unchanged (mmx2 0), 261 tests,
 fmt/clippy clean.
+
+## Nested scheduler resume fixed; pull-to-target now stable (2026-11-24)
+
+The `bus request resumed with a CPU` panic came from `done` staying true after
+the nested loop started the next instruction: a step could end with the CPU
+coroutine suspended at a `Request`, and the next `step()` sent `Start`. Fixed by
+resetting `done` when `at_done` is consumed and only returning when
+`done && at_done` (coroutine parked at `Done`). The park now pulls the S-CPU all
+the way to the S-SMP clock (`synchronize(cpu)`), not one yield.
+
+Result (`SNES_CA+SYM_SCHED+SYM_NESTED+SMP_ACCESS_PULL+DSP_THREAD+prime0`,
+280 frames): 1,086,533 instructions, no panic. First PC divergence vs ares is at
+instruction **883,082**: ours takes `$FFD4 -> $FFEF` while ares keeps the
+`$FFCF/$FFD2` poll (we poll one iteration fewer), so the nested plumbing is
+correct but the loop still ends the poll too early.
+
+Opt-in; default verified unchanged (mmx2 0), 261 tests, fmt/clippy clean.
