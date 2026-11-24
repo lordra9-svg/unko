@@ -13232,3 +13232,17 @@ The remaining requirement is exact co-switch ordering at the S-SMP instruction /
 S-CPU access boundary (which poll iteration runs before the latch is observed),
 i.e. the full coroutine scheduler, not another visibility knob. Reverted; default
 and six-exact mode verified unchanged.
+
+## Per-access S-SMP suspension does not match ares either (2026-11-24)
+
+Implemented `SNES_SMP_PER_ACCESS`: `smp_step_parking` suspends the SPC coroutine
+at every `SpcEvent::StepClock` (access boundary) and resumes with `Unit`, so the
+caller can switch threads per access. With `SNES_CA+SYM_SCHED+DSP_THREAD` the
+first PC divergence moves to instruction **883,082**, where ours takes
+`$FFD4 -> $FFEF` while ares continues the `$FFCF/$FFD2` poll loop — still not the
+ares stream (and earlier than the 887,720 immediate-latch divergence).
+
+So per-access suspension by itself is also not sufficient; the remaining
+difference is the *order in which the S-CPU access and the S-SMP access are
+interleaved at the same clock*, i.e. the scheduler's co_switch sequence, not the
+suspension granularity. Reverted; default and six-exact mode unchanged.
