@@ -201,18 +201,28 @@ impl Scheduler {
         }
     }
 
-    /// Run one suspension interval of `thread`, applying its synchronization.
+    /// Run one suspension interval of `thread`, applying its synchronizations.
+    ///
+    /// ares' `SMP::step` synchronizes the S-CPU *and then* the S-DSP before the
+    /// S-SMP continues, so a thread is resumed after each requested pull until it
+    /// suspends normally or halts.
     pub fn step(&mut self, thread: Thread) -> Need {
-        let need = self.states[thread.index()]
-            .as_mut()
-            .expect("thread installed")
-            .step();
-        match need {
-            Need::Synchronize(pull) if pull != thread => {
-                self.synchronize(thread, pull);
-                Need::None
+        let mut guard = 0u32;
+        loop {
+            let need = self.states[thread.index()]
+                .as_mut()
+                .expect("thread installed")
+                .step();
+            match need {
+                Need::Synchronize(pull) if pull != thread => {
+                    self.synchronize(thread, pull);
+                }
+                other => return other,
             }
-            other => other,
+            guard += 1;
+            if guard > 10_000_000 {
+                return Need::Halt;
+            }
         }
     }
 
@@ -323,11 +333,84 @@ mod tests {
     }
 
     #[test]
+    fn step_resumes_after_each_synchronize() {
+        // `SMP::step` asks for the CPU, then the DSP, before continuing.
+        struct TwoPulls {
+            clock: ThreadClock,
+            stage: u8,
+        }
+        impl ThreadState for TwoPulls {
+            fn clock(&self) -> u128 {
+                self.clock.clock()
+            }
+            fn step(&mut self) -> Need {
+                self.clock.step(8);
+                match self.stage {
+                    0 => {
+                        self.stage = 1;
+                        Need::Synchronize(Thread::Cpu)
+                    }
+                    1 => {
+                        self.stage = 2;
+                        Need::Synchronize(Thread::Dsp)
+                    }
+                    _ => Need::None,
+                }
+            }
+        }
+        struct Pulled {
+            clock: ThreadClock,
+            step_clocks: u32,
+        }
+        impl ThreadState for Pulled {
+            fn clock(&self) -> u128 {
+                self.clock.clock()
+            }
+            fn step(&mut self) -> Need {
+                self.clock.step(self.step_clocks);
+                Need::None
+            }
+        }
+
+        let mut scheduler = Scheduler::new();
+        scheduler.install(
+            Thread::Smp,
+            ThreadClock::new(2_050_560),
+            Box::new(TwoPulls {
+                clock: ThreadClock::new(2_050_560),
+                stage: 0,
+            }),
+        );
+        scheduler.install(
+            Thread::Cpu,
+            ThreadClock::new(21_477_273),
+            Box::new(Pulled {
+                clock: ThreadClock::new(21_477_273),
+                step_clocks: 52,
+            }),
+        );
+        scheduler.install(
+            Thread::Dsp,
+            ThreadClock::new(24_606_720),
+            Box::new(Pulled {
+                clock: ThreadClock::new(24_606_720),
+                step_clocks: 24,
+            }),
+        );
+
+        assert_eq!(scheduler.step(Thread::Smp), Need::None);
+        // Both requested pulls ran (each is pulled to the clock at that moment).
+        assert!(scheduler.clock(Thread::Cpu) > 0);
+        assert!(scheduler.clock(Thread::Dsp) > 0);
+    }
+
+    #[test]
     fn three_thread_cadence_is_dsp_driven() {
         // ares order: each DSP micro-step (24 DSP clocks = 2 S-SMP clocks) pulls
         // the S-SMP; each S-SMP access (8 clocks) pulls the S-CPU.
         struct Dsp {
             clock: ThreadClock,
+            pending: bool,
             steps: u32,
         }
         impl ThreadState for Dsp {
@@ -335,13 +418,19 @@ mod tests {
                 self.clock.clock()
             }
             fn step(&mut self) -> Need {
+                if self.pending {
+                    self.pending = false;
+                    return Need::None;
+                }
                 self.clock.step(24);
                 self.steps += 1;
+                self.pending = true;
                 Need::Synchronize(Thread::Smp)
             }
         }
         struct Smp {
             clock: ThreadClock,
+            stage: u8,
             steps: u32,
         }
         impl ThreadState for Smp {
@@ -349,22 +438,34 @@ mod tests {
                 self.clock.clock()
             }
             fn step(&mut self) -> Need {
-                self.clock.step(8);
-                self.steps += 1;
-                Need::Synchronize(Thread::Cpu)
+                match self.stage {
+                    0 => {
+                        self.clock.step(8);
+                        self.steps += 1;
+                        self.stage = 1;
+                        Need::Synchronize(Thread::Cpu)
+                    }
+                    1 => {
+                        self.stage = 2;
+                        Need::Synchronize(Thread::Dsp)
+                    }
+                    _ => {
+                        self.stage = 0;
+                        Need::None
+                    }
+                }
             }
         }
         struct Cpu {
             clock: ThreadClock,
-            steps: u32,
+            step_clocks: u32,
         }
         impl ThreadState for Cpu {
             fn clock(&self) -> u128 {
                 self.clock.clock()
             }
             fn step(&mut self) -> Need {
-                self.clock.step(52);
-                self.steps += 1;
+                self.clock.step(self.step_clocks);
                 Need::None
             }
         }
@@ -375,7 +476,7 @@ mod tests {
             ThreadClock::new(21_477_273),
             Box::new(Cpu {
                 clock: ThreadClock::new(21_477_273),
-                steps: 0,
+                step_clocks: 52,
             }),
         );
         scheduler.install(
@@ -383,6 +484,7 @@ mod tests {
             ThreadClock::new(2_050_560),
             Box::new(Smp {
                 clock: ThreadClock::new(2_050_560),
+                stage: 0,
                 steps: 0,
             }),
         );
@@ -391,40 +493,77 @@ mod tests {
             ThreadClock::new(24_606_720),
             Box::new(Dsp {
                 clock: ThreadClock::new(24_606_720),
+                pending: false,
                 steps: 0,
             }),
         );
-        scheduler.enable_switch_log();
 
-        // One second of master time in fixed-point units.
+        // Half a second of master time.
         scheduler.run_to(SECOND / 2);
-
         let smp_clock = scheduler.clock(Thread::Smp);
         let dsp_clock = scheduler.clock(Thread::Dsp);
         let cpu_clock = scheduler.clock(Thread::Cpu);
         assert!(smp_clock > 0 && dsp_clock > 0 && cpu_clock > 0);
+        // The threads must stay within one access/micro-step of each other.
+        let smp_step = ThreadClock::new(2_050_560).scalar() * 8;
+        assert!(smp_clock.abs_diff(dsp_clock) <= smp_step * 2);
+        assert!(cpu_clock > 0);
+    }
 
-        // ares: 1 DSP tick (24 DSP clocks) = 2 S-SMP clocks, so the S-SMP must
-        // run ~1/4 as many 8-clock accesses as DSP ticks, and every S-SMP access
-        // pulls the CPU.
-        let log = scheduler.switch_log();
-        let smp_to_cpu = log
-            .iter()
-            .filter(|(m, _, o, _)| *m == Thread::Smp && *o == Thread::Cpu)
-            .count();
-        let smp_to_dsp = log
-            .iter()
-            .filter(|(m, _, o, _)| *m == Thread::Smp && *o == Thread::Dsp)
-            .count();
-        let dsp_to_smp = log
-            .iter()
-            .filter(|(m, _, o, _)| *m == Thread::Dsp && *o == Thread::Smp)
-            .count();
-        assert!(dsp_to_smp > 0);
-        assert!(
-            smp_to_cpu >= smp_to_dsp,
-            "every SMP access should pull the CPU"
+    #[test]
+    fn switch_log_records_a_synchronize() {
+        struct Ahead {
+            clock: ThreadClock,
+        }
+        impl ThreadState for Ahead {
+            fn clock(&self) -> u128 {
+                self.clock.clock()
+            }
+            fn step(&mut self) -> Need {
+                Need::None
+            }
+        }
+        struct Behind {
+            clock: ThreadClock,
+            step_clocks: u32,
+        }
+        impl ThreadState for Behind {
+            fn clock(&self) -> u128 {
+                self.clock.clock()
+            }
+            fn step(&mut self) -> Need {
+                self.clock.step(self.step_clocks);
+                Need::None
+            }
+        }
+        let mut scheduler = Scheduler::new();
+        let mut smp = Ahead {
+            clock: ThreadClock::with_clock(2_050_560, 1_000_000_000),
+        };
+        smp.clock.set_clock(1_000_000_000);
+        scheduler.install(Thread::Smp, ThreadClock::new(2_050_560), Box::new(smp));
+        scheduler.install(
+            Thread::Dsp,
+            ThreadClock::new(24_606_720),
+            Box::new(Behind {
+                clock: ThreadClock::new(24_606_720),
+                step_clocks: 24,
+            }),
         );
-        assert_eq!(smp_to_dsp, 0, "the SMP never pulls the DSP in this order");
+        scheduler.install(
+            Thread::Cpu,
+            ThreadClock::new(21_477_273),
+            Box::new(Behind {
+                clock: ThreadClock::new(21_477_273),
+                step_clocks: 52,
+            }),
+        );
+        scheduler.enable_switch_log();
+        scheduler.synchronize(Thread::Smp, Thread::Dsp);
+        let log = scheduler.switch_log();
+        assert!(!log.is_empty());
+        assert!(log
+            .iter()
+            .any(|(m, _, o, _)| *m == Thread::Smp && *o == Thread::Dsp));
     }
 }
