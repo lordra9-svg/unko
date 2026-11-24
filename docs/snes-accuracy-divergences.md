@@ -13158,3 +13158,24 @@ accounted; that variant is fast but regressed the six. The exact ares
 `writeAPU` semantics therefore need a scheduler that co-locates the threads
 continuously (so the synchronize is ~zero work), not a per-write catch-up on top
 of the carried-credit driver.
+
+## IPL branch polarity brackets the CPU->SMP latch timing (2026-11-24)
+
+Re-ran the ares SPC-trace comparison for MMX2 with the timestamped S-CPU->S-SMP
+latch (`SNES_CPU_LATCH_TIME`), comparing to the ares instruction stream:
+
+* immediate latch: first divergence at instruction 887,720 - ares `$FFDC BNE
+  $FFE9` taken, ours falls through (our `$F4` read is **stale**, one poll fewer).
+* timestamped latch: first divergence moves to instruction 883,130 and flips -
+  ours now executes an **extra** `$FFCF/$FFD2` poll pair before `$FFD4` (one
+  poll more than ares).
+
+So the two models bracket the ares alignment: immediate is one poll early/behind,
+timestamped is one poll late/ahead. The correct CPU->SMP write visibility lies
+strictly between them (sub-access), which is why neither `SNES_PORT_SYNC`'s
+charged catch-up nor the timestamp queue reproduces `$FFDC` exactly.
+
+This is the concrete calibration target for the co-scheduled driver: when the
+S-CPU writes `$2140`, the S-SMP must see it at the same point in the poll loop as
+ares, which the instruction-level trace now measures directly. The 600-frame
+audio gate and the `$FFDC` index are the two acceptance checks.
