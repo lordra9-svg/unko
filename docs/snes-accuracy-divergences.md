@@ -13042,3 +13042,25 @@ the latch one access boundary. With the earlier fixed-delay result (mmx2 up to
 93.5% but ct 29%), the "one poll early" observation is a symptom of the S-SMP
 entry phase, not a latch-order bug that can be corrected at the port write.
 Reverted; default verified unchanged (mmx2 0, ct prime0 0), 261 lib tests.
+
+## DSP tick phase: CT is a clean constant, MMX2 jumps at control writes (2026-11-24)
+
+Captured the ares S-DSP write log for CT (26,346 writes) and MMX2 (4,320) and
+compared `dspTicks` against our `samples_run*32+step`:
+
+* **CT**: all 26,343 matched writes have the **same** offset (`ares - ours = -4`,
+  i.e. exactly the 4-micro-step prime in the default build), unchanged over the
+  whole 9 s. Address/value order identical.
+* **MMX2**: the offset starts at +62 and **jumps by ±46 at writes to `$5C`
+  (KOFF), `$6C` (FLG), `$4D` (PMON)**, then settles at 0 (65 changes total).
+
+So for a title that is exact at prime 0, our DSP grid matches ares to a constant;
+for MMX2 the grid is re-phased at KOFF/FLG/PMON register writes. That is a
+sub-sample interleaving difference between the S-SMP register write and the DSP
+micro-step, not a rate, latch-order, or scheduler difference. The next model must
+place `$F3` writes at the same point of the 32-step DSP routine as ares for those
+control registers.
+
+This refines the earlier "2 samples early": the phase error is introduced at the
+driver's KOFF/FLG/PMON writes, which is consistent with MMX2's driver doing its
+first envelope setup immediately at program entry while the six defer it.
