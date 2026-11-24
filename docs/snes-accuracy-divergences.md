@@ -13246,3 +13246,21 @@ So per-access suspension by itself is also not sufficient; the remaining
 difference is the *order in which the S-CPU access and the S-SMP access are
 interleaved at the same clock*, i.e. the scheduler's co_switch sequence, not the
 suspension granularity. Reverted; default and six-exact mode unchanged.
+
+## ares thread-switch log available for the co-switch rewrite (2026-11-24)
+
+`ARES_SWITCH_LOG` works in the local ares build and records every
+`Thread::synchronize` co_switch:
+
+```
+S <seq> <mainUniqueID> <mainClock> <threadUniqueID> <threadClock>
+```
+
+(3 frames of MMX2 = 104,226 switches, ~2.5 MB; the machine has more than the
+CPU/SMP/DSP IDs visible here, so the first step of a rewrite is to map the IDs.)
+
+This is the reference needed to reproduce ares' exact switch order at the
+`$FFDC` divergence: capture ~260 frames (to cover the 4.2 s point), take the
+final switches before ares' instruction 887,720, and make the co-switch loop
+issue the same sequence. It is a diagnostic for the scheduler rewrite, not a
+change to the current driver; the default and six-exact modes are unchanged.
