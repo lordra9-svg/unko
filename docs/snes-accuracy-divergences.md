@@ -13315,3 +13315,21 @@ CPU->SMP synchronize is not the discriminator either; the remaining difference
 is the S-SMP access-level co-switch sequence inside the instruction.
 
 Reverted; default verified unchanged (mmx2 0), 261 tests, tree clean.
+
+## Switch-log clock factor is mid-run scheduler resets, not a unit error (2026-11-24)
+
+The reconstructed switch clock is monotonic-except-downwards: scanning the
+262-frame log finds **5 backwards jumps** for the CPU thread, including a line
+`1@299 2@4101020` (CPU clock 299 while SMP is at 4.1M). `Scheduler::power`
+resets `_clock` to the thread ID and I also zeroed `_clockBase`, so each mid-run
+power (the harness/game calls it during load) discards the elapsed time; ~half
+the run is lost, giving the uniform 0.514 factor (CPU 42.95M vs 83.57M).
+
+Fix (one line): do not zero `_clockBase` in `Scheduler::power` - keep the
+accumulated total so `_clockBase + _clock` remains absolute across power cycles.
+The divergence is at the log maximum (SMP reconstructed 4,101,120 x 1.9458 =
+7,979,000 ~= the SPC-trace mono 7,979,250), so the extracted switch window is
+valid even before that fix; only absolute indexing needs it.
+
+The remaining work is the literal per-access co-switch implementation, not the
+log.
