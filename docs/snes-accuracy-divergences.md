@@ -13108,3 +13108,37 @@ exactly.
 Next target is the S-CPU side: why MMX2's poll loop completes one iteration
 fewer per byte than ares (Cx4 stalls / wait states during the upload), with the
 absolute SMP-clock diff at the first DSP write as the acceptance metric.
+
+## SPC instruction-level diff: IPL branch at $FFDC flips (2026-11-24)
+
+Captured ares `ARES_SPC_TRACE` (1,086,687 instructions, 280 frames) and our
+`SPC_TRACE` (2,221,513) and aligned the PC sequences. The first divergence is at
+trace index 887,720, inside the IPL ROM transfer loop:
+
+```
+$FFD6: EB F4   MOV Y,$F4      ; Y = S-CPU -> S-SMP port
+$FFD8: D0 FC   BNE $FFD6      ; wait for nonzero
+$FFDA: 7E F4   CMP Y,$F4      ; compare with the port again
+$FFDC: D0 0B   BNE $FFE9      ; if changed -> ares takes this
+$FFDE: E4 F5   MOV A,$F5      ; else echo (ours takes this)
+$FFE0: CB F4   MOV $F4,A
+```
+
+At index 887,720 ares executes `$FFE9` (branch taken: the port changed since
+`Y` was loaded) while ours executes `$FFDE` (branch not taken: our `$F4` read is
+still the stale value). So the S-SMP's read of `$F4` is not aligned with the
+S-CPU's `$2140` write: ares' `writeAPU` runs `synchronize(smp)` **before**
+latching, and the latch only becomes visible to the S-SMP once it has reached the
+S-CPU clock.
+
+This is the exact mechanism behind the 132-SMP-clock first-write lead and the
+per-byte one-poll difference. The fix is the ares `writeAPU` ordering
+(`synchronize(smp); io.apuN = data;`); our earlier `SNES_PORT_SYNC` implemented
+it but with the carried-credit/park semantics that regressed the six, so the
+remaining work is to implement that ordering without perturbing the credit model
+- i.e. co-locate the S-SMP to the S-CPU clock on a port write and latch there,
+leaving the credit for subsequent advances untouched.
+
+The divergence region can now be validated instruction-by-instruction against
+`ARES_SPC_TRACE` (PC + absolute SMP clock), which is the acceptance metric short
+of the 7-title audio gate.
