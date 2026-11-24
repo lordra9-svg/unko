@@ -13081,3 +13081,30 @@ Placing the write at the access start moves the DSP phase but does not fix MMX2
 and breaks the exact titles, so the write placement inside the access is not the
 discriminator. The remaining MMX2 re-phasing at KOFF/FLG/PMON is therefore not
 the `$F3` placement but the accumulated DSP tick offset at those writes.
+
+## Absolute S-SMP clock at the first DSP write: CT 0, MMX2 132 early (2026-11-24)
+
+Using the monotonic `aresSmpMono` column (col 11) of the ares DSP-write log
+instead of the periodically-reduced `smp.clock()`, and comparing with our
+fixed-point SMP clock:
+
+| title | first-write SMP clock (ares) | ours | diff | steady-state diff |
+|---|---|---|---|---|
+| CT | 765406 | 765406 | **0** | 0 at every one of 26,343 writes |
+| MMX2 | 8103466 | 8103334 | **+132** | settles to +8 |
+
+So for a title that is exact at prime 0, our absolute S-SMP clock at every DSP
+write is **identical** to ares. For MMX2 the S-SMP is **132 clocks early** at the
+first write, settling to 8 clocks early in steady state.
+
+132 = 33 x 4 SMP clocks, i.e. **one extra poll iteration on each of ~33 uploaded
+bytes** (the steady-state 8 = 2 x 4 is the residual phase the +4 prime removes).
+This confirms the entry lead is cumulative per uploaded byte, not a single
+transition, and it is absent for CT. It is therefore caused by MMX2's S-CPU
+upload cadence (the Cx4-era boot), not by the APU read/write or latch path: an
+APU-side per-byte delay would also shift CT, which currently matches ares
+exactly.
+
+Next target is the S-CPU side: why MMX2's poll loop completes one iteration
+fewer per byte than ares (Cx4 stalls / wait states during the upload), with the
+absolute SMP-clock diff at the first DSP write as the acceptance metric.
