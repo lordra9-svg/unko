@@ -12829,3 +12829,40 @@ defer non-port credit.
 Default is unchanged for the accepted MMX2-exact reference (prime 4, write pull
 on): MMX2 0 differing, the six as before. `SNES_DSP_PRIME=0` selects the
 six-exact configuration above.
+
+## True DSP-thread co-schedule attempted in the actor; structural mismatch (2026-11-24)
+
+Implemented the ares DSP-as-independent-thread model directly in the active
+actor (`SNES_DSP_THREAD`): recording advances only the S-SMP clock, and the
+scheduler loop runs whichever of S-SMP/S-DSP is furthest behind - a DSP
+micro-step (24 clocks, sample emitted) pulls the S-SMP to the DSP clock, and an
+S-SMP access runs otherwise, both to the absolute S-CPU time. `$F3` DSP writes
+are deferred to replay so the eager recorder cannot apply them ahead of the DSP.
+
+Measured 600-frame gate (`~` = produced full 639656 for comparison):
+
+| model | CT | MMX2 |
+|---|---|---|
+| current (SMP-paced DSP, write pull on) + prime 0 | **0 (100%)** | 49253 (92.3001%) |
+| DSP-thread, prime 0 | 452746 (29.2204%) | 41458 (93.5187%) |
+| DSP-thread, prime 2..8 | ~450293 (29.6%) | 73073..75328 (~88%) |
+| DSP-thread, prime 10+ | 451011 (29.5%) | audio stalls (148 samples) |
+
+The DSP-thread model is **structurally** wrong in this driver, not merely phase
+shifted: CT is fixed at ~29% across the entire prime sweep, so no constant
+offset recovers it. The cause is the eager record/replay split: although `$F3`
+writes are deferred, the recorder still executes S-SMP RAM writes and the rest
+of the instruction's side effects ahead of the replayed access clock, so the
+DSP thread observes state at the wrong time. A faithful DSP thread requires the
+S-SMP itself to execute access-by-access against the DSP (no plan/record
+speculation), i.e. the coroutine-backed SPC700 plus fixed-point `ThreadClock`s.
+
+The existing `SymEngine` scaffolding has the mutual primitives but its
+`smp_clock`/`dsp_units` are raw S-SMP clocks (not the ares `Second`-based
+fixed-point clocks), and its DSP is still caught up to the S-SMP
+(`catch_dsp_to_smp`), so wiring it does not change the result.
+
+Reverted. The verified state remains: default MMX2-exact (prime 4), six titles
+exact with `SNES_DSP_PRIME=0`, 212/212 baseline, 261 lib tests, fmt/clippy clean.
+The remaining 4-micro-step MMX2 offset needs the SPC700 executed directly from
+its coroutine in the fixed-point scheduler, not the plan/record driver.
