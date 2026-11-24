@@ -12866,3 +12866,38 @@ Reverted. The verified state remains: default MMX2-exact (prime 4), six titles
 exact with `SNES_DSP_PRIME=0`, 212/212 baseline, 261 lib tests, fmt/clippy clean.
 The remaining 4-micro-step MMX2 offset needs the SPC700 executed directly from
 its coroutine in the fixed-point scheduler, not the plan/record driver.
+
+## True DSP-thread co-schedule on the direct engine: implemented, six exact (2026-11-24)
+
+The actor-level DSP thread failed because the plan/record driver applies side
+effects ahead of the replayed access clock. Moving the DSP thread onto the
+**direct, access-by-access engine** fixes that: `SNES_SYM_ENGINE` +
+`SNES_SYM_STOP` + `SNES_SYM_PULL` execute the SPC700 from its coroutine (no
+speculative recording), and `SNES_DSP_THREAD` now runs the round-robin:
+
+* a DSP micro-step advances 24 DSP clocks, emits its sample, and pulls the
+  S-SMP to the DSP clock (`DSP::tick` -> `Thread::synchronize(smp)`);
+* otherwise the S-SMP runs one access (`sym_step_to`);
+* `SpcEvent::StepClock` no longer advances the DSP when the DSP thread owns it.
+
+600-frame gate with the true DSP thread:
+
+| prime | dkc | zelda | fzero | cv4 | smas | ct | mmx2 |
+|---|---|---|---|---|---|---|---|
+| 0 | 0 | 0 | 0 | 0 | 0 | 0 | 49253 (92.3001%) |
+| 4 | - | - | - | - | - | 232868 (63.5948%) | 0 |
+
+So **five independent schedulers** - plan/credit, direct `SYM_STOP`, direct
+`SYM_STOP+SYM_STEP_PULL`, `SMP_ACCESS_STOP+PORT_READ_CLOCK+PER_ACCESS_MUTUAL`,
+and this true DSP thread - now produce the *identical* split: six titles exact
+at prime 0, MMX2 exact at prime 4, never both.
+
+This rules out the scheduler as the cause of MMX2's 4-micro-step (8 S-SMP clock)
+offset. With the DSP advancing on its own absolute clock and the SPC700 executed
+access-by-access, the only remaining difference is MMX2's S-SMP entry into the
+uploaded program: it reaches it 8 clocks before ares. That is the boot
+data-transfer cadence (one/two poll iterations), not thread scheduling, and the
+next target is the `$2140-$2143` upload hand-off itself.
+
+Default unchanged (prime 4, MMX2 exact); the DSP-thread model is opt-in via
+those flags. 212/212 baseline and 261 lib tests remain green.

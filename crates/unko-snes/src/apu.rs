@@ -172,6 +172,16 @@ pub fn credit_reset() -> bool {
     *RESET.get_or_init(|| std::env::var_os("SNES_CREDIT_RESET").is_some())
 }
 
+/// `SNES_DSP_THREAD`: with the direct (`SNES_SYM_ENGINE` + `SNES_SYM_STOP`)
+/// engine, run the S-DSP as ares' independent thread: a DSP micro-step advances
+/// 24 DSP clocks and pulls the S-SMP to that clock, and the scheduler runs
+/// whichever thread is furthest behind. Requires the access-by-access SPC700
+/// execution, so it is only meaningful on that engine.
+pub fn dsp_thread() -> bool {
+    static T: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *T.get_or_init(|| std::env::var_os("SNES_DSP_THREAD").is_some())
+}
+
 /// `SNES_SMP_LATCH_QUEUE`: timestamp S-SMP writes to `$F4-$F7` and let an
 /// S-CPU read of `$2140-$2143` return the value whose write clock is at or
 /// before the S-CPU clock (mirror of the CPU->SMP direction).
@@ -1464,7 +1474,7 @@ impl Apu {
                         }
                         SpcEvent::StepClock(clocks) => {
                             self.smp_clock += u128::from(clocks) * SMP_SCALAR;
-                            if !dsp_instr_sync() {
+                            if !dsp_instr_sync() && !dsp_thread() {
                                 let target = self.sym_dsp_target();
                                 drain_dsp_to(
                                     &mut self.ram[..],
@@ -1533,6 +1543,9 @@ impl Apu {
         let Some(target) = self.cpu_fixed_clock() else {
             return false;
         };
+        if dsp_thread() {
+            return self.sym_threads_to(target);
+        }
         let mut guard = 0u32;
         while self.smp_clock < target {
             match self.sym_step_to(target) {
@@ -1541,6 +1554,52 @@ impl Apu {
             }
             guard += 1;
             if guard > 1_000_000 {
+                break;
+            }
+        }
+        false
+    }
+
+    /// True three-thread round-robin for the direct engine (`SNES_DSP_THREAD`).
+    ///
+    /// The DSP ticks one micro-step on its own clock and then pulls the S-SMP
+    /// to that clock; if the S-SMP is furthest behind it runs one access.
+    /// Execution is access-by-access (`sym_step_to`) so side effects happen at
+    /// the real access clock, not at a speculative record time.
+    fn sym_threads_to(&mut self, target: u128) -> bool {
+        let phase = std::env::var("SNES_DSP_PRIME")
+            .ok()
+            .and_then(|value| value.parse::<u128>().ok())
+            .map_or(0, |ticks| ticks * DSP_TICK);
+        let dsp_target = target.saturating_add(phase);
+        let mut guard = 0u32;
+        loop {
+            let smp = self.smp_clock;
+            let dsp = self.dsp_clock;
+            if smp >= target && dsp >= dsp_target {
+                return false;
+            }
+            if dsp <= smp {
+                if let Some(sample) = self.dsp.tick(&mut self.ram[..]) {
+                    self.samples.push_back(sample);
+                }
+                self.dsp_clock += DSP_TICK;
+                let mut pull = 0u32;
+                while self.smp_clock < self.dsp_clock && pull < 4096 {
+                    match self.sym_step_to(self.dsp_clock) {
+                        SymStep::Parked => return true,
+                        SymStep::Advanced => {}
+                    }
+                    pull += 1;
+                }
+            } else {
+                match self.sym_step_to(target) {
+                    SymStep::Parked => return true,
+                    SymStep::Advanced => {}
+                }
+            }
+            guard += 1;
+            if guard > 10_000_000 {
                 break;
             }
         }
