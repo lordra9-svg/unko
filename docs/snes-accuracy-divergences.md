@@ -13333,3 +13333,31 @@ valid even before that fix; only absolute indexing needs it.
 
 The remaining work is the literal per-access co-switch implementation, not the
 log.
+
+## Extracted literal co-switch order at the divergence (2026-11-24)
+
+The absolute switch log (after preserving `_clockBase` across power) ends at the
+divergence, and the tail shows the exact repeated order (SMP=2, DSP=3, CPU=1):
+
+```
+2@735387  3@8824655    SMP -> DSP
+3@8824679 2@735387     DSP -> SMP
+2@735389  3@8824679    SMP -> DSP
+3@8824703 2@735389     DSP -> SMP
+2@735391  1@7702387    SMP -> CPU      (every ~4 DSP micro-steps)
+1@7702439 2@735391     CPU -> SMP      (CPU advances 52 clocks)
+2@735391  3@8824703    SMP -> DSP
+...
+```
+
+So ares runs, repeatedly:
+
+1. DSP micro-step (24 DSP clocks = 2 S-SMP clocks), switching SMP <-> DSP;
+2. after every **4 micro-steps** (8 S-SMP clocks) the S-SMP synchronizes the
+   **S-CPU** (runs it 52 clocks) and switches back.
+
+This is a nested schedule: the DSP loop pulls the S-SMP, and the S-SMP pulls the
+S-CPU from inside that loop. Reproducing it requires the S-CPU coroutine to be
+resumable from inside the APU advance (`ca_drive` currently cannot re-enter the
+S-CPU while handling one of its requests). That is the remaining architectural
+piece; the reference sequence and the `$FFDC` acceptance point are now exact.
