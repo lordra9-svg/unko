@@ -12994,3 +12994,34 @@ CT, so the one-poll difference is **MMX2-specific boot timing**, not a protocol
 rule: applying it to every title is wrong. It therefore cannot be the unifying
 fix, and a title test is not acceptable. Reverted. Default remains mmx2 0,
 261 lib tests, fmt/clippy clean.
+
+## MMX2 upload: CPU cadence matches ares; the ack is one poll early (2026-11-24)
+
+Comparing the S-CPU upload writes at `$0083f6` (port 0, byte index) between ares
+and ours over the same window:
+
+| i | ares Δclock | ours Δclock | ares - ours |
+|---|---|---|---|
+| 2 | 496 | 548 | -30 |
+| 3 | 508 | 508 | -30 |
+| 4 | 560 | 508 | +22 |
+| 5 | 496 | 548 | -30 |
+| 6 | 560 | 508 | +22 |
+| 8 | 456 | 508 | -30 |
+| 9 | 560 | 508 | +22 |
+
+The **set of write intervals is the same** in both (`{456,496,508,548,560,...}`),
+and the ares-vs-ours offset alternates between exactly **-30 and +22**, i.e.
+**52 master clocks = one poll iteration**. So the S-CPU instruction cadence of
+the upload loop is correct; the difference is only that our S-SMP's ack becomes
+visible one poll earlier, which shifts the S-SMP program entry by 8 SMP clocks.
+
+This also explains why the global `SNES_SMP_LATCH_DELAY` helps MMX2 but breaks
+the six: a fixed timestamp shift moves *every later* SMP->CPU handshake, whereas
+ares' `writeIO` synchronize only reorders the write relative to the in-flight
+CPU access. The six absorb the one-poll entry difference (their drivers sync the
+DSP after entry), MMX2 exposes it immediately at the first DSP writes.
+
+The remaining fix is therefore the exact `SMP::writeIO -> synchronize(cpu) ->
+latch` ordering, not a constant delay: commit the latch only after the CPU
+access that triggered the synchronize has retired, for every `$F4-$F7` write.
