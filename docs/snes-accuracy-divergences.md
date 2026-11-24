@@ -13064,3 +13064,20 @@ control registers.
 This refines the earlier "2 samples early": the phase error is introduced at the
 driver's KOFF/FLG/PMON writes, which is consistent with MMX2's driver doing its
 first envelope setup immediately at program entry while the six defer it.
+
+## Re-measured $F3 placement at the access start (2026-11-24)
+
+The requested change is already implemented as `SNES_DSP_WRITE_AT=start|mid`
+(places the `$F3` write before/mid `step_clock`). Re-measured with the current
+write-pull default at `SNES_DSP_PRIME=0`:
+
+| placement | dkc | ct | mmx2 |
+|---|---|---|---|
+| end (default) | 0 | 0 | 49253 (92.30%) |
+| start | 226813 (64.54%) | 88209 (86.21%) | 55202 (91.37%) |
+| mid | 226813 (64.54%) | 88209 (86.21%) | 55202 (91.37%) |
+
+Placing the write at the access start moves the DSP phase but does not fix MMX2
+and breaks the exact titles, so the write placement inside the access is not the
+discriminator. The remaining MMX2 re-phasing at KOFF/FLG/PMON is therefore not
+the `$F3` placement but the accumulated DSP tick offset at those writes.
