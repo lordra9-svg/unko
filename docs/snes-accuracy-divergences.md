@@ -12952,7 +12952,8 @@ tick counters are not directly comparable across DSP resets.
 ### CPU-side hand-shake
 
 Aligning the two CPU-side `$2140-$2143` sequences, the first **17** events match
-exactly with a constant clock offset of **-30 master clocks** (ours earlier).
+exactly with a constant clock offset of **-30 master clocks** (`ares - ours`,
+i.e. ours is 30 clocks later).
 Event 17 diverges:
 
 ```
