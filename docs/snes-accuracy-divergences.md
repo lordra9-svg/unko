@@ -13299,3 +13299,19 @@ instruction 887,720. The oracle scheduler files were restored and rebuilt.
 Before the co-switch rewrite can be driven by the log, the absolute clock must be
 made exact (the factor-2 error suggests the reduction/step accounting differs
 from `oracleClock`), then the switch sequence at CPU 83,574,544 extracted.
+
+## Extracted switch window at the divergence; ca_drive call site is inert (2026-11-24)
+
+Using the captured absolute switch log and its uniform ~1.9458 scale factor, the
+divergence is at the log's end (reconstructed SMP max 4,101,120). The extracted
+window shows CPU(1)<->SMP(2) switches every ~1,364 CPU cycles = ~130 S-SMP
+clocks, i.e. the S-CPU synchronizes the S-SMP about once per **instruction**, not
+per bus access, while SMP<->DSP switching dominates (per 24-clock micro-step).
+
+Tested moving `ca_drive` from every bus request to only instruction boundaries
+(`CpuOutput::Done`) plus `Advance`: the first PC divergence is unchanged at
+instruction 883,082 (`$FFD4 -> $FFEF` vs ares polling). So the call site of the
+CPU->SMP synchronize is not the discriminator either; the remaining difference
+is the S-SMP access-level co-switch sequence inside the instruction.
+
+Reverted; default verified unchanged (mmx2 0), 261 tests, tree clean.
