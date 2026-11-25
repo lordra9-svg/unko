@@ -23,6 +23,8 @@ the TLUT, and texture coordinates are perspective-corrected by the parsed W
 coefficients. `SET_MASK_IMAGE`/`SET_PRIMITIVE_DEPTH` drive a Z-buffered depth
 pipeline: interpolated 16.16 Z compressed to the RDP's 16-bit depth word with
 a 16-bit delta exponent, z compare/update for opaque/transparent/decal/
-interpenetrating modes and primitive-depth source selection. Double-precision
-FPU operations, precise exceptions, fog-alpha edge cases and exact depth-blend
+interpenetrating modes and primitive-depth source selection. TLB misses and
+invalid pages are delivered through CP0 (EPC/Cause/BadVAddr, Status.EXL,
+refill vs general vectors) and `ERET` returns. Double-precision FPU
+operations, interrupt delivery, fog-alpha edge cases and exact depth-blend
 shifters are next.

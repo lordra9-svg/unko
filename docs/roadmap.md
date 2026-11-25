@@ -296,8 +296,10 @@ The main effort was the reference-parity accuracy core. Details in
       the host sample rate for `Core::audio`. The VR4300 has a 32-entry TLB
       (TLBR/TLBWI/TLBWR/TLBP, mapped KUSEG translation) and a single-precision
       COP1 FPU (ADD/SUB/MUL/DIV/SQRT/ABS/MOV/NEG, CVT and compares, LWC1/SWC1/
-      LDC1/SDC1). Double-precision FPU, precise exceptions and exact
-      depth-blend shifters are the next milestones; no
+      LDC1/SDC1). TLB faults are delivered through CP0 Cause/EPC/BadVAddr with
+      Status.EXL and the refill/general vectors, and ERET restores execution.
+      Double-precision FPU, non-TLB precise exceptions and exact depth-blend
+      shifters are the next milestones; no
       standard N64 cartridge image was available locally to boot (only 64DD
       IPL firmware). See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.

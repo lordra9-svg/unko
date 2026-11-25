@@ -75,6 +75,10 @@ pub enum CpuError {
     Tlb {
         /// Virtual address that failed translation.
         address: u64,
+        /// Whether the faulting access was a store.
+        store: bool,
+        /// Whether a matching entry existed but its page was invalid.
+        invalid: bool,
     },
     /// `SYSCALL` or `BREAK` executed.
     Trap {
@@ -92,7 +96,7 @@ impl fmt::Display for CpuError {
                 write!(f, "unimplemented opcode {instruction:08X} at {pc:016X}")
             }
             Self::Unaligned { address } => write!(f, "unaligned access at {address:016X}"),
-            Self::Tlb { address } => write!(f, "TLB fault at {address:016X}"),
+            Self::Tlb { address, .. } => write!(f, "TLB fault at {address:016X}"),
             Self::Trap { pc, code } => write!(f, "trap {code} at {pc:016X}"),
         }
     }
@@ -168,9 +172,21 @@ impl Cpu {
         self.pc = self.next_pc;
         self.next_pc = self.pc.wrapping_add(4);
 
-        let instruction = bus.read_u32(self.translate(pc)?);
+        let instruction = match self.translate(pc, false) {
+            Ok(address) => bus.read_u32(address),
+            Err(error) => {
+                self.deliver_exception(&error, pc);
+                return Ok(());
+            }
+        };
         self.instructions += 1;
-        self.execute(instruction, pc, bus)
+        match self.execute(instruction, pc, bus) {
+            Err(error @ CpuError::Tlb { .. }) => {
+                self.deliver_exception(&error, pc);
+                Ok(())
+            }
+            result => result,
+        }
     }
 
     fn gpr(&self, index: u32) -> u64 {
@@ -534,14 +550,24 @@ impl Cpu {
                 Ok(())
             }
             0x04 => {
-                self.cp0[rd as usize] = self.gpr(rt);
+                // CP0 registers are 32-bit on the VR4300.
+                self.cp0[rd as usize] = self.gpr(rt) & 0xFFFF_FFFF;
                 Ok(())
             }
             0x10 => match funct {
                 0x18 => {
-                    // ERET: return to EPC.
-                    self.pc = self.cp0[14];
-                    self.next_pc = self.pc.wrapping_add(4);
+                    // ERET: return to ErrorEPC when ERL is set, otherwise EPC,
+                    // clearing the matching status bit.
+                    let status = self.cp0[12];
+                    let pc = if status & 4 != 0 {
+                        self.cp0[12] &= !4;
+                        self.cp0[30]
+                    } else {
+                        self.cp0[12] &= !2;
+                        self.cp0[14]
+                    };
+                    self.pc = pc;
+                    self.next_pc = pc.wrapping_add(4);
                     Ok(())
                 }
                 0x01 => {
@@ -629,7 +655,7 @@ impl Cpu {
     ///
     /// Before any TLB entry is valid the interpreter falls back to identity
     /// mapping for KUSEG so early boot code (and synthetic programs) still run.
-    fn translate(&self, address: u64) -> Result<u64, CpuError> {
+    fn translate(&self, address: u64, store: bool) -> Result<u64, CpuError> {
         if (0x8000_0000..0xC000_0000).contains(&address) {
             return Ok(address & 0x1FFF_FFFF);
         }
@@ -658,12 +684,54 @@ impl Cpu {
                 entry.lo0
             };
             if lo & 2 == 0 {
-                return Err(CpuError::Tlb { address });
+                return Err(CpuError::Tlb {
+                    address,
+                    store,
+                    invalid: true,
+                });
             }
             let pfn = u64::from((lo >> 6) & 0x0F_FFFF);
             return Ok((pfn << 12) | (address & 0x0FFF));
         }
-        Err(CpuError::Tlb { address })
+        Err(CpuError::Tlb {
+            address,
+            store,
+            invalid: false,
+        })
+    }
+
+    /// Delivers a precise TLB exception through CP0: EPC, Cause.ExcCode,
+    /// BadVAddr, Status.EXL and the refill/general exception vector. When
+    /// Status.EXL is already set the exception uses the general vector and
+    /// leaves EPC unchanged, matching the VR4300.
+    fn deliver_exception(&mut self, error: &CpuError, pc: u64) {
+        let CpuError::Tlb {
+            address,
+            store,
+            invalid,
+        } = *error
+        else {
+            return;
+        };
+        let status = self.cp0[12];
+        let already_exl = status & 2 != 0;
+        if !already_exl {
+            self.cp0[14] = pc & 0xFFFF_FFFF;
+        }
+        let code = if store { 3u64 } else { 2 };
+        self.cp0[13] = (self.cp0[13] & !(0x1F << 2) & !(1 << 31)) | (code << 2);
+        self.cp0[8] = address;
+        self.cp0[12] = status | 2;
+        let bev = status & (1 << 22) != 0;
+        let refill = !invalid && !already_exl;
+        let vector = match (bev, refill) {
+            (false, true) => 0x8000_0000,
+            (false, false) => 0x8000_0180,
+            (true, true) => 0xBFC0_0200,
+            (true, false) => 0xBFC0_0380,
+        };
+        self.pc = vector;
+        self.next_pc = vector.wrapping_add(4);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -827,7 +895,7 @@ impl Cpu {
         signed: bool,
     ) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
-        let value = bus.read_u8(self.translate(address)?);
+        let value = bus.read_u8(self.translate(address, false)?);
         self.set_gpr(
             rt,
             if signed {
@@ -851,7 +919,7 @@ impl Cpu {
         if address & 1 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        let value = bus.read_u16(self.translate(address)?);
+        let value = bus.read_u16(self.translate(address, false)?);
         self.set_gpr(
             rt,
             if signed {
@@ -875,7 +943,7 @@ impl Cpu {
         if address & 3 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        let value = bus.read_u32(self.translate(address)?);
+        let value = bus.read_u32(self.translate(address, false)?);
         self.set_gpr(
             rt,
             if signed {
@@ -892,14 +960,14 @@ impl Cpu {
         if address & 7 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        let value = bus.read_u64(self.translate(address)?);
+        let value = bus.read_u64(self.translate(address, false)?);
         self.set_gpr(rt, value);
         Ok(())
     }
 
     fn store8<B: Bus>(&mut self, bus: &mut B, rs: u32, rt: u32, simm: i64) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
-        bus.write_u8(self.translate(address)?, self.gpr(rt) as u8);
+        bus.write_u8(self.translate(address, true)?, self.gpr(rt) as u8);
         Ok(())
     }
 
@@ -914,7 +982,7 @@ impl Cpu {
         if address & 1 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        bus.write_u16(self.translate(address)?, self.gpr(rt) as u16);
+        bus.write_u16(self.translate(address, true)?, self.gpr(rt) as u16);
         Ok(())
     }
 
@@ -929,7 +997,7 @@ impl Cpu {
         if address & 3 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        bus.write_u32(self.translate(address)?, self.gpr(rt) as u32);
+        bus.write_u32(self.translate(address, true)?, self.gpr(rt) as u32);
         Ok(())
     }
 
@@ -944,7 +1012,7 @@ impl Cpu {
         if address & 7 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        bus.write_u64(self.translate(address)?, self.gpr(rt));
+        bus.write_u64(self.translate(address, true)?, self.gpr(rt));
         Ok(())
     }
 
@@ -959,7 +1027,7 @@ impl Cpu {
         if address & 3 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        let value = bus.read_u32(self.translate(address)?);
+        let value = bus.read_u32(self.translate(address, false)?);
         self.fpr[rt as usize] = u64::from(value);
         Ok(())
     }
@@ -975,7 +1043,7 @@ impl Cpu {
         if address & 3 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        bus.write_u32(self.translate(address)?, self.fpr[rt as usize] as u32);
+        bus.write_u32(self.translate(address, true)?, self.fpr[rt as usize] as u32);
         Ok(())
     }
 
@@ -990,7 +1058,7 @@ impl Cpu {
         if address & 7 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        let value = bus.read_u64(self.translate(address)?);
+        let value = bus.read_u64(self.translate(address, false)?);
         self.fpr[rt as usize] = value;
         Ok(())
     }
@@ -1006,7 +1074,7 @@ impl Cpu {
         if address & 7 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        bus.write_u64(self.translate(address)?, self.fpr[rt as usize]);
+        bus.write_u64(self.translate(address, true)?, self.fpr[rt as usize]);
         Ok(())
     }
 }
@@ -1236,10 +1304,10 @@ mod tests {
         let mut cpu2 = Cpu::new(0);
         cpu2.tlb[0] = cpu.tlb[0];
         let mut memory2 = program(&[0x8C09_5000]);
-        assert!(matches!(
-            cpu2.step(&mut memory2),
-            Err(CpuError::Tlb { address: 0x5000 })
-        ));
+        cpu2.step(&mut memory2).expect("fault delivered");
+        assert_eq!(cpu2.cp0[8], 0x5000);
+        assert_eq!((cpu2.cp0[13] >> 2) & 0x1F, 2);
+        assert_eq!(cpu2.pc, 0x8000_0000);
     }
 
     #[test]
@@ -1306,5 +1374,80 @@ mod tests {
         cpu.fpr[6] = (-9i64) as u64;
         cpu.cop1(0, 0x15, 0, 6, 7, 0x20).expect("cvt.s.l");
         assert_eq!(cpu.fpr[7] as u32, (-9.0f32).to_bits());
+    }
+    #[test]
+    fn tlb_miss_refills_and_eret_returns() {
+        let mut cpu = Cpu::new(0x8000_1000);
+        cpu.tlb[0] = TlbEntry {
+            entry_hi: 0,
+            lo0: 2,
+            lo1: (1 << 6) | 2,
+            page_mask: 0,
+        };
+        let mut memory = Memory::new(0x3000);
+        // Refill vector 0x80000000 -> physical 0: EPC += 4 ; eret.
+        for (index, word) in [0x401A_7000u32, 0x275A_0004, 0x409A_7000, 0x4200_0018]
+            .iter()
+            .enumerate()
+        {
+            memory.write_u32(index as u64 * 4, *word);
+        }
+        // Program at 0x80001000: faulting load then ADDIU t1,zero,7.
+        memory.write_u32(0x1000, 0x8C08_5000); // lw t0,0x5000(zero)
+        memory.write_u32(0x1004, 0x2409_0007); // addiu t1,zero,7
+
+        cpu.step(&mut memory).expect("refill delivered");
+        assert_eq!(cpu.pc, 0x8000_0000);
+        assert_eq!(cpu.cp0[14], 0x8000_1000);
+        assert_eq!(cpu.cp0[8], 0x5000);
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 2, "TLBL");
+        assert_ne!(cpu.cp0[12] & 2, 0, "EXL set");
+
+        run(&mut cpu, &mut memory, 4);
+        assert_eq!(cpu.pc, 0x8000_1004);
+        assert_eq!(cpu.cp0[12] & 2, 0, "ERET clears EXL");
+        cpu.step(&mut memory).expect("resume");
+        assert_eq!(cpu.gpr[9], 7);
+
+        // A store miss reports TLBS (code 3) and takes the refill vector.
+        let mut cpu = Cpu::new(0x8000_1000);
+        cpu.tlb[0] = TlbEntry {
+            entry_hi: 0,
+            lo0: 2,
+            lo1: (1 << 6) | 2,
+            page_mask: 0,
+        };
+        memory.write_u32(0x1000, 0xAC00_5000); // sw zero,0x5000(zero)
+        cpu.step(&mut memory).expect("store refill delivered");
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 3, "TLBS");
+        assert_eq!(cpu.pc, 0x8000_0000);
+    }
+
+    #[test]
+    fn tlb_invalid_page_takes_the_general_vector() {
+        let mut cpu = Cpu::new(0x8000_1000);
+        cpu.tlb[0] = TlbEntry {
+            entry_hi: 0,
+            lo0: 2, // even page valid, odd page invalid
+            lo1: 0,
+            page_mask: 0,
+        };
+        let mut memory = Memory::new(0x3000);
+        memory.write_u32(0x1000, 0x8C08_1000); // lw t0,0x1000(zero)
+        cpu.step(&mut memory).expect("invalid TLB exception");
+        assert_eq!(cpu.pc, 0x8000_0180);
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 2);
+        assert_eq!(cpu.cp0[8], 0x1000);
+        // With BEV set the boot vectors are used instead.
+        let mut cpu = Cpu::new(0x8000_1000);
+        cpu.cp0[12] = 1 << 22;
+        cpu.tlb[0] = TlbEntry {
+            entry_hi: 0,
+            lo0: 2,
+            lo1: 0,
+            page_mask: 0,
+        };
+        cpu.step(&mut memory).expect("BEV invalid TLB exception");
+        assert_eq!(cpu.pc, 0xBFC0_0380);
     }
 }
