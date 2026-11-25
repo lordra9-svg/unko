@@ -1,11 +1,15 @@
 //! Nintendo 64 cartridge parsing and system scaffold.
 //!
-//! This crate currently owns the image layer: byte-order detection, header
-//! metadata and region. The CPU/RCP emulation that will consume it is not
-//! implemented yet, so [`crate::Cartridge`] is metadata-only.
+//! The image layer (byte order, header, region) is complete, and the machine
+//! scaffold now boots a cartridge's IPL3 on the [`cpu::Cpu`] (VR4300 integer
+//! interpreter) with RDRAM/RSP memory and PI/VI register stubs. RSP/RDP
+//! rendering and audio are the next milestone.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+
+pub mod cpu;
+pub mod machine;
 
 use std::fmt;
 

@@ -271,9 +271,12 @@ The main effort was the reference-parity accuracy core. Details in
       are recognised, tagged and routed to the `unko-n64` scaffold
       (`unko-n64` parses/normalises `.z64/.v64/.n64` and their header;
       `unko-n64-host` exposes it as a registered `Core`, so `unko cores`
-      lists `n64`) which reports that CPU/RCP emulation is not implemented
-      yet. Then **N64 from ares** with gopher64 as a GPL structural reference.
-      See `docs/systems.md`.
+      lists `n64`). The machine HLEs the PIF: a VR4300 (MIPS III) integer
+      interpreter boots the cartridge's IPL3 from RSP DMEM with RDRAM/RSP
+      memory and PI/VI register stubs, and `run_frame` presents blank frames.
+      RSP/RDP rendering, audio, the TLB and FPU are the next milestones; no
+      standard N64 cartridge image was available locally to boot (only 64DD
+      IPL firmware). See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.
 - [ ] GameCube/Wii is deferred: Dolphin is GPL-2.0+ and application-shaped, so
       it can only be a separate optional process, never a registry core.

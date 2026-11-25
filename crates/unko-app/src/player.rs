@@ -2775,7 +2775,7 @@ mod tests {
     }
 
     #[test]
-    fn n64_image_loads_with_unimplemented_emulation() {
+    fn n64_image_boots_to_blank_frames() {
         let dir = std::env::temp_dir().join(format!("unko-n64-start-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("dir");
@@ -2796,11 +2796,9 @@ mod tests {
         let mut player = Player::start_with(&entries[0], &settings, GameProperties::default())
             .expect("start N64 scaffold");
         assert_eq!(player.core.info().system, unko_core::SystemId::Other("n64"));
-        let error = player
-            .core
-            .run_frame()
-            .expect_err("emulation is not implemented");
-        assert!(error.to_string().contains("not implemented"), "{error}");
+        let stats = player.core.run_frame().expect("placeholder frame");
+        assert_eq!(stats.frames, 1);
+        assert_eq!(player.core.video().width, 640);
         let adapter = player
             .core
             .as_any()
@@ -2810,6 +2808,7 @@ mod tests {
             adapter.inner().cartridge().expect("cart").header().title,
             "Game"
         );
+        assert_eq!(adapter.inner().machine().expect("machine").frames, 1);
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -1,9 +1,9 @@
 //! Adapter between the [`unko_n64`] scaffold and [`unko_core`].
 //!
-//! The image layer is real: `load` validates and normalises the cartridge and
-//! reports its metadata. Emulation is not implemented yet, so `run_frame`
-//! returns [`CoreError::Unsupported`] with a precise message. Registering the
-//! core now lets the host route N64 images to it and surface that status.
+//! `load` validates and normalises the cartridge, then boots its IPL3 on the
+//! VR4300 interpreter (PIF HLE) with RDRAM, RSP memory and PI/VI stubs.
+//! `run_frame` advances a placeholder frame and presents a blank RGBA image;
+//! RSP/RDP rendering, audio and precise exceptions are the next milestone.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -12,6 +12,7 @@ use unko_core::{
     Accuracy, AudioBuffer, AudioQuality, Core, CoreError, CoreInfo, CoreRegistration, Features,
     FrameBuffer, FrameStats, InputState, LoadOptions, PixelFormat, SystemId,
 };
+use unko_n64::machine::Machine;
 use unko_n64::Cartridge;
 
 /// Stable id of this core implementation.
@@ -38,6 +39,8 @@ pub fn registration() -> CoreRegistration {
 /// One N64 image. Emulation is not implemented yet.
 pub struct N64Core {
     cart: Option<Cartridge>,
+    machine: Option<Machine>,
+    frame: Vec<u8>,
     sample_rate: f32,
 }
 
@@ -47,6 +50,8 @@ impl N64Core {
     pub fn new() -> Self {
         Self {
             cart: None,
+            machine: None,
+            frame: vec![0; (WIDTH * HEIGHT * 4) as usize],
             sample_rate: 48_000.0,
         }
     }
@@ -55,6 +60,12 @@ impl N64Core {
     #[must_use]
     pub fn cartridge(&self) -> Option<&Cartridge> {
         self.cart.as_ref()
+    }
+
+    /// Booted machine, when one is loaded.
+    #[must_use]
+    pub fn machine(&self) -> Option<&Machine> {
+        self.machine.as_ref()
     }
 }
 
@@ -79,29 +90,40 @@ impl Core for N64Core {
     fn load(&mut self, rom: &[u8], _options: &LoadOptions) -> Result<(), CoreError> {
         let cart =
             Cartridge::from_bytes(rom).map_err(|error| CoreError::InvalidRom(error.to_string()))?;
+        self.machine = Some(Machine::new(&cart));
         self.cart = Some(cart);
         Ok(())
     }
 
     fn reset(&mut self) -> Result<(), CoreError> {
-        if self.cart.is_none() {
-            return Err(CoreError::Internal("no ROM loaded".to_owned()));
-        }
+        let cart = self
+            .cart
+            .as_ref()
+            .ok_or_else(|| CoreError::Internal("no ROM loaded".to_owned()))?;
+        self.machine = Some(Machine::new(cart));
         Ok(())
     }
 
     fn run_frame(&mut self) -> Result<FrameStats, CoreError> {
-        Err(CoreError::Unsupported(
-            "N64 CPU/RCP emulation is not implemented yet".to_owned(),
-        ))
+        let machine = self
+            .machine
+            .as_mut()
+            .ok_or_else(|| CoreError::Internal("no ROM loaded".to_owned()))?;
+        machine
+            .run_frame()
+            .map_err(|error| CoreError::Unsupported(error.to_string()))?;
+        Ok(FrameStats {
+            frames: 1,
+            samples: 0,
+        })
     }
 
     fn video(&self) -> FrameBuffer<'_> {
         FrameBuffer {
-            data: &[],
+            data: &self.frame,
             width: WIDTH,
             height: HEIGHT,
-            stride: 0,
+            stride: WIDTH as usize * 4,
             format: PixelFormat::Rgba8,
         }
     }
@@ -165,12 +187,27 @@ mod tests {
     }
 
     #[test]
-    fn reports_unimplemented_emulation() {
+    fn boots_and_presents_frames() {
         let mut core = N64Core::new();
         core.load(&z64(), &LoadOptions::default()).expect("load");
-        let error = core.run_frame().expect_err("emulation is not implemented");
-        assert!(error.to_string().contains("not implemented"), "{error}");
+        let stats = core.run_frame().expect("placeholder frame");
+        assert_eq!(stats.frames, 1);
+        assert_eq!(core.video().width, WIDTH);
+        assert_eq!(core.video().stride, WIDTH as usize * 4);
+        assert_eq!(core.machine().expect("machine").frames, 1);
         assert!(core.reset().is_ok());
+        assert_eq!(core.machine().expect("machine").frames, 0);
+    }
+
+    #[test]
+    fn reports_an_unimplemented_opcode() {
+        let mut rom = z64();
+        // COP1 (floating point) is not implemented yet.
+        rom[0x80..0x84].copy_from_slice(&[0x46, 0x20, 0x00, 0x00]);
+        let mut core = N64Core::new();
+        core.load(&rom, &LoadOptions::default()).expect("load");
+        let error = core.run_frame().expect_err("unimplemented opcode");
+        assert!(error.to_string().contains("unimplemented"), "{error}");
     }
 
     #[test]
