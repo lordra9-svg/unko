@@ -13506,3 +13506,14 @@ also advance the cooperative S-SMP/S-DSP by those clocks (they are clocked
 independently of `self.clock`).
 
 Reverted; default and six-exact modes unchanged.
+
+## Per-access suspension + CPU-lead is worse; `step_report` added (2026-11-24)
+
+The last untried ordering combination - per-access S-SMP suspension
+(`SNES_SMP_ACCESS_PULL`) with CPU-lead whole-instruction runs and DSP-only SMP
+pulls - was measured: CT 452725 differing (29.2237%) and 8,369,712 bytes of
+audio (a rate anomaly), i.e. clearly worse. Reverted.
+
+Added `Scheduler::step_report(thread)`: run one suspension interval and return
+the `Need` without performing the pull, so a driver that owns the S-CPU can
+reproduce ares' literal `co_switch` order. Unit-tested (272 lib tests).

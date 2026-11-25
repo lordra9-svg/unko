@@ -201,6 +201,19 @@ impl Scheduler {
         }
     }
 
+    /// Run exactly one suspension interval of `thread` and report the
+    /// synchronization it needs, **without** performing it.
+    ///
+    /// This is the entry for a driver that owns the S-CPU (and therefore cannot
+    /// let the scheduler re-enter it): the driver satisfies `Need::Synchronize`
+    /// itself, reproducing ares' literal `Thread::synchronize` order.
+    pub fn step_report(&mut self, thread: Thread) -> Need {
+        self.states[thread.index()]
+            .as_mut()
+            .expect("thread installed")
+            .step()
+    }
+
     /// Run one suspension interval of `thread`, applying its synchronizations.
     ///
     /// ares' `SMP::step` synchronizes the S-CPU *and then* the S-DSP before the
@@ -508,6 +521,78 @@ mod tests {
         let smp_step = ThreadClock::new(2_050_560).scalar() * 8;
         assert!(smp_clock.abs_diff(dsp_clock) <= smp_step * 2);
         assert!(cpu_clock > 0);
+    }
+
+    #[test]
+    fn step_report_returns_the_need_without_pulling() {
+        struct Reports {
+            clock: ThreadClock,
+            stage: u8,
+        }
+        impl ThreadState for Reports {
+            fn clock(&self) -> u128 {
+                self.clock.clock()
+            }
+            fn step(&mut self) -> Need {
+                self.clock.step(8);
+                match self.stage {
+                    0 => {
+                        self.stage = 1;
+                        Need::Synchronize(Thread::Cpu)
+                    }
+                    _ => Need::None,
+                }
+            }
+        }
+        struct Counter {
+            clock: ThreadClock,
+            steps: u32,
+        }
+        impl ThreadState for Counter {
+            fn clock(&self) -> u128 {
+                self.clock.clock()
+            }
+            fn step(&mut self) -> Need {
+                self.clock.step(52);
+                self.steps += 1;
+                Need::None
+            }
+        }
+        let mut scheduler = Scheduler::new();
+        scheduler.install(
+            Thread::Smp,
+            ThreadClock::new(2_050_560),
+            Box::new(Reports {
+                clock: ThreadClock::new(2_050_560),
+                stage: 0,
+            }),
+        );
+        scheduler.install(
+            Thread::Cpu,
+            ThreadClock::new(21_477_273),
+            Box::new(Counter {
+                clock: ThreadClock::new(21_477_273),
+                steps: 0,
+            }),
+        );
+        scheduler.install(
+            Thread::Dsp,
+            ThreadClock::new(24_606_720),
+            Box::new(Counter {
+                clock: ThreadClock::new(24_606_720),
+                steps: 0,
+            }),
+        );
+        // Report only: the CPU must not run.
+        let cpu_before = scheduler.clock(Thread::Cpu);
+        assert_eq!(
+            scheduler.step_report(Thread::Smp),
+            Need::Synchronize(Thread::Cpu)
+        );
+        assert_eq!(scheduler.clock(Thread::Cpu), cpu_before);
+        // The scheduler owns the pull when asked explicitly.
+        scheduler.synchronize(Thread::Smp, Thread::Cpu);
+        assert!(scheduler.clock(Thread::Cpu) >= scheduler.clock(Thread::Smp));
     }
 
     #[test]
