@@ -13830,3 +13830,39 @@ NMI edge must be crossing the instruction boundary at a different point (the
 NMI assertion is ours 83,573,184 vs ares 83,573,188 in the fresh run, i.e. not
 shifted by the same +30). Resolving it needs the NMI edge and the instruction
 boundary expressed in one clock base, which the current hooks do not provide.
+
+## Joint NMI/instruction-boundary trace; refresh placement off by one access (2026-11-24)
+
+Added `NMI_BOUNDARY` tracing that logs the instruction-boundary clock in the
+same `self.clock` base as `NMI_POLL`, and fixed `NMI_POLL` to log the true edge
+instant (`self.clock - rem`, not `self.clock + clocks`). Around the 887,720
+boundary (default driver, prime 0):
+
+```
+instruction boundary before counter write   83,573,172
+NMI assertion (line 225 dot 0)              83,573,180   (+8)
+counter write $0x76                         83,573,202
+next instruction boundary / NMI taken       83,573,208
+```
+
+So the NMI edge lands 8 clocks *after* the boundary that would let it preempt
+the counter write. Our NMI already fires at the earliest PPU point (line 225
+dot 0); ares fires at dot ~1.5, i.e. later, so the NMI edge is not the thing to
+move earlier. The ordering difference is the S-CPU clock phase.
+
+A boot comparison (same-run, clocks 0-60,000, aligned at the first `$8000`
+fetch) shows our S-CPU clock matches ares **exactly at every instruction
+boundary** (delta 0 throughout). The only sub-access discrepancy is the DRAM
+refresh's position: ares charges the 40-clock refresh one bus access earlier
+than we do, producing transient -40 offsets that realign at the next boundary:
+
+```
+ours  0080C8 @532,  0080C9 @540
+ares  0080C8 @532,  0080C9 @580   (40-clock refresh here)
+ours  ... 0080CA @588   (refresh charged here instead)
+```
+
+The persistent +30 offset seen at APU-port accesses by frame 232 is therefore
+not from the boot sequence; it appears later. The refresh placement is the one
+concrete sub-access divergence in the early CPU path and the next thing to
+align.

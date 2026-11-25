@@ -2127,6 +2127,37 @@ impl Snes {
 
     /// Feed the latched IRQ/NMI edges to the CPU at an instruction boundary.
     fn apply_interrupts(&mut self) {
+        if let Some(path) = std::env::var_os("NMI_BOUNDARY") {
+            let from: u64 = std::env::var("NMI_BOUNDARY_FROM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            let to: u64 = std::env::var("NMI_BOUNDARY_TO")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(u64::MAX);
+            if self.clock >= from && self.clock <= to {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                {
+                    let _ = writeln!(
+                        f,
+                        "B {} pc={:06X} line={} lock={} lineclk={} ready={} flag={} en={}",
+                        self.clock,
+                        self.live_pc,
+                        u8::from(self.nmi_line),
+                        u8::from(self.nmi_lock),
+                        self.nmi_line_clock,
+                        u8::from(self.nmi_line && self.clock >= self.nmi_line_clock + 22),
+                        u8::from(self.nmi_flag),
+                        u8::from(self.nmi_enable)
+                    );
+                }
+            }
+        }
         let gsu_irq = self.gsu.as_ref().is_some_and(|gsu| gsu.irq_line);
         let cx4_irq = self.cx4.as_ref().is_some_and(|cx4| cx4.irq_line());
         let sa1_irq = self.sa1.as_ref().is_some_and(|sa1| sa1.cpu_irq_line());
@@ -2592,7 +2623,7 @@ impl Snes {
                     let _ = writeln!(
                         f,
                         "{} pc={:06X} line={} dot={}",
-                        self.clock + u64::from(clocks),
+                        self.clock - u64::try_from(rem).unwrap_or(0),
                         self.live_pc,
                         self.ppu.line(),
                         self.ppu.dot()
