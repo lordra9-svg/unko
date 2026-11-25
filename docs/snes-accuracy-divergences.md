@@ -13776,3 +13776,37 @@ phase at an interrupt boundary, not a DSP model error.
 Closing the gap therefore requires the S-CPU clock to match ares at the NMI
 boundary (refresh/DMA-edge placement at the +-20-clock level), not another DSP
 synchronisation change.
+
+## Vblank NMI timing measurement; the latch delay is not the lever (2026-11-24)
+
+Instrumented both sides for the NMI at the 887,720 boundary (MMX2, default
+driver, prime 0):
+
+```
+NMI assertion (vblank edge)   ours 83,573,184 (dot 0)   ares 83,573,188 (hc 6)
+NMI taken (CPU interrupt)     ours 83,573,208           ares 83,573,194
+```
+
+The vblank assertion is aligned to 4 master clocks, but our NMI is taken 14
+clocks later: ares enters the handler 6 clocks after the transition, ours 24,
+because `apply_interrupts` waits `nmi_line_clock + 22` (the constant calibrated
+for Chrono Trigger's `$C0EC71` service point). Our `$83F3` counter write lands
+at 83,573,202 - between ares' takeover (194) and ours (208).
+
+Making the `+22` tunable (`SNES_NMI_DELAY`) and scanning it with
+`SNES_DSP_PRIME=0` gives MMX2:
+
+| delay | differing | identical |
+|---|---|---|
+| 4  | 196,870 | 69.2225% |
+| 8  | 55,202  | 91.3700% |
+| 10 | 196,870 | 69.2225% |
+| 12 | 39,626  | 93.8051% |
+| 16 | 72,441  | 88.6750% |
+
+No value is exact, and the response is not monotone: moving the NMI changes
+which complete instruction frame the handler runs on, so the resulting program
+stream (and every downstream APU write) changes discontinuously. The NMI latch
+delay is therefore not a standalone fix; the 14-clock gap is a symptom of the
+broader sub-synchronisation CPU-cycle phase, not a single constant. Reverted;
+the calibrated default is unchanged.
