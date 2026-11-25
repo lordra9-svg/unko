@@ -1,11 +1,11 @@
-//! RDP scaffold: the DPC register block and a command interpreter for the
-//! solid-fill path.
+//! RDP scaffold: the DPC register block and a command interpreter.
 //!
 //! Commands are fetched as big-endian 64-bit words from RDRAM between
 //! `DPC_START` and `DPC_END`. Implemented: `SET_COLOR_IMAGE`,
-//! `SET_FILL_COLOR`, `FILL_RECTANGLE` and `SYNC_FULL`. Triangles, texturing,
-//! combiner, blender and depth are later milestones, so this renders solid
-//! rectangles into a 16-bit framebuffer.
+//! `SET_FILL_COLOR`, `FILL_RECTANGLE`, `SET_OTHER_MODES` (1/2-cycle copy and
+//! alpha blender, coverage, dither), the two-cycle combiner, texture sampling
+//! (RGBA/IA/I/CI with TLUT) and the triangle edgewalker. Depth testing and
+//! tile loading are later milestones.
 
 /// Texture image descriptor (`SET_TEXTURE_IMAGE`).
 #[derive(Debug, Clone, Copy, Default)]
@@ -43,6 +43,24 @@ struct TileSize {
     t_high: u16,
 }
 
+/// `SET_OTHER_MODES`: cycle type, coverage and the per-cycle blender selectors.
+#[derive(Debug, Clone, Copy, Default)]
+struct OtherModes {
+    /// 0 = 1 cycle, 1 = 2 cycles, 2 = copy, 3 = fill.
+    cycle: u8,
+    force_blend: bool,
+    alpha_cvg_select: bool,
+    cvg_times_alpha: bool,
+    color_on_coverage: bool,
+    #[allow(dead_code)] // image-read coverage blending is a later milestone.
+    image_read: bool,
+    aa: bool,
+    dither: u8,
+    coverage_mode: u8,
+    /// `[cycle][1a, 1b, 2a, 2b]`.
+    blend: [[u8; 4]; 2],
+}
+
 /// Interpolated texture coordinates (16.16 fixed point).
 #[derive(Debug, Clone, Copy, Default)]
 struct TexCoords {
@@ -72,6 +90,8 @@ pub struct Rdp {
     environment_color: u32,
     combine_mode: u64,
     blend_color: u32,
+    fog_color: u32,
+    other_modes: OtherModes,
     triangles: u64,
     texture: TextureImage,
     tiles: [Tile; 8],
@@ -104,6 +124,8 @@ impl Rdp {
             environment_color: 0,
             combine_mode: 0,
             blend_color: 0,
+            fog_color: 0,
+            other_modes: OtherModes::default(),
             triangles: 0,
             texture: TextureImage::default(),
             tiles: [Tile::default(); 8],
@@ -230,6 +252,36 @@ impl Rdp {
                 0x3B => self.environment_color = command as u32,
                 0x3C => self.combine_mode = command,
                 0x39 => self.blend_color = command as u32,
+                0x38 => self.fog_color = command as u32,
+                0x2F => {
+                    let high = (command >> 32) as u32;
+                    let low = command as u32;
+                    self.other_modes = OtherModes {
+                        cycle: ((high >> 20) & 3) as u8,
+                        dither: ((high >> 4) & 0xF) as u8,
+                        force_blend: low & (1 << 14) != 0,
+                        alpha_cvg_select: low & (1 << 13) != 0,
+                        cvg_times_alpha: low & (1 << 12) != 0,
+                        color_on_coverage: low & (1 << 7) != 0,
+                        image_read: low & (1 << 6) != 0,
+                        aa: low & (1 << 3) != 0,
+                        coverage_mode: ((low >> 8) & 3) as u8,
+                        blend: [
+                            [
+                                ((low >> 30) & 3) as u8,
+                                ((low >> 26) & 3) as u8,
+                                ((low >> 22) & 3) as u8,
+                                ((low >> 18) & 3) as u8,
+                            ],
+                            [
+                                ((low >> 28) & 3) as u8,
+                                ((low >> 24) & 3) as u8,
+                                ((low >> 20) & 3) as u8,
+                                ((low >> 16) & 3) as u8,
+                            ],
+                        ],
+                    };
+                }
                 0x3D => {
                     self.texture = TextureImage {
                         format: ((command >> 53) & 7) as u8,
@@ -322,52 +374,136 @@ impl Rdp {
             .min()
             .unwrap_or(0);
 
+        let modes = self.other_modes;
         for y in y_start.max(0)..=y_end {
-            for sub in 0..4 {
-                let row = y * 4 + sub;
-                let (x_left, x_right) = setup.span(row);
-                let left = x_left as f64 / 65_536.0;
-                let right = x_right as f64 / 65_536.0;
-                if right <= left {
+            let mut spans = [(0i64, 0i64); 4];
+            let mut any = false;
+            for (sub, span) in spans.iter_mut().enumerate() {
+                *span = setup.span(y * 4 + sub as i32);
+                any |= span.1 > span.0;
+            }
+            if !any {
+                continue;
+            }
+            for x in 0..self.color_width as i32 {
+                let center = (i64::from(x) << 16) + 0x8000;
+                let coverage = spans
+                    .iter()
+                    .filter(|(left, right)| center >= *left && center < *right)
+                    .count() as u8
+                    * 2;
+                if coverage == 0 {
                     continue;
                 }
-                let first = (left - 0.5).ceil() as i32;
-                let mut x = first.max(0);
-                while (x as f64 + 0.5) < right {
-                    if self.color_width != 0 && x as u32 >= self.color_width {
-                        break;
-                    }
-                    let texel = coords
-                        .and_then(|coords| {
-                            self.sample_texture_coords(&coords, x, y, (origin_x, origin_y), rdram)
-                        })
-                        .unwrap_or(color);
-                    let mut surface = if self.combine_mode != 0 {
-                        combine(
-                            self.combine_mode,
-                            shade,
-                            texel,
-                            self.primitive_color,
-                            self.environment_color,
-                        )
-                    } else if coords.is_some() {
-                        texel
-                    } else {
-                        color
-                    };
-                    let address = self.color_address as usize
-                        + ((y as u32 * self.color_width + x as u32) as usize) * 2;
-                    if let Some(bytes) = rdram.get(address..address + 2) {
-                        let destination = u16::from_be_bytes([bytes[0], bytes[1]]);
-                        surface = blend(surface, rgba5551_to_8888(destination));
-                    }
-                    let pixel = rgba8888_to_5551(surface).to_be_bytes();
-                    if let Some(slot) = rdram.get_mut(address..address + 2) {
-                        slot.copy_from_slice(&pixel);
-                    }
-                    x += 1;
-                }
+                self.render_pixel(
+                    x,
+                    y,
+                    coverage,
+                    color,
+                    shade,
+                    coords,
+                    (origin_x, origin_y),
+                    modes,
+                    rdram,
+                );
             }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_pixel(
+        &self,
+        x: i32,
+        y: i32,
+        coverage: u8,
+        color: u32,
+        shade: u32,
+        coords: Option<TexCoords>,
+        origin: (i32, i32),
+        modes: OtherModes,
+        rdram: &mut [u8],
+    ) {
+        let texel = coords
+            .and_then(|coords| self.sample_texture_coords(&coords, x, y, origin, rdram))
+            .unwrap_or(color);
+        let combined = if self.combine_mode != 0 {
+            combine(
+                self.combine_mode,
+                shade,
+                texel,
+                self.primitive_color,
+                self.environment_color,
+            )
+        } else if coords.is_some() {
+            texel
+        } else {
+            color
+        };
+        let address =
+            self.color_address as usize + ((y as u32 * self.color_width + x as u32) as usize) * 2;
+        let destination = rdram
+            .get(address..address + 2)
+            .map(|bytes| u16::from_be_bytes([bytes[0], bytes[1]]))
+            .unwrap_or(0);
+        let memory = rgba5551_to_8888(destination);
+        let mut surface = if modes.cycle == 2 {
+            // Copy cycle: the texel (or primitive colour) bypasses the
+            // combiner and blender.
+            if coords.is_some() {
+                texel
+            } else {
+                color
+            }
+        } else {
+            let cycle = usize::from(modes.cycle == 1);
+            let mut pixel = combined;
+            if modes.cycle == 1 {
+                pixel = blender(
+                    modes.blend[0],
+                    pixel,
+                    memory,
+                    self.fog_color,
+                    self.blend_color,
+                    (shade & 0xFF) as u8,
+                    modes.force_blend,
+                    false,
+                    modes.color_on_coverage,
+                    false,
+                );
+            }
+            blender(
+                modes.blend[cycle],
+                pixel,
+                memory,
+                self.fog_color,
+                self.blend_color,
+                (shade & 0xFF) as u8,
+                modes.force_blend,
+                true,
+                modes.color_on_coverage,
+                false,
+            )
+        };
+        if modes.dither >> 2 < 2 {
+            surface = dither(surface, x, y, ((modes.dither >> 2) & 3) as usize);
+        }
+        if modes.aa {
+            let coverage8 = u32::from(coverage).min(8);
+            let mut alpha = if modes.alpha_cvg_select {
+                coverage8 * 255 / 8
+            } else if modes.cvg_times_alpha {
+                (surface & 0xFF) * coverage8 / 8
+            } else {
+                surface & 0xFF
+            };
+            let memory_coverage = ((memory & 0xFF) >> 5) as u8;
+            let stored = coverage_blend(coverage.min(7), memory_coverage, modes.coverage_mode);
+            alpha = (alpha & !0xE0) | (u32::from(stored) << 5);
+            surface = (surface & 0xFFFF_FF00) | alpha.min(255);
+        }
+        let pixel = rgba8888_to_5551(surface).to_be_bytes();
+        if let Some(slot) = rdram.get_mut(address..address + 2) {
+            slot.copy_from_slice(&pixel);
         }
     }
 
@@ -686,16 +822,91 @@ fn combine(mode: u64, shade: u32, texel: u32, primitive: u32, environment: u32) 
     (cycle1 & 0xFFFF_FF00) | (alpha1 & 0xFF)
 }
 
-fn blend(source: u32, destination: u32) -> u32 {
-    let alpha = (source & 0xFF) as i32;
-    let mut result = 0u32;
-    for channel_index in 0..4 {
-        let src = channel(source, channel_index);
-        let dst = channel(destination, channel_index);
-        let value = (src * alpha + dst * (255 - alpha) + 127) / 255;
-        result |= (value.clamp(0, 255) as u32) << (24 - channel_index * 8);
+fn blend_source(selector: u8, pixel: u32, memory: u32, blend_color: u32, fog_color: u32) -> u32 {
+    match selector {
+        0 => pixel,
+        1 => memory,
+        2 => blend_color,
+        _ => fog_color,
     }
-    result
+}
+
+fn blend_alpha(selector: u8, pixel: u32, fog_color: u32, shade_alpha: u8) -> u8 {
+    match selector {
+        0 => (pixel & 0xFF) as u8,
+        1 => (fog_color & 0xFF) as u8,
+        2 => shade_alpha,
+        _ => 0,
+    }
+}
+
+fn blend_factor(selector: u8, alpha: u8, memory: u32) -> u8 {
+    match selector {
+        0 => !alpha,
+        1 => (memory & 0xFF) as u8,
+        2 => 0xFF,
+        _ => 0,
+    }
+}
+
+/// RDP blender: `(rgb0 * a0 + rgb1 * (a1 + 1)) >> 5`.
+#[allow(clippy::too_many_arguments)]
+fn blender(
+    modes: [u8; 4],
+    pixel: u32,
+    memory: u32,
+    fog_color: u32,
+    blend_color: u32,
+    shade_alpha: u8,
+    _force_blend: bool,
+    final_cycle: bool,
+    color_on_coverage: bool,
+    coverage_wrap: bool,
+) -> u32 {
+    let rgb1 = blend_source(modes[2], pixel, memory, blend_color, fog_color);
+    if final_cycle && color_on_coverage && !coverage_wrap {
+        return rgb1;
+    }
+    let rgb0 = blend_source(modes[0], pixel, memory, blend_color, fog_color);
+    if final_cycle && modes[1] == 0 && modes[3] == 0 && (pixel & 0xFF) == 0xFF {
+        return rgb0;
+    }
+    let a0 = blend_alpha(modes[1], pixel, fog_color, shade_alpha);
+    let a1 = blend_factor(modes[3], a0, memory);
+    let a0 = u32::from(a0 >> 3);
+    let a1 = u32::from(a1 >> 3);
+    let mut result = 0u32;
+    for channel_index in 0..3 {
+        let c0 = (rgb0 >> (24 - channel_index * 8)) & 0xFF;
+        let c1 = (rgb1 >> (24 - channel_index * 8)) & 0xFF;
+        let value = (c0 * a0 + c1 * (a1 + 1)) >> 5;
+        result |= value.min(255) << (24 - channel_index * 8);
+    }
+    (result & 0xFFFF_FF00) | (pixel & 0xFF)
+}
+
+fn dither(color: u32, x: i32, y: i32, mode: usize) -> u32 {
+    const MATRICES: [[u8; 16]; 2] = [
+        [0, 6, 1, 7, 4, 2, 5, 3, 3, 5, 2, 4, 7, 1, 6, 0],
+        [0, 4, 1, 5, 4, 0, 5, 1, 3, 7, 2, 6, 7, 3, 6, 2],
+    ];
+    let threshold = u32::from(MATRICES[mode][(y as usize & 3) * 4 + (x as usize & 3)]);
+    let mut result = color & 0xFF;
+    for channel_index in 0..3 {
+        let value = (color >> (24 - channel_index * 8)) & 0xFF;
+        let quantized = (value & 0xF8) + if value & 7 > threshold { 8 } else { 0 };
+        result |= quantized.min(0xFF) << (24 - channel_index * 8);
+    }
+    result | (color & 0xFF)
+}
+
+fn coverage_blend(coverage: u8, memory_coverage: u8, mode: u8) -> u8 {
+    match mode {
+        0 => (coverage - 1) & 7,
+        1 => (coverage + memory_coverage) & 7,
+        2 => 7,
+        _ => memory_coverage,
+    }
 }
 
 fn rgba5551_to_8888(color: u16) -> u32 {
@@ -778,6 +989,14 @@ mod tests {
         assert_eq!(rdp.triangles(), 1);
         // The following SET_FILL_COLOR was reached (stream stayed aligned).
         assert_eq!(rdp.fill_color, 0x0000_00FF);
+    }
+
+    #[test]
+    fn dither_pattern_rounds_rgb_up_by_threshold() {
+        // 0x85 has a fractional 5-bit remainder of 5; the magic matrix entry
+        // at (0,0) is 0 so it rounds up, while (1,0) is 6 and stays.
+        assert_eq!(dither(0x8585_85FF, 0, 0, 0), 0x8888_88FF);
+        assert_eq!(dither(0x8585_85FF, 1, 0, 0), 0x8080_80FF);
     }
 
     #[test]

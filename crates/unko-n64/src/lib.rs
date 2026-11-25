@@ -5,11 +5,12 @@
 //! interpreter) with RDRAM/RSP memory and PI/VI register stubs, runs RSP
 //! scalar/vector code and DMA ([`rsp::Rsp`]), applies RDP solid-fill commands
 //! and rasterises unshaded/shaded/textured triangles ([`rdp::Rdp`]) with the
-//! RDP edgewalker, two-cycle combiner and alpha blending, presents the VI
+//! RDP edgewalker, two-cycle combiner and the SET_OTHER_MODES blender
+//! (cycle/copy, fog, coverage, dither), presents the VI
 //! framebuffer from
 //! RDRAM and runs AI DMA into an audio FIFO ([`ai::Ai`]). CI/TLUT palettes and
-//! perspective-correct W interpolation are implemented; full blender modes and
-//! audio resampling are the next milestones.
+//! perspective-correct W interpolation are implemented; depth testing and audio
+//! resampling are the next milestones.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

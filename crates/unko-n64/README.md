@@ -12,8 +12,12 @@ state, rasterises unshaded/shaded/textured triangles with the RDP edgewalker
 (half-pixel X, 1/4-pixel Y, lmajor and Yl/Ym/Yh subpixel spans), samples
 triangles using the interpolated texture coefficient words (SET_TEXTURE_IMAGE/SET_TILE/SET_TILE_SIZE; 4/8/16-bit
 RGBA/IA/I texels with clamp/mirror/mask), runs the two-cycle combiner
-(`SET_COMBINE_MODE`) with alpha blending, and models the AI register block:
+(`SET_COMBINE_MODE`), and applies the `SET_OTHER_MODES` blender: 1/2-cycle
+selectors (pixel/memory/blend/fog colour and alpha), force blend, copy-cycle
+bypass, fog, coverage modes with AA subpixel coverage and RGB dithering. It
+models the AI register block:
 `AI_LEN` DMAs 16-bit stereo pairs from RDRAM into a FIFO that the host turns
 into audio. CI palettes load through LOAD_TLUT and 4/8-bit CI texels look up
 the TLUT, and texture coordinates are perspective-corrected by the parsed W
-coefficients. Full blender modes and audio resampling are next.
+coefficients. Fog-alpha edge cases, depth testing and audio resampling are
+next.

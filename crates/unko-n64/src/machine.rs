@@ -484,6 +484,82 @@ mod tests {
 
     #[test]
     #[allow(clippy::vec_init_then_push)]
+    fn rdp_blender_alpha_and_copy_cycles() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        let origin = 0x2000u32;
+        let texture = 0x5000u32;
+        machine.write_register(0x0440_0004, origin);
+        machine.write_register(0x0440_0008, 32);
+        for row in 0..4 {
+            for column in 0..4 {
+                machine.write_u16(texture as u64 + (row * 8 + column * 2), 0xF801);
+            }
+        }
+        let mut words: Vec<u64> = Vec::new();
+        words.push(
+            (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (32u64 << 32) | u64::from(origin),
+        );
+        // Fill the framebuffer opaque blue (RGBA order).
+        words.push((0x37u64 << 56) | 0x0000_FFFF);
+        words.push((0x36u64 << 56) | (31u64 << 12) | 31);
+        words.push((0x3Du64 << 56) | (2u64 << 51) | (4u64 << 32) | u64::from(texture));
+        words.push((0x35u64 << 56) | (2u64 << 51) | (1u64 << 41));
+        words.push((0x32u64 << 56) | (3u64 << 12) | 3);
+        // Primitive alpha 0x80 feeds the combiner alpha.
+        words.push((0x3Au64 << 56) | 0x0000_0080);
+        // rgb0 = texel, alpha0 = primitive alpha, cycle1 passes both through.
+        let combine =
+            (3u64 << 52) | (1u64 << 47) | (4u64 << 9) | (2u64 << 37) | (1u64 << 32) | 2u64;
+        words.push((0x3Cu64 << 56) | combine);
+        // 1 cycle, 1a = pixel, 1b = pixel alpha, 2a = memory, 2b = 1 - alpha.
+        // Dither off (mode 3) keeps the blend result exact for the assert.
+        words.push((0x2Fu64 << 56) | (0xCu64 << 36) | (1u64 << 22));
+        words.extend(triangle_edge(0x0A, [(4.0, 4.0), (10.0, 6.0), (4.0, 12.0)]));
+        words.extend([0u64; 8]); // texture coefficients: s = t = 0.
+                                 // Copy cycle: the next triangle bypasses the blender.
+        words.push((0x2Fu64 << 56) | (0xCu64 << 36) | (2u64 << 52));
+        words.extend(triangle_edge(
+            0x0A,
+            [(20.0, 4.0), (26.0, 6.0), (20.0, 12.0)],
+        ));
+        words.extend([0u64; 8]);
+        for (index, word) in words.iter().enumerate() {
+            machine.write_u32(index as u64 * 8, (word >> 32) as u32);
+            machine.write_u32(index as u64 * 8 + 4, *word as u32);
+        }
+        let end = (words.len() * 8) as u32;
+        machine.write_u32(0x0410_0000, 0);
+        machine.write_u32(0x0410_0004, end);
+        machine.run_frame().expect("frame");
+
+        let pixel = |x: usize, y: usize| {
+            let index = (y * WIDTH as usize + x) * 4;
+            let frame = machine.frame();
+            [
+                frame[index],
+                frame[index + 1],
+                frame[index + 2],
+                frame[index + 3],
+            ]
+        };
+        // 0x80 alpha over opaque blue: red 253*16/32 = 126, blue 255*16/32 = 127,
+        // then 5-bit colour-image truncation expands to 123.
+        assert_eq!(
+            pixel(5, 9),
+            [123, 0, 123, 0xFF],
+            "alpha blend of red over blue"
+        );
+        assert_eq!(
+            pixel(22, 9),
+            [0xFF, 0, 0, 0xFF],
+            "copy cycle writes the texel"
+        );
+        assert_eq!(pixel(28, 20), [0, 0, 0xFF, 0xFF], "background fill");
+    }
+
+    #[test]
+    #[allow(clippy::vec_init_then_push)]
     fn rdp_textured_triangle_samples_the_tile() {
         let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
         let mut machine = Machine::new(&cart);
