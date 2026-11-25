@@ -14253,3 +14253,27 @@ So the remaining error is the actual S-CPU↔S-SMP co-scheduling phase at the
 handshake: the S-SMP read must pull the S-CPU to the read clock, and the S-CPU
 must push the S-SMP forward, exactly as ares' `SMP::step` does. Every
 timestamp/offset surrogate of that pull either changes nothing or regresses.
+
+## Every MMX2-exact configuration breaks CT (2026-11-25)
+
+600-frame audio, `offset 0`, all in one process config:
+
+| config | MMX2 | DKC | CT | SMAS |
+|---|---|---|---|---|
+| base, PRIME=0 | 92.3001% | 100% | 100% | 100% |
+| `PORT_SYNC`, PRIME=0 | **96.5991%** | 100% | **29.2388%** | **50.9452%** |
+| `CLOCK_SYNC`, PRIME=0 | 93.8051% | - | - | - |
+| `CLOCK_SYNC`, PRIME=2 | **100.0000%** | **42.3631%** | 29.2141% | 47.9395% |
+| `ACCESS_STOP`, PRIME=2 | 100.0000% | 42.3631% | deadlock@321786 | - |
+| default, PRIME=4 | 100.0000% | 69.1525% | 63.5948% | - |
+
+CT is the binding constraint: the only configuration that keeps it bit-exact is
+the unmodified base at `PRIME=0` (its port handshake has zero timing margin).
+Every ares-faithful pull/pacing model (`PORT_SYNC`, `CLOCK_SYNC`,
+`ACCESS_STOP`) that makes MMX2 exact moves CT off it by tens of percent.
+
+PORT_SYNC is the closest *pacing-only* model (no prime): it lifts MMX2 from
+92.3% to 96.6% while keeping DKC exact, but CT and SMAS collapse. So the
+missing piece is not an SMP pacing flag; it is the exact per-read pull the
+base model approximates, and CT is already calibrated against that
+approximation.
