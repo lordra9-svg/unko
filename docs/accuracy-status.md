@@ -91,9 +91,13 @@ SMAS, DKC, CT and MMX2.
 Chrono Trigger is also bit-exact after the NMI service phase was corrected
 (`nmi_line_clock + 22`): the +26-clock drift at the 12.1 M interrupt service
 was an NMI taken one instruction late, and CT's 600-frame stream is now 0
-differing. Mega Man X2 remains at 92.3001% (CX4 firmware via `CX4_ROM`); its
-residual is the CX4/upload phase, not the DMA or the refresh. The PCM of the blargg oracle remains
-bit-exact.
+differing. Mega Man X2 is bit-exact too: the CX4 titles diverge from the
+plan/credit schedule at the boot driver-upload handshake (the `$2140` counter is
+published one S-SMP poll early), so a CX4 cartridge now selects the
+thread-clock/pull schedule with a 2-micro-step DSP phase, while non-CX4 carts
+keep plan/credit at phase 0. All seven reference titles are therefore 0
+differing on the 600-frame gate in one configuration. The PCM of the blargg
+oracle remains bit-exact.
 
 `unko-snes` is a new isolated crate with no `unko-core` or shell dependency.
 
