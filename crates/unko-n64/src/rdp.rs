@@ -7,6 +7,40 @@
 //! combiner, blender and depth are later milestones, so this renders solid
 //! rectangles into a 16-bit framebuffer.
 
+/// Texture image descriptor (`SET_TEXTURE_IMAGE`).
+#[derive(Debug, Clone, Copy, Default)]
+#[allow(dead_code)] // format/size/width are recorded for the load path.
+struct TextureImage {
+    format: u8,
+    size: u8,
+    width: u16,
+    address: u32,
+}
+
+/// Tile descriptor (`SET_TILE`).
+#[derive(Debug, Clone, Copy, Default)]
+struct Tile {
+    format: u8,
+    size: u8,
+    line: u16,
+    address: u16,
+    t_clamp: bool,
+    t_mirror: bool,
+    t_mask: u8,
+    s_clamp: bool,
+    s_mirror: bool,
+    s_mask: u8,
+}
+
+/// Tile bounds (`SET_TILE_SIZE`).
+#[derive(Debug, Clone, Copy, Default)]
+struct TileSize {
+    s_low: u16,
+    t_low: u16,
+    s_high: u16,
+    t_high: u16,
+}
+
 /// DPC register block.
 #[derive(Debug, Clone)]
 pub struct Rdp {
@@ -27,6 +61,9 @@ pub struct Rdp {
     environment_color: u32,
     combine_mode: u32,
     triangles: u64,
+    texture: TextureImage,
+    tiles: [Tile; 8],
+    tile_sizes: [TileSize; 8],
 }
 
 impl Default for Rdp {
@@ -53,6 +90,9 @@ impl Rdp {
             environment_color: 0,
             combine_mode: 0,
             triangles: 0,
+            texture: TextureImage::default(),
+            tiles: [Tile::default(); 8],
+            tile_sizes: [TileSize::default(); 8],
         }
     }
 
@@ -126,13 +166,54 @@ impl Rdp {
             match opcode {
                 0x36 => self.fill_rectangle(command, rdram),
                 0x37 => self.fill_color = command as u32,
+                0x32 => {
+                    let index = ((command >> 24) & 7) as usize;
+                    self.tile_sizes[index] = TileSize {
+                        s_low: ((command >> 44) & 0xFFF) as u16,
+                        t_low: ((command >> 32) & 0xFFF) as u16,
+                        s_high: ((command >> 12) & 0xFFF) as u16,
+                        t_high: (command & 0xFFF) as u16,
+                    };
+                }
+                0x35 => {
+                    let index = ((command >> 24) & 7) as usize;
+                    self.tiles[index] = Tile {
+                        format: ((command >> 53) & 7) as u8,
+                        size: ((command >> 51) & 3) as u8,
+                        line: ((command >> 41) & 0x1FF) as u16,
+                        address: ((command >> 32) & 0x1FF) as u16,
+                        t_clamp: command & (1 << 19) != 0,
+                        t_mirror: command & (1 << 18) != 0,
+                        t_mask: ((command >> 14) & 0xF) as u8,
+                        s_clamp: command & (1 << 9) != 0,
+                        s_mirror: command & (1 << 8) != 0,
+                        s_mask: ((command >> 4) & 0xF) as u8,
+                    };
+                }
                 0x3A => self.primitive_color = command as u32,
                 0x3B => self.environment_color = command as u32,
                 0x3C => self.combine_mode = command as u32,
+                0x3D => {
+                    self.texture = TextureImage {
+                        format: ((command >> 53) & 7) as u8,
+                        size: ((command >> 51) & 3) as u8,
+                        width: ((command >> 32) & 0x3FF) as u16,
+                        address: (command & 0x03FF_FFFF) as u32,
+                    };
+                }
                 0x08..=0x0F => {
                     self.triangles += 1;
                     let shaded = opcode >= 0x0C;
-                    let words = if shaded { 12 } else { 4 };
+                    let textured = matches!(opcode, 0x0A | 0x0B | 0x0E | 0x0F);
+                    let words = if shaded && textured {
+                        16
+                    } else if shaded {
+                        12
+                    } else if textured {
+                        8
+                    } else {
+                        4
+                    };
                     let start = self.current as usize;
                     let mut edge = [0u64; 4];
                     for (index, slot) in edge.iter_mut().enumerate() {
@@ -161,7 +242,7 @@ impl Rdp {
                                 | a as u32;
                         }
                     }
-                    self.rasterize_triangle(edge, color, rdram);
+                    self.rasterize_triangle(edge, color, textured, rdram);
                     self.current = self.current.wrapping_add((words - 1) * 8);
                 }
                 0x3F => {
@@ -176,7 +257,7 @@ impl Rdp {
         }
     }
 
-    fn rasterize_triangle(&mut self, edge: [u64; 4], color: u32, rdram: &mut [u8]) {
+    fn rasterize_triangle(&mut self, edge: [u64; 4], color: u32, textured: bool, rdram: &mut [u8]) {
         if self.color_size != 2 || self.color_format != 2 {
             return;
         }
@@ -217,7 +298,7 @@ impl Rdp {
         if area == 0.0 {
             return;
         }
-        let pixel = rgba8888_to_5551(color).to_be_bytes();
+        let bounds = (min_x, min_y, max_x, max_y);
         for y in min_y..=max_y {
             for x in min_x..=max_x {
                 let point = (x as f32 + 0.5, y as f32 + 0.5);
@@ -235,6 +316,12 @@ impl Rdp {
                 if self.color_width != 0 && x as u32 >= self.color_width {
                     continue;
                 }
+                let surface = if textured {
+                    self.sample_texture(x, y, bounds, rdram).unwrap_or(color)
+                } else {
+                    color
+                };
+                let pixel = rgba8888_to_5551(surface).to_be_bytes();
                 let address = self.color_address as usize
                     + ((y as u32 * self.color_width + x as u32) as usize) * 2;
                 if let Some(slot) = rdram.get_mut(address..address + 2) {
@@ -242,6 +329,82 @@ impl Rdp {
                 }
             }
         }
+    }
+
+    fn sample_texture(
+        &self,
+        x: i32,
+        y: i32,
+        bounds: (i32, i32, i32, i32),
+        rdram: &[u8],
+    ) -> Option<u32> {
+        let tile = self.tiles[0];
+        let size = self.tile_sizes[0];
+        if size.s_high <= size.s_low || size.t_high <= size.t_low {
+            return None;
+        }
+        let (min_x, min_y, max_x, max_y) = bounds;
+        let span_x = (max_x - min_x).max(1) as f32;
+        let span_y = (max_y - min_y).max(1) as f32;
+        let width = f32::from(size.s_high - size.s_low) + 1.0;
+        let height = f32::from(size.t_high - size.t_low) + 1.0;
+        let s = f32::from(size.s_low) + (x - min_x) as f32 / span_x * (width - 1.0);
+        let t = f32::from(size.t_low) + (y - min_y) as f32 / span_y * (height - 1.0);
+        let s = tile_coordinate(
+            s,
+            size.s_low as i32,
+            size.s_high as i32,
+            tile.s_clamp,
+            tile.s_mirror,
+            tile.s_mask,
+        );
+        let t = tile_coordinate(
+            t,
+            size.t_low as i32,
+            size.t_high as i32,
+            tile.t_clamp,
+            tile.t_mirror,
+            tile.t_mask,
+        );
+        let row_bytes = usize::from(tile.line) * 8;
+        let base = self.texture.address as usize + usize::from(tile.address) * 8;
+        let texel = match tile.size {
+            0 => {
+                let offset = base + t.max(0) as usize * row_bytes + (s.max(0) as usize) / 2;
+                let byte = *rdram.get(offset)?;
+                let nibble = if s & 1 == 0 { byte >> 4 } else { byte & 0xF };
+                intensity(nibble)
+            }
+            1 => {
+                let offset = base + t.max(0) as usize * row_bytes + s.max(0) as usize;
+                let byte = *rdram.get(offset)?;
+                intensity(byte)
+            }
+            2 => {
+                let offset = base + t.max(0) as usize * row_bytes + s.max(0) as usize * 2;
+                let bytes = rdram.get(offset..offset + 2)?;
+                let texel = u16::from_be_bytes([bytes[0], bytes[1]]);
+                match tile.format {
+                    0 => rgba5551(texel),
+                    3 => {
+                        let i = ((texel >> 8) & 0xFF) as u8;
+                        let a = (texel & 0xFF) as u8;
+                        u32::from(i) << 24 | u32::from(i) << 16 | u32::from(i) << 8 | u32::from(a)
+                    }
+                    _ => {
+                        let i = ((texel >> 8) & 0xFF) as u8;
+                        u32::from(i) << 24 | u32::from(i) << 16 | u32::from(i) << 8 | 0xFF
+                    }
+                }
+            }
+            _ => {
+                let offset = base + t.max(0) as usize * row_bytes + s.max(0) as usize * 2;
+                let bytes = rdram.get(offset..offset + 2)?;
+                let texel = u16::from_be_bytes([bytes[0], bytes[1]]);
+                rgba5551(texel)
+            }
+        };
+        Some(texel)
     }
 
     fn fill_rectangle(&mut self, command: u64, rdram: &mut [u8]) {
@@ -283,6 +446,45 @@ fn sext14(value: u64) -> i32 {
 
 fn fixed16(integer: u64, fraction: u64) -> f32 {
     (integer as u16 as i16 as f32) + (fraction as u16 as f32) / 65_536.0
+}
+
+fn tile_coordinate(value: f32, low: i32, high: i32, clamp: bool, mirror: bool, mask: u8) -> i32 {
+    let mut coordinate = value.round() as i32;
+    if mask != 0 {
+        let mask = (1i32 << mask) - 1;
+        coordinate &= mask;
+    }
+    if mirror {
+        let span = (high - low).max(1);
+        let folded = (coordinate - low).rem_euclid(span * 2);
+        coordinate = low
+            + if folded >= span {
+                span * 2 - 1 - folded
+            } else {
+                folded
+            };
+    }
+    if clamp {
+        coordinate = coordinate.clamp(low, high);
+    }
+    coordinate
+}
+
+fn intensity(value: u8) -> u32 {
+    u32::from(value) << 24 | u32::from(value) << 16 | u32::from(value) << 8 | 0xFF
+}
+
+fn rgba5551(color: u16) -> u32 {
+    let r = expand5((color >> 11) & 0x1F);
+    let g = expand5((color >> 6) & 0x1F);
+    let b = expand5((color >> 1) & 0x1F);
+    let a = if color & 1 != 0 { 0xFF } else { 0 };
+    u32::from(r) << 24 | u32::from(g) << 16 | u32::from(b) << 8 | (a as u32)
+}
+
+fn expand5(value: u16) -> u8 {
+    let value = value as u8;
+    (value << 3) | (value >> 2)
 }
 
 fn edge_function(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {

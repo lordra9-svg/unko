@@ -386,6 +386,62 @@ mod tests {
 
     #[test]
     #[allow(clippy::vec_init_then_push)]
+    fn rdp_textured_triangle_samples_the_tile() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        let origin = 0x2000u32;
+        let texture = 0x3000u32;
+        machine.write_register(0x0440_0004, origin);
+        machine.write_register(0x0440_0008, 64);
+        // 4x4 RGBA5551 texture: red, green, blue, white rows.
+        let rows = [0xF801u16, 0x07C1, 0x003F, 0xFFFF];
+        for (row, color) in rows.iter().enumerate() {
+            for column in 0..4 {
+                machine.write_u16(texture as u64 + (row * 8 + column * 2) as u64, *color);
+            }
+        }
+        let mut words: Vec<u64> = Vec::new();
+        words.push((0x3Du64 << 56) | (2u64 << 51) | (4u64 << 32) | u64::from(texture));
+        words.push((0x35u64 << 56) | (2u64 << 51) | (1u64 << 41));
+        words.push((0x32u64 << 56) | (3u64 << 12) | 3);
+        words.push(
+            (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (64u64 << 32) | u64::from(origin),
+        );
+        words.push((0x0Au64 << 56) | (48u64 << 32) | (16u64 << 16) | 16);
+        words.push(4u64 << 48);
+        words.push(4u64 << 48);
+        words.push(12u64 << 48);
+        words.push(0); // texture coefficients (unused by the bbox scaffold)
+        words.push(0);
+        words.push(0);
+        words.push(0);
+        for (index, word) in words.iter().enumerate() {
+            machine.write_u32(index as u64 * 8, (word >> 32) as u32);
+            machine.write_u32(index as u64 * 8 + 4, *word as u32);
+        }
+        let end = (words.len() * 8) as u32;
+        machine.write_u32(0x0410_0000, 0);
+        machine.write_u32(0x0410_0004, end);
+        machine.run_frame().expect("frame");
+
+        let pixel = |x: usize, y: usize| {
+            let index = (y * WIDTH as usize + x) * 4;
+            let frame = machine.frame();
+            [
+                frame[index],
+                frame[index + 1],
+                frame[index + 2],
+                frame[index + 3],
+            ]
+        };
+        assert_eq!(pixel(5, 5), [0xFF, 0, 0, 0xFF], "row 0 red");
+        assert_eq!(pixel(5, 7), [0, 0xFF, 0, 0xFF], "row 1 green");
+        assert_eq!(pixel(4, 11), [0xFF, 0xFF, 0xFF, 0xFF], "row 3 white");
+        assert_eq!(pixel(10, 10), [0, 0, 0, 0], "outside the triangle");
+    }
+
+    #[test]
+    #[allow(clippy::vec_init_then_push)]
     fn rdp_triangles_render_non_rectangular_geometry() {
         let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
         let mut machine = Machine::new(&cart);
