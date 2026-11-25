@@ -14088,3 +14088,29 @@ outcome. Reverted (flag default-off was dead code). The MMX2 prime0 gap is not
 the refresh sampling point; it remains the per-event SMP/DSP phase, which is in
 turn driven by the wandering S-CPU clock phase. No local refresh/DMA/NMI lever
 has changed any of the audio results.
+
+## Per-access increment audit: the wander is refresh +-40 and DMA alignment (2026-11-24)
+
+Instead of cumulative clocks, compare the per-access clock *increments*
+(ours[i]-ours[i-1] vs ares[j]-ares[j-1]) over the address-aligned 24M window
+(99.9% address match). Non-zero increment deltas, by address:
+
+```
+008100..008104, 0609CE : +40 / -40 in near-equal counts (the DRAM refresh
+                         landing between different loop accesses; net ~0)
+7E2077 / 7E2078        : +4536 / -4544  (a full DMA cost - an alignment
+                         artifact: ares logs no CPU::read/write during a DMA)
+```
+
+There is **no** repeated +8/+22/+54 per-access cycle-count difference on any
+address. The cumulative phase changes at the DMA sites are the DMA-silence
+alignment artifact; the +-40 refresh increments cancel over a frame. So the
+"wandering S-CPU phase" is composed of (a) refresh placement (transient, +-40,
+net ~0) and (b) DMA-silence log alignment, not a systematic per-access cycle
+cost error.
+
+The only real, persistent divergence is at the instruction level: the
+887,720 NMI boundary (ours executes one extra counter write before taking the
+NMI), which shifts the SMP by 132 clocks by the `$6D` echo write and causes the
+prime-0 MMX2 audio difference. That is an interrupt-boundary instruction
+alignment, not a per-access clock cost, and it is the single root left.
