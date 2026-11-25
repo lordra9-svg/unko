@@ -3,9 +3,9 @@
 //! `load` validates and normalises the cartridge, then boots its IPL3 on the
 //! VR4300 interpreter (PIF HLE) with RDRAM, RSP memory and PI/VI stubs.
 //! `run_frame` runs RSP scalar/vector code and DMA, applies pending RDP fill
-//! and triangle commands and presents the VI framebuffer from RDRAM as RGBA.
-//! Texturing, full combiner/blender, audio and precise exceptions are the next
-//! milestone.
+//! and triangle commands, presents the VI framebuffer from RDRAM as RGBA and
+//! drains AI DMA into interleaved f32 audio. Texturing, full combiner/blender,
+//! audio resampling/mixing and precise exceptions are the next milestone.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -42,6 +42,7 @@ pub fn registration() -> CoreRegistration {
 pub struct N64Core {
     cart: Option<Cartridge>,
     machine: Option<Machine>,
+    audio: Vec<f32>,
     sample_rate: f32,
 }
 
@@ -52,6 +53,7 @@ impl N64Core {
         Self {
             cart: None,
             machine: None,
+            audio: Vec::new(),
             sample_rate: 48_000.0,
         }
     }
@@ -66,6 +68,11 @@ impl N64Core {
     #[must_use]
     pub fn machine(&self) -> Option<&Machine> {
         self.machine.as_ref()
+    }
+
+    /// Mutable machine (tests/debugger).
+    pub fn machine_mut(&mut self) -> Option<&mut Machine> {
+        self.machine.as_mut()
     }
 }
 
@@ -112,9 +119,14 @@ impl Core for N64Core {
         machine
             .run_frame()
             .map_err(|error| CoreError::Unsupported(error.to_string()))?;
+        self.audio.clear();
+        for (left, right) in machine.take_audio() {
+            self.audio.push(f32::from(left) / 32_768.0);
+            self.audio.push(f32::from(right) / 32_768.0);
+        }
         Ok(FrameStats {
             frames: 1,
-            samples: 0,
+            samples: self.audio.len() / 2,
         })
     }
 
@@ -133,9 +145,13 @@ impl Core for N64Core {
     }
 
     fn audio(&self) -> AudioBuffer<'_> {
+        let sample_rate = self
+            .machine
+            .as_ref()
+            .map_or(self.sample_rate, |machine| machine.audio_sample_rate());
         AudioBuffer {
-            samples: &[],
-            sample_rate: self.sample_rate,
+            samples: &self.audio,
+            sample_rate,
             channels: 2,
         }
     }
@@ -203,6 +219,32 @@ mod tests {
         assert_eq!(core.machine().expect("machine").frames, 1);
         assert!(core.reset().is_ok());
         assert_eq!(core.machine().expect("machine").frames, 0);
+    }
+
+    #[test]
+    fn ai_dma_produces_host_audio() {
+        use unko_n64::cpu::Bus;
+        let mut core = N64Core::new();
+        core.load(&z64(), &LoadOptions::default()).expect("load");
+        {
+            let machine = core.machine_mut().expect("machine");
+            for (index, (left, right)) in [(100i16, -100i16), (200, -200)].iter().enumerate() {
+                let mut word = [0u8; 4];
+                word[..2].copy_from_slice(&left.to_be_bytes());
+                word[2..].copy_from_slice(&right.to_be_bytes());
+                machine.write_u32(0x40 + index as u64 * 4, u32::from_be_bytes(word));
+            }
+            machine.write_u32(0x0450_0008, 1);
+            machine.write_u32(0x0450_0000, 0x40);
+            machine.write_u32(0x0450_0010, 1013);
+            machine.write_u32(0x0450_0004, 8);
+        }
+        let stats = core.run_frame().expect("frame");
+        assert_eq!(stats.samples, 2);
+        assert_eq!(core.audio().channels, 2);
+        assert!(core.audio().sample_rate > 40_000.0);
+        assert_eq!(core.audio().samples.len(), 4);
+        assert!((core.audio().samples[0] - 100.0 / 32768.0).abs() < 1e-6);
     }
 
     #[test]

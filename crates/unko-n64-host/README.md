@@ -4,5 +4,6 @@ Adapter between the `unko-n64` scaffold and the shared `unko-core` interface.
 
 Cartridge parsing is implemented, and the core boots a cartridge's IPL3 on the
 VR4300 interpreter with RDRAM/RSP memory and PI/VI stubs. `run_frame` runs RSP
-scalar code/DMA, applies RDP solid-fill commands and presents the VI
-framebuffer from RDRAM as RGBA; textured triangles and audio are next.
+scalar code/DMA, applies RDP fill/triangle commands, presents the VI
+framebuffer from RDRAM as RGBA and drains AI DMA into interleaved f32 audio;
+texturing and audio resampling/mixing are next.

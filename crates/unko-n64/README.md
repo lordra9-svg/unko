@@ -8,5 +8,7 @@ covers DMEM/IMEM, DMA, a scalar interpreter and the vector subset
 `VRCP/VRCPL/VRCPH`); the RDP scaffold processes
 `SET_COLOR_IMAGE`/`SET_FILL_COLOR`/`FILL_RECTANGLE` into a 16-bit framebuffer
 that `run_frame` presents from RDRAM, tracks primitive/environment/combine
-state, and rasterises unshaded/shaded triangles (half-space coverage from the
-edge coefficients). Texturing, combiner blending and audio are next.
+state, rasterises unshaded/shaded triangles (half-space coverage from the edge
+coefficients), and models the AI register block: `AI_LEN` DMAs 16-bit stereo
+pairs from RDRAM into a FIFO that the host turns into audio. Texturing, full
+combiner blending and audio resampling are next.

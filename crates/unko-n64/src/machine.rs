@@ -8,6 +8,7 @@
 //! code, applies pending RDP fill commands and presents the VI framebuffer from
 //! RDRAM as RGBA. Textured triangles, audio, the TLB and FPU are later.
 
+use crate::ai::Ai;
 use crate::cpu::{Bus, Cpu, CpuError};
 use crate::rdp::Rdp;
 use crate::rsp::Rsp;
@@ -30,6 +31,8 @@ pub struct Machine {
     pub rsp: Rsp,
     /// RDP scaffold.
     pub rdp: Rdp,
+    /// Audio interface.
+    pub ai: Ai,
     /// Work RAM (4 MiB).
     rdram: Vec<u8>,
     /// Cartridge image (normalised big-endian).
@@ -60,6 +63,7 @@ impl Machine {
             cpu: Cpu::new(0xA400_0040),
             rsp,
             rdp: Rdp::new(),
+            ai: Ai::new(),
             rdram: vec![0; 4 * 1024 * 1024],
             rom,
             frames: 0,
@@ -87,6 +91,17 @@ impl Machine {
     #[must_use]
     pub fn frame(&self) -> &[u8] {
         &self.frame
+    }
+
+    /// Drains audio samples produced by AI DMA.
+    pub fn take_audio(&mut self) -> Vec<(i16, i16)> {
+        self.ai.take_samples()
+    }
+
+    /// Audio sample rate from `AI_DACRATE`.
+    #[must_use]
+    pub fn audio_sample_rate(&self) -> f32 {
+        self.ai.sample_rate()
     }
 
     /// Executes one CPU instruction.
@@ -154,6 +169,9 @@ impl Bus for Machine {
             0x0410_0000..=0x0410_001F => {
                 (self.rdp.read_register(address - 0x0410_0000) >> ((3 - (address & 3)) * 8)) as u8
             }
+            0x0450_0000..=0x0450_0017 => {
+                (self.ai.read_register(address - 0x0450_0000) >> ((3 - (address & 3)) * 8)) as u8
+            }
             0x1000_0000..=0x1FBF_FFFF => self
                 .rom
                 .get((address - 0x1000_0000) as usize)
@@ -178,6 +196,7 @@ impl Bus for Machine {
         match address {
             0x0404_0000..=0x0404_003C => self.rsp.read_register(address - 0x0404_0000),
             0x0410_0000..=0x0410_001C => self.rdp.read_register(address - 0x0410_0000),
+            0x0450_0000..=0x0450_0014 => self.ai.read_register(address - 0x0450_0000),
             0x0000_0000..=0x003F_FFFF => {
                 let mut bytes = [0u8; 4];
                 for (offset, byte) in bytes.iter_mut().enumerate() {
@@ -236,6 +255,10 @@ impl Bus for Machine {
             0x0410_0000..=0x0410_001C => {
                 self.rdp
                     .write_register(address - 0x0410_0000, value, &mut self.rdram);
+            }
+            0x0450_0000..=0x0450_0014 => {
+                self.ai
+                    .write_register(address - 0x0450_0000, value, &self.rdram);
             }
             _ => self.write_register(address, value),
         }
@@ -334,6 +357,31 @@ mod tests {
         assert_eq!(&machine.frame()[..4], &[0xFF, 0x00, 0x00, 0xFF]);
         let outside = 4 * 4;
         assert_eq!(&machine.frame()[outside..outside + 4], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn ai_dma_produces_audio_samples() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        for (index, (left, right)) in [(1i16, -2i16), (3, -4), (5, -6), (7, -8)]
+            .iter()
+            .enumerate()
+        {
+            let mut word = [0u8; 4];
+            word[..2].copy_from_slice(&left.to_be_bytes());
+            word[2..].copy_from_slice(&right.to_be_bytes());
+            machine.write_u32(0x100 + index as u64 * 4, u32::from_be_bytes(word));
+        }
+        machine.write_u32(0x0450_0008, 1); // control enable
+        machine.write_u32(0x0450_0000, 0x100); // dram address
+        machine.write_u32(0x0450_0010, 1013); // ~48 kHz
+        machine.write_u32(0x0450_0004, 16); // 4 stereo samples
+        machine.run_frame().expect("frame");
+        let audio = machine.take_audio();
+        assert_eq!(audio.len(), 4);
+        assert_eq!(audio[0], (1, -2));
+        assert_eq!(audio[3], (7, -8));
+        assert!(machine.audio_sample_rate() > 40_000.0);
     }
 
     #[test]

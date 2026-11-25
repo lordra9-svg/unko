@@ -280,8 +280,10 @@ The main effort was the reference-parity accuracy core. Details in
       a 16-bit framebuffer, tracks primitive/environment/combine state and
       rasterises unshaded/shaded triangles with a half-space test over the
       edge coefficients; `run_frame` presents the VI framebuffer from RDRAM as
-      RGBA. Texturing, full combiner/blender, audio, the TLB and FPU are the
-      next milestones; no
+      RGBA. The AI register block (`AI_LEN` DMA of 16-bit stereo pairs into a
+      FIFO) feeds interleaved f32 audio through `Core::audio`. Texturing, full
+      combiner/blender, audio resampling/mixing, the TLB and FPU are the next
+      milestones; no
       standard N64 cartridge image was available locally to boot (only 64DD
       IPL firmware). See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.
