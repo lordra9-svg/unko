@@ -2670,8 +2670,21 @@ mod tests {
             .unwrap_or(600);
         let out = std::env::var("UNKO_SNES_OUT")
             .unwrap_or_else(|_| "/tmp/unko-snes-start.f32".to_owned());
-        let entries =
-            crate::library::probe_path_any(std::path::Path::new(&rom_path)).expect("probe");
+        // Discover through the recursive library scan, exactly as the GUI does,
+        // and fall back to a direct probe if the parent scan misses it.
+        let rom_file = std::path::Path::new(&rom_path);
+        let parent = rom_file
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let entry = crate::library::scan_any(parent)
+            .into_iter()
+            .find(|entry| entry.source.display_path() == rom_path)
+            .or_else(|| {
+                crate::library::probe_path_any(rom_file)
+                    .ok()
+                    .and_then(|entries| entries.into_iter().next())
+            })
+            .expect("discover SNES entry");
         let mut settings = Settings {
             save_dir: std::env::temp_dir().join("unko-snes-start-saves"),
             snes_ipl: PathBuf::from(ipl_path),
@@ -2680,7 +2693,7 @@ mod tests {
         if let Ok(cx4) = std::env::var("UNKO_SNES_CX4") {
             settings.snes_cx4 = PathBuf::from(cx4);
         }
-        let mut player = Player::start_with(&entries[0], &settings, GameProperties::default())
+        let mut player = Player::start_with(&entry, &settings, GameProperties::default())
             .expect("start SNES title");
         let mut bytes = Vec::new();
         for _ in 0..frames {

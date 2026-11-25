@@ -258,8 +258,9 @@ The main effort was the reference-parity accuracy core. Details in
       probe now recognises SNES images and persisted `snes_ipl`/`snes_cx4`/
       `snes_dsp1` firmware paths feed the adapter, so a SNES title opens and
       runs through the real `Player::start_with` flow (bit-exact vs ares for
-      MMX2 and DKC at 600 frames). The library scan and Settings UI for SNES,
-      plus the SNES debugger, remain. Then **N64 from ares** with gopher64 as a GPL structural
+      MMX2 and DKC at 600 frames). The recursive library scan indexes SNES
+      cartridge images and Settings exposes the IPL/CX4/NEC-DSP paths; the
+      SNES debugger surface remains. Then **N64 from ares** with gopher64 as a GPL structural
       reference. See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.
 - [ ] GameCube/Wii is deferred: Dolphin is GPL-2.0+ and application-shaped, so

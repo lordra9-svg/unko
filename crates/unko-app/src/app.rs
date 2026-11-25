@@ -4356,9 +4356,45 @@ impl App {
     }
 }
 
+/// One editable path row for user-supplied firmware.
+fn firmware_path_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    hint: &str,
+    path: &mut std::path::PathBuf,
+    save_dir: &std::path::Path,
+    filters: &[&str],
+) {
+    ui.label(format!("{label} ({hint}; never bundled)"));
+    ui.horizontal(|ui| {
+        let mut text = path.display().to_string();
+        if ui.text_edit_singleline(&mut text).changed() {
+            *path = if text.trim().is_empty() {
+                std::path::PathBuf::new()
+            } else {
+                paths::resolve(std::path::Path::new(&text))
+            };
+        }
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        if ui.button("Browse…").clicked() {
+            let start = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or(save_dir);
+            if let Some(selected) = rfd::FileDialog::new()
+                .set_directory(start)
+                .add_filter(label, filters)
+                .pick_file()
+            {
+                *path = selected;
+            }
+        }
+    });
+}
+
 fn scan(dir: &std::path::Path) -> Vec<GameEntry> {
     if dir.is_dir() {
-        library::scan(dir)
+        library::scan_any(dir)
     } else {
         Vec::new()
     }
@@ -6075,13 +6111,37 @@ fn paths_tab(ui: &mut egui::Ui, settings: &mut Settings) {
             }
         }
     });
+    firmware_path_row(
+        ui,
+        "SNES IPL",
+        "S-SMP IPL ROM, 64 B; required to boot SNES titles",
+        &mut settings.snes_ipl,
+        &settings.save_dir,
+        &["rom", "bin"],
+    );
+    firmware_path_row(
+        ui,
+        "SNES CX4",
+        "CX4 data ROM, 3 KiB; optional (Mega Man X2/X3)",
+        &mut settings.snes_cx4,
+        &settings.save_dir,
+        &["rom", "bin"],
+    );
+    firmware_path_row(
+        ui,
+        "SNES NEC DSP",
+        "DSP-1/2/3/4 program ROM; optional",
+        &mut settings.snes_dsp1,
+        &settings.save_dir,
+        &["rom", "bin"],
+    );
     ui.add_space(12.0);
     ui.separator();
     ui.heading("Library roots");
     ui.label(
         RichText::new(
-            "Additional folders tagged by system. Only NES roots are scanned in this milestone; \
-             the SNES/N64 tags are placeholders for the multi-system library.",
+            "Additional folders tagged by system. NES containers and SNES cartridge \
+             images are scanned; the N64 tag is a placeholder.",
         )
         .weak()
         .small(),
