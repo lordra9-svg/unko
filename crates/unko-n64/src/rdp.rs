@@ -65,6 +65,8 @@ struct OtherModes {
     alpha_dither: bool,
     key_enable: bool,
     tex_lod: bool,
+    sharpen_tex: bool,
+    detail_tex: bool,
     dither: u8,
     coverage_mode: u8,
     /// `[cycle][1a, 1b, 2a, 2b]`.
@@ -344,6 +346,8 @@ impl Rdp {
                         alpha_dither: low & 2 != 0,
                         key_enable: high & (1 << 8) != 0,
                         tex_lod: high & (1 << 16) != 0,
+                        sharpen_tex: high & (1 << 17) != 0,
+                        detail_tex: high & (1 << 18) != 0,
                         coverage_mode: ((low >> 8) & 3) as u8,
                         blend: [
                             [
@@ -526,28 +530,42 @@ impl Rdp {
             (y + 7) as u32,
             primitive.wrapping_add(11),
         ));
-        let (tile_index, lod_frac) =
-            if let (Some(coords), true) = (coords, modes.tex_lod && level > 0) {
-                let step = coords.s[1]
-                    .abs()
-                    .max(coords.t[1].abs())
-                    .max(coords.s[2].abs())
-                    .max(coords.t[2].abs()) as f32
-                    / 65_536.0;
-                let lod = step.max(1.0 / 65_536.0).log2().clamp(0.0, f32::from(level));
-                let base = base_tile + lod.floor() as usize;
-                (base.min(7), (lod.fract() * 255.0) as u8)
-            } else {
-                (base_tile, 0)
-            };
-        self.lod_fraction = lod_frac;
+        let lod = if let Some(coords) = coords {
+            let base = self.tiles[base_tile.min(7)];
+            let s_step = coords.s[1]
+                .abs()
+                .max(coords.s[2].abs())
+                .unsigned_abs()
+                .wrapping_shr(u32::from(base.s_shift));
+            let t_step = coords.t[1]
+                .abs()
+                .max(coords.t[2].abs())
+                .unsigned_abs()
+                .wrapping_shr(u32::from(base.t_shift));
+            let step = s_step.max(t_step) as i32;
+            let max_d = step >> 11;
+            compute_lod(
+                max_d,
+                level,
+                self.min_level,
+                modes.sharpen_tex,
+                modes.detail_tex,
+                modes.tex_lod,
+                base_tile,
+            )
+        } else {
+            compute_lod(0, level, self.min_level, false, false, false, base_tile)
+        };
+        self.lod_fraction = lod.frac;
         let texel = coords
             .and_then(|coords| {
-                let a = self.sample_texture_coords(&coords, x, y, origin, tile_index, rdram);
-                let next = (tile_index + 1).min(base_tile + usize::from(level)).min(7);
-                let b = self.sample_texture_coords(&coords, x, y, origin, next, rdram);
+                let a = self.sample_texture_coords(&coords, x, y, origin, lod.tile0, rdram);
+                if lod.tile1 == lod.tile0 {
+                    return a;
+                }
+                let b = self.sample_texture_coords(&coords, x, y, origin, lod.tile1, rdram);
                 match (a, b) {
-                    (Some(a), Some(b)) => Some(blend_texel(a, b, lod_frac)),
+                    (Some(a), Some(b)) => Some(blend_texel(a, b, lod.frac)),
                     (Some(a), None) => Some(a),
                     (None, Some(b)) => Some(b),
                     (None, None) => None,
@@ -1484,6 +1502,72 @@ fn blender(
     (result & 0xFFFF_FF00) | (pixel & 0xFF)
 }
 
+struct LodResult {
+    frac: u8,
+    tile0: usize,
+    tile1: usize,
+}
+
+/// Texture LOD selection following the RDP 2-cycle model. `max_d` is the
+/// largest texel-space derivative scaled by 2^-11 (so 32 == LOD 0).
+#[allow(clippy::too_many_arguments)]
+fn compute_lod(
+    max_d: i32,
+    max_level: u8,
+    min_lod: u8,
+    sharpen: bool,
+    detail: bool,
+    tex_lod: bool,
+    base_tile: usize,
+) -> LodResult {
+    let level = i32::from(max_level);
+    let (distant, magnify, mut tile_offset, frac) = if max_d >= 0x4000 {
+        (true, false, level, 0xFF)
+    } else if max_d < 32 {
+        let distant = max_level == 0;
+        let frac = if !sharpen && !detail {
+            if distant {
+                0xFF
+            } else {
+                0
+            }
+        } else {
+            let value = (i32::from(min_lod).max(max_d) << 3) + if sharpen { -0x100 } else { 0 };
+            value.clamp(0, 0xFF) as u8
+        };
+        (distant, true, 0, frac)
+    } else {
+        let mip_base = i32::from(msb(max_d >> 5)).max(0);
+        let distant = mip_base >= level;
+        if distant && !sharpen && !detail {
+            (distant, false, 0, 0xFF)
+        } else {
+            let frac = (((max_d << 3) >> mip_base) & 0xFF) as u8;
+            (distant, false, mip_base, frac)
+        }
+    };
+    let mut tile0 = base_tile;
+    let mut tile1 = base_tile;
+    if tex_lod {
+        if distant {
+            tile_offset = level;
+        }
+        if !detail {
+            tile0 = (base_tile + tile_offset as usize) & 7;
+            tile1 = if distant || (!sharpen && magnify) {
+                tile0
+            } else {
+                (tile0 + 1) & 7
+            };
+        } else {
+            let base = base_tile + tile_offset as usize;
+            tile1 = (base + if distant || magnify { 1 } else { 2 }) & 7;
+            tile0 = (base + if magnify { 0 } else { 1 }) & 7;
+        }
+    }
+    LodResult { frac, tile0, tile1 }
+}
+
 fn blend_texel(a: u32, b: u32, frac: u8) -> u32 {
     let frac = u32::from(frac);
     let mut result = 0u32;
@@ -1629,6 +1713,41 @@ mod tests {
         let result = depth_test(0x1_0000, 0, 0x800, 0, 8, 7, true, 1, false, true);
         assert!(result.pass);
         assert_eq!(result.coverage, 8);
+    }
+
+    #[test]
+    fn lod_tile_offsets_and_detail_sharpen() {
+        // LOD in [1, 2): tile offset 1, fractional 0 at max_d = 64.
+        let lod = compute_lod(64, 2, 0, false, false, true, 0);
+        assert_eq!(lod.tile0, 1);
+        assert_eq!(lod.tile1, 2);
+        assert_eq!(lod.frac, 0);
+        // Fractional part from max_d = 100 (mip base 1) -> 144.
+        let lod = compute_lod(100, 2, 0, false, false, true, 0);
+        assert_eq!(lod.tile0, 1);
+        assert_eq!(lod.tile1, 2);
+        assert_eq!(lod.frac, 144);
+        // Distant: clamp to the max level and use a single tile.
+        let lod = compute_lod(128, 2, 0, false, false, true, 0);
+        assert_eq!(lod.tile0, 2);
+        assert_eq!(lod.tile1, 2);
+        assert_eq!(lod.frac, 0xFF);
+        // Detail mode advances both tiles.
+        let lod = compute_lod(64, 2, 0, false, true, true, 0);
+        assert_eq!(lod.tile0, 2);
+        assert_eq!(lod.tile1, 3);
+        // Magnification near LOD 0 uses the base tile only (no sharpen).
+        let lod = compute_lod(8, 2, 0, false, false, true, 0);
+        assert_eq!(lod.tile0, 0);
+        assert_eq!(lod.tile1, 0);
+        assert_eq!(lod.frac, 0);
+        // Sharpen biases the magnified fraction downward (clamped to 0).
+        let lod = compute_lod(8, 2, 0, true, false, true, 0);
+        assert_eq!(lod.frac, 0);
+        // With max_level 0 magnification is distant: full fraction, one tile.
+        let lod = compute_lod(8, 0, 0, false, false, true, 0);
+        assert_eq!(lod.frac, 0xFF);
+        assert_eq!(lod.tile0, lod.tile1);
     }
 
     #[test]

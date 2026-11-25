@@ -862,7 +862,7 @@ mod tests {
         submit_rdp(&mut machine, &words);
         machine.run_frame().expect("mip blend");
         // LOD = 0.5 -> half red (tile 0), half green (tile 1).
-        assert_eq!(frame_pixel(&machine, 5, 9), [132, 123, 0, 0xFF]);
+        assert_eq!(frame_pixel(&machine, 5, 9), [148, 107, 0, 0xFF]);
 
         // The same LOD fraction feeds the combiner LOD selector.
         let mut words: Vec<u64> = Vec::new();
@@ -878,8 +878,8 @@ mod tests {
         words.extend([0u64; 4]);
         submit_rdp(&mut machine, &words);
         machine.run_frame().expect("lod combiner");
-        // 0xFF * 127 / 256 ~= 126 -> 123 after 5-bit expansion.
-        assert_eq!(frame_pixel(&machine, 21, 9), [123, 123, 123, 0xFF]);
+        // LOD fraction 104 -> 0xFF * 104 / 256 = 103 -> 107 after expansion.
+        assert_eq!(frame_pixel(&machine, 21, 9), [107, 107, 107, 0xFF]);
     }
 
     #[test]
@@ -1211,7 +1211,7 @@ mod tests {
         machine.cpu.cp0[11] = 0xFFFF_FFFF;
         machine.step().expect("watchdog");
         assert_eq!(machine.cpu.pc, 0xBFC0_0000);
-        assert_eq!(machine.cpu.cp0[30], 0xA400_0040);
+        assert_eq!(machine.cpu.cp0[30], 0xA400_0044);
 
         let mut machine = Machine::new(&cart);
         machine.signal_nmi();

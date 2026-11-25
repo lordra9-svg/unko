@@ -11,9 +11,10 @@ that `run_frame` presents from RDRAM, tracks primitive/environment/combine
 state, rasterises unshaded/shaded/textured triangles with the RDP edgewalker
 (half-pixel X, 1/4-pixel Y, lmajor and Yl/Ym/Yh subpixel spans), samples
 triangles using the interpolated texture coefficient words (SET_TEXTURE_IMAGE/SET_TILE/SET_TILE_SIZE; 4/8/16-bit
-RGBA/IA/I texels with clamp/mirror/mask and mip/LOD selection: per-pixel
-texture derivatives compute the LOD, adjacent mip tiles are blended by the
-LOD fraction, and that fraction feeds the combiner LOD source, runs the two-cycle combiner
+RGBA/IA/I texels with clamp/mirror/mask and per-tile mip/LOD selection:
+texel-space derivatives compute the LOD, detail/sharpen modes advance the mip
+tiles, adjacent levels are blended by the LOD fraction, and that fraction feeds
+the combiner LOD source. It runs the two-cycle combiner
 (`SET_COMBINE_MODE`), and applies the `SET_OTHER_MODES` blender: 1/2-cycle
 selectors (pixel/memory/blend/fog colour and alpha), force blend, copy-cycle
 bypass, fog, coverage modes driven by the exact 8-bit subpixel AA mask, RGB

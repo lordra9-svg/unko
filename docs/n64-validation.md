@@ -56,7 +56,7 @@ provide the image.
 Recent full runs:
 
 ```
-unko-n64       62 passed
+unko-n64       64 passed
 unko-n64-host   6 passed, 1 ignored (the gate above)
 unko-app       86 passed, 2 ignored
 unko-snes     272 passed
@@ -84,9 +84,9 @@ N64 coverage highlights:
 
 | Item | Current model | Basis / measured scope |
 | --- | --- | --- |
-| LOD | per-pixel `log2` of max texture derivative, adjacent mip tiles blended by the fraction | derivative coefficients come from the triangle texture words; there is no per-tile mip metadata, detail/sharpen LOD, or perspective-corrected derivative |
+| LOD | RDP 2-cycle LOD: texel-space derivatives (scaled by the tile s/t shifts), per-tile mip selection, detail/sharpen tile advancing, and LOD-fraction blending | verified by `lod_tile_offsets_and_detail_sharpen` and the mip frame test; derivatives are not perspective-corrected and there is no per-tile mip-level table |
 | Noise | LCG reseed over `(x, y, primitive)` identical to the reference renderer's `noise.h` | verified against reference seed vectors `(0,0,0)->0x0000`, `(5,9,3)->0xCEC4`, `(1028,16,14)->0xB1BC`; our "primitive" is the triangle counter, not a span-buffer primitive index + base |
-| CP0 Count | +1 per retired instruction | VR4300 increments every other CPU clock; per-instruction timing would need a cycle-accurate pipeline model |
+| CP0 Count | cycle-cost model (ALU 1, load/store/branch/COP0 2, COP1 4, mul 5, div 37) | verified by `count_advances_by_instruction_cycle_cost`; not a full pipeline/cache timing model |
 | Cache/NMI | external pending lines consumed at `step()` | there is no cache parity/ECC model; conditions are signalled by the system layer |
 | Interpenetrating Z | coverage scaled by the 4-bit coefficient of the combined depth delta | matches the reference renderer formula; verified by unit and frame tests |
 | CLI/TLUT | palette loaded from the texture image into a 256-entry table | TMEM chunk/address semantics are simplified |

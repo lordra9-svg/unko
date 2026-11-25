@@ -253,10 +253,12 @@ impl Cpu {
             Ok(address) => bus.read_u32(address),
             Err(error) => {
                 self.deliver_error(&error, pc, delay_slot);
+                self.advance_cycles(1);
                 return Ok(());
             }
         };
         self.instructions += 1;
+        let cycles = instruction_cycles(instruction);
         match self.execute(instruction, pc, bus) {
             Err(
                 error @ (CpuError::Tlb { .. }
@@ -268,9 +270,14 @@ impl Cpu {
                 | CpuError::Overflow { .. }),
             ) => {
                 self.deliver_error(&error, pc, delay_slot);
+                self.advance_cycles(1);
                 Ok(())
             }
-            result => result,
+            Ok(()) => {
+                self.advance_cycles(cycles);
+                Ok(())
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -403,20 +410,26 @@ impl Cpu {
             self.take_error(ErrorSource::CacheError);
             return true;
         }
-        // Count advances once per instruction retirement.
-        self.cp0[9] = self.cp0[9].wrapping_add(1) & 0xFFFF_FFFF;
-        let count = self.cp0[9];
-        let compare = self.cp0[11];
-        if count == compare && compare != 0 {
-            if !self.compare_latched {
-                self.compare_latched = true;
-                self.take_error(ErrorSource::Watchdog);
-                return true;
-            }
-        } else {
-            self.compare_latched = false;
-        }
         false
+    }
+
+    /// Advances CP0 Count by the modelled cycle cost of one instruction and
+    /// raises the watchdog error when the counter reaches Compare.
+    fn advance_cycles(&mut self, cycles: u32) {
+        for _ in 0..cycles {
+            self.cp0[9] = self.cp0[9].wrapping_add(1) & 0xFFFF_FFFF;
+            let count = self.cp0[9];
+            let compare = self.cp0[11];
+            if compare != 0 && count == compare {
+                if !self.compare_latched {
+                    self.compare_latched = true;
+                    self.take_error(ErrorSource::Watchdog);
+                    return;
+                }
+            } else {
+                self.compare_latched = false;
+            }
+        }
     }
 
     fn gpr(&self, index: u32) -> u64 {
@@ -1621,6 +1634,25 @@ fn round_to_i64(value: f32, mode: u32) -> i64 {
     }
 }
 
+/// Modelled retire cost used by CP0 Count: integer ALU 1, loads/stores and
+/// branches 2, COP0 2, COP1 4, multiplies 5 and divides 37 cycles.
+fn instruction_cycles(instruction: u32) -> u32 {
+    let op = instruction >> 26;
+    match op {
+        0 => match instruction & 0x3F {
+            0x18 | 0x19 => 5,
+            0x1A | 0x1B => 37,
+            0x08 | 0x09 | 0x0C | 0x0D => 2,
+            _ => 1,
+        },
+        1..=7 => 2,
+        16 => 2,
+        17 => 4,
+        32..=63 => 2,
+        _ => 1,
+    }
+}
+
 fn sign_extend32(value: impl Into<u64>) -> u64 {
     value.into() as u32 as i32 as i64 as u64
 }
@@ -2327,17 +2359,17 @@ mod tests {
         cpu.step(&mut memory).expect("watchdog");
         assert_eq!(cpu.cp0[9], 0xFFFF_FFFF);
         assert_eq!(cpu.pc, 0xBFC0_0000);
-        assert_eq!(cpu.cp0[30], 0x8000_1000);
+        assert_eq!(cpu.cp0[30], 0x8000_1004);
         assert_ne!(cpu.cp0[12] & 4, 0);
 
         cpu.pc = 0x8000_0180;
         cpu.next_pc = 0x8000_0184;
         cpu.step(&mut memory).expect("eret");
-        assert_eq!(cpu.pc, 0x8000_1000);
+        assert_eq!(cpu.pc, 0x8000_1004);
         assert_eq!(cpu.cp0[12] & 4, 0);
         // Count wrapped past Compare, so the match does not re-fire.
         cpu.step(&mut memory).expect("resume");
-        assert_eq!(cpu.cp0[9], 1);
+        assert_eq!(cpu.cp0[9], 2);
 
         // Compare reached mid-run triggers exactly once.
         let mut cpu = Cpu::new(0x8000_1000);
@@ -2348,7 +2380,7 @@ mod tests {
         assert_eq!(cpu.cp0[12] & 4, 0, "no error before the match");
         cpu.step(&mut memory).expect("watchdog at 3");
         assert_eq!(cpu.pc, 0xBFC0_0000);
-        assert_eq!(cpu.cp0[30], 0x8000_1008);
+        assert_eq!(cpu.cp0[30], 0x8000_100C);
     }
 
     #[test]
@@ -2372,5 +2404,32 @@ mod tests {
         assert_eq!(cpu.pc, 0xA000_0000);
         assert_eq!(cpu.cp0[30], 0x8000_2000);
         assert_ne!(cpu.cp0[12] & 4, 0);
+    }
+    #[test]
+    fn count_advances_by_instruction_cycle_cost() {
+        let mut memory = program(&[
+            0x2408_0001, // addiu t0,zero,1 (1 cycle)
+            0x8C09_0000, // lw t1,0(zero)   (2 cycles)
+            0x0000_001A, // div zero,zero   (37 cycles)
+        ]);
+        let mut cpu = Cpu::new(0);
+        cpu.step(&mut memory).expect("addiu");
+        assert_eq!(cpu.cp0[9], 1);
+        cpu.step(&mut memory).expect("lw");
+        assert_eq!(cpu.cp0[9], 3);
+        cpu.step(&mut memory).expect("div");
+        assert_eq!(cpu.cp0[9], 40);
+
+        // Compare in the middle of a multi-cycle instruction fires during the
+        // cycle advance.
+        let mut cpu = Cpu::new(0);
+        cpu.pc = 8;
+        cpu.next_pc = 12;
+        cpu.cp0[9] = 0;
+        cpu.cp0[11] = 5;
+        cpu.step(&mut memory).expect("div -> watchdog");
+        assert_eq!(cpu.cp0[9], 5);
+        assert_eq!(cpu.pc, 0xBFC0_0000);
+        assert_eq!(cpu.cp0[30], 0x000C);
     }
 }

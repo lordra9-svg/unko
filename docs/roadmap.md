@@ -283,8 +283,8 @@ The main effort was the reference-parity accuracy core. Details in
       left/right spans), and samples textured triangles using the interpolated
       texture-coefficient words via `SET_TEXTURE_IMAGE`/`SET_TILE`/
       `SET_TILE_SIZE` (4/8/16-bit RGBA/IA/I with clamp/mirror/mask), with
-      mip/LOD tile selection and LOD-fraction blending from texture
-      derivatives, running the
+      per-tile mip/LOD selection, detail/sharpen tile advancing and
+      LOD-fraction blending from texture derivatives, running the
       two-cycle combiner (`SET_COMBINE_MODE`) and the `SET_OTHER_MODES` blender
       (1/2-cycle selectors, fog, copy cycle, coverage modes driven by the exact
       8-bit subpixel AA mask, RGB dither, alpha compare with dithered
@@ -312,14 +312,15 @@ The main effort was the reference-parity accuracy core. Details in
       exceptions) are delivered through CP0 Cause/EPC/BadVAddr with Status.EXL
       and the refill/general vectors, and ERET restores execution. Error-level
       entry saves ErrorEPC, sets ERL and returns via ERET; it is driven by the
-      CP0 Count/Compare watchdog and external NMI/cache-error lines. The FPU
+      CP0 Count/Compare watchdog (Count advances with a per-instruction cycle
+      cost model) and external NMI/cache-error lines. The FPU
       reports `fcr31` flags/causes
       (inexact, underflow, overflow, divide-by-zero, invalid, unimplemented
       operation) and honors FS flush-to-zero; D-format inexact detection uses
       error-free transformations. Double-precision (`D`-format) arithmetic, compares,
       conversions and 64-bit paired FPR storage are also implemented. Broader
-      GPU coverage (per-tile mip metadata, detail/sharpen LOD, cache parity)
-      is the next milestone. No standard N64 cartridge image is available
+      GPU coverage (perspective-corrected LOD derivatives, cache parity) is
+      the next milestone. No standard N64 cartridge image is available
       locally (only 64DD IPL firmware, which is not a cartridge); an ignored
       `UNKO_N64_ROM` gate in `unko-n64-host` boots a supplied image, runs N
       frames and prints video/audio hashes. Approximation inventory and
