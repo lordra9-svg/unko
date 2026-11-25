@@ -30,5 +30,6 @@ interrupts and enabled FPU exceptions) are delivered through CP0
 (EPC/Cause/BadVAddr, CE, Status.EXL, refill vs general vectors) and `ERET`
 returns to the faulting context. The FPU reports Inexact/Underflow/Overflow/
 Divide-by-zero/Invalid flags and causes in `fcr31` and honors the FS subnormal
-flush bit. Double-precision FPU operations, fog-alpha edge cases and exact
-depth-blend shifters are next.
+flush bit. Double-precision (`D`-format) arithmetic, comparisons, conversions
+and 64-bit paired FPR storage are implemented too. Fog-alpha edge cases and
+exact depth-blend shifters are next.

@@ -302,8 +302,10 @@ The main effort was the reference-parity accuracy core. Details in
       CP0 Cause/EPC/BadVAddr with Status.EXL and the refill/general vectors,
       and ERET restores execution. The FPU reports `fcr31` flags/causes
       (inexact, underflow, overflow, divide-by-zero, invalid) and honors FS
-      flush-to-zero. Double-precision FPU and exact depth-blend shifters are
-      the next milestones; no
+      flush-to-zero. Double-precision (`D`-format) arithmetic, compares,
+      conversions and 64-bit paired FPR storage are also implemented. Exact
+      depth-blend shifters and broader GPU coverage are the next milestones;
+      no
       standard N64 cartridge image was available locally to boot (only 64DD
       IPL firmware). See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.

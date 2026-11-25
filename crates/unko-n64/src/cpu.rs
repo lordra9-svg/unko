@@ -923,9 +923,24 @@ impl Cpu {
                 }
                 Ok(())
             }
-            0x10 => self.fpu_single(fs, ft, fd, funct, pc),
+            0x10 => {
+                if funct == 0x21 {
+                    // CVT.D.S
+                    let value = f32::from_bits(self.fpr[fs as usize] as u32);
+                    self.fpr[fd as usize] = (f64::from(value)).to_bits();
+                    Ok(())
+                } else {
+                    self.fpu_single(fs, ft, fd, funct, pc)
+                }
+            }
+            0x11 => self.fpu_double(fs, ft, fd, funct, pc),
             0x14 => {
-                if funct == 0x20 {
+                if funct == 0x21 {
+                    // CVT.D.W
+                    let value = self.fpr[fs as usize] as u32 as i32;
+                    self.fpr[fd as usize] = (f64::from(value)).to_bits();
+                    Ok(())
+                } else if funct == 0x20 {
                     let value = self.fpr[fs as usize] as u32 as i32;
                     self.fpr[fd as usize] = u64::from((value as f32).to_bits());
                     Ok(())
@@ -934,7 +949,12 @@ impl Cpu {
                 }
             }
             0x15 => {
-                if funct == 0x20 {
+                if funct == 0x21 {
+                    // CVT.D.L
+                    let value = self.fpr[fs as usize] as i64;
+                    self.fpr[fd as usize] = (value as f64).to_bits();
+                    Ok(())
+                } else if funct == 0x20 {
                     let value = self.fpr[fs as usize] as i64;
                     self.fpr[fd as usize] = u64::from((value as f32).to_bits());
                     Ok(())
@@ -1076,6 +1096,109 @@ impl Cpu {
         if cause & enable != 0 {
             return Err(CpuError::Fpu { pc });
         }
+        Ok(())
+    }
+
+    fn fpu_double(
+        &mut self,
+        fs: u32,
+        ft: u32,
+        fd: u32,
+        funct: u32,
+        pc: u64,
+    ) -> Result<(), CpuError> {
+        let a = f64::from_bits(self.fpr[fs as usize]);
+        let b = f64::from_bits(self.fpr[ft as usize]);
+        let result = match funct {
+            0x00 => a + b,
+            0x01 => a - b,
+            0x02 => a * b,
+            0x03 => a / b,
+            0x04 => a.sqrt(),
+            0x05 => a.abs(),
+            0x06 => a,
+            0x07 => -a,
+            0x20 => {
+                // CVT.S.D
+                let value = a as f32;
+                self.fpr[fd as usize] = u64::from(value.to_bits());
+                return Ok(());
+            }
+            0x24 => {
+                let value = round_f64_to_i32(a, self.fcr31 & 3);
+                if a.is_nan() {
+                    self.set_fpu_flags(1 << 4);
+                    self.check_fpu_exception(pc)?;
+                }
+                self.fpr[fd as usize] = (value as i64) as u64;
+                return Ok(());
+            }
+            0x25 => {
+                let value = round_f64_to_i64(a, self.fcr31 & 3);
+                if a.is_nan() {
+                    self.set_fpu_flags(1 << 4);
+                    self.check_fpu_exception(pc)?;
+                }
+                self.fpr[fd as usize] = value as u64;
+                return Ok(());
+            }
+            0x30..=0x3F => {
+                let unordered = a.is_nan() || b.is_nan();
+                let condition = match funct {
+                    0x30 | 0x38 => false,
+                    0x31 => unordered,
+                    0x32 | 0x3A => a == b,
+                    0x33 => unordered || a == b,
+                    0x34 | 0x3C => a < b,
+                    0x35 => unordered || a < b,
+                    0x36 | 0x3E => a <= b,
+                    0x37 => unordered || a <= b,
+                    0x39 | 0x3B | 0x3F => unordered || a <= b,
+                    0x3D => !unordered && a < b,
+                    _ => false,
+                };
+                if condition {
+                    self.fcr31 |= 1 << 23;
+                } else {
+                    self.fcr31 &= !(1 << 23);
+                }
+                return Ok(());
+            }
+            _ => {
+                return Err(CpuError::Unimplemented {
+                    pc,
+                    instruction: funct,
+                })
+            }
+        };
+        if funct <= 0x04 {
+            let mut bits = 0u32;
+            if result.is_nan() && !a.is_nan() && !b.is_nan() {
+                bits |= 1 << 4;
+            }
+            if funct == 0x03 && b == 0.0 && a != 0.0 && !a.is_nan() {
+                bits |= 1 << 3;
+            }
+            if result.is_infinite() && a.is_finite() && b.is_finite() && b != 0.0 {
+                bits |= 1 << 2;
+            }
+            let exact = match funct {
+                0x00 => result - a == b,
+                0x01 => result - a == -b,
+                0x02 => a == 0.0 || b == 0.0 || result / a == b,
+                0x03 => result * b == a,
+                _ => result * result == a,
+            };
+            if result.is_finite() && !exact {
+                bits |= 1 << 0;
+            }
+            if result.is_finite() && result != 0.0 && result.abs() < f64::MIN_POSITIVE {
+                bits |= 1 << 1;
+            }
+            self.set_fpu_flags(bits);
+            self.check_fpu_exception(pc)?;
+        }
+        self.fpr[fd as usize] = result.to_bits();
         Ok(())
     }
 
@@ -1315,6 +1438,34 @@ pub const fn physical(address: u64) -> u64 {
         address & 0x1FFF_FFFF
     } else {
         address
+    }
+}
+
+fn round_f64_to_i32(value: f64, mode: u32) -> i32 {
+    let rounded = match mode {
+        0 => value.round_ties_even(),
+        1 => value.trunc(),
+        2 => value.ceil(),
+        _ => value.floor(),
+    };
+    if rounded.is_nan() {
+        0
+    } else {
+        rounded.clamp(i32::MIN as f64, i32::MAX as f64) as i32
+    }
+}
+
+fn round_f64_to_i64(value: f64, mode: u32) -> i64 {
+    let rounded = match mode {
+        0 => value.round_ties_even(),
+        1 => value.trunc(),
+        2 => value.ceil(),
+        _ => value.floor(),
+    };
+    if rounded.is_nan() {
+        0
+    } else {
+        rounded.clamp(i64::MIN as f64, i64::MAX as f64) as i64
     }
 }
 
@@ -1839,5 +1990,62 @@ mod tests {
         assert_eq!(cpu.fpr[2] as u32, 0, "subnormal flushed to zero");
         assert_ne!(cpu.fcr31 & (1 << 3), 0, "underflow flag");
         assert_ne!(cpu.fcr31 & (1 << 2), 0, "inexact flag");
+    }
+    #[test]
+    fn double_precision_arithmetic_and_conversions() {
+        let mut memory = Memory::new(0x3000);
+        let image = program(&[
+            0xD400_0100, // ldc1 f0, 0x100(zero)
+            0xD401_0108, // ldc1 f1, 0x108(zero)
+            0x4621_0080, // add.d f2, f0, f1
+            0x4620_10E0, // cvt.s.d f3, f2
+            0x4408_1800, // mfc1 t0, f3
+            0x4600_1921, // cvt.d.s f4, f3
+            0x4429_2000, // dmfc1 t1, f4
+            0x4621_0083, // div.d f2, f0, f1
+            0x442A_1000, // dmfc1 t2, f2
+            0x4620_1144, // sqrt.d f5, f2
+            0x442B_2800, // dmfc1 t3, f5
+            0x4620_11A4, // cvt.w.d f6, f2
+            0x440C_3000, // mfc1 t4, f6
+            0x4621_003C, // c.lt.d f0, f1
+        ]);
+        memory.0[..image.0.len()].copy_from_slice(&image.0);
+        memory.write_u64(0x100, 1.5f64.to_bits());
+        memory.write_u64(0x108, 2.25f64.to_bits());
+        let mut cpu = Cpu::new(0);
+        cpu.cp0[12] = 1 << 29;
+        run(&mut cpu, &mut memory, 14);
+        assert_eq!(cpu.gpr[8], u64::from(3.75f32.to_bits()));
+        assert_eq!(cpu.gpr[9], 3.75f64.to_bits());
+        let quotient = 1.5f64 / 2.25;
+        assert_eq!(cpu.gpr[10], quotient.to_bits());
+        assert_eq!(cpu.gpr[11], quotient.sqrt().to_bits());
+        assert_eq!(cpu.gpr[12], 1);
+        assert_ne!(cpu.fcr31 & (1 << 23), 0, "c.lt.d condition");
+
+        // CVT.D.W / CVT.D.L and enabled D-format exceptions through ERET.
+        cpu.fpr[7] = 7;
+        cpu.cop1(0, 0x14, 0, 7, 8, 0x21).expect("cvt.d.w");
+        assert_eq!(cpu.fpr[8], 7.0f64.to_bits());
+        cpu.fpr[7] = (-9i64) as u64;
+        cpu.cop1(0, 0x15, 0, 7, 8, 0x21).expect("cvt.d.l");
+        assert_eq!(cpu.fpr[8], (-9.0f64).to_bits());
+
+        let mut cpu = Cpu::new(0x8000_1000);
+        let mut memory = Memory::new(0x3000);
+        install_handler(&mut memory, false);
+        memory.write_u32(0x1000, 0x4621_0083); // div.d f2, f0, f1
+        memory.write_u32(0x1004, 0x2409_0007); // addiu t1,zero,7
+        cpu.cp0[12] = 1 << 29;
+        cpu.fcr31 = 1 << 10; // enable divide-by-zero
+        cpu.fpr[0] = 1.0f64.to_bits();
+        cpu.fpr[1] = 0.0f64.to_bits();
+        cpu.step(&mut memory).expect("FPU D exception delivered");
+        assert_eq!(cpu.pc, 0x8000_0180);
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 15);
+        run(&mut cpu, &mut memory, 4);
+        cpu.step(&mut memory).expect("resume after FPU exception");
+        assert_eq!(cpu.gpr[9], 7);
     }
 }
