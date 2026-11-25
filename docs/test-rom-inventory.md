@@ -19,9 +19,11 @@ See `docs/accuracy-status.md` for the dated evidence.
 Cloned from <https://github.com/akatsuki105/snes-test-roms> at commit
 `8223a0807f2b467a9923bbe455917c51d10aa26e` (2021-04-12). The local copy is
 gitignored. `cargo run -p unko-snes --example snes-scan -- test-roms/snes`
-reports **207 images, 207 parsed, 6 checksum-valid, 0 failed**. Test ROMs often
-carry zero or deliberately invalid header checksums, so the checksum count is
-not the pass criterion.
+reports **207 images, 207 parsed, 6 checksum-valid, 0 failed**. For a load/run
+sweep use the batch runner (header detection, five-frame batches, optional CSV):
+`cargo run --release -p xtask -- snes-scan --dir test-roms/snes --frames 5`.
+Test ROMs often carry zero or deliberately invalid header checksums, so the
+checksum count is not the pass criterion.
 
 | Group | Files | Purpose |
 |---|---:|---|

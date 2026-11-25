@@ -26,6 +26,7 @@ All former Python and shell tooling is now the Rust **`xtask`** crate:
 ```sh
 cargo run -p xtask -- license-audit
 cargo run -p xtask -- osv-audit
+cargo run -p xtask -- snes-scan --dir roms/snes --frames 300 --batch 5
 cargo run -p xtask -- repair-vs <dir> -o test-roms/vs
 cargo run -p xtask -- package --platform linux --arch x86_64
 cargo run -p xtask -- pgo <rom-dir>

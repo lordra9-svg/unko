@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Compatibility page
+    url: https://lordra9-svg.github.io/unko/
+    about: Browse per-game status by system and open a prefilled test report.
+  - name: Accuracy and evidence notes
+    url: https://github.com/lordra9-svg/unko/blob/main/docs/compatibility.md
+    about: Current system-level evidence, mapper coverage and known gaps.
+  - name: Security policy
+    url: https://github.com/lordra9-svg/unko/blob/main/SECURITY.md
+    about: Report vulnerabilities privately, not in the compatibility tracker.

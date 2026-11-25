@@ -20,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **1,163 workspace tests**, 0 failed (6 ignored), plus the ROM-backed suites |
+| Test suite | **1,165 workspace tests**, 0 failed (6 ignored), plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -40,7 +40,7 @@ sample lands on fade/transition frames. "Rendering" is a boot smoke test, not
 a completion claim. The current audit, mapper breadth and per-mapper gaps are
 in `docs/mapper-audit.md`; the dated measurements are below.
 
-## SNES core (in progress, 2026-11-22)
+## SNES core (shipped, updated 2026-11-25)
 
 ### SNES definition of done (recorded 2026-11-19)
 
@@ -186,7 +186,7 @@ Implemented so far:
 
 Validation so far:
 
-- **1,163 workspace tests**, 0 failed (6 ignored)
+- **1,165 workspace tests**, 0 failed (6 ignored)
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -224,6 +224,10 @@ Validation so far:
   stored checksums reproduced
 - 250-image random No-Intro sample: 237 parsed; the 13 failures are
   headerless/beta/pirate dumps, not clean retail images
+- 500-image region/mapper-stratified No-Intro sweep (2026-11-25): 500/500
+  loaded and completed 300 frames, 0 failures; 370 LoROM, 125 HiROM and 5
+  ExHiROM images across 381 NTSC / 119 PAL releases. See
+  `docs/snes-library-scan.md`.
 - 207 public SNES test images in `test-roms/snes/`: all 207 parsed by
   `snes-scan`
 - Donkey Kong Country (USA) now produces frames (it was black before the

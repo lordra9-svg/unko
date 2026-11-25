@@ -140,8 +140,8 @@ Firmware is user-supplied and never bundled: `set_ipl`, `set_cx4_firmware`,
 `set_dsp1_firmware`, `load_st018_firmware`/`load_st018_data_rom`,
 `load_bsx_pack`. A cart whose firmware is missing runs the base console.
 
-Not implemented: ST018 and Satellaview/BS-X are modelled only as far as the
-documented interfaces above; see `docs/snes-accuracy-divergences.md`.
+Limited: ST018 and Satellaview/BS-X are modelled only as far as the documented
+interfaces above; see `docs/snes-accuracy-divergences.md`.
 
 ## Determinism and testing
 
@@ -159,7 +159,10 @@ Validation kept in the repository:
   10000/10000, Mega Man X2 9996/10000 with torn presents proved;
 - 600-frame audio gates: all seven reference titles bit-exact in the default
   configuration (see the root `README.md`);
-- 212-entry test-ROM baseline.
+- 212-entry test-ROM baseline;
+- 500-image region/mapper-stratified No-Intro boot sweep (370 LoROM, 125
+  HiROM, 5 ExHiROM; 381 NTSC / 119 PAL) at 300 frames per image with 0
+  failures, recorded in `docs/snes-library-scan.md`.
 
 Tests needing copyrighted ROMs are `#[ignore]` and read paths from environment
 variables (`UNKO_SNES_ROM`, `UNKO_SNES_IPL`, `UNKO_SNES_CX4`,

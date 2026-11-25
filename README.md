@@ -12,6 +12,7 @@ dependency on the shell, so it can back an independent emulator (see
 > (registry id `nes_accuracy_core`). SNES core: `unko-snes`.
 
 **Repository:** <https://github.com/lordra9-svg/unko>
+**Compatibility:** [per-game tracker](https://lordra9-svg.github.io/unko/) · [evidence notes](docs/compatibility.md)
 **Security:** [`SECURITY.md`](SECURITY.md) · audit: [`docs/security.md`](docs/security.md)
 
 [![CI](https://github.com/lordra9-svg/unko/actions/workflows/ci.yml/badge.svg)](https://github.com/lordra9-svg/unko/actions/workflows/ci.yml)
@@ -76,7 +77,7 @@ Reference gates:
 - mapper matrix (Holy Mapperel, blargg MMC3, MMC5, VRC2a, MMC1-A12):
   **65/65**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW**, 0 failed, 5 DRAW skips
-- `cargo test --workspace`: **1,163 passed, 0 failed** (6 ignored); clippy/fmt clean
+- `cargo test --workspace`: **1,165 passed, 0 failed** (6 ignored); clippy/fmt clean
 - VS. System: mapper 99, cabinet input, UniSystem/DualSystem parsing,
   2C03/2C04/2C05 palettes and 2C05 security; 13 repaired local images boot
   (including Gumshoe's outer bank)
@@ -87,9 +88,20 @@ Licensed-library audit (7,101 images):
 |---:|---:|---:|---:|---:|
 | 7,101 | 7,073 (99.6%) | 0 | 28 (truncated dumps) | 6,503 |
 
+SNES library sweep (2026-11-25, 300 frames per image, batches of five):
+
+| Scanned | Loaded + completed | Failures | LoROM / HiROM / ExHiROM | NTSC / PAL | Countries |
+|---:|---:|---:|---|---|---|
+| 500 | 500 | 0 | 370 / 125 / 5 | 381 / 119 | Japan 196 · USA/Canada 185 · Europe 119 |
+
+The 500-image sample is deduplicated by SHA-256, includes strict and lenient
+headers, and is a boot/load smoke sweep rather than a pixel/audio oracle:
+[`docs/snes-library-scan.md`](docs/snes-library-scan.md).
+
 Details: [`docs/accuracy-status.md`](docs/accuracy-status.md),
 [`docs/accuracy-divergences.md`](docs/accuracy-divergences.md),
 [`docs/snes-accuracy-divergences.md`](docs/snes-accuracy-divergences.md),
+[`docs/snes-library-scan.md`](docs/snes-library-scan.md),
 [`docs/compatibility.md`](docs/compatibility.md),
 [`docs/mapper-audit.md`](docs/mapper-audit.md),
 [`docs/test-rom-inventory.md`](docs/test-rom-inventory.md),
@@ -116,7 +128,7 @@ and run-ahead. The legacy input-framing session remains for tests and
 |---|---:|
 | Workspace crates | 11 |
 | First-party Rust lines | ~129,200 |
-| Workspace tests | 1,163 pass, 0 failed |
+| Workspace tests | 1,165 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images | 7,101 |
 
@@ -200,6 +212,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo run -p xtask -- license-audit
+cargo run --release -p xtask -- snes-scan --dir roms/snes --frames 300 --batch 5
 cargo run --release -p unko-cli -- bench --synthetic 3000 --min-fps 300
 ```
 

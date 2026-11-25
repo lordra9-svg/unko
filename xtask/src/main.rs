@@ -10,11 +10,13 @@ mod osv;
 mod package;
 mod platform;
 mod repair;
+mod snes_scan;
 
 use std::process::ExitCode;
 
 fn usage() -> &'static str {
     "usage:
+  xtask snes-scan --dir ROMS | --list IMAGES [--ipl IPL.ROM] [--frames N]
   xtask license-audit
   xtask osv-audit
   xtask repair-vs <source-dir> [-o <output-dir>] [--all]
@@ -35,6 +37,10 @@ fn main() -> ExitCode {
     };
     let rest = &args[1..];
     let result = match command {
+        "snes-scan" => match snes_scan::run(rest) {
+            0 => Ok(()),
+            code => Err(format!("snes-scan exited with status {code}")),
+        },
         "license-audit" => license::run(rest),
         "osv-audit" => osv::run(rest),
         "repair-vs" => repair::run(rest),

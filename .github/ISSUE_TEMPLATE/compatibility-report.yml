@@ -1,0 +1,99 @@
+name: Game compatibility report
+description: Test a NES, SNES or Nintendo 64 game and record what the Unko core does.
+title: "[Compatibility] "
+labels: ["compatibility", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing. This tracker is evidence-based: report the dump,
+        the exact build, and what you observed. Do **not** attach ROMs,
+        firmware, BIOS files or save states from commercial games.
+
+        The generated compatibility page is at
+        <https://lordra9-svg.github.io/unko/>.
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      description: Which Unko core did you test?
+      options:
+        - NES / Famicom
+        - Famicom Disk System
+        - SNES / Super Famicom
+        - Nintendo 64
+        - Other / frontend issue
+    validations:
+      required: true
+  - type: input
+    id: game
+    attributes:
+      label: Game title
+      description: Use the title from the dump, including region and revision.
+      placeholder: "Super Mario World (USA, Rev 1)"
+    validations:
+      required: true
+  - type: input
+    id: dump
+    attributes:
+      label: Dump identity
+      description: SHA-256 of the ROM image, and the mapper/board or coprocessor if known.
+      placeholder: "sha256: … · LoROM · 1 MiB"
+  - type: dropdown
+    id: status
+    attributes:
+      label: Result
+      description: Pick the furthest verified state. Automated smoke runs belong in “Runs (automated only)”.
+      options:
+        - Verified against the reference oracle
+        - Playable
+        - In-game with issues
+        - Menus / title screen only
+        - Boots, does not reach the title screen
+        - Runs (automated only, no gameplay verdict)
+        - Does not boot
+        - Untested / needs retest
+    validations:
+      required: true
+  - type: checkboxes
+    id: issues
+    attributes:
+      label: Observed issues
+      options:
+        - label: Crash or panic
+        - label: Hang / deadlock / soft-lock
+        - label: Graphics corruption or missing layers
+        - label: Audio glitch, missing sound or wrong pitch
+        - label: Input problem
+        - label: Save / SRAM / save-state problem
+        - label: Performance below full speed
+        - label: Coprocessor or firmware-dependent behaviour
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and reproduction steps
+      description: What did you see, on which frame, and how can someone else reproduce it?
+      placeholder: |
+        1. Build / commit:
+        2. Frontend and settings:
+        3. Frames or timing:
+        4. Screenshot, log or trace (no ROM data):
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Unko build
+      description: Commit hash or release version.
+      placeholder: "cdb377d / 0.1.0"
+    validations:
+      required: true
+  - type: checkboxes
+    id: legal
+    attributes:
+      label: Confirmation
+      options:
+        - label: I did not attach a ROM, firmware, BIOS or commercial save state.
+          required: true
+        - label: I searched existing compatibility reports for this game.
+          required: true

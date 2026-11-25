@@ -5,7 +5,16 @@ chosen reference (real hardware, then ares, then a public test ROM). It is the
 SNES counterpart to `docs/accuracy-divergences.md` and follows the charter in
 `docs/accuracy.md`.
 
-Current snapshot: **2026-11-19**, 65C816 + SPC700 + APU + S-DSP + PPU + DMA/HDMA + SuperFX + SA-1 + SDD1 + SPC7110 + CX4 + DSP-1/2/3/4 + OBC1 + MSU1.
+Current snapshot: **2026-11-25**, 65C816 + SPC700 + APU + S-DSP + PPU + DMA/HDMA + SuperFX + SA-1 + SDD1 + SPC7110 + CX4 + DSP-1/2/3/4 + OBC1 + MSU1.
+
+## Library sweep 2026-11-25
+
+A deterministic, region- and mapper-stratified 500-image No-Intro sample
+completed 300 frames on every image with 0 load/run failures: 370 LoROM,
+125 HiROM, 5 ExHiROM; 381 NTSC, 119 PAL; 485 strict headers and 15 lenient
+fallbacks. This is boot/load coverage, not an accuracy oracle; the
+pixel/audio gates below remain the reference evidence. Method and per-image
+hashes: [`snes-library-scan.md`](snes-library-scan.md).
 
 ## Resolved 2026-11-17 — blargg `spc_dsp6` reports `PASSED TESTS`
 

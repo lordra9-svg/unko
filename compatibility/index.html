@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Unko compatibility</title>
+  <meta name="description" content="Per-game compatibility tracker for the Unko NES, SNES and N64 cores.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Unko · compatibility</p>
+      <h1>One page per system. One row per game.</h1>
+      <p class="lede">
+        Evidence-based compatibility for the standalone NES, SNES and Nintendo 64
+        cores. Every row links to a prefilled test report; every status says what
+        was actually measured.
+      </p>
+      <div class="actions">
+        <a class="button primary" href="https://github.com/lordra9-svg/unko/issues/new?template=compatibility-report.yml&amp;labels=compatibility,needs-triage">Report a game</a>
+        <a class="button" href="https://github.com/lordra9-svg/unko">Repository</a>
+        <a class="button" href="https://github.com/lordra9-svg/unko/blob/main/docs/compatibility.md">Evidence notes</a>
+      </div>
+      <div id="summary" class="summary" aria-live="polite"></div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="controls" aria-label="Filters">
+      <label>
+        <span>Search</span>
+        <input id="search" type="search" placeholder="Title, region, SHA-256…" autocomplete="off">
+      </label>
+      <label>
+        <span>Status</span>
+        <select id="status-filter">
+          <option value="all">All statuses</option>
+        </select>
+      </label>
+      <button id="expand" type="button">Collapse all</button>
+      <span id="count" class="count"></span>
+    </section>
+
+    <div id="systems" class="systems"></div>
+
+    <section class="legend">
+      <h2>Status legend</h2>
+      <dl id="status-legend"></dl>
+    </section>
+  </main>
+
+  <footer class="wrap">
+    <p>
+      ROMs and firmware are never attached to this page or to issues. Test
+      reports must describe the dump (SHA-256 and region); do not upload
+      copyrighted images.
+    </p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

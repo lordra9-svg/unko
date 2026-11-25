@@ -1,0 +1,104 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b0d12;
+  --panel: #131720;
+  --panel-2: #181d29;
+  --line: #293142;
+  --text: #e7ecf4;
+  --muted: #97a3b6;
+  --accent: #6ea8fe;
+  --accent-2: #9b8cff;
+  --green: #3fb950;
+  --cyan: #39c5cf;
+  --blue: #58a6ff;
+  --purple: #bc8cff;
+  --slate: #8b949e;
+  --red: #f85149;
+  --yellow: #d29922;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: radial-gradient(1200px 600px at 20% -10%, #1a2440 0, transparent 55%), var(--bg);
+  color: var(--text);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.wrap { width: min(1180px, calc(100% - 32px)); margin: 0 auto; }
+.hero { padding: 64px 0 28px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, rgba(110,168,254,.06), transparent); }
+.eyebrow { margin: 0 0 12px; color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+h1 { margin: 0; max-width: 780px; font-size: clamp(32px, 5vw, 56px); line-height: 1.05; letter-spacing: -.03em; }
+.lede { max-width: 760px; margin: 18px 0 0; color: var(--muted); font-size: 18px; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+.button {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 40px; padding: 0 14px; border: 1px solid var(--line);
+  border-radius: 9px; color: var(--text); background: var(--panel); font-weight: 600;
+}
+.button:hover { border-color: #46536b; text-decoration: none; }
+.button.primary { border-color: transparent; color: #07101f; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+.summary { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 24px; color: var(--muted); font-size: 14px; }
+.summary strong { color: var(--text); font-size: 20px; margin-right: 5px; }
+main { padding: 28px 0 56px; }
+.controls {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; flex-wrap: wrap; align-items: end; gap: 12px;
+  padding: 14px; border: 1px solid var(--line); border-radius: 14px;
+  background: rgba(19,23,32,.92); backdrop-filter: blur(10px);
+}
+.controls label { display: grid; gap: 6px; min-width: 160px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.controls label:first-child { flex: 1 1 280px; }
+input, select, button { font: inherit; }
+input, select { min-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.controls button { min-height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); cursor: pointer; }
+.count { margin-left: auto; color: var(--muted); font-size: 13px; }
+.systems { display: grid; gap: 18px; margin-top: 20px; }
+.system { border: 1px solid var(--line); border-radius: 16px; background: var(--panel); overflow: hidden; }
+.system > summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+  padding: 18px 20px; cursor: pointer; list-style: none;
+  background: linear-gradient(180deg, rgba(255,255,255,.03), transparent);
+}
+.system > summary::-webkit-details-marker { display: none; }
+.system > summary h2 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
+.system > summary .system-count { color: var(--muted); }
+.system > summary .chevron { margin-left: auto; color: var(--muted); transition: transform .18s; }
+.system[open] > summary .chevron { transform: rotate(90deg); }
+.system-body { padding: 0 20px 20px; }
+.system-note { margin: 0 0 12px; color: var(--muted); }
+.test-command { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 9px; background: var(--panel-2); }
+.test-command code { color: #c9d5e8; overflow-wrap: anywhere; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; min-width: 760px; }
+th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { position: sticky; top: 78px; z-index: 2; background: #111621; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+tbody tr:hover { background: rgba(110,168,254,.05); }
+td.game { min-width: 260px; }
+td.game strong { display: block; color: var(--text); }
+td.game small { color: var(--muted); overflow-wrap: anywhere; }
+.badge { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 8px; border: 1px solid currentColor; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.badge[data-status="verified"], .badge[data-status="playable"] { color: var(--green); }
+.badge[data-status="in-game"] { color: var(--cyan); }
+.badge[data-status="menus"] { color: var(--blue); }
+.badge[data-status="boots"] { color: var(--purple); }
+.badge[data-status="runs"] { color: var(--slate); }
+.badge[data-status="nothing"] { color: var(--red); }
+.badge[data-status="untested"] { color: var(--yellow); }
+.muted { color: var(--muted); }
+.empty { padding: 18px; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); background: var(--panel-2); }
+.legend { margin-top: 28px; }
+.legend h2 { font-size: 18px; }
+.legend dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; margin: 0; }
+.legend dt { font-weight: 700; }
+.legend dd { margin: 0; color: var(--muted); }
+footer { padding: 22px 0 42px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.error { padding: 18px; border: 1px solid var(--red); border-radius: 10px; color: var(--red); background: rgba(248,81,73,.07); }
+@media (max-width: 680px) {
+  .hero { padding-top: 42px; }
+  .controls { position: static; }
+  th { top: 0; }
+  .legend dl { grid-template-columns: 1fr; }
+}

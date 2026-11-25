@@ -1,8 +1,14 @@
 # Compatibility
 
-This is the current compatibility picture for the NES core and desktop shell.
-It is deliberately evidence-based: a check mark means a public test, a synthetic
-test, or a smoke audit covers it; a dash means no verdict yet.
+Per-game status is tracked at
+<https://lordra9-svg.github.io/unko/>. Each game row links to a prefilled test
+report; the raw catalog is
+[`compatibility/games.json`](../compatibility/games.json). Use the
+`compatibility` label in the issue tracker.
+
+This page remains the system-level evidence summary for the NES core and
+desktop shell. It is deliberately evidence-based: a check mark means a public
+test, a synthetic test, or a smoke audit covers it; a dash means no verdict yet.
 
 ## Compatibility levels
 
@@ -23,8 +29,8 @@ test, or a smoke audit covers it; a dash means no verdict yet.
 | NSF / NSFE | **Loads only** | Parser and player wiring are unit-tested; corpus validation pending |
 | VS. System | **Partial** | Mapper 99 banking, four-screen VRAM, 2 KiB OUT1-gated work RAM, coin/service/DIP input, coin counter, NES 2.0 UniSystem/DualSystem type parsing and the 2C03/2C04/2C05 RGB palettes with 2C05 security implemented; 13 local images (mapper 99/2C03/2C04, including the Gumshoe 40 KiB outer bank) boot in staged tests. A 2C05 title, a known-good DualSystem dump, per-title DIP defaults and the DualSystem sub-CPU/watchdog are still missing |
 | PlayChoice-10 | **Partial** | 2C03 RGB palette implemented; PC10 BIOS is present; no PC10 game ROMs or coin/service input |
-| SNES / Super Famicom | **In progress** | Isolated `unko-snes` crate: ROM parsing/checksums/mapping, SRAM, cycle-exact 65C816, full SPC700, S-DSP, PPU modes 0-7 with hires/interlace, sprites, windows, mosaic and subscreen/colour math, DMA/HDMA, and the SuperFX, SA-1, SDD1, SPC7110, CX4, DSP-1/2/3/4, OBC1, MSU1, S-RTC, ST018, Satellaview/BS-X and Sufami Turbo pieces. Every reference title is pixel-identical to ares; audio is bit-exact for Donkey Kong Country, Zelda, F-Zero and Castlevania IV, with SMAS/Chrono Trigger/Mega Man X2 residuals in the boot-handshake phase |
-| Nintendo 64 | **Not started** | Queued after SNES |
+| SNES / Super Famicom | **Verified** | Isolated `unko-snes` crate with its own `Core` adapter: ROM parsing/checksums/mapping, SRAM, cycle-exact 65C816, SPC700, S-DSP, PPU modes 0-7 with hires/interlace, sprites, windows, mosaic and subscreen/colour math, DMA/HDMA, SuperFX, SA-1, SDD1, SPC7110, CX4, DSP-1/2/3/4, OBC1, MSU1, S-RTC and Sufami Turbo. All seven reference titles are pixel-identical to the calibrated ares oracle and bit-exact on the 600-frame audio gate; the 212-ROM test baseline is green. ST018 and Satellaview/BS-X are implemented only to their documented interfaces (see `snes-accuracy-divergences.md`) |
+| Nintendo 64 | **Scaffold** | `unko-n64` + `unko-n64-host`: VR4300/TLB/FPU/CP0, RSP, RDP, VI, AI, MI and synthetic tests. Real-cartridge validation waits for a user-supplied `UNKO_N64_ROM`; see `n64-validation.md` |
 
 ## ROM containers and patch formats
 
@@ -112,7 +118,9 @@ Public mapper-specific status:
 | x0000 APU write-window tests | 10/10 pass |
 | NESdev archive | 137 pass / 11 fail / 115 visual/audio/input-only; PAL APU timing leaves 4 failures, adding the alternate MMC3 selector leaves only `read_joy3/count_errors` |
 | RustyNES test tree | 159 pass / 11 fail / 171 visual/audio/input-only; 166 / 4 with PAL APU in PAL mode, 1 with the alternate MMC3 selector too |
-| Workspace tests | 1,163 pass, 0 failed |
+| SNES audio (600 frames) | seven reference titles bit-exact, 0 differing samples over 639,656 interleaved i16 |
+| SNES library sweep | 500/500 No-Intro images completed 300 frames, 0 failures (370 LoROM, 125 HiROM, 5 ExHiROM; 381 NTSC / 119 PAL) |
+| Workspace tests | 1,165 pass, 0 failed |
 
 The actionable accuracy failures are tracked in
 [`accuracy-divergences.md`](accuracy-divergences.md); the ROM/BIOS inventory is

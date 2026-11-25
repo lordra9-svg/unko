@@ -4798,6 +4798,7 @@ dependencies = [
  "sha2",
  "tar",
  "toml",
+ "unko-snes",
  "zip",
 ]
 
