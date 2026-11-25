@@ -4282,7 +4282,9 @@ impl eframe::App for App {
                         player.apply_debug(action, ctx);
                     }
                 } else if let Some(view) = player.snes_debug() {
-                    snes_debugger_window(ctx, &mut player.debug, &view);
+                    let pc = (u32::from(view.cpu.pbr) << 16) | u32::from(view.cpu.pc);
+                    let listing = player.snes_listing(pc, 8);
+                    snes_debugger_window(ctx, &mut player.debug, &view, &listing);
                 }
             }
         } else {
@@ -4363,6 +4365,7 @@ fn snes_debugger_window(
     ctx: &egui::Context,
     debug: &mut crate::debugger::Debugger,
     view: &crate::snes::SnesDebugView,
+    listing: &[unko_snes_api::Disassembly],
 ) {
     egui::Window::new("SNES Debugger")
         .open(&mut debug.open)
@@ -4400,6 +4403,19 @@ fn snes_debugger_window(
                 "DSP  {} Hz, {} samples",
                 view.dsp.sample_rate, view.dsp.samples
             ));
+            ui.separator();
+            ui.monospace("Disassembly");
+            if listing.is_empty() {
+                ui.weak("(unavailable)");
+            }
+            for row in listing {
+                ui.monospace(format!(
+                    "{:02X}:{:04X}  {}",
+                    (row.address >> 16) & 0xFF,
+                    row.address & 0xFFFF,
+                    row.text
+                ));
+            }
         });
 }
 

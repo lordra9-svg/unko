@@ -380,6 +380,36 @@ impl unko_snes_api::SnesCore for SnesCore {
             unko_snes_api::DebugSpace::DspRegisters => system.apu.dsp().registers[address as usize],
         })
     }
+
+    fn debug_disassemble(&mut self, address: u32) -> Option<unko_snes_api::Disassembly> {
+        let system = self.system.as_mut()?;
+        Some(unko_snes_api::debug::disassemble(address, |target| {
+            machine_peek(system, target)
+        }))
+    }
+}
+
+/// Side-effect-free byte fetch for the disassembler.
+///
+/// WRAM mirrors are read directly; low-bank I/O (`$2000-$5FFF`) reports open
+/// bus instead of touching the PPU/APU/DMA registers; everything else goes
+/// through the CPU bus (ROM and cartridge SRAM reads are side-effect free).
+fn machine_peek(system: &mut Snes, address: u32) -> u8 {
+    use unko_snes::CpuBus;
+    let bank = (address >> 16) & 0xFF;
+    let offset = address & 0xFFFF;
+    if bank == 0x7E || bank == 0x7F {
+        let index = (((bank & 1) as usize) << 16) | offset as usize;
+        return system.wram()[index];
+    }
+    let low = bank <= 0x3F || (0x80..=0xBF).contains(&bank);
+    if low && offset < 0x2000 {
+        return system.wram()[offset as usize];
+    }
+    if low && (0x2000..0x6000).contains(&offset) {
+        return 0;
+    }
+    CpuBus::read(system, address, 0)
 }
 
 /// Whether `bytes` parses as an SNES cartridge image.
@@ -478,7 +508,9 @@ mod tests {
         assert!(core
             .debug_peek(unko_snes_api::DebugSpace::ApuRam, 0)
             .is_some());
-        assert!(core.debug_disassemble(0).is_none());
+        let row = core.debug_disassemble(0x8000).expect("disassembly");
+        assert_eq!(row.address, 0x8000);
+        assert!(!row.bytes.is_empty());
     }
 
     #[test]

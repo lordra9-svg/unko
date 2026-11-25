@@ -85,6 +85,26 @@ impl SnesAdapter {
         use unko_snes_api::SnesCore as _;
         self.inner.debug_peek(space, address)
     }
+
+    /// Disassembles one instruction at a 24-bit address.
+    pub fn snes_disassemble(&mut self, address: u32) -> Option<unko_snes_api::Disassembly> {
+        use unko_snes_api::SnesCore as _;
+        self.inner.debug_disassemble(address)
+    }
+
+    /// Disassembles up to `count` consecutive instructions.
+    pub fn snes_listing(&mut self, address: u32, count: usize) -> Vec<unko_snes_api::Disassembly> {
+        let mut rows = Vec::with_capacity(count);
+        let mut pc = address;
+        for _ in 0..count {
+            let Some(row) = self.snes_disassemble(pc) else {
+                break;
+            };
+            pc = pc.wrapping_add(row.bytes.len().max(1) as u32);
+            rows.push(row);
+        }
+        rows
+    }
 }
 
 impl Default for SnesAdapter {
@@ -145,6 +165,10 @@ impl Core for SnesAdapter {
 
 impl NesCore for SnesAdapter {
     fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
 

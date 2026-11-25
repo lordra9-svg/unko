@@ -186,7 +186,7 @@ pub trait SnesCore: Core {
     }
 
     /// Decodes one instruction for a disassembly listing.
-    fn debug_disassemble(&self, _address: u32) -> Option<Disassembly> {
+    fn debug_disassemble(&mut self, _address: u32) -> Option<Disassembly> {
         None
     }
 }

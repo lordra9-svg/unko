@@ -2166,6 +2166,15 @@ impl Player {
             .downcast_ref::<crate::snes::SnesAdapter>()?
             .snes_debug()
     }
+
+    /// Disassembles a short SNES listing starting at `address`.
+    pub fn snes_listing(&mut self, address: u32, count: usize) -> Vec<unko_snes_api::Disassembly> {
+        self.core
+            .as_any_mut()
+            .downcast_mut::<crate::snes::SnesAdapter>()
+            .map(|adapter| adapter.snes_listing(address, count))
+            .unwrap_or_default()
+    }
 }
 
 /// Parses a region string from the UI.
@@ -2644,6 +2653,10 @@ mod tests {
         assert_eq!(debug.ppu.width, 256);
         assert!(debug.dsp.samples > 0);
         assert_eq!(debug.cpu.pbr, 0);
+        let listing = player.snes_listing(0x00_8000, 4);
+        assert_eq!(listing.len(), 4);
+        assert_eq!(listing[0].address, 0x00_8000);
+        assert!(!listing[0].text.is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -2717,6 +2730,20 @@ mod tests {
         }
         fs::write(&out, &bytes).expect("write audio");
         let debug = player.snes_debug();
+        if let Some(view) = debug {
+            let pc = (u32::from(view.cpu.pbr) << 16) | u32::from(view.cpu.pc);
+            let listing = player.snes_listing(pc, 4);
+            println!(
+                "listing at {:02X}:{:04X}: {}",
+                view.cpu.pbr,
+                view.cpu.pc,
+                listing
+                    .iter()
+                    .map(|row| row.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            );
+        }
         println!(
             "wrote {out} frames={frames} core={} video={}x{} debug={}",
             player.core_id,
