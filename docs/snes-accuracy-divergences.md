@@ -14178,8 +14178,10 @@ upload-window (~5080 micro-steps for DKC's first write, from 981805 to 986885),
 and `PRIME=2` on its own shifts DKC/SMAS off their exact phase:
 
 ```
-DKC, PRIME=2 + ACCESS_STOP=1 : 368678 differing (42.3631%)
-CT , PRIME=2 + ACCESS_STOP=1 : 139578 differing (56.6240%)
+DKC, PRIME=2 + ACCESS_STOP=1 : 368678 differing (42.3631%)   [600 frames]
+CT , PRIME=2 + ACCESS_STOP=1 : 139578 differing (56.6240%)   [partial: 321786
+                               samples before the run was interrupted; already
+                               far off exact, and its full-run reference is 0]
 ```
 
 So the six exact titles sit on a zero-phase cliff at `PRIME=0`, and MMX2 sits
