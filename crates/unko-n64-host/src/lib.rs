@@ -288,8 +288,8 @@ mod tests {
     #[test]
     fn reports_an_unimplemented_opcode() {
         let mut rom = z64();
-        // COP1 double-precision format is still unimplemented.
-        rom[0x80..0x84].copy_from_slice(&[0x46, 0x20, 0x00, 0x00]);
+        // An unimplemented COP0 CO operation.
+        rom[0x80..0x84].copy_from_slice(&0x4200_003Fu32.to_be_bytes());
         let mut core = N64Core::new();
         core.load(&rom, &LoadOptions::default()).expect("load");
         let error = core.run_frame().expect_err("unimplemented opcode");

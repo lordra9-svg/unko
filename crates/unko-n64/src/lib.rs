@@ -13,10 +13,11 @@
 //! resampling ([`ai::Ai`]). CI/TLUT palettes and
 //! perspective-correct W interpolation and the compressed Z-buffer depth
 //! pipeline are implemented, and precise exceptions (TLB, unaligned access,
-//! SYSCALL/BREAK, delay-slot BD and maskable interrupts) are delivered through
-//! CP0 EPC/Cause/BadVAddr, Status.EXL and the refill/general vectors, with
-//! ERET returning to the faulting context. Double-precision FPU and precise
-//! FPU exceptions are the next milestones.
+//! SYSCALL/BREAK, reserved instructions, coprocessor-unusable, delay-slot BD,
+//! maskable interrupts and enabled FPU exceptions) are delivered through CP0
+//! EPC/Cause/BadVAddr/CE, Status.EXL and the refill/general vectors, with ERET
+//! returning to the faulting context; the FPU tracks `fcr31` flags/causes and
+//! flush-to-zero. Double-precision FPU is the next milestone.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

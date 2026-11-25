@@ -297,10 +297,13 @@ The main effort was the reference-parity accuracy core. Details in
       (TLBR/TLBWI/TLBWR/TLBP, mapped KUSEG translation) and a single-precision
       COP1 FPU (ADD/SUB/MUL/DIV/SQRT/ABS/MOV/NEG, CVT and compares, LWC1/SWC1/
       LDC1/SDC1). Precise exceptions (TLB, unaligned accesses, SYSCALL/BREAK,
-      delay-slot BD, maskable interrupts) are delivered through CP0
-      Cause/EPC/BadVAddr with Status.EXL and the refill/general vectors, and
-      ERET restores execution. Double-precision FPU, FPU exceptions and exact
-      depth-blend shifters are the next milestones; no
+      reserved instructions, coprocessor-unusable with Cause.CE, delay-slot
+      BD, maskable interrupts, enabled FPU exceptions) are delivered through
+      CP0 Cause/EPC/BadVAddr with Status.EXL and the refill/general vectors,
+      and ERET restores execution. The FPU reports `fcr31` flags/causes
+      (inexact, underflow, overflow, divide-by-zero, invalid) and honors FS
+      flush-to-zero. Double-precision FPU and exact depth-blend shifters are
+      the next milestones; no
       standard N64 cartridge image was available locally to boot (only 64DD
       IPL firmware). See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.

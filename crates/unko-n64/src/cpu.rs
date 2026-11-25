@@ -82,6 +82,23 @@ pub enum CpuError {
         /// Whether a matching entry existed but its page was invalid.
         invalid: bool,
     },
+    /// A reserved instruction encoding was executed.
+    ReservedInstruction {
+        /// Program counter of the instruction.
+        pc: u64,
+        /// Raw instruction word.
+        instruction: u32,
+    },
+    /// A coprocessor instruction was executed while that unit was disabled.
+    CoprocessorUnusable {
+        /// Coprocessor number (1 = FPU).
+        coprocessor: u8,
+    },
+    /// A floating-point exception with its enable bit set.
+    Fpu {
+        /// Program counter of the instruction.
+        pc: u64,
+    },
     /// `SYSCALL` or `BREAK` executed.
     Trap {
         /// Program counter of the instruction.
@@ -100,6 +117,13 @@ impl fmt::Display for CpuError {
                 write!(f, "unimplemented opcode {instruction:08X} at {pc:016X}")
             }
             Self::Unaligned { address, .. } => write!(f, "unaligned access at {address:016X}"),
+            Self::ReservedInstruction { pc, instruction } => {
+                write!(f, "reserved instruction {instruction:08X} at {pc:016X}")
+            }
+            Self::CoprocessorUnusable { coprocessor } => {
+                write!(f, "coprocessor {coprocessor} unusable")
+            }
+            Self::Fpu { pc } => write!(f, "floating point exception at {pc:016X}"),
             Self::Tlb { address, .. } => write!(f, "TLB fault at {address:016X}"),
             Self::Trap {
                 pc,
@@ -204,7 +228,12 @@ impl Cpu {
         self.instructions += 1;
         match self.execute(instruction, pc, bus) {
             Err(
-                error @ (CpuError::Tlb { .. } | CpuError::Unaligned { .. } | CpuError::Trap { .. }),
+                error @ (CpuError::Tlb { .. }
+                | CpuError::Unaligned { .. }
+                | CpuError::Trap { .. }
+                | CpuError::ReservedInstruction { .. }
+                | CpuError::CoprocessorUnusable { .. }
+                | CpuError::Fpu { .. }),
             ) => {
                 self.deliver_error(&error, pc, delay_slot);
                 Ok(())
@@ -249,6 +278,16 @@ impl Cpu {
                 let _ = code;
                 self.deliver_exception(exception, None, delay_slot, pc, false);
             }
+            CpuError::ReservedInstruction { .. } => {
+                self.deliver_exception(10, None, delay_slot, pc, false);
+            }
+            CpuError::CoprocessorUnusable { coprocessor } => {
+                self.deliver_exception(11, None, delay_slot, pc, false);
+                self.cp0[13] |= u64::from(coprocessor) << 28;
+            }
+            CpuError::Fpu { .. } => {
+                self.deliver_exception(15, None, delay_slot, pc, false);
+            }
             _ => {}
         }
     }
@@ -270,7 +309,7 @@ impl Cpu {
             self.cp0[14] = epc & 0xFFFF_FFFF;
         }
         let bd = if delay_slot { 1u64 << 31 } else { 0 };
-        self.cp0[13] = (self.cp0[13] & !(0x1F << 2) & !(1 << 31)) | (code << 2) | bd;
+        self.cp0[13] = (self.cp0[13] & !(0x1F << 2) & !(1 << 31) & !(3 << 28)) | (code << 2) | bd;
         if let Some(address) = bad_address {
             self.cp0[8] = address & 0xFFFF_FFFF;
         }
@@ -285,6 +324,14 @@ impl Cpu {
         };
         self.pc = vector;
         self.next_pc = vector.wrapping_add(4);
+    }
+
+    fn require_coprocessor(&self, coprocessor: u8) -> Result<(), CpuError> {
+        // Status.CU1 enables COP1; the VR4300 has no other coprocessors.
+        if coprocessor == 1 && self.cp0[12] & (1 << 29) == 0 {
+            return Err(CpuError::CoprocessorUnusable { coprocessor });
+        }
+        Ok(())
     }
 
     fn gpr(&self, index: u32) -> u64 {
@@ -406,11 +453,26 @@ impl Cpu {
                 Ok(())
             }
             16 => self.cop0(instruction, pc, rs, rt, rd, funct),
-            17 => self.cop1(pc, rs, rt, rd, sa, funct),
-            49 => self.load_f32(bus, rs, rt, simm),
-            53 => self.load_f64(bus, rs, rt, simm),
-            57 => self.store_f32(bus, rs, rt, simm),
-            61 => self.store_f64(bus, rs, rt, simm),
+            17 => {
+                self.require_coprocessor(1)?;
+                self.cop1(pc, rs, rt, rd, sa, funct)
+            }
+            49 => {
+                self.require_coprocessor(1)?;
+                self.load_f32(bus, rs, rt, simm)
+            }
+            53 => {
+                self.require_coprocessor(1)?;
+                self.load_f64(bus, rs, rt, simm)
+            }
+            57 => {
+                self.require_coprocessor(1)?;
+                self.store_f32(bus, rs, rt, simm)
+            }
+            61 => {
+                self.require_coprocessor(1)?;
+                self.store_f64(bus, rs, rt, simm)
+            }
             32 => self.load8(bus, rs, rt, simm, true),
             33 => self.load16(bus, rs, rt, simm, true),
             35 => self.load32(bus, rs, rt, simm, true),
@@ -420,6 +482,7 @@ impl Cpu {
             40 => self.store8(bus, rs, rt, simm),
             41 => self.store16(bus, rs, rt, simm),
             43 => self.store32(bus, rs, rt, simm),
+            18 | 19 => Err(CpuError::ReservedInstruction { pc, instruction }),
             47 => Ok(()), // CACHE
             55 => self.load64(bus, rs, rt, simm),
             63 => self.store64(bus, rs, rt, simm),
@@ -907,7 +970,7 @@ impl Cpu {
     ) -> Result<(), CpuError> {
         let a = f32::from_bits(self.fpr[fs as usize] as u32);
         let b = f32::from_bits(self.fpr[ft as usize] as u32);
-        let result = match funct {
+        let mut result = match funct {
             0x00 => a + b,
             0x01 => a - b,
             0x02 => a * b,
@@ -917,11 +980,19 @@ impl Cpu {
             0x06 => a,
             0x07 => -a,
             0x24 => {
+                if a.is_nan() {
+                    self.fcr31 |= (1 << 2) | (1 << 6) | (1 << 12) | (1 << 16);
+                    self.check_fpu_exception(pc)?;
+                }
                 let value = round_to_i32(a, self.fcr31 & 3);
                 self.fpr[fd as usize] = (value as i64) as u64;
                 return Ok(());
             }
             0x25 => {
+                if a.is_nan() {
+                    self.fcr31 |= (1 << 2) | (1 << 6) | (1 << 12) | (1 << 16);
+                    self.check_fpu_exception(pc)?;
+                }
                 let value = round_to_i64(a, self.fcr31 & 3);
                 self.fpr[fd as usize] = value as u64;
                 return Ok(());
@@ -955,7 +1026,56 @@ impl Cpu {
                 })
             }
         };
+        if funct <= 0x04 {
+            let wide = match funct {
+                0x00 => f64::from(a) + f64::from(b),
+                0x01 => f64::from(a) - f64::from(b),
+                0x02 => f64::from(a) * f64::from(b),
+                0x03 => f64::from(a) / f64::from(b),
+                _ => f64::from(a).sqrt(),
+            };
+            let mut bits = 0u32;
+            if result.is_nan() && !a.is_nan() && !b.is_nan() {
+                bits |= 1 << 4; // invalid
+            }
+            if funct == 0x03 && b == 0.0 && a != 0.0 && !a.is_nan() {
+                bits |= 1 << 3; // division by zero
+            }
+            if result.is_infinite() && a.is_finite() && b.is_finite() && b != 0.0 {
+                bits |= 1 << 2; // overflow
+            }
+            let flush = self.fcr31 & (1 << 24) != 0
+                && result.is_finite()
+                && result != 0.0
+                && result.abs() < f32::MIN_POSITIVE;
+            if flush {
+                bits |= (1 << 1) | (1 << 0);
+            } else if result.is_finite() && f64::from(result) != wide {
+                bits |= 1 << 0; // inexact
+            }
+            if result.is_finite() && result != 0.0 && result.abs() < f32::MIN_POSITIVE {
+                bits |= 1 << 1; // underflow
+            }
+            self.set_fpu_flags(bits);
+            self.check_fpu_exception(pc)?;
+            if flush {
+                result = 0.0f32.copysign(result);
+            }
+        }
         self.fpr[fd as usize] = u64::from(result.to_bits());
+        Ok(())
+    }
+
+    fn set_fpu_flags(&mut self, bits: u32) {
+        self.fcr31 |= (bits << 2) | (bits << 12);
+    }
+
+    fn check_fpu_exception(&mut self, pc: u64) -> Result<(), CpuError> {
+        let cause = (self.fcr31 >> 12) & 0x1F;
+        let enable = (self.fcr31 >> 7) & 0x1F;
+        if cause & enable != 0 {
+            return Err(CpuError::Fpu { pc });
+        }
         Ok(())
     }
 
@@ -1479,12 +1599,8 @@ mod tests {
         memory.write_u32(0x100, 1.5f32.to_bits());
         memory.write_u32(0x104, 2.25f32.to_bits());
         let mut cpu = Cpu::new(0);
+        cpu.cp0[12] = 1 << 29; // Status.CU1 enables the FPU
         run(&mut cpu, &mut memory, 8);
-        eprintln!(
-            "fpr={:08X?} gpr8={:X}",
-            cpu.fpr.map(|v| v as u32),
-            cpu.gpr[8]
-        );
         assert_eq!(cpu.gpr[8], u64::from(3.75f32.to_bits()));
         // Default round-to-nearest-even converts 3.75 to 4.
         assert_eq!(cpu.gpr[9], 4);
@@ -1649,5 +1765,79 @@ mod tests {
         assert_eq!(cpu.cp0[12] & 2, 0);
         cpu.step(&mut memory).expect("resume after interrupt");
         assert_eq!(cpu.gpr[9], 7);
+    }
+    #[test]
+    fn reserved_and_coprocessor_unusable_exceptions_resume() {
+        // COP2 is reserved on the VR4300.
+        let mut cpu = Cpu::new(0x8000_1000);
+        let mut memory = Memory::new(0x3000);
+        install_handler(&mut memory, false);
+        memory.write_u32(0x1000, 0x4800_0000); // COP2 instruction
+        memory.write_u32(0x1004, 0x2409_0007); // addiu t1,zero,7
+        cpu.step(&mut memory).expect("reserved");
+        assert_eq!(cpu.pc, 0x8000_0180);
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 10);
+        assert_eq!(cpu.cp0[14], 0x8000_1000);
+        run(&mut cpu, &mut memory, 4);
+        cpu.step(&mut memory).expect("resume");
+        assert_eq!(cpu.gpr[9], 7);
+
+        // COP1 with Status.CU1 clear is unusable; Cause.CE identifies unit 1.
+        let mut cpu = Cpu::new(0x8000_1000);
+        memory.write_u32(0x1000, 0x4601_0080); // add.s f2,f0,f1
+        memory.write_u32(0x1004, 0x2409_0007);
+        cpu.step(&mut memory).expect("coprocessor unusable");
+        assert_eq!(cpu.pc, 0x8000_0180);
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 11);
+        assert_ne!(cpu.cp0[13] & (1 << 28), 0, "CE = 1");
+        run(&mut cpu, &mut memory, 4);
+        cpu.step(&mut memory).expect("resume");
+        assert_eq!(cpu.gpr[9], 7);
+    }
+
+    #[test]
+    fn fpu_flags_and_enabled_exception() {
+        let mut memory = Memory::new(0x3000);
+        install_handler(&mut memory, false);
+        // 1.0 / 3.0 sets inexact (flag bit 2, cause bit 12).
+        memory.write_u32(0x1000, 0x4601_0083); // div.s f2,f0,f1
+        let mut cpu = Cpu::new(0x8000_1000);
+        cpu.cp0[12] = 1 << 29;
+        cpu.fpr[0] = u64::from(1.0f32.to_bits());
+        cpu.fpr[1] = u64::from(3.0f32.to_bits());
+        cpu.step(&mut memory).expect("div");
+        assert_eq!(cpu.fpr[2] as u32, (1.0f32 / 3.0).to_bits());
+        assert_ne!(cpu.fcr31 & (1 << 2), 0, "inexact flag");
+        assert_ne!(cpu.fcr31 & (1 << 12), 0, "inexact cause");
+
+        // Division by zero sets Z; enabling it raises a precise FPU exception.
+        let mut cpu = Cpu::new(0x8000_1000);
+        cpu.cp0[12] = 1 << 29;
+        cpu.fpr[0] = u64::from(1.0f32.to_bits());
+        cpu.fpr[1] = 0;
+        cpu.step(&mut memory).expect("div zero");
+        assert_ne!(cpu.fcr31 & (1 << 5), 0, "divide-by-zero flag");
+        assert_ne!(cpu.fcr31 & (1 << 15), 0, "divide-by-zero cause");
+        assert!(f32::from_bits(cpu.fpr[2] as u32).is_infinite());
+
+        cpu.pc = 0x8000_1000;
+        cpu.next_pc = 0x8000_1004;
+        cpu.fcr31 = 1 << 10; // enable divide-by-zero
+        cpu.step(&mut memory).expect("FPU exception delivered");
+        assert_eq!(cpu.pc, 0x8000_0180);
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 15);
+        assert_eq!(cpu.cp0[14], 0x8000_1000);
+
+        // FS flushes a subnormal result to zero and reports underflow+inexact.
+        let mut cpu = Cpu::new(0x8000_1000);
+        cpu.cp0[12] = 1 << 29;
+        cpu.fcr31 = 1 << 24; // FS
+        memory.write_u32(0x1000, 0x4601_0082); // mul.s f2,f0,f1
+        cpu.fpr[0] = u64::from(f32::MIN_POSITIVE.to_bits());
+        cpu.fpr[1] = u64::from(0.5f32.to_bits());
+        cpu.step(&mut memory).expect("mul");
+        assert_eq!(cpu.fpr[2] as u32, 0, "subnormal flushed to zero");
+        assert_ne!(cpu.fcr31 & (1 << 3), 0, "underflow flag");
+        assert_ne!(cpu.fcr31 & (1 << 2), 0, "inexact flag");
     }
 }

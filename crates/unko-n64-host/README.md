@@ -7,4 +7,4 @@ VR4300 interpreter with RDRAM/RSP memory and PI/VI stubs. `run_frame` runs RSP
 scalar code/DMA, applies RDP fill/triangle commands, presents the VI
 framebuffer from RDRAM as RGBA and drains AI DMA into interleaved f32 audio,
 resampled from the DAC rate to the requested host sample rate. Remainder:
-double-precision FPU, precise FPU exceptions and broader GPU coverage.
+double-precision FPU and broader GPU coverage.
