@@ -247,9 +247,11 @@ The main effort was the reference-parity accuracy core. Details in
       Mednafen and RustySNES as black-box oracles) has the CPU, SPC700/DSP,
       PPU, DMA/HDMA and coprocessors implemented, with every reference title
       pixel-identical to ares and all seven reference titles audio-bit-exact
-      in one configuration; the `unko-snes-host` adapter follows. Then **N64
-      from ares** with gopher64 as a GPL structural reference. See
-      `docs/systems.md`.
+      in one configuration. `unko-snes-host` now adapts the core to
+      `unko-core` (load/reset/run-frame, RGBA video, 32040 Hz stereo audio,
+      input, save states, SRAM); coprocessor firmware provisioning and the
+      frontend follow. Then **N64 from ares** with gopher64 as a GPL structural
+      reference. See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.
 - [ ] GameCube/Wii is deferred: Dolphin is GPL-2.0+ and application-shaped, so
       it can only be a separate optional process, never a registry core.

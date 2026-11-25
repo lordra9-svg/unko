@@ -3875,6 +3875,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "unko-snes-host"
+version = "0.1.1"
+dependencies = [
+ "unko-core",
+ "unko-snes",
+]
+
+[[package]]
 name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
