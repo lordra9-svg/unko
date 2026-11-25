@@ -14070,3 +14070,21 @@ is the post-tick `time.hcounter`), rather than our post-access accumulator.
 This is the concrete remaining refresh/RAM-wait item; it was not changed here
 because it touches the shared access-boundary path and needs full 212-ROM
 regression to validate.
+
+## Refresh post-step ordering: neutral for audio (2026-11-24)
+
+Implemented ares' actual ordering (run the access's tick loop, then test
+`hcounter() >= dramRefreshPosition` post-step) behind `SNES_REFRESH_POST_STEP`
+and measured:
+
+```
+MMX2 prime4 (default): 0 differing  (still exact)
+MMX2 prime0          : 49,253 differing (92.3001%, unchanged)
+Zelda prime0         : 0 differing  (still exact)
+```
+
+So moving the refresh test to the post-step hcounter does not change the audio
+outcome. Reverted (flag default-off was dead code). The MMX2 prime0 gap is not
+the refresh sampling point; it remains the per-event SMP/DSP phase, which is in
+turn driven by the wandering S-CPU clock phase. No local refresh/DMA/NMI lever
+has changed any of the audio results.
