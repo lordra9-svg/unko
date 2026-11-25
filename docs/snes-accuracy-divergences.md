@@ -14019,3 +14019,25 @@ approximation for uncalibrated titles. The 8-clock residual is in that rounding,
 not the trigger. This is the same class for the other bisected steps
 (refresh/HDMA/DMA grid alignment), so exactness requires matching that
 pre/post-rounding arithmetic per access rather than changing the trigger.
+
+## Correction: DMA pre/run/post accounting already matches ares (2026-11-24)
+
+Instrumented `run_dma`'s total cost for the same `lastaddr=7e2077` transfers and
+compared with ares `ARES_DMA_COST`:
+
+```
+ares  pre=6 run=4528 post=2 total=4536   pre=4 run=4528 post=4 total=4536
+      pre=2 run=4528 post=6 total=4536   pre=8 run=4528 post=8 total=4544
+ours  total=4536 post=2   total=4536 post=2   total=4536 post=6   total=4544 post=8
+```
+
+Our DMA total clocks and post-rounding match ares (one sample differs in the
+accum phase: ours 4374/2 vs ares 4372/4, but the total is identical). So the
++22 -> +14 phase step at ~23,894,6xx is **not** DMA grid rounding - the DMA
+accounting is correct. The pre-DMA address sequences differ by one instruction
+(ares `$7E2077`, ours `$7E2075`/`$7E2076`), and since the DMA totals match the
+step must come from the surrounding refresh/RAM-wait placement, not the DMA.
+
+This supersedes the earlier claim that the step was DMA pre/post rounding. The
+remaining wandering source is the DRAM refresh position / RAM wait accounting,
+still the -40/±40 variants seen throughout.
