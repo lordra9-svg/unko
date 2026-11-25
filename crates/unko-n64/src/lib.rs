@@ -12,10 +12,11 @@
 //! RDRAM and runs double-buffered AI DMA with interrupts and DAC-to-host
 //! resampling ([`ai::Ai`]). CI/TLUT palettes and
 //! perspective-correct W interpolation and the compressed Z-buffer depth
-//! pipeline are implemented, and TLB faults are delivered precisely through
-//! CP0 (EPC/Cause/BadVAddr, refill/general vectors, ERET). Double-precision
-//! FPU, interrupt delivery and non-TLB precise exceptions are the next
-//! milestones.
+//! pipeline are implemented, and precise exceptions (TLB, unaligned access,
+//! SYSCALL/BREAK, delay-slot BD and maskable interrupts) are delivered through
+//! CP0 EPC/Cause/BadVAddr, Status.EXL and the refill/general vectors, with
+//! ERET returning to the faulting context. Double-precision FPU and precise
+//! FPU exceptions are the next milestones.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

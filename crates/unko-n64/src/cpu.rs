@@ -70,6 +70,8 @@ pub enum CpuError {
     Unaligned {
         /// Virtual address.
         address: u64,
+        /// Whether the faulting access was a store.
+        store: bool,
     },
     /// A TLB miss or invalid mapping.
     Tlb {
@@ -84,8 +86,10 @@ pub enum CpuError {
     Trap {
         /// Program counter of the instruction.
         pc: u64,
-        /// Breakpoint code (`Break`) or zero (`Syscall`).
+        /// Breakpoint code (`BREAK`) or zero (`SYSCALL`).
         code: u32,
+        /// Whether this was `BREAK` rather than `SYSCALL`.
+        breakpoint: bool,
     },
 }
 
@@ -95,9 +99,19 @@ impl fmt::Display for CpuError {
             Self::Unimplemented { pc, instruction } => {
                 write!(f, "unimplemented opcode {instruction:08X} at {pc:016X}")
             }
-            Self::Unaligned { address } => write!(f, "unaligned access at {address:016X}"),
+            Self::Unaligned { address, .. } => write!(f, "unaligned access at {address:016X}"),
             Self::Tlb { address, .. } => write!(f, "TLB fault at {address:016X}"),
-            Self::Trap { pc, code } => write!(f, "trap {code} at {pc:016X}"),
+            Self::Trap {
+                pc,
+                code,
+                breakpoint,
+            } => {
+                if *breakpoint {
+                    write!(f, "break {code} at {pc:016X}")
+                } else {
+                    write!(f, "syscall at {pc:016X}")
+                }
+            }
         }
     }
 }
@@ -146,6 +160,8 @@ pub struct Cpu {
     pub fpr: [u64; 32],
     /// COP1 control/status register (`fcr31`).
     pub fcr31: u32,
+    /// Whether the instruction about to execute is a branch delay slot.
+    pub delay_slot: bool,
 }
 
 impl Cpu {
@@ -163,30 +179,112 @@ impl Cpu {
             tlb: [TlbEntry::default(); 32],
             fpr: [0; 32],
             fcr31: 0,
+            delay_slot: false,
         }
     }
 
     /// Executes one instruction.
     pub fn step<B: Bus>(&mut self, bus: &mut B) -> Result<(), CpuError> {
         let pc = self.pc;
+        let delay_slot = self.delay_slot;
+        if self.take_interrupt() {
+            return Ok(());
+        }
         self.pc = self.next_pc;
         self.next_pc = self.pc.wrapping_add(4);
+        self.delay_slot = false;
 
         let instruction = match self.translate(pc, false) {
             Ok(address) => bus.read_u32(address),
             Err(error) => {
-                self.deliver_exception(&error, pc);
+                self.deliver_error(&error, pc, delay_slot);
                 return Ok(());
             }
         };
         self.instructions += 1;
         match self.execute(instruction, pc, bus) {
-            Err(error @ CpuError::Tlb { .. }) => {
-                self.deliver_exception(&error, pc);
+            Err(
+                error @ (CpuError::Tlb { .. } | CpuError::Unaligned { .. } | CpuError::Trap { .. }),
+            ) => {
+                self.deliver_error(&error, pc, delay_slot);
                 Ok(())
             }
             result => result,
         }
+    }
+
+    /// Takes a pending maskable interrupt when `Status.IE` is set, `EXL`/`ERL`
+    /// are clear and a `Cause.IP` bit is enabled in `Status.IM`.
+    fn take_interrupt(&mut self) -> bool {
+        let status = self.cp0[12];
+        if status & 1 == 0 || status & (2 | 4) != 0 {
+            return false;
+        }
+        if self.cp0[13] & status & 0xFF00 == 0 {
+            return false;
+        }
+        let pc = self.pc;
+        self.deliver_exception(0, None, false, pc, false);
+        true
+    }
+
+    fn deliver_error(&mut self, error: &CpuError, pc: u64, delay_slot: bool) {
+        match *error {
+            CpuError::Tlb {
+                address,
+                store,
+                invalid,
+            } => {
+                let code = if store { 3 } else { 2 };
+                self.deliver_exception(code, Some(address), delay_slot, pc, !invalid);
+            }
+            CpuError::Unaligned { address, store } => {
+                let code = if store { 5 } else { 4 };
+                self.deliver_exception(code, Some(address), delay_slot, pc, false);
+            }
+            CpuError::Trap {
+                code, breakpoint, ..
+            } => {
+                let exception = if breakpoint { 9 } else { 8 };
+                let _ = code;
+                self.deliver_exception(exception, None, delay_slot, pc, false);
+            }
+            _ => {}
+        }
+    }
+
+    /// Delivers a precise exception through CP0.
+    #[allow(clippy::too_many_arguments)]
+    fn deliver_exception(
+        &mut self,
+        code: u64,
+        bad_address: Option<u64>,
+        delay_slot: bool,
+        pc: u64,
+        refill: bool,
+    ) {
+        let status = self.cp0[12];
+        let already_exl = status & 2 != 0;
+        if !already_exl {
+            let epc = if delay_slot { pc.wrapping_sub(4) } else { pc };
+            self.cp0[14] = epc & 0xFFFF_FFFF;
+        }
+        let bd = if delay_slot { 1u64 << 31 } else { 0 };
+        self.cp0[13] = (self.cp0[13] & !(0x1F << 2) & !(1 << 31)) | (code << 2) | bd;
+        if let Some(address) = bad_address {
+            self.cp0[8] = address & 0xFFFF_FFFF;
+        }
+        self.cp0[12] = status | 2;
+        let bev = status & (1 << 22) != 0;
+        let refill = refill && !already_exl;
+        let vector = match (bev, refill) {
+            (false, true) => 0x8000_0000,
+            (false, false) => 0x8000_0180,
+            (true, true) => 0xBFC0_0200,
+            (true, false) => 0xBFC0_0380,
+        };
+        self.pc = vector;
+        self.next_pc = vector.wrapping_add(4);
     }
 
     fn gpr(&self, index: u32) -> u64 {
@@ -213,6 +311,7 @@ impl Cpu {
         match op {
             0 => self.special(instruction, pc, rs, rt, rd, sa, funct),
             1 => {
+                self.delay_slot = true;
                 let target = pc.wrapping_add(4).wrapping_add((simm as u64) << 2);
                 let value = self.gpr(rs);
                 let take = match rt {
@@ -229,6 +328,7 @@ impl Cpu {
                 Ok(())
             }
             2 | 3 => {
+                self.delay_slot = true;
                 let target = (pc.wrapping_add(4) & !0x0FFF_FFFF)
                     | (u64::from(instruction & 0x03FF_FFFF) << 2);
                 if op == 3 {
@@ -238,24 +338,28 @@ impl Cpu {
                 Ok(())
             }
             4 => {
+                self.delay_slot = true;
                 if self.gpr(rs) == self.gpr(rt) {
                     self.next_pc = pc.wrapping_add(4).wrapping_add((simm as u64) << 2);
                 }
                 Ok(())
             }
             5 => {
+                self.delay_slot = true;
                 if self.gpr(rs) != self.gpr(rt) {
                     self.next_pc = pc.wrapping_add(4).wrapping_add((simm as u64) << 2);
                 }
                 Ok(())
             }
             6 => {
+                self.delay_slot = true;
                 if (self.gpr(rs) as i64) <= 0 {
                     self.next_pc = pc.wrapping_add(4).wrapping_add((simm as u64) << 2);
                 }
                 Ok(())
             }
             7 => {
+                self.delay_slot = true;
                 if (self.gpr(rs) as i64) > 0 {
                     self.next_pc = pc.wrapping_add(4).wrapping_add((simm as u64) << 2);
                 }
@@ -362,10 +466,12 @@ impl Cpu {
                 Ok(())
             }
             0x08 => {
+                self.delay_slot = true;
                 self.next_pc = a;
                 Ok(())
             }
             0x09 => {
+                self.delay_slot = true;
                 let target = a;
                 self.set_gpr(rd, pc.wrapping_add(8));
                 self.next_pc = target;
@@ -383,10 +489,15 @@ impl Cpu {
                 }
                 Ok(())
             }
-            0x0C => Err(CpuError::Trap { pc, code: 0 }),
+            0x0C => Err(CpuError::Trap {
+                pc,
+                code: 0,
+                breakpoint: false,
+            }),
             0x0D => Err(CpuError::Trap {
                 pc,
                 code: instruction >> 6 & 0xFFFFF,
+                breakpoint: true,
             }),
             0x0F => Ok(()), // SYNC
             0x10 => {
@@ -700,40 +811,6 @@ impl Cpu {
         })
     }
 
-    /// Delivers a precise TLB exception through CP0: EPC, Cause.ExcCode,
-    /// BadVAddr, Status.EXL and the refill/general exception vector. When
-    /// Status.EXL is already set the exception uses the general vector and
-    /// leaves EPC unchanged, matching the VR4300.
-    fn deliver_exception(&mut self, error: &CpuError, pc: u64) {
-        let CpuError::Tlb {
-            address,
-            store,
-            invalid,
-        } = *error
-        else {
-            return;
-        };
-        let status = self.cp0[12];
-        let already_exl = status & 2 != 0;
-        if !already_exl {
-            self.cp0[14] = pc & 0xFFFF_FFFF;
-        }
-        let code = if store { 3u64 } else { 2 };
-        self.cp0[13] = (self.cp0[13] & !(0x1F << 2) & !(1 << 31)) | (code << 2);
-        self.cp0[8] = address;
-        self.cp0[12] = status | 2;
-        let bev = status & (1 << 22) != 0;
-        let refill = !invalid && !already_exl;
-        let vector = match (bev, refill) {
-            (false, true) => 0x8000_0000,
-            (false, false) => 0x8000_0180,
-            (true, true) => 0xBFC0_0200,
-            (true, false) => 0xBFC0_0380,
-        };
-        self.pc = vector;
-        self.next_pc = vector.wrapping_add(4);
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn cop1(
         &mut self,
@@ -775,6 +852,7 @@ impl Cpu {
                 Ok(())
             }
             0x08 => {
+                self.delay_slot = true;
                 let condition = self.fcr31 & (1 << 23) != 0;
                 let expected = ft & 1 != 0;
                 if condition == expected {
@@ -859,8 +937,7 @@ impl Cpu {
                     0x35 => unordered || a < b,
                     0x36 | 0x3E => a <= b,
                     0x37 => unordered || a <= b,
-                    0x39 | 0x3F => unordered || a <= b,
-                    0x3B => unordered || a <= b,
+                    0x39 | 0x3B | 0x3F => unordered || a <= b,
                     0x3D => !unordered && a < b,
                     _ => false,
                 };
@@ -917,7 +994,10 @@ impl Cpu {
     ) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
         if address & 1 != 0 {
-            return Err(CpuError::Unaligned { address });
+            return Err(CpuError::Unaligned {
+                address,
+                store: false,
+            });
         }
         let value = bus.read_u16(self.translate(address, false)?);
         self.set_gpr(
@@ -941,7 +1021,10 @@ impl Cpu {
     ) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
         if address & 3 != 0 {
-            return Err(CpuError::Unaligned { address });
+            return Err(CpuError::Unaligned {
+                address,
+                store: false,
+            });
         }
         let value = bus.read_u32(self.translate(address, false)?);
         self.set_gpr(
@@ -958,7 +1041,10 @@ impl Cpu {
     fn load64<B: Bus>(&mut self, bus: &mut B, rs: u32, rt: u32, simm: i64) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
         if address & 7 != 0 {
-            return Err(CpuError::Unaligned { address });
+            return Err(CpuError::Unaligned {
+                address,
+                store: false,
+            });
         }
         let value = bus.read_u64(self.translate(address, false)?);
         self.set_gpr(rt, value);
@@ -980,7 +1066,10 @@ impl Cpu {
     ) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
         if address & 1 != 0 {
-            return Err(CpuError::Unaligned { address });
+            return Err(CpuError::Unaligned {
+                address,
+                store: true,
+            });
         }
         bus.write_u16(self.translate(address, true)?, self.gpr(rt) as u16);
         Ok(())
@@ -995,7 +1084,10 @@ impl Cpu {
     ) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
         if address & 3 != 0 {
-            return Err(CpuError::Unaligned { address });
+            return Err(CpuError::Unaligned {
+                address,
+                store: true,
+            });
         }
         bus.write_u32(self.translate(address, true)?, self.gpr(rt) as u32);
         Ok(())
@@ -1010,7 +1102,10 @@ impl Cpu {
     ) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
         if address & 7 != 0 {
-            return Err(CpuError::Unaligned { address });
+            return Err(CpuError::Unaligned {
+                address,
+                store: true,
+            });
         }
         bus.write_u64(self.translate(address, true)?, self.gpr(rt));
         Ok(())
@@ -1025,7 +1120,10 @@ impl Cpu {
     ) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
         if address & 3 != 0 {
-            return Err(CpuError::Unaligned { address });
+            return Err(CpuError::Unaligned {
+                address,
+                store: false,
+            });
         }
         let value = bus.read_u32(self.translate(address, false)?);
         self.fpr[rt as usize] = u64::from(value);
@@ -1041,7 +1139,10 @@ impl Cpu {
     ) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
         if address & 3 != 0 {
-            return Err(CpuError::Unaligned { address });
+            return Err(CpuError::Unaligned {
+                address,
+                store: true,
+            });
         }
         bus.write_u32(self.translate(address, true)?, self.fpr[rt as usize] as u32);
         Ok(())
@@ -1056,7 +1157,10 @@ impl Cpu {
     ) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
         if address & 7 != 0 {
-            return Err(CpuError::Unaligned { address });
+            return Err(CpuError::Unaligned {
+                address,
+                store: false,
+            });
         }
         let value = bus.read_u64(self.translate(address, false)?);
         self.fpr[rt as usize] = value;
@@ -1072,7 +1176,10 @@ impl Cpu {
     ) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
         if address & 7 != 0 {
-            return Err(CpuError::Unaligned { address });
+            return Err(CpuError::Unaligned {
+                address,
+                store: true,
+            });
         }
         bus.write_u64(self.translate(address, true)?, self.fpr[rt as usize]);
         Ok(())
@@ -1157,6 +1264,19 @@ mod tests {
     fn run(cpu: &mut Cpu, memory: &mut Memory, steps: usize) {
         for _ in 0..steps {
             cpu.step(memory).expect("step");
+        }
+    }
+
+    /// Installs the general-vector handler at physical 0x180: EPC += 4,
+    /// optionally clear Cause, then ERET.
+    fn install_handler(memory: &mut Memory, clear_cause: bool) {
+        let mut words = vec![0x401A_7000u32, 0x275A_0004, 0x409A_7000];
+        if clear_cause {
+            words.push(0x4080_6800); // mtc0 zero,$13
+        }
+        words.push(0x4200_0018); // eret
+        for (index, word) in words.iter().enumerate() {
+            memory.write_u32(0x180 + index as u64 * 4, *word);
         }
     }
 
@@ -1279,8 +1399,11 @@ mod tests {
     fn unaligned_access_is_reported() {
         let mut memory = program(&[0x8D0A_0001]); // lw t2,1(t0)
         let mut cpu = Cpu::new(0);
-        let error = cpu.step(&mut memory).expect_err("unaligned");
-        assert!(matches!(error, CpuError::Unaligned { .. }));
+        cpu.step(&mut memory).expect("exception delivered");
+        assert_eq!(cpu.pc, 0x8000_0180);
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 4, "AdEL");
+        assert_eq!(cpu.cp0[8], 1);
+        assert_eq!(cpu.cp0[14], 0);
     }
     #[test]
     fn tlb_maps_virtual_pages_to_physical_memory() {
@@ -1449,5 +1572,82 @@ mod tests {
         };
         cpu.step(&mut memory).expect("BEV invalid TLB exception");
         assert_eq!(cpu.pc, 0xBFC0_0380);
+    }
+    #[test]
+    fn non_tlb_exceptions_deliver_and_eret_resumes() {
+        // Unaligned load -> AdEL.
+        let mut cpu = Cpu::new(0x8000_1000);
+        let mut memory = Memory::new(0x3000);
+        install_handler(&mut memory, false);
+        memory.write_u32(0x1000, 0x8C08_0001); // lw t0,1(zero)
+        memory.write_u32(0x1004, 0x2409_0007); // addiu t1,zero,7
+        cpu.step(&mut memory).expect("AdEL");
+        assert_eq!(cpu.pc, 0x8000_0180);
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 4);
+        assert_eq!(cpu.cp0[8], 1);
+        assert_eq!(cpu.cp0[14], 0x8000_1000);
+        run(&mut cpu, &mut memory, 4);
+        assert_eq!(cpu.pc, 0x8000_1004);
+        cpu.step(&mut memory).expect("resume");
+        assert_eq!(cpu.gpr[9], 7);
+
+        // Unaligned store -> AdES.
+        let mut cpu = Cpu::new(0x8000_1000);
+        memory.write_u32(0x1000, 0xAC00_0002); // sw zero,2(zero)
+        cpu.step(&mut memory).expect("AdES");
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 5);
+        assert_eq!(cpu.cp0[8], 2);
+
+        // SYSCALL -> exception 8, BREAK -> 9.
+        let mut cpu = Cpu::new(0x8000_1000);
+        memory.write_u32(0x1000, 0x0000_000C);
+        memory.write_u32(0x1004, 0x2409_0007);
+        cpu.step(&mut memory).expect("syscall");
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 8);
+        run(&mut cpu, &mut memory, 4);
+        cpu.step(&mut memory).expect("resume after syscall");
+        assert_eq!(cpu.gpr[9], 7);
+
+        let mut cpu = Cpu::new(0x8000_1000);
+        memory.write_u32(0x1000, 0x0000_48CD); // break 0x123
+        cpu.step(&mut memory).expect("break");
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 9);
+    }
+
+    #[test]
+    fn delay_slot_exception_sets_bd_and_branch_epc() {
+        let mut cpu = Cpu::new(0x8000_1000);
+        let mut memory = Memory::new(0x3000);
+        memory.write_u32(0x1000, 0x1000_0002); // beq zero,zero,+2
+        memory.write_u32(0x1004, 0x0000_000C); // syscall (delay slot)
+        cpu.step(&mut memory).expect("branch");
+        cpu.step(&mut memory).expect("delay slot exception");
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 8);
+        assert_ne!(cpu.cp0[13] & (1 << 31), 0, "BD set");
+        assert_eq!(cpu.cp0[14], 0x8000_1000, "EPC points at the branch");
+        assert_eq!(cpu.pc, 0x8000_0180);
+    }
+
+    #[test]
+    fn interrupt_delivery_and_eret() {
+        let mut cpu = Cpu::new(0x8000_1000);
+        let mut memory = Memory::new(0x3000);
+        install_handler(&mut memory, true);
+        memory.write_u32(0x1000, 0x0000_0000); // nop
+        memory.write_u32(0x1004, 0x2409_0007); // addiu t1,zero,7
+                                               // IE + IM2 enabled, IP2 pending.
+        cpu.cp0[12] = 1 | (1 << 10);
+        cpu.cp0[13] = 1 << 10;
+        cpu.step(&mut memory).expect("interrupt");
+        assert_eq!(cpu.pc, 0x8000_0180);
+        assert_eq!(cpu.cp0[14], 0x8000_1000);
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 0, "interrupt code");
+        assert_ne!(cpu.cp0[12] & 2, 0, "EXL set");
+        // Handler: EPC += 4, clear Cause, ERET.
+        run(&mut cpu, &mut memory, 5);
+        assert_eq!(cpu.pc, 0x8000_1004);
+        assert_eq!(cpu.cp0[12] & 2, 0);
+        cpu.step(&mut memory).expect("resume after interrupt");
+        assert_eq!(cpu.gpr[9], 7);
     }
 }
