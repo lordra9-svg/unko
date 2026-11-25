@@ -47,6 +47,11 @@ impl SmpThread {
     pub fn set_cpu_clock_fixed(&mut self, clock: u128) {
         self.engine.set_cpu_clock_fixed(clock);
     }
+
+    /// The shared APU RAM handle (also given to [`DspThread`]).
+    pub fn ram_handle(&self) -> std::rc::Rc<std::cell::RefCell<Vec<u8>>> {
+        self.engine.ram_handle()
+    }
 }
 
 impl ThreadState for SmpThread {
@@ -85,6 +90,15 @@ mod tests {
         let mut smp = smp_with(&[0xE4, 0xF4, 0x2F, 0xFC], 0x0200);
         smp.set_cpu_clock_fixed(0);
         assert_eq!(smp.step(), Need::Synchronize(Thread::Cpu));
+    }
+
+    #[test]
+    fn smp_and_dsp_share_apu_ram() {
+        let smp = smp_with(&[0xFF], 0x0200);
+        let ram = smp.ram_handle();
+        let _dsp = DspThread::new(ram.clone());
+        ram.borrow_mut()[0x1234] = 0x5A;
+        assert_eq!(smp.engine().ram_handle().borrow()[0x1234], 0x5A);
     }
 
     #[test]

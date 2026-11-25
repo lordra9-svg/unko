@@ -466,7 +466,7 @@ pub struct SymEngine {
     core: Option<crate::spc700::Spc700>,
     spc: crate::spc_coroutine::SpcCoroutine,
     dsp: crate::dsp::Dsp,
-    ram: Box<[u8]>,
+    ram: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
     samples: std::collections::VecDeque<crate::dsp::Sample>,
     smp_clock: u128,
     dsp_units: u128,
@@ -512,7 +512,7 @@ impl SymEngine {
             core: None,
             spc: crate::spc_coroutine::new_spc_coroutine_inline(),
             dsp: crate::dsp::Dsp::new(),
-            ram: vec![0; 0x1_0000].into_boxed_slice(),
+            ram: std::rc::Rc::new(std::cell::RefCell::new(vec![0; 0x1_0000])),
             samples: std::collections::VecDeque::new(),
             smp_clock: 0,
             dsp_units: 0,
@@ -555,6 +555,11 @@ impl SymEngine {
         units * SMP_FIXED
     }
 
+    /// The shared APU RAM handle (ares `apuram`).
+    pub fn ram_handle(&self) -> std::rc::Rc<std::cell::RefCell<Vec<u8>>> {
+        self.ram.clone()
+    }
+
     /// DSP progress in S-SMP-clock units (2 per micro-step; fixed-point internal).
     pub const fn dsp_units(&self) -> u128 {
         self.dsp_units / SMP_FIXED
@@ -587,7 +592,7 @@ impl SymEngine {
 
     /// Run one S-DSP micro-step and record it in the round-robin state.
     fn dsp_micro_step(&mut self) {
-        if let Some(sample) = self.dsp.tick(&mut self.ram) {
+        if let Some(sample) = self.dsp.tick(&mut self.ram.borrow_mut()[..]) {
             self.samples.push_back(sample);
             if self.samples.len() > 16_384 {
                 self.samples.pop_front();
@@ -634,7 +639,7 @@ impl SymEngine {
             SpcEvent::Read(address) if self.iplrom_enable && address >= 0xFFC0 => {
                 SpcResume::Byte(self.ipl[usize::from(address & 0x3F)])
             }
-            SpcEvent::Read(address) => SpcResume::Byte(self.ram[usize::from(address)]),
+            SpcEvent::Read(address) => SpcResume::Byte(self.ram.borrow()[usize::from(address)]),
             SpcEvent::Write(0x00F0, value) => {
                 // ares: external = bits 0-3, internal = bits 4-7.
                 self.external_wait = value & 0x0F;
@@ -666,7 +671,7 @@ impl SymEngine {
                 SpcResume::Unit
             }
             SpcEvent::Write(address, value) => {
-                self.ram[usize::from(address)] = value;
+                self.ram.borrow_mut()[usize::from(address)] = value;
                 SpcResume::Unit
             }
             SpcEvent::StepClock(clocks) => {
@@ -959,8 +964,9 @@ impl SymEngine {
     /// Apply ares' deterministic APU RAM + S-DSP power-on state (the same
     /// stream `Apu::load_power_on_state` uses).
     pub fn load_power_on_state(&mut self, ram: &[u8], dsp_registers: &[u8]) {
-        if ram.len() == self.ram.len() {
-            self.ram.copy_from_slice(ram);
+        let mut destination = self.ram.borrow_mut();
+        if ram.len() == destination.len() {
+            destination.copy_from_slice(ram);
         }
         let count = dsp_registers.len().min(crate::dsp::DSP_REGISTERS);
         self.dsp.registers[..count].copy_from_slice(&dsp_registers[..count]);
@@ -1115,8 +1121,8 @@ mod engine_tests {
     fn smp_coroutine_retires_instructions_and_pulls_dsp() {
         let mut engine = SymEngine::new();
         engine.load_core(test_core());
-        engine.ram[0x0200] = 0x2F; // BRA
-        engine.ram[0x0201] = 0xFE; // -2
+        engine.ram.borrow_mut()[0x0200] = 0x2F; // BRA
+        engine.ram.borrow_mut()[0x0201] = 0xFE; // -2
         engine.run_mutual(4);
         assert!(engine.instructions() >= 1, "S-SMP must run instructions");
         assert!(engine.dsp_units() >= 4 * SMP_PER_DSP_STEP);
@@ -1187,8 +1193,8 @@ mod port_tests {
         let mut core = crate::spc700::Spc700::new();
         core.pc = 0x0200;
         let mut engine = SymEngine::new();
-        engine.ram[0x0200] = 0x2F; // BRA -2
-        engine.ram[0x0201] = 0xFE;
+        engine.ram.borrow_mut()[0x0200] = 0x2F; // BRA -2
+        engine.ram.borrow_mut()[0x0201] = 0xFE;
         engine.load_core(core);
         engine
     }
@@ -1232,10 +1238,10 @@ mod pull_tests {
         let mut core = crate::spc700::Spc700::new();
         core.pc = 0x0200;
         let mut engine = SymEngine::new();
-        engine.ram[0x0200] = 0xE4;
-        engine.ram[0x0201] = 0xF4;
-        engine.ram[0x0202] = 0x2F;
-        engine.ram[0x0203] = 0xFC;
+        engine.ram.borrow_mut()[0x0200] = 0xE4;
+        engine.ram.borrow_mut()[0x0201] = 0xF4;
+        engine.ram.borrow_mut()[0x0202] = 0x2F;
+        engine.ram.borrow_mut()[0x0203] = 0xFC;
         engine.load_core(core);
         engine.set_cpu_clock(0);
         let mut pulls = 0u32;
@@ -1326,8 +1332,8 @@ mod advance_tests {
         let mut core = crate::spc700::Spc700::new();
         core.pc = 0x0200;
         let mut engine = SymEngine::new();
-        engine.ram[0x0200] = 0x2F; // BRA -2
-        engine.ram[0x0201] = 0xFE;
+        engine.ram.borrow_mut()[0x0200] = 0x2F; // BRA -2
+        engine.ram.borrow_mut()[0x0201] = 0xFE;
         engine.load_core(core);
         engine
     }
@@ -1358,10 +1364,10 @@ mod parking_tests {
         core.pc = 0x0200;
         let mut engine = SymEngine::new();
         // `MOV A,$F4` then `BRA -2`.
-        engine.ram[0x0200] = 0xE4;
-        engine.ram[0x0201] = 0xF4;
-        engine.ram[0x0202] = 0x2F;
-        engine.ram[0x0203] = 0xFC;
+        engine.ram.borrow_mut()[0x0200] = 0xE4;
+        engine.ram.borrow_mut()[0x0201] = 0xF4;
+        engine.ram.borrow_mut()[0x0202] = 0x2F;
+        engine.ram.borrow_mut()[0x0203] = 0xFC;
         engine.load_core(core);
         engine.set_cpu_clock(0);
         let target = match engine.smp_step_parking() {
@@ -1388,10 +1394,10 @@ mod ca_peer_tests {
         core.pc = 0x0200;
         let mut engine = SymEngine::new();
         // `MOV A,$F4` then `BRA -2`.
-        engine.ram[0x0200] = 0xE4;
-        engine.ram[0x0201] = 0xF4;
-        engine.ram[0x0202] = 0x2F;
-        engine.ram[0x0203] = 0xFC;
+        engine.ram.borrow_mut()[0x0200] = 0xE4;
+        engine.ram.borrow_mut()[0x0201] = 0xF4;
+        engine.ram.borrow_mut()[0x0202] = 0x2F;
+        engine.ram.borrow_mut()[0x0203] = 0xFC;
         engine.load_core(core);
         engine.set_cpu_clock(0);
         let mut peer = CaPeer::new(engine);
@@ -1417,10 +1423,10 @@ mod ca_async_tests {
         core.pc = 0x0200;
         let mut engine = SymEngine::new();
         // `MOV A,$F4` then `BRA -2`.
-        engine.ram[0x0200] = 0xE4;
-        engine.ram[0x0201] = 0xF4;
-        engine.ram[0x0202] = 0x2F;
-        engine.ram[0x0203] = 0xFC;
+        engine.ram.borrow_mut()[0x0200] = 0xE4;
+        engine.ram.borrow_mut()[0x0201] = 0xF4;
+        engine.ram.borrow_mut()[0x0202] = 0x2F;
+        engine.ram.borrow_mut()[0x0203] = 0xFC;
         engine.load_core(core);
         let mut peer = CaPeer::new(engine);
         let mut cpu = 0u128;
