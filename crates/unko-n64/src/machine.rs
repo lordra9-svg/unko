@@ -47,6 +47,7 @@ pub struct Machine {
     vi_origin: u32,
     vi_width: u32,
     vi_line: u32,
+    vi_intr: u32,
     pi_dram: u32,
     pi_cart: u32,
 }
@@ -77,6 +78,7 @@ impl Machine {
             vi_origin: 0,
             vi_width: 320,
             vi_line: 0,
+            vi_intr: 0,
             pi_dram: 0,
             pi_cart: 0,
         }
@@ -170,6 +172,18 @@ impl Machine {
 
     /// Runs one placeholder frame and returns its index.
     pub fn run_frame(&mut self) -> Result<u64, CpuError> {
+        // Advance the VI line counter for one frame and raise the VI interrupt
+        // when the programmed line is reached.
+        if self.vi_intr != 0 {
+            for _ in 0..525 {
+                self.vi_line = (self.vi_line + 1) % 525;
+                if self.vi_line == self.vi_intr {
+                    self.mi.raise_interrupt(3);
+                }
+            }
+        } else {
+            self.vi_line = (self.vi_line + 525) % 525;
+        }
         if !self.rsp.halted {
             self.rsp.run(RSP_INSTRUCTIONS_PER_FRAME);
         }
@@ -180,7 +194,6 @@ impl Machine {
         let samples = (self.ai.output_rate() / 60.0).round() as usize;
         self.ai.generate(samples, &self.rdram, &mut self.audio);
         self.frames += 1;
-        self.vi_line = (self.vi_line + 1) % 525;
         self.present();
         Ok(self.frames)
     }
@@ -339,7 +352,7 @@ impl Machine {
             0x0440_0000 => 0, // VI status
             0x0440_0004 => self.vi_origin,
             0x0440_0008 => self.vi_width,
-            0x0440_000C => 0,
+            0x0440_000C => self.vi_intr,
             0x0440_0010 => self.vi_line,
             0x0460_0000 => self.pi_dram,
             0x0460_0004 => self.pi_cart,
@@ -351,6 +364,7 @@ impl Machine {
         match address {
             0x0440_0004 => self.vi_origin = value & 0x00FF_FFFF,
             0x0440_0008 => self.vi_width = value & 0x0FFF,
+            0x0440_000C => self.vi_intr = value & 0x03FF,
             0x0460_0000 => self.pi_dram = value,
             0x0460_0004 => self.pi_cart = value,
             0x0460_0008 | 0x0460_000C => self.pi_dma(value),
@@ -367,6 +381,9 @@ impl Machine {
             if let Some(slot) = self.rdram.get_mut(destination + offset) {
                 *slot = byte;
             }
+        }
+        if length != 0 {
+            self.mi.raise_interrupt(4);
         }
     }
 }
@@ -1393,6 +1410,50 @@ mod tests {
         machine.signal_cache_error();
         machine.step().expect("cache error");
         assert_eq!(machine.cpu.pc, 0xA000_0000);
+    }
+
+    #[test]
+    fn machine_pi_dma_raises_mi_interrupt() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        for (index, word) in [0x3C08_0430u32, 0x2409_0010, 0xAD09_0008, 0x4200_0018]
+            .iter()
+            .enumerate()
+        {
+            machine.write_u32(0x180 + index as u64 * 4, *word);
+        }
+        machine.cpu.cp0[12] = 1 | (1 << 10);
+        machine.write_u32(0x0430_000C, 1 << 9); // set PI mask
+        machine.pi_cart = 0x100;
+        machine.pi_dram = 0x2000;
+        machine.write_u32(0x0460_0008, 16); // PI DMA completes
+        assert_ne!(machine.mi.read_register(0x08) & (1 << 4), 0);
+        machine.run_frame().expect("frame with PI interrupt");
+        assert_eq!(machine.frames, 1);
+        assert_eq!(machine.mi.read_register(0x08) & (1 << 4), 0, "PI cleared");
+        assert_eq!(machine.cpu.cp0[12] & 2, 0, "handler ERET ran");
+    }
+
+    #[test]
+    fn machine_vi_line_raises_mi_interrupt() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        for (index, word) in [0x3C08_0430u32, 0x2409_0008, 0xAD09_0008, 0x4200_0018]
+            .iter()
+            .enumerate()
+        {
+            machine.write_u32(0x180 + index as u64 * 4, *word);
+        }
+        machine.cpu.cp0[12] = 1 | (1 << 10);
+        machine.write_u32(0x0430_000C, 1 << 7); // set VI mask
+                                                // Default VI_INTR is disabled (0): no interrupt.
+        machine.run_frame().expect("frame without VI");
+        assert_eq!(machine.mi.read_register(0x08) & (1 << 3), 0);
+        machine.write_u32(0x0440_000C, 100); // VI interrupt line
+        machine.run_frame().expect("frame with VI interrupt");
+        assert_eq!(machine.frames, 2);
+        assert_eq!(machine.mi.read_register(0x08) & (1 << 3), 0, "VI cleared");
+        assert_eq!(machine.cpu.cp0[12] & 2, 0, "handler ERET ran");
     }
 
     #[test]
