@@ -627,6 +627,9 @@ impl Rdp {
             blend_enabled = result.blend_en;
             coverage_wrap = result.coverage_wrap;
             blend_shift = result.blend_shift;
+            if modes.aa && coverage == 0 {
+                return;
+            }
             if modes.z_update {
                 let word = z_compress(z) << 2 | u16::from(dz_compressed >> 2);
                 if let Some(slot) = rdram.get_mut(depth_address..depth_address + 2) {
@@ -1524,6 +1527,25 @@ mod tests {
         assert_eq!(rdp.triangles(), 1);
         // The following SET_FILL_COLOR was reached (stream stayed aligned).
         assert_eq!(rdp.fill_color, 0x0000_00FF);
+    }
+
+    #[test]
+    fn interpenetrating_depth_scales_coverage() {
+        // Existing surface at z = 0x20000 with a 1-unit delta exponent.
+        // A fragment 0x10 in front is within the combined delta, so the
+        // interpenetrating curve reduces the coverage count.
+        let result = depth_test(0x1_FFF0, 0, 0x800, 0, 8, 7, true, 1, false, true);
+        assert!(result.pass);
+        assert_eq!(result.coverage, 2);
+        assert!(!result.blend_en);
+        // A different point in the delta window yields coefficient 4.
+        let result = depth_test(0x1_FFE0, 0, 0x800, 0, 8, 7, true, 1, false, true);
+        assert!(result.pass);
+        assert_eq!(result.coverage, 4);
+        // Outside the delta window the normal opaque rule keeps full coverage.
+        let result = depth_test(0x1_0000, 0, 0x800, 0, 8, 7, true, 1, false, true);
+        assert!(result.pass);
+        assert_eq!(result.coverage, 8);
     }
 
     #[test]

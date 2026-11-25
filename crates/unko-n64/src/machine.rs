@@ -736,6 +736,77 @@ mod tests {
 
     #[test]
     #[allow(clippy::vec_init_then_push)]
+    fn rdp_interpenetrating_depth_scales_coverage() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        let origin = 0x2000u32;
+        let depth = 0x6000u32;
+        machine.write_register(0x0440_0004, origin);
+        machine.write_register(0x0440_0008, 32);
+        for index in 0..32 * 32 {
+            machine.write_u16(depth as u64 + index * 2, 0xFFFF);
+        }
+        let vertices = [(4.0, 4.0), (10.0, 6.0), (4.0, 12.0)];
+        // 1-cycle primitive colour with full alpha; AA + z test/update +
+        // image read, interpenetrating z-mode, clamp coverage, dither off.
+        let combine = (8u64 << 52)
+            | (8u64 << 28)
+            | (16u64 << 47)
+            | (3u64 << 15)
+            | (7u64 << 44)
+            | (7u64 << 12)
+            | (7u64 << 41)
+            | (6u64 << 9);
+        let other = (0x2Fu64 << 56)
+            | (0xCu64 << 36)
+            | (1u64 << 10)
+            | (1u64 << 6)
+            | (1u64 << 5)
+            | (1u64 << 4)
+            | (1u64 << 3)
+            | (1u64 << 22);
+
+        let mut words: Vec<u64> = Vec::new();
+        words.push(
+            (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (32u64 << 32) | u64::from(origin),
+        );
+        words.push((0x3Eu64 << 56) | u64::from(depth));
+        words.push((0x37u64 << 56) | 0x0000_FFFF); // blue
+        words.push((0x36u64 << 56) | (31u64 << 12) | 31);
+        words.push(other);
+        words.push((0x3Cu64 << 56) | combine);
+        words.push((0x3Au64 << 56) | 0xFF00_00FF); // red surface at z=0x20000
+        words.extend(triangle_edge(0x09, vertices));
+        words.extend(z_words(32_768.0, 0.0, 0.0));
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("first surface");
+
+        // Green fragment 0x10 in front: interpenetrating coverage scaling.
+        let mut words: Vec<u64> = Vec::new();
+        words.push((0x3Au64 << 56) | 0x00FF_00FF);
+        words.extend(triangle_edge(0x09, vertices));
+        words.extend(z_words(32_764.0, 0.0, 0.0));
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("interpenetrating fragment");
+        assert_eq!(
+            frame_pixel(&machine, 5, 9),
+            [0, 0xFF, 0, 0],
+            "reduced coverage yields partial alpha"
+        );
+
+        // A farther-in-front fragment (outside the delta window) keeps full
+        // coverage and opaque alpha.
+        let mut words: Vec<u64> = Vec::new();
+        words.push((0x3Au64 << 56) | 0x00FF_00FF);
+        words.extend(triangle_edge(0x09, vertices));
+        words.extend(z_words(16_384.0, 0.0, 0.0));
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("opaque fragment");
+        assert_eq!(frame_pixel(&machine, 5, 9), [0, 0xFF, 0, 0xFF]);
+    }
+
+    #[test]
+    #[allow(clippy::vec_init_then_push)]
     fn rdp_combiner_k4_k5_lod_and_noise_inputs() {
         let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
         let mut machine = Machine::new(&cart);

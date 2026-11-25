@@ -291,7 +291,8 @@ The main effort was the reference-parity accuracy core. Details in
       PrimLODFrac combiner inputs), a Z-buffered
       depth pipeline
       (`SET_MASK_IMAGE`/`SET_PRIMITIVE_DEPTH`, interpolated 16.16 Z compressed
-      to 16-bit depth + delta, z compare/update, image-read blending, AA
+      to 16-bit depth + delta, z compare/update with the interpenetrating
+      coverage curve, image-read blending, AA
       exact subpixel coverage accumulation/overflow and memory-alpha
       depth-delta shifters), with CI/TLUT
       palettes (`LOAD_TLUT`, 4/8-bit CI lookup) and perspective-correct W

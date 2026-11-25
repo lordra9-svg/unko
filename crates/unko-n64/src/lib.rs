@@ -14,7 +14,8 @@
 //! RDRAM and runs DAC-clocked double-buffered AI DMA with boundary interrupts
 //! and host-rate resampling ([`ai::Ai`]). CI/TLUT palettes and
 //! perspective-correct W interpolation and the compressed Z-buffer depth
-//! pipeline are implemented, and precise exceptions (TLB, unaligned access,
+//! pipeline (including the interpenetrating coverage curve) are implemented,
+//! and precise exceptions (TLB, unaligned access,
 //! SYSCALL/BREAK, reserved instructions, coprocessor-unusable, integer
 //! overflow, delay-slot BD, maskable interrupts and enabled FPU exceptions)
 //! are delivered through CP0
