@@ -300,6 +300,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 );
             }
         }
+        "snes" => cmd_snes(args)?,
         "signatures" => {
             let dir = args.next().ok_or_else(usage)?;
             let mut frames = 60u32;
@@ -1223,10 +1224,87 @@ fn create_core(registry: &Registry, id: Option<&str>) -> Result<Box<dyn NesCore>
     Ok(Box::new(unko_nes_host::AccuracyCore::new()))
 }
 
+fn cmd_snes<I: Iterator<Item = String>>(mut args: I) -> Result<(), Box<dyn Error>> {
+    use unko_snes_host::{FirmwareKind, SnesCore};
+
+    let path = args.next().ok_or_else(usage)?;
+    let mut frames = 600u32;
+    let mut ipl: Option<String> = None;
+    let mut cx4: Option<String> = None;
+    let mut dsp1: Option<String> = None;
+    let mut audio_out: Option<String> = None;
+    let mut frame_out: Option<String> = None;
+    while let Some(flag) = args.next() {
+        match flag.as_str() {
+            "--frames" => frames = args.next().ok_or_else(usage)?.parse()?,
+            "--ipl" => ipl = Some(args.next().ok_or_else(usage)?),
+            "--cx4" => cx4 = Some(args.next().ok_or_else(usage)?),
+            "--dsp1" => dsp1 = Some(args.next().ok_or_else(usage)?),
+            "--audio-out" => audio_out = Some(args.next().ok_or_else(usage)?),
+            "--frame-out" => frame_out = Some(args.next().ok_or_else(usage)?),
+            other => return Err(format!("unknown snes option '{other}'").into()),
+        }
+    }
+
+    let rom = fs::read(&path)?;
+    let mut core = SnesCore::new();
+    if let Some(path) = &ipl {
+        core.set_firmware(FirmwareKind::Ipl, &fs::read(path)?)?;
+    }
+    if let Some(path) = &cx4 {
+        core.set_firmware(FirmwareKind::Cx4, &fs::read(path)?)?;
+    }
+    if let Some(path) = &dsp1 {
+        core.set_firmware(FirmwareKind::NecDsp, &fs::read(path)?)?;
+    }
+    core.load(&rom, &LoadOptions::default())?;
+    let info = core.info();
+    println!("system    {}", info.system.as_str());
+    println!("core      {} ({})", info.name, info.id);
+
+    let mut audio_file = match &audio_out {
+        Some(path) => Some(fs::File::create(path)?),
+        None => None,
+    };
+    let mut video_hash = FNV_OFFSET;
+    let mut audio_hash = FNV_OFFSET;
+    let mut stereo_frames = 0usize;
+    let started = Instant::now();
+    for frame in 0..frames {
+        let stats = core.run_frame()?;
+        video_hash = hash_video(video_hash, &core);
+        audio_hash = hash_audio(audio_hash, &core);
+        stereo_frames += stats.samples;
+        if let Some(file) = audio_file.as_mut() {
+            use std::io::Write;
+            let mut bytes = Vec::with_capacity(core.audio().samples.len() * 4);
+            for sample in core.audio().samples {
+                bytes.extend_from_slice(&sample.to_le_bytes());
+            }
+            file.write_all(&bytes)?;
+        }
+        if let Some(path) = &frame_out {
+            if frame + 1 == frames {
+                fs::write(path, core.video().data)?;
+            }
+        }
+    }
+    let video = core.video();
+    let seconds = started.elapsed().as_secs_f64();
+    println!(
+        "frames    {frames} ({:.1} fps)  stereo_frames {stereo_frames}",
+        f64::from(frames) / seconds.max(f64::EPSILON)
+    );
+    println!("video     {}x{}", video.width, video.height);
+    println!("hashes    video {video_hash:016x}  audio {audio_hash:016x}");
+    Ok(())
+}
+
 fn usage() -> String {
     "usage:
   unko rom-manager --dat DAT --input ROMS [--1g1r] [--fixdat FILE] [--csv FILE] [--copy DIR]
   unko info <rom|archive>
+  unko snes <rom> [--frames N] [--ipl PATH] [--cx4 PATH] [--dsp1 PATH] [--audio-out FILE] [--frame-out FILE]
   unko scan <dir>
   unko signatures <dir> [--frames N] [--mapper ID] [--limit N] [--check FILE]
   unko run <rom|archive> [--frames N] [--out frame.ppm] [--sram save.sav] [--press-start] [--core ID] [--bios PATH]
@@ -1645,5 +1723,21 @@ fn share2(part: u64, total: u64) -> f64 {
         0.0
     } else {
         100.0 * part as f64 / total as f64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registry_exposes_both_systems() {
+        let registry = registry();
+        assert!(registry.create_default(SystemId::Nes).is_some());
+        let snes = registry
+            .create(SystemId::Snes, "snes_accuracy_core")
+            .expect("SNES core is registered");
+        assert_eq!(snes.info().system, SystemId::Snes);
+        assert!(registry.systems().contains(&SystemId::Snes));
     }
 }
