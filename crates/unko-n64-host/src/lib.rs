@@ -6,8 +6,8 @@
 //! and (textured) triangle commands through the two-cycle combiner and the
 //! SET_OTHER_MODES blender (fog, coverage, dither, copy),
 //! presents the VI framebuffer from RDRAM as RGBA and drains AI DMA into
-//! interleaved f32 audio. Audio resampling/mixing and precise exceptions are
-//! the next milestone.
+//! interleaved f32 audio resampled from the AI DAC rate to the host rate.
+//! Precise exceptions are the next milestone.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -99,7 +99,9 @@ impl Core for N64Core {
     fn load(&mut self, rom: &[u8], _options: &LoadOptions) -> Result<(), CoreError> {
         let cart =
             Cartridge::from_bytes(rom).map_err(|error| CoreError::InvalidRom(error.to_string()))?;
-        self.machine = Some(Machine::new(&cart));
+        let mut machine = Machine::new(&cart);
+        machine.ai.set_output_rate(self.sample_rate);
+        self.machine = Some(machine);
         self.cart = Some(cart);
         Ok(())
     }
@@ -109,7 +111,9 @@ impl Core for N64Core {
             .cart
             .as_ref()
             .ok_or_else(|| CoreError::Internal("no ROM loaded".to_owned()))?;
-        self.machine = Some(Machine::new(cart));
+        let mut machine = Machine::new(cart);
+        machine.ai.set_output_rate(self.sample_rate);
+        self.machine = Some(machine);
         Ok(())
     }
 
@@ -161,7 +165,13 @@ impl Core for N64Core {
     fn set_input(&mut self, _port: usize, _input: InputState) {}
 
     fn set_sample_rate(&mut self, sample_rate: f32) {
+        if !sample_rate.is_finite() || sample_rate <= 0.0 {
+            return;
+        }
         self.sample_rate = sample_rate;
+        if let Some(machine) = self.machine.as_mut() {
+            machine.ai.set_output_rate(sample_rate);
+        }
     }
 
     fn set_audio_quality(&mut self, _quality: AudioQuality) {}
@@ -242,11 +252,37 @@ mod tests {
             machine.write_u32(0x0450_0004, 8);
         }
         let stats = core.run_frame().expect("frame");
-        assert_eq!(stats.samples, 2);
+        // One 60 Hz frame at the 48 kHz host rate.
+        assert_eq!(stats.samples, 800);
         assert_eq!(core.audio().channels, 2);
-        assert!(core.audio().sample_rate > 40_000.0);
-        assert_eq!(core.audio().samples.len(), 4);
+        assert!((core.audio().sample_rate - 48_000.0).abs() < 1.0);
+        assert_eq!(core.audio().samples.len(), 1600);
         assert!((core.audio().samples[0] - 100.0 / 32768.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn audio_resamples_to_the_host_rate() {
+        use unko_n64::cpu::Bus;
+        let mut core = N64Core::new();
+        core.set_sample_rate(24_000.0);
+        core.load(&z64(), &LoadOptions::default()).expect("load");
+        {
+            let machine = core.machine_mut().expect("machine");
+            for (index, (left, right)) in [(1000i16, -1000i16), (2000, -2000)].iter().enumerate() {
+                let mut word = [0u8; 4];
+                word[..2].copy_from_slice(&left.to_be_bytes());
+                word[2..].copy_from_slice(&right.to_be_bytes());
+                machine.write_u32(0x40 + index as u64 * 4, u32::from_be_bytes(word));
+            }
+            machine.write_u32(0x0450_0008, 1);
+            machine.write_u32(0x0450_0000, 0x40);
+            machine.write_u32(0x0450_0010, 1013);
+            machine.write_u32(0x0450_0004, 8);
+        }
+        let stats = core.run_frame().expect("frame");
+        assert_eq!(stats.samples, 400);
+        assert!((core.audio().sample_rate - 24_000.0).abs() < 1.0);
+        assert!((core.audio().samples[0] - 1000.0 / 32768.0).abs() < 1e-6);
     }
 
     #[test]

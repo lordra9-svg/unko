@@ -40,6 +40,7 @@ pub struct Machine {
     /// Presented frames.
     pub frames: u64,
     frame: Vec<u8>,
+    audio: Vec<(i16, i16)>,
     vi_origin: u32,
     vi_width: u32,
     vi_line: u32,
@@ -68,6 +69,7 @@ impl Machine {
             rom,
             frames: 0,
             frame: vec![0; (WIDTH * HEIGHT * 4) as usize],
+            audio: Vec::new(),
             vi_origin: 0,
             vi_width: 320,
             vi_line: 0,
@@ -93,15 +95,21 @@ impl Machine {
         &self.frame
     }
 
-    /// Drains audio samples produced by AI DMA.
+    /// Drains host-rate audio produced by AI DMA since the last call.
     pub fn take_audio(&mut self) -> Vec<(i16, i16)> {
-        self.ai.take_samples()
+        std::mem::take(&mut self.audio)
     }
 
-    /// Audio sample rate from `AI_DACRATE`.
+    /// Host output audio sample rate.
     #[must_use]
     pub fn audio_sample_rate(&self) -> f32 {
-        self.ai.sample_rate()
+        self.ai.output_rate()
+    }
+
+    /// Whether the AI DMA interrupt is pending.
+    #[must_use]
+    pub fn audio_interrupt_pending(&self) -> bool {
+        self.ai.interrupt_pending()
     }
 
     /// Executes one CPU instruction.
@@ -120,6 +128,9 @@ impl Machine {
         for _ in 0..INSTRUCTIONS_PER_FRAME {
             self.step()?;
         }
+        // Resample the queued AI stream to the host rate for one frame.
+        let samples = (self.ai.output_rate() / 60.0).round() as usize;
+        self.ai.generate(samples, &mut self.audio);
         self.frames += 1;
         self.vi_line = (self.vi_line + 1) % 525;
         self.present();
@@ -418,12 +429,17 @@ mod tests {
         machine.write_u32(0x0450_0000, 0x100); // dram address
         machine.write_u32(0x0450_0010, 1013); // ~48 kHz
         machine.write_u32(0x0450_0004, 16); // 4 stereo samples
+        assert!(machine.audio_interrupt_pending());
         machine.run_frame().expect("frame");
         let audio = machine.take_audio();
-        assert_eq!(audio.len(), 4);
+        // One frame at the 48 kHz host rate.
+        assert_eq!(audio.len(), 800);
         assert_eq!(audio[0], (1, -2));
-        assert_eq!(audio[3], (7, -8));
+        assert!((audio[3].0 - 7).abs() <= 1, "{:?}", audio[3]);
         assert!(machine.audio_sample_rate() > 40_000.0);
+        // AI_STATUS acknowledges the DMA interrupt.
+        machine.write_u32(0x0450_000C, 1);
+        assert!(!machine.audio_interrupt_pending());
     }
 
     #[test]

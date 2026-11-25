@@ -290,10 +290,11 @@ The main effort was the reference-parity accuracy core. Details in
       to 16-bit depth + delta, z compare/update, image-read blending), with CI/TLUT
       palettes (`LOAD_TLUT`, 4/8-bit CI lookup) and perspective-correct W
       interpolation; `run_frame` presents the VI framebuffer from RDRAM as
-      RGBA. The AI register block (`AI_LEN` DMA of 16-bit stereo pairs into a
-      FIFO) feeds interleaved f32 audio through `Core::audio`. Exact
-      depth-blend shifters, audio resampling/mixing, the TLB and FPU are the
-      next milestones; no
+      RGBA. The AI register block queues double-buffered `AI_LEN` DMAs of
+      16-bit stereo pairs, raises/acknowledges the DMA interrupt, reports
+      `AI_STATUS` and remaining length, and linearly resamples the DAC rate to
+      the host sample rate for `Core::audio`. Exact depth-blend shifters, the
+      TLB and FPU are the next milestones; no
       standard N64 cartridge image was available locally to boot (only 64DD
       IPL firmware). See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.
