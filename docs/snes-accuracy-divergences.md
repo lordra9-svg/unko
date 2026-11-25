@@ -14202,3 +14202,54 @@ makes MMX2's S-SMP clock reach the port handshake 132 clocks ahead of ares
 (the `887,720` IPL `$FFDA CMP Y,$F4` divergence), not a DSP or NMI phase
 constant. The verified split stands: MMX2 exact at default (PRIME=4), the six
 exact at `SNES_DSP_PRIME=0`.
+
+## The 887,720 divergence at port-value granularity (2026-11-25)
+
+`ares` `ARES_SMP_READ_LOG` logs `(aresSmpMono, port, value)` on every
+`$F4-$F7` read; ours `SNES_SMP_READ_LOG` logs `(smp_clock, port, value)`,
+convertible with `SMP_SCALAR = SCHEDULER_SECOND / 2_050_560`. The two read
+streams are **identical to the cycle** up to the divergence:
+
+```
+first port0=0x74  ares 7,979,141  ours 7,979,141
+first port0=0x75  ares 7,979,191  ours 7,979,191
+first read mismatch: SMP cycle 7,979,241, port 0
+    ares 0x75   ours 0x76
+```
+
+At that read ours has already published the next counter byte (`0x76`) while
+ares still shows `0x75`. The following instruction is `$FFDA CMP Y,$F4` /
+`$FFDC BNE`: with `Y=0x76`, ares branches (`$FFE9`, more bytes to copy) and ours
+falls through (`$FFDE`). This is the first `CO_TRACE` divergence (index
+887,720) seen as a port value, and it is a **discrete CPU→SMP publish-ordering
+difference**, not a clock-rate drift: the SMP clock is identical at the read.
+
+### The latch timestamp does not reproduce it
+
+`SNES_CPU_LATCH_TIME` (timestamp CPU `$2140` writes with the CPU clock and
+publish them once the SMP reaches that clock) is the ares model, but it
+over-delays earlier handshakes: its first mismatch moves to cycle 7,946,469,
+where ares already reads port0 `0xCC` and latched-ours still reads `0`. Using
+the write's own advance-slice *start* clock as the timestamp (instead of the
+slice end) does not change this. The immediate-publish model is exact at the
+`0xCC` read and one publish early at the `0x76` read; the relative CPU/SMP
+phase between those two reads is not a constant, so no timestamp/delay offset
+reconciles them.
+
+Knob screen (first read mismatch index / 570,016 reads; higher is better):
+
+```
+base                      443174  (cycle 7,979,241)
+SMP_LATCH_QUEUE           443174
+PORT_READ_CLOCK           443174
+CREDIT_RESET              443174
+WRITE_ACCESS_STOP         441205   (worse)
+PORT_SYNC                 441205
+PORT_LEAD                 441205
+POLL_LEAD=4               441205
+```
+
+So the remaining error is the actual S-CPU↔S-SMP co-scheduling phase at the
+handshake: the S-SMP read must pull the S-CPU to the read clock, and the S-CPU
+must push the S-SMP forward, exactly as ares' `SMP::step` does. Every
+timestamp/offset surrogate of that pull either changes nothing or regresses.
