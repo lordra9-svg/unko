@@ -40,7 +40,7 @@ maskable interrupts and enabled FPU exceptions) are delivered through CP0
 (EPC/Cause/BadVAddr, CE, Status.EXL, refill vs general vectors) and `ERET`
 returns to the faulting context, and error-level entries (`ErrorEPC`/`ERL`,
 returned through by `ERET`) are driven by the CP0 Count/Compare watchdog,
-modelled cache parity faults, an MI-register RCP NMI source, MI interrupt
+two-way set-associative ECC/LRU CPU cache lines, an MI-register RCP NMI source, MI interrupt
 routing to CPU Int0 (IP2) with cycle-modelled PI DMA/VI line events, AI
 sources and mask/Status gating, and reset. The FPU reports Inexact/Underflow/Overflow/
 Divide-by-zero/Invalid flags and causes in `fcr31`, reports unimplemented

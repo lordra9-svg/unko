@@ -169,7 +169,7 @@ impl Machine {
     pub fn step(&mut self) -> Result<(), CpuError> {
         self.update_interrupts();
         let before = self.cpu.cycles;
-        let mut cpu = std::mem::replace(&mut self.cpu, Cpu::new(0));
+        let mut cpu = std::mem::replace(&mut self.cpu, Cpu::placeholder());
         let result = cpu.step(self);
         self.cpu = cpu;
         let retired = (self.cpu.cycles.wrapping_sub(before)) as u32;
@@ -1579,11 +1579,13 @@ mod tests {
     fn machine_cache_parity_entry() {
         let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
         let mut machine = Machine::new(&cart);
-        // Boot fetches 0xA4000040 -> physical 0x04000040.
-        machine.inject_cache_parity_error(0x0400_0040);
+        // Fetch from cached RDRAM at 0x80001000 (physical 0x1000).
+        machine.cpu.pc = 0x8000_1000;
+        machine.cpu.next_pc = 0x8000_1004;
+        machine.inject_cache_parity_error(0x1000);
         machine.step().expect("cache error");
         assert_eq!(machine.cpu.pc, 0xA000_0000);
-        assert_eq!(machine.cpu.cp0[30], 0xA400_0044);
+        assert_eq!(machine.cpu.cp0[30], 0x8000_1004);
         assert_ne!(machine.cpu.cp0[12] & 4, 0);
     }
 

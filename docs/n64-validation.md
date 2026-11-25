@@ -56,7 +56,7 @@ provide the image.
 Recent full runs:
 
 ```
-unko-n64       77 passed
+unko-n64       78 passed
 unko-n64-host   6 passed, 1 ignored (the gate above)
 unko-app       86 passed, 2 ignored
 unko-snes     272 passed
@@ -88,7 +88,7 @@ N64 coverage highlights:
 | Noise | LCG reseed over `(x, y, primitive)` identical to the reference renderer's `noise.h` | verified against reference seed vectors `(0,0,0)->0x0000`, `(5,9,3)->0xCEC4`, `(1028,16,14)->0xB1BC`; our "primitive" is the triangle counter, not a span-buffer primitive index + base |
 | CP0 Count | cycle-cost model (ALU 1, load/store/branch/COP0 2, COP1 4, mul 5, div 37) | verified by `count_advances_by_instruction_cycle_cost`; not a full pipeline/cache timing model |
 | MI interrupts | PI (bit 4) is raised when the modelled PI DMA completes after 64 + 2*length CPU cycles; VI (bit 3) when the line counter (one line per 3000 retired CPU cycles) crosses `VI_INTR`; AI (bit 2) is mirrored from the AI DMA. MI_MASK gates them and the OR is delivered to the CPU as Int0 (Cause.IP2), respecting Status.IE/IM. | verified by `machine_pi_dma_completes_after_cycle_budget` (95 steps pending, step 96 raises), `machine_vi_line_timing_uses_cycles` (2999 steps idle, step 3000 raises at line 1), plus the run_frame handler tests. Timing uses the CPU cycle-cost model, not RCP clock domains. |
-| Cache/NMI | cache parity is modelled with 16-byte line metadata; an injected parity fault raises the cache-error exception on the next instruction fetch or data access. NMI is triggered at register level by the modelled MI RCP NMI bit, which asserts `Cpu::signal_nmi`. | verified by `cache_parity_error_triggers_entry_and_eret`, `machine_cache_parity_entry`, `registers_mask_and_nmi_trigger` and `machine_mi_rcp_nmi_entry_and_eret`; there is no real ECC/parity storage, cache replacement policy or PIF/reset-button model |
+| Cache/NMI | two-way set-associative 16-byte data/instruction cache with tag/data/ECC storage and LRU replacement; reads verify per-byte parity, writes are write-through. An injected parity fault raises the cache-error exception on the next access. NMI is triggered at register level by the modelled MI RCP NMI bit. | verified by `cache_stores_data_with_lru_replacement_and_ecc` (write-through, stale-hit, LRU eviction, ECC rejection), `cache_parity_error_triggers_entry_and_eret`, `machine_cache_parity_entry`; no write-back/dirty eviction, CACHE instructions are still NOPs, and no PIF/reset-button model |
 | Interpenetrating Z | coverage scaled by the 4-bit coefficient of the combined depth delta | matches the reference renderer formula; verified by unit and frame tests |
 | CLI/TLUT | palette loaded from the texture image into a 256-entry table | TMEM chunk/address semantics are simplified |
 

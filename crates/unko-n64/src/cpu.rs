@@ -8,6 +8,7 @@
 //! single-precision COP1 FPU (arithmetic, conversions, compares and LWC1/SWC1).
 //! Precise exceptions and the FPU pipeline are later milestones.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 /// Byte/word access used by the CPU.
@@ -188,13 +189,21 @@ pub enum ErrorSource {
     CacheError,
 }
 
-const CACHE_LINES: usize = 512;
+const CACHE_SETS: usize = 512;
 
 #[derive(Debug, Clone, Copy, Default)]
 struct CacheLine {
     valid: bool,
     tag: u64,
-    parity_ok: bool,
+    data: [u8; 16],
+    ecc: [u8; 16],
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct CacheSet {
+    ways: [CacheLine; 2],
+    /// Way used most recently (the other way is replaced on a miss).
+    lru: u8,
 }
 
 /// VR4300 architectural state.
@@ -230,14 +239,27 @@ pub struct Cpu {
     pending_cache_error: bool,
     /// CP0 Count/Compare match already taken.
     compare_latched: bool,
-    /// Direct-mapped data/instruction cache line metadata (16-byte lines).
-    cache: [CacheLine; CACHE_LINES],
+    /// Two-way set-associative data/instruction cache (16-byte lines, ECC).
+    cache: Box<[CacheSet]>,
+    /// Physical cache lines that should be filled with a parity fault.
+    injected_cache_errors: BTreeSet<u64>,
 }
 
 impl Cpu {
     /// Creates a CPU starting at `pc` (with an empty delay slot).
     #[must_use]
     pub fn new(pc: u64) -> Self {
+        Self::with_cache(pc, true)
+    }
+
+    /// Cheap placeholder used while `Machine::step` temporarily moves the CPU
+    /// out of the machine; it never executes.
+    #[must_use]
+    pub(crate) fn placeholder() -> Self {
+        Self::with_cache(0, false)
+    }
+
+    fn with_cache(pc: u64, cache: bool) -> Self {
         Self {
             gpr: [0; 32],
             hi: 0,
@@ -254,7 +276,12 @@ impl Cpu {
             pending_nmi: false,
             pending_cache_error: false,
             compare_latched: false,
-            cache: [CacheLine::default(); CACHE_LINES],
+            cache: if cache {
+                vec![CacheSet::default(); CACHE_SETS].into_boxed_slice()
+            } else {
+                Vec::new().into_boxed_slice()
+            },
+            injected_cache_errors: BTreeSet::new(),
         }
     }
 
@@ -273,8 +300,8 @@ impl Cpu {
         self.delay_slot = false;
 
         let instruction = match self.translate(pc, false) {
-            Ok(address) => match self.cache_access(address) {
-                Ok(()) => bus.read_u32(address),
+            Ok(address) => match self.cache_read_u32(address, bus) {
+                Ok(value) => value,
                 Err(error) => {
                     self.deliver_error(&error, pc, delay_slot);
                     self.advance_cycles(1);
@@ -444,19 +471,208 @@ impl Cpu {
         self.pending_cache_error = true;
     }
 
-    fn cache_access(&mut self, address: u64) -> Result<(), CpuError> {
-        let line_number = address / 16;
-        let index = (line_number as usize) % CACHE_LINES;
-        let tag = line_number / CACHE_LINES as u64;
-        let line = &mut self.cache[index];
-        if line.valid && line.tag == tag {
-            if !line.parity_ok {
-                return Err(CpuError::CacheError { address });
+    fn parity_of(byte: u8) -> u8 {
+        (byte.count_ones() & 1) as u8
+    }
+
+    fn cache_fill<B: Bus>(&mut self, physical: u64, bus: &mut B) {
+        let line_number = physical / 16;
+        let set = (line_number as usize) % CACHE_SETS;
+        let tag = line_number / CACHE_SETS as u64;
+        let way = {
+            let ways = &self.cache[set].ways;
+            if !ways[0].valid {
+                0
+            } else if !ways[1].valid {
+                1
+            } else {
+                1usize - usize::from(self.cache[set].lru & 1)
             }
+        };
+        let base = line_number * 16;
+        let mut line = CacheLine {
+            valid: true,
+            tag,
+            ..CacheLine::default()
+        };
+        for (index, slot) in line.data.iter_mut().enumerate() {
+            let byte = bus.read_u8(base + index as u64);
+            *slot = byte;
+            line.ecc[index] = Self::parity_of(byte);
+        }
+        if self.injected_cache_errors.remove(&line_number) {
+            line.ecc[0] ^= 1;
+        }
+        self.cache[set].ways[way] = line;
+        self.cache[set].lru = way as u8;
+    }
+
+    fn cache_line<B: Bus>(
+        &mut self,
+        address: u64,
+        bus: &mut B,
+    ) -> Result<(usize, usize, usize), CpuError> {
+        let line_number = address / 16;
+        let set = (line_number as usize) % CACHE_SETS;
+        let tag = line_number / CACHE_SETS as u64;
+        let offset = (address % 16) as usize;
+        if let Some(way) = self.cache[set]
+            .ways
+            .iter()
+            .position(|line| line.valid && line.tag == tag)
+        {
+            self.cache[set].lru = way as u8;
+            return Ok((set, way, offset));
+        }
+        self.cache_fill(address, bus);
+        self.cache[set]
+            .ways
+            .iter()
+            .position(|line| line.valid && line.tag == tag)
+            .map(|way| (set, way, offset))
+            .ok_or(CpuError::CacheError { address })
+    }
+
+    fn uncached(address: u64) -> bool {
+        address >= 0x0400_0000
+    }
+
+    fn cache_read_u8<B: Bus>(&mut self, address: u64, bus: &mut B) -> Result<u8, CpuError> {
+        if Self::uncached(address) {
+            return Ok(bus.read_u8(address));
+        }
+        let (set, way, offset) = self.cache_line(address, bus)?;
+        let line = &self.cache[set].ways[way];
+        let byte = line.data[offset];
+        if Self::parity_of(byte) != line.ecc[offset] {
+            return Err(CpuError::CacheError { address });
+        }
+        Ok(byte)
+    }
+
+    fn cache_write_u8<B: Bus>(
+        &mut self,
+        address: u64,
+        value: u8,
+        bus: &mut B,
+    ) -> Result<(), CpuError> {
+        if Self::uncached(address) {
+            bus.write_u8(address, value);
+            return Ok(());
+        }
+        let (set, way, offset) = self.cache_line(address, bus)?;
+        let line = &mut self.cache[set].ways[way];
+        line.data[offset] = value;
+        line.ecc[offset] = Self::parity_of(value);
+        self.cache[set].lru = way as u8;
+        // Write-through keeps RDRAM coherent with the CPU cache.
+        bus.write_u8(address, value);
+        Ok(())
+    }
+
+    fn cache_read_u16<B: Bus>(&mut self, address: u64, bus: &mut B) -> Result<u16, CpuError> {
+        if Self::uncached(address) {
+            return Ok(bus.read_u16(address));
+        }
+        let mut bytes = [0u8; 2];
+        for (index, slot) in bytes.iter_mut().enumerate() {
+            *slot = self.cache_read_u8(address + index as u64, bus)?;
+        }
+        Ok(u16::from_be_bytes(bytes))
+    }
+
+    fn cache_read_u32<B: Bus>(&mut self, address: u64, bus: &mut B) -> Result<u32, CpuError> {
+        if Self::uncached(address) {
+            return Ok(bus.read_u32(address));
+        }
+        let (set, way, offset) = self.cache_line(address, bus)?;
+        let line = &self.cache[set].ways[way];
+        if offset <= 12 {
+            let mut bytes = [0u8; 4];
+            bytes.copy_from_slice(&line.data[offset..offset + 4]);
+            for (index, byte) in bytes.iter().enumerate() {
+                if Self::parity_of(*byte) != line.ecc[offset + index] {
+                    return Err(CpuError::CacheError {
+                        address: address + index as u64,
+                    });
+                }
+            }
+            return Ok(u32::from_be_bytes(bytes));
+        }
+        let mut bytes = [0u8; 4];
+        for (index, slot) in bytes.iter_mut().enumerate() {
+            *slot = self.cache_read_u8(address + index as u64, bus)?;
+        }
+        Ok(u32::from_be_bytes(bytes))
+    }
+
+    fn cache_read_u64<B: Bus>(&mut self, address: u64, bus: &mut B) -> Result<u64, CpuError> {
+        if Self::uncached(address) {
+            return Ok(bus.read_u64(address));
+        }
+        let mut bytes = [0u8; 8];
+        for (index, slot) in bytes.iter_mut().enumerate() {
+            *slot = self.cache_read_u8(address + index as u64, bus)?;
+        }
+        Ok(u64::from_be_bytes(bytes))
+    }
+
+    fn cache_write_u16<B: Bus>(
+        &mut self,
+        address: u64,
+        value: u16,
+        bus: &mut B,
+    ) -> Result<(), CpuError> {
+        if Self::uncached(address) {
+            bus.write_u16(address, value);
+            return Ok(());
+        }
+        for (index, byte) in value.to_be_bytes().iter().enumerate() {
+            self.cache_write_u8(address + index as u64, *byte, bus)?;
+        }
+        Ok(())
+    }
+
+    fn cache_write_u32<B: Bus>(
+        &mut self,
+        address: u64,
+        value: u32,
+        bus: &mut B,
+    ) -> Result<(), CpuError> {
+        if Self::uncached(address) {
+            bus.write_u32(address, value);
+            return Ok(());
+        }
+        let (set, way, offset) = self.cache_line(address, bus)?;
+        let bytes = value.to_be_bytes();
+        if offset <= 12 {
+            let line = &mut self.cache[set].ways[way];
+            line.data[offset..offset + 4].copy_from_slice(&bytes);
+            for (index, byte) in bytes.iter().enumerate() {
+                line.ecc[offset + index] = Self::parity_of(*byte);
+            }
+            self.cache[set].lru = way as u8;
         } else {
-            line.valid = true;
-            line.tag = tag;
-            line.parity_ok = true;
+            for (index, byte) in bytes.iter().enumerate() {
+                self.cache_write_u8(address + index as u64, *byte, bus)?;
+            }
+        }
+        bus.write_u32(address, value);
+        Ok(())
+    }
+
+    fn cache_write_u64<B: Bus>(
+        &mut self,
+        address: u64,
+        value: u64,
+        bus: &mut B,
+    ) -> Result<(), CpuError> {
+        if Self::uncached(address) {
+            bus.write_u64(address, value);
+            return Ok(());
+        }
+        for (index, byte) in value.to_be_bytes().iter().enumerate() {
+            self.cache_write_u8(address + index as u64, *byte, bus)?;
         }
         Ok(())
     }
@@ -465,25 +681,20 @@ impl Cpu {
     /// error. The next access to that line raises the cache-error exception.
     pub fn inject_cache_parity_error(&mut self, physical_address: u64) {
         let line_number = physical_address / 16;
-        let index = (line_number as usize) % CACHE_LINES;
-        let tag = line_number / CACHE_LINES as u64;
-        self.cache[index] = CacheLine {
-            valid: true,
-            tag,
-            parity_ok: false,
-        };
+        self.injected_cache_errors.insert(line_number);
+        let set = (line_number as usize) % CACHE_SETS;
+        let tag = line_number / CACHE_SETS as u64;
+        for line in self.cache[set].ways.iter_mut() {
+            if line.valid && line.tag == tag {
+                line.valid = false;
+            }
+        }
     }
 
-    /// Clears the cache line metadata/parity state.
+    /// Clears the cache contents and any injected parity faults.
     pub fn clear_cache(&mut self) {
-        self.cache = [CacheLine::default(); CACHE_LINES];
-    }
-
-    /// Translates and checks the cache line for a data access.
-    fn data_access(&mut self, address: u64, store: bool) -> Result<u64, CpuError> {
-        let physical = self.translate(address, store)?;
-        self.cache_access(physical)?;
-        Ok(physical)
+        self.cache = vec![CacheSet::default(); CACHE_SETS].into_boxed_slice();
+        self.injected_cache_errors.clear();
     }
 
     /// Services pending NMI/cache error and the CP0 Count/Compare watchdog.
@@ -1436,7 +1647,10 @@ impl Cpu {
         signed: bool,
     ) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
-        let value = bus.read_u8(self.data_access(address, false)?);
+        let value = {
+            let physical = self.translate(address, false)?;
+            self.cache_read_u8(physical, bus)?
+        };
         self.set_gpr(
             rt,
             if signed {
@@ -1463,7 +1677,10 @@ impl Cpu {
                 store: false,
             });
         }
-        let value = bus.read_u16(self.data_access(address, false)?);
+        let value = {
+            let physical = self.translate(address, false)?;
+            self.cache_read_u16(physical, bus)?
+        };
         self.set_gpr(
             rt,
             if signed {
@@ -1490,7 +1707,10 @@ impl Cpu {
                 store: false,
             });
         }
-        let value = bus.read_u32(self.data_access(address, false)?);
+        let value = {
+            let physical = self.translate(address, false)?;
+            self.cache_read_u32(physical, bus)?
+        };
         self.set_gpr(
             rt,
             if signed {
@@ -1510,14 +1730,20 @@ impl Cpu {
                 store: false,
             });
         }
-        let value = bus.read_u64(self.data_access(address, false)?);
+        let value = {
+            let physical = self.translate(address, false)?;
+            self.cache_read_u64(physical, bus)?
+        };
         self.set_gpr(rt, value);
         Ok(())
     }
 
     fn store8<B: Bus>(&mut self, bus: &mut B, rs: u32, rt: u32, simm: i64) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
-        bus.write_u8(self.data_access(address, true)?, self.gpr(rt) as u8);
+        {
+            let physical = self.translate(address, true)?;
+            self.cache_write_u8(physical, self.gpr(rt) as u8, bus)?;
+        }
         Ok(())
     }
 
@@ -1535,7 +1761,10 @@ impl Cpu {
                 store: true,
             });
         }
-        bus.write_u16(self.data_access(address, true)?, self.gpr(rt) as u16);
+        {
+            let physical = self.translate(address, true)?;
+            self.cache_write_u16(physical, self.gpr(rt) as u16, bus)?;
+        }
         Ok(())
     }
 
@@ -1553,7 +1782,10 @@ impl Cpu {
                 store: true,
             });
         }
-        bus.write_u32(self.data_access(address, true)?, self.gpr(rt) as u32);
+        {
+            let physical = self.translate(address, true)?;
+            self.cache_write_u32(physical, self.gpr(rt) as u32, bus)?;
+        }
         Ok(())
     }
 
@@ -1571,7 +1803,10 @@ impl Cpu {
                 store: true,
             });
         }
-        bus.write_u64(self.data_access(address, true)?, self.gpr(rt));
+        {
+            let physical = self.translate(address, true)?;
+            self.cache_write_u64(physical, self.gpr(rt), bus)?;
+        }
         Ok(())
     }
 
@@ -1589,7 +1824,10 @@ impl Cpu {
                 store: false,
             });
         }
-        let value = bus.read_u32(self.data_access(address, false)?);
+        let value = {
+            let physical = self.translate(address, false)?;
+            self.cache_read_u32(physical, bus)?
+        };
         self.fpr[rt as usize] = u64::from(value);
         Ok(())
     }
@@ -1608,10 +1846,10 @@ impl Cpu {
                 store: true,
             });
         }
-        bus.write_u32(
-            self.data_access(address, true)?,
-            self.fpr[rt as usize] as u32,
-        );
+        {
+            let physical = self.translate(address, true)?;
+            self.cache_write_u32(physical, self.fpr[rt as usize] as u32, bus)?;
+        }
         Ok(())
     }
 
@@ -1629,7 +1867,10 @@ impl Cpu {
                 store: false,
             });
         }
-        let value = bus.read_u64(self.data_access(address, false)?);
+        let value = {
+            let physical = self.translate(address, false)?;
+            self.cache_read_u64(physical, bus)?
+        };
         self.fpr[rt as usize] = value;
         Ok(())
     }
@@ -1648,7 +1889,10 @@ impl Cpu {
                 store: true,
             });
         }
-        bus.write_u64(self.data_access(address, true)?, self.fpr[rt as usize]);
+        {
+            let physical = self.translate(address, true)?;
+            self.cache_write_u64(physical, self.fpr[rt as usize], bus)?;
+        }
         Ok(())
     }
 }
@@ -2559,5 +2803,42 @@ mod tests {
         cpu.step(&mut memory).expect("clean load");
         assert_eq!(cpu.cp0[30], 0);
         assert_eq!(cpu.cp0[12] & 4, 0);
+    }
+    #[test]
+    fn cache_stores_data_with_lru_replacement_and_ecc() {
+        let mut cpu = Cpu::new(0);
+        let mut memory = Memory::new(0x10_000);
+        memory.write_u8(0x100, 0xAA);
+        assert_eq!(cpu.cache_read_u8(0x100, &mut memory), Ok(0xAA));
+
+        // Write-through updates both the cache line and the bus.
+        cpu.cache_write_u8(0x100, 0x55, &mut memory).unwrap();
+        assert_eq!(memory.read_u8(0x100), 0x55);
+        assert_eq!(cpu.cache_read_u8(0x100, &mut memory), Ok(0x55));
+
+        // A hit serves the cached line even if memory changes behind it.
+        memory.write_u8(0x101, 0x77);
+        assert_eq!(cpu.cache_read_u8(0x101, &mut memory), Ok(0x00));
+
+        // Fill the other way of set 16 (line 528), touch line 16 again, then
+        // fill a third tag: the least-recently-used way is replaced.
+        assert_eq!(cpu.cache_read_u8(0x2100, &mut memory), Ok(0x00));
+        assert_eq!(cpu.cache_read_u8(0x100, &mut memory), Ok(0x55));
+        assert_eq!(cpu.cache_read_u8(0x4100, &mut memory), Ok(0x00));
+        // Line 16 survived the replacement.
+        memory.write_u8(0x103, 0x44);
+        assert_eq!(cpu.cache_read_u8(0x103, &mut memory), Ok(0x00));
+        // Line 528 was evicted, so the next access refills from memory.
+        memory.write_u8(0x2100, 0xCC);
+        assert_eq!(cpu.cache_read_u8(0x2100, &mut memory), Ok(0xCC));
+
+        // Injected ECC/parity faults reject hits on that line.
+        cpu.clear_cache();
+        memory.write_u8(0x200, 0xBB);
+        cpu.inject_cache_parity_error(0x200);
+        assert!(matches!(
+            cpu.cache_read_u8(0x200, &mut memory),
+            Err(CpuError::CacheError { .. })
+        ));
     }
 }
