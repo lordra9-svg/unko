@@ -10,6 +10,8 @@ members = [
     "crates/unko-snes",
     "crates/unko-snes-host",
     "crates/unko-snes-api",
+    "crates/unko-n64",
+    "crates/unko-n64-host",
     "crates/unko-rom-manager",
     "crates/unko-netplay",
     "crates/unko-cli",

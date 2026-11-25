@@ -456,9 +456,6 @@ impl Player {
         properties: GameProperties,
     ) -> Result<Self, String> {
         let mut rom = unko_rom::load(entry).map_err(|err| format!("read ROM: {err}"))?;
-        if entry.system == "n64" || crate::library::is_n64_bytes(&rom) {
-            return Err("N64 titles are not supported: this build has no N64 core".to_owned());
-        }
         if let Some(mapper) = properties.mapper {
             if entry.is_fds() {
                 return Err("mapper overrides do not apply to FDS images".into());
@@ -2778,22 +2775,41 @@ mod tests {
     }
 
     #[test]
-    fn n64_image_reports_no_core() {
+    fn n64_image_loads_with_unimplemented_emulation() {
         let dir = std::env::temp_dir().join(format!("unko-n64-start-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("dir");
         let rom_path = dir.join("Game.z64");
-        fs::write(&rom_path, [0x80, 0x37, 0x12, 0x40, 0, 0, 0, 0]).expect("rom");
+        let mut rom = vec![0u8; 0x100];
+        rom[0x00..0x04].copy_from_slice(&[0x80, 0x37, 0x12, 0x40]);
+        rom[0x20..0x20 + 8].copy_from_slice(b"Game    ");
+        rom[0x3C] = b'N';
+        rom[0x3D] = b'D';
+        rom[0x3E] = b'E';
+        fs::write(&rom_path, &rom).expect("rom");
         let entries = crate::library::probe_path_any(&rom_path).expect("probe");
         assert_eq!(entries[0].system, "n64");
         let settings = Settings {
             save_dir: dir.join("saves"),
             ..Settings::default()
         };
-        match Player::start_with(&entries[0], &settings, GameProperties::default()) {
-            Ok(_) => panic!("N64 must not start"),
-            Err(error) => assert!(error.contains("no N64 core"), "unexpected error: {error}"),
-        }
+        let mut player = Player::start_with(&entries[0], &settings, GameProperties::default())
+            .expect("start N64 scaffold");
+        assert_eq!(player.core.info().system, unko_core::SystemId::Other("n64"));
+        let error = player
+            .core
+            .run_frame()
+            .expect_err("emulation is not implemented");
+        assert!(error.to_string().contains("not implemented"), "{error}");
+        let adapter = player
+            .core
+            .as_any()
+            .downcast_ref::<crate::n64::N64Adapter>()
+            .expect("N64 adapter");
+        assert_eq!(
+            adapter.inner().cartridge().expect("cart").header().title,
+            "Game"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

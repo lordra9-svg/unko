@@ -25,6 +25,7 @@ mod gpu_shader;
 mod library;
 mod microphone;
 mod movie;
+pub mod n64;
 mod paths;
 mod piano;
 mod player;

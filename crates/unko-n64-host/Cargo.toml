@@ -1,0 +1,13 @@
+[package]
+name = "unko-n64-host"
+description = "Adapter between the Unko N64 scaffold and the system-agnostic unko-core interface"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[dependencies]
+unko-core.workspace = true
+unko-n64 = { path = "../unko-n64" }

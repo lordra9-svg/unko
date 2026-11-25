@@ -36,7 +36,11 @@ pub fn is_nes_rom(rom: &[u8]) -> bool {
 /// Builds the core for the image, dispatching on the container signature.
 #[must_use]
 pub fn create_for_rom(rom: &[u8]) -> Box<dyn NesCore> {
-    if !is_nes_rom(rom) && unko_snes_host::is_snes_rom(rom) {
+    if is_nes_rom(rom) {
+        Box::new(unko_nes_host::AccuracyCore::new())
+    } else if crate::library::is_n64_bytes(rom) {
+        Box::new(crate::n64::N64Adapter::new())
+    } else if unko_snes_host::is_snes_rom(rom) {
         Box::new(SnesAdapter::new())
     } else {
         Box::new(unko_nes_host::AccuracyCore::new())
@@ -271,8 +275,12 @@ mod tests {
         let snes = create_for_rom(&build_lorom());
         assert_eq!(snes.info().system, unko_core::SystemId::Snes);
 
-        // Noise is not a valid cartridge for either system; the player defaults
-        // to the NES core (its upstream loader is NES-only).
+        // N64 images route to the N64 scaffold.
+        let n64 = create_for_rom(&[0x80, 0x37, 0x12, 0x40, 0, 0, 0, 0]);
+        assert_eq!(n64.info().system, unko_core::SystemId::Other("n64"));
+
+        // Noise is not a valid cartridge for any system; the player defaults to
+        // the NES core (its upstream loader is NES-only).
         let noise = create_for_rom(&[0u8; 32]);
         assert_eq!(noise.info().system, unko_core::SystemId::Nes);
     }

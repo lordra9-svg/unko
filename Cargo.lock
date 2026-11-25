@@ -3769,6 +3769,8 @@ dependencies = [
  "rtrb",
  "sdl3",
  "unko-core",
+ "unko-n64",
+ "unko-n64-host",
  "unko-nes-api",
  "unko-nes-host",
  "unko-netplay",
@@ -3785,6 +3787,7 @@ name = "unko-cli"
 version = "0.1.1"
 dependencies = [
  "unko-core",
+ "unko-n64-host",
  "unko-nes",
  "unko-nes-api",
  "unko-nes-host",
@@ -3796,6 +3799,18 @@ dependencies = [
 [[package]]
 name = "unko-core"
 version = "0.1.1"
+
+[[package]]
+name = "unko-n64"
+version = "0.1.1"
+
+[[package]]
+name = "unko-n64-host"
+version = "0.1.1"
+dependencies = [
+ "unko-core",
+ "unko-n64",
+]
 
 [[package]]
 name = "unko-nes"

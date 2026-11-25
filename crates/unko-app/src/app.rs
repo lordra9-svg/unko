@@ -5686,7 +5686,7 @@ fn graphics_tab(ui: &mut egui::Ui, settings: &mut Settings, ctx: &egui::Context)
 fn system_label(system: &str) -> &'static str {
     match system {
         "snes" => "SNES",
-        "n64" => "N64 (no core)",
+        "n64" => "N64 (scaffold)",
         _ => "NES",
     }
 }

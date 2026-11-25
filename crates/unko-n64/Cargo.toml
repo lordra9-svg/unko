@@ -1,0 +1,11 @@
+[package]
+name = "unko-n64"
+description = "Nintendo 64 cartridge parsing and system scaffold"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[dependencies]

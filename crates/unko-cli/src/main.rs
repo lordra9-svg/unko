@@ -1196,6 +1196,7 @@ fn registry() -> Registry {
     let mut registry = Registry::new();
     registry.register(unko_nes_host::registration());
     registry.register(unko_snes_host::registration());
+    registry.register(unko_n64_host::registration());
     registry
 }
 
