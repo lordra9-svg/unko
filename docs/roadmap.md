@@ -302,8 +302,9 @@ The main effort was the reference-parity accuracy core. Details in
       exceptions) are delivered through CP0 Cause/EPC/BadVAddr with Status.EXL
       and the refill/general vectors, and ERET restores execution. Error-level
       entry saves ErrorEPC, sets ERL and returns via ERET. The FPU reports `fcr31` flags/causes
-      (inexact, underflow, overflow, divide-by-zero, invalid) and honors FS
-      flush-to-zero. Double-precision (`D`-format) arithmetic, compares,
+      (inexact, underflow, overflow, divide-by-zero, invalid, unimplemented
+      operation) and honors FS flush-to-zero; D-format inexact detection uses
+      error-free transformations. Double-precision (`D`-format) arithmetic, compares,
       conversions and 64-bit paired FPR storage are also implemented. Exact
       depth-blend shifters and broader GPU coverage are the next milestones;
       no

@@ -982,7 +982,7 @@ impl Cpu {
                     self.fpr[fd as usize] = u64::from((value as f32).to_bits());
                     Ok(())
                 } else {
-                    Err(CpuError::Unimplemented { pc, instruction: 0 })
+                    self.fpu_unimplemented(pc)
                 }
             }
             0x15 => {
@@ -996,10 +996,10 @@ impl Cpu {
                     self.fpr[fd as usize] = u64::from((value as f32).to_bits());
                     Ok(())
                 } else {
-                    Err(CpuError::Unimplemented { pc, instruction: 0 })
+                    self.fpu_unimplemented(pc)
                 }
             }
-            _ => Err(CpuError::Unimplemented { pc, instruction: 0 }),
+            _ => self.fpu_unimplemented(pc),
         }
     }
 
@@ -1076,12 +1076,7 @@ impl Cpu {
                 }
                 return Ok(());
             }
-            _ => {
-                return Err(CpuError::Unimplemented {
-                    pc,
-                    instruction: funct,
-                })
-            }
+            _ => return self.fpu_unimplemented(pc),
         };
         if funct <= 0x04 {
             let wide = match funct {
@@ -1125,6 +1120,13 @@ impl Cpu {
 
     fn set_fpu_flags(&mut self, bits: u32) {
         self.fcr31 |= (bits << 2) | (bits << 12);
+    }
+
+    fn fpu_unimplemented(&mut self, pc: u64) -> Result<(), CpuError> {
+        // fcr31 flag bit 6 and cause bit 17; unimplemented operation raises a
+        // precise FPU exception regardless of the enable bits.
+        self.fcr31 |= (1 << 6) | (1 << 17);
+        Err(CpuError::Fpu { pc })
     }
 
     fn check_fpu_exception(&mut self, pc: u64) -> Result<(), CpuError> {
@@ -1201,12 +1203,7 @@ impl Cpu {
                 }
                 return Ok(());
             }
-            _ => {
-                return Err(CpuError::Unimplemented {
-                    pc,
-                    instruction: funct,
-                })
-            }
+            _ => return self.fpu_unimplemented(pc),
         };
         if funct <= 0x04 {
             let mut bits = 0u32;
@@ -1220,10 +1217,10 @@ impl Cpu {
                 bits |= 1 << 2;
             }
             let exact = match funct {
-                0x00 => result - a == b,
-                0x01 => result - a == -b,
-                0x02 => a == 0.0 || b == 0.0 || result / a == b,
-                0x03 => result * b == a,
+                0x00 => two_sum_error(a, b, result) == 0.0,
+                0x01 => two_sum_error(a, -b, result) == 0.0,
+                0x02 => a.mul_add(b, -result) == 0.0,
+                0x03 => a == 0.0 || result * b == a,
                 _ => result * result == a,
             };
             if result.is_finite() && !exact {
@@ -1476,6 +1473,12 @@ pub const fn physical(address: u64) -> u64 {
     } else {
         address
     }
+}
+
+fn two_sum_error(a: f64, b: f64, sum: f64) -> f64 {
+    let bv = sum - a;
+    let av = sum - bv;
+    (a - av) + (b - bv)
 }
 
 fn round_f64_to_i32(value: f64, mode: u32) -> i32 {
@@ -2150,5 +2153,46 @@ mod tests {
         assert_eq!(cpu.pc, 0x8000_0180);
         assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 4);
         assert_eq!(cpu.cp0[14], 0x1234, "EPC not overwritten at error level");
+    }
+    #[test]
+    fn fpu_unimplemented_and_precise_inexact() {
+        // An unimplemented COP1 operation sets the unimplemented-operation
+        // flag/cause and raises a precise FPU exception that ERET resumes.
+        let mut memory = Memory::new(0x3000);
+        install_handler(&mut memory, false);
+        memory.write_u32(0x1000, 0x4600_0011); // movf.s f0,f0 (unimplemented here)
+        memory.write_u32(0x1004, 0x2409_0007); // addiu t1,zero,7
+        let mut cpu = Cpu::new(0x8000_1000);
+        cpu.cp0[12] = 1 << 29;
+        cpu.step(&mut memory).expect("unimplemented FP exception");
+        assert_eq!(cpu.pc, 0x8000_0180);
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 15);
+        assert_eq!(cpu.cp0[14], 0x8000_1000);
+        assert_ne!(cpu.fcr31 & (1 << 6), 0, "unimplemented flag");
+        assert_ne!(cpu.fcr31 & (1 << 17), 0, "unimplemented cause");
+        run(&mut cpu, &mut memory, 4);
+        cpu.step(&mut memory).expect("resume");
+        assert_eq!(cpu.gpr[9], 7);
+
+        // D-format inexact detection: 0.1 + 0.2 is inexact, 1.5 + 2.25 is exact.
+        memory.write_u32(0x1000, 0x4621_0080); // add.d f2,f0,f1
+        let mut cpu = Cpu::new(0x8000_1000);
+        cpu.cp0[12] = 1 << 29;
+        cpu.fpr[0] = 0.1f64.to_bits();
+        cpu.fpr[1] = 0.2f64.to_bits();
+        cpu.fcr31 = 0;
+        cpu.step(&mut memory).expect("add.d");
+        assert_ne!(cpu.fcr31 & (1 << 2), 0, "inexact flag");
+        assert_ne!(cpu.fcr31 & (1 << 12), 0, "inexact cause");
+        assert_eq!(cpu.fpr[2], (0.1f64 + 0.2f64).to_bits());
+
+        cpu.pc = 0x8000_1000;
+        cpu.next_pc = 0x8000_1004;
+        cpu.fcr31 = 0;
+        cpu.fpr[0] = 1.5f64.to_bits();
+        cpu.fpr[1] = 2.25f64.to_bits();
+        cpu.step(&mut memory).expect("exact add.d");
+        assert_eq!(cpu.fcr31 & (1 << 2), 0, "exact sum has no inexact flag");
+        assert_eq!(cpu.fcr31 & (1 << 12), 0);
     }
 }
