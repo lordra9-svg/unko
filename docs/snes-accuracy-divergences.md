@@ -14277,3 +14277,12 @@ PORT_SYNC is the closest *pacing-only* model (no prime): it lifts MMX2 from
 missing piece is not an SMP pacing flag; it is the exact per-read pull the
 base model approximates, and CT is already calibrated against that
 approximation.
+
+### Port-write commit instant is not the cause
+
+ares commits a CPU `$2140` write *after* the access clocks (`CPU::write`:
+`step(status.clockCount)` then `bus.write`); we commit before. Tested the
+ares ordering (`SNES_PORT_WRITE_END`, hold the write until the next advance):
+the first read mismatch is unchanged at SMP cycle 7,979,241 (ours `0x76`,
+ares `0x75`). The gap is hundreds of master clocks, not one access, so the
+commit instant is not the discriminator. Reverted (behaviour-neutral here).
