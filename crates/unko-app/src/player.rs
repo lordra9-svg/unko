@@ -456,6 +456,9 @@ impl Player {
         properties: GameProperties,
     ) -> Result<Self, String> {
         let mut rom = unko_rom::load(entry).map_err(|err| format!("read ROM: {err}"))?;
+        if entry.system == "n64" || crate::library::is_n64_bytes(&rom) {
+            return Err("N64 titles are not supported: this build has no N64 core".to_owned());
+        }
         if let Some(mapper) = properties.mapper {
             if entry.is_fds() {
                 return Err("mapper overrides do not apply to FDS images".into());
@@ -2770,6 +2773,26 @@ mod tests {
         match Player::start_with(&entries[0], &settings, GameProperties::default()) {
             Ok(_) => panic!("missing IPL must fail"),
             Err(error) => assert!(error.contains("SNES IPL"), "{error}"),
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn n64_image_reports_no_core() {
+        let dir = std::env::temp_dir().join(format!("unko-n64-start-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("dir");
+        let rom_path = dir.join("Game.z64");
+        fs::write(&rom_path, [0x80, 0x37, 0x12, 0x40, 0, 0, 0, 0]).expect("rom");
+        let entries = crate::library::probe_path_any(&rom_path).expect("probe");
+        assert_eq!(entries[0].system, "n64");
+        let settings = Settings {
+            save_dir: dir.join("saves"),
+            ..Settings::default()
+        };
+        match Player::start_with(&entries[0], &settings, GameProperties::default()) {
+            Ok(_) => panic!("N64 must not start"),
+            Err(error) => assert!(error.contains("no N64 core"), "unexpected error: {error}"),
         }
         let _ = fs::remove_dir_all(&dir);
     }

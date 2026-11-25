@@ -164,7 +164,7 @@ The main effort was the reference-parity accuracy core. Details in
       restores config/profiles/thumbnails while keeping saves, SRAM and
       recordings.
 - [x] Library grid columns (1-8), configurable list columns and per-system
-      library roots (NES scanned; SNES/N64 tags are placeholders).
+      library roots (NES and SNES scanned; N64 indexed without a core).
 - [x] Display aspect Fit/4:3/8:7, fixed 1-6x integer scale, 1-3x output
       supersampling, built-in output shader presets and window-size presets.
 - [x] MiSTer accuracy options: PPU reset behaviour, RAM clear, audio source,
@@ -267,8 +267,9 @@ The main effort was the reference-parity accuracy core. Details in
       WRAM/VRAM/OAM/CGRAM/APU RAM/DSP registers, and single-step /
       run-to-breakpoint with 24-bit PC breakpoints, plus a one-instruction
       65816 assembler. Assemble-and-patch targets WRAM/VRAM/OAM/CGRAM/APU/DSP
-      and cartridge ROM (the cartridge owns a mutable ROM backing). The N64
-      library tag remains a placeholder. Then **N64 from ares** with gopher64 as a GPL structural
+      and cartridge ROM (the cartridge owns a mutable ROM backing). N64 images
+      are recognised and tagged in the library and report a clear "no N64
+      core" status. Then **N64 from ares** with gopher64 as a GPL structural
       reference. See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.
 - [ ] GameCube/Wii is deferred: Dolphin is GPL-2.0+ and application-shaped, so

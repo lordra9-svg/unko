@@ -311,7 +311,7 @@ impl App {
         let library = scan(&settings.rom_dir);
         let status = if library.is_empty() {
             format!(
-                "No ROMs in {} — add .nes files or .zip/.7z/.rar archives",
+                "No ROMs in {} — add NES/SNES/N64 files or .zip/.7z/.rar archives",
                 settings.rom_dir.display()
             )
         } else {
@@ -675,7 +675,7 @@ impl App {
     fn scan(&mut self) {
         let mut roots = vec![self.settings.rom_dir.clone()];
         for root in &self.settings.library_roots {
-            if root.system == "nes" {
+            if matches!(root.system.as_str(), "nes" | "snes" | "n64") {
                 roots.push(root.path.clone());
             }
         }
@@ -5685,8 +5685,8 @@ fn graphics_tab(ui: &mut egui::Ui, settings: &mut Settings, ctx: &egui::Context)
 
 fn system_label(system: &str) -> &'static str {
     match system {
-        "snes" => "SNES (stub)",
-        "n64" => "N64 (stub)",
+        "snes" => "SNES",
+        "n64" => "N64 (no core)",
         _ => "NES",
     }
 }
@@ -6411,7 +6411,7 @@ fn paths_tab(ui: &mut egui::Ui, settings: &mut Settings) {
     ui.label(
         RichText::new(
             "Additional folders tagged by system. NES containers and SNES cartridge \
-             images are scanned; the N64 tag is a placeholder.",
+             images are scanned; N64 titles are indexed and report that no core is available.",
         )
         .weak()
         .small(),

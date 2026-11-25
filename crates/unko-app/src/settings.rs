@@ -296,7 +296,7 @@ impl ShaderPreset {
 /// One library root tagged with the system it contains.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryRoot {
-    /// System identifier (`nes` for now; SNES/N64 placeholders later).
+    /// System identifier (`nes`, `snes` or `n64`).
     pub system: String,
     /// Folder scanned for that system.
     pub path: PathBuf,
