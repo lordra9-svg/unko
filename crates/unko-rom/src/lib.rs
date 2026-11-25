@@ -394,6 +394,7 @@ fn scan_zip(path: &Path) -> Vec<RomEntry> {
         }
         let mut prefix = [0u8; 16];
         let prefix_ok = member.read_exact(&mut prefix).is_ok();
+        let size = member.size();
         let header = if member_ext.eq("fds") {
             None
         } else if member_ext.eq("unif") || member_ext.eq("unf") {
@@ -401,7 +402,11 @@ fn scan_zip(path: &Path) -> Vec<RomEntry> {
             // the bytes are still converted on load.
             if prefix_ok {
                 let mut bytes = prefix.to_vec();
-                if member.read_to_end(&mut bytes).is_ok() {
+                if member
+                    .take(MAX_ROM_BYTES + 1)
+                    .read_to_end(&mut bytes)
+                    .is_ok()
+                {
                     unif::header(&bytes)
                 } else {
                     None
@@ -419,7 +424,6 @@ fn scan_zip(path: &Path) -> Vec<RomEntry> {
             continue;
         };
         let title = member_title(&name);
-        let size = member.size();
         let id = archive_id(path, &name);
         out.push(RomEntry {
             source: Source::Archive {

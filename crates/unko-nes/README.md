@@ -37,7 +37,9 @@ let audio = nes.audio();  // mono f32 samples for the frame
 
 `System` also exposes `from_fds`, `save_state`/`load_state`, battery SRAM,
 controller/peripheral setters, region and palette selection, and the APU/PPU
-debug helpers. See the crate documentation for the full surface.
+debug helpers. See the crate documentation for the full surface, and
+`docs/nes-core.md` at the repository root for an integration guide (input bit
+order, audio/filters, save-state limits, FDS/NSF, validation and provenance).
 
 ## Features
 

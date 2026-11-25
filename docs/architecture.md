@@ -22,8 +22,10 @@ input, audio, screenshot or save-state code.
 └───────────────▲──────────────────────────────┬───────────────┘
                 │ implements                    │ factory()
 ┌───────────────┴──────────────────────────────▼───────────────┐
-│ core crates: unko-nes (standalone) · unko-nes-api (NesCore)   │
-│  SNES core · GB core · ...                                   │
+│ standalone cores (no unko-core/shell dependency):            │
+│   unko-nes · unko-snes · unko-n64                            │
+│ optional adapters/extensions: unko-nes-host, unko-snes-host, │
+│   unko-n64-host, unko-nes-api, unko-snes-api                 │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -36,9 +38,48 @@ is a thin adapter that implements `unko_core::Core` and
 `unko_nes_api::NesCore` on top of it and is the crate the app and CLI link. The former TetaNES adapter has been retired.
 
 `unko-snes` is the same shape for the SNES: a standalone MIT Rust core with no
-`unko-core` or shell dependency. It has ROM parsing, a cycle-stepped 65C816 and
-the minimal S-CPU memory map; a `unko-snes-host` adapter follows once the
-SPC700/PPU/frame surface is stable.
+`unko-core` or shell dependency. It has ROM parsing, a cycle-stepped 65C816,
+the SPC700/APU, the S-DSP, the dot/scanline PPU, DMA/HDMA, the coprocessors and
+versioned save states. `unko-snes-host` is its thin `unko_core::Core` adapter
+and `unko-snes-api` adds the SNES extension trait.
+
+`unko-n64` is the third standalone core (RDRAM/RSP/RDP/AI/CPU scaffold). It
+does not depend on the shell either; `unko-n64-host` is its adapter. Its
+current validation status and known approximations are tracked in
+`docs/n64-validation.md`.
+
+Every core can be used on its own. Integration guides for building your own
+emulator on top of them:
+
+- `docs/nes-core.md`
+- `docs/snes-core.md`
+- `docs/n64-validation.md` (N64 scaffold status)
+
+## System separation (verified)
+
+The three emulated systems are separate crates with separate adapters:
+
+| Core crate | Depends on | Standalone emulator use |
+|---|---|---|
+| `unko-nes` | serde, bincode, serde-big-array only | yes — `System::from_ines` + `run_frame` |
+| `unko-snes` | serde, bincode, serde-big-array, corosensei only | yes — `Snes::new` / `reset` + PPU frame loop |
+| `unko-n64` | no runtime dependencies | yes — `Machine::new` + `run_frame` |
+
+None of the cores depend on `unko-core`, `unko-app`, `unko-rom` or another
+system's crate, and none share a system-specific module. The adapters
+(`unko-nes-host`, `unko-snes-host`, `unko-n64-host`) are the only crates that
+bridge a core into `unko_core::Core`, and the `unko-*-api` crates add extension
+traits without being required by the cores. `unko-rom` (archive discovery) and
+`unko-rom-manager` are frontend-side input/tooling boundaries and can be
+omitted entirely by an embedder.
+
+Dependency check used for this table:
+
+```sh
+cargo tree -p unko-nes -e normal --depth 1
+cargo tree -p unko-snes -e normal --depth 1
+cargo tree -p unko-n64 -e normal --depth 1
+```
 
 `unko-rom` is a sibling boundary for *input*: it discovers loose ROMs and
 members of `.zip`/`.7z`/`.rar` archives, parses iNES/NES 2.0/UNIF metadata and

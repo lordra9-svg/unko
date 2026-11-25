@@ -4,8 +4,10 @@ Standalone Super Nintendo / Super Famicom core for Unko.
 
 This crate has no dependency on the Unko shell or on `unko-core`. It is the
 SNES counterpart to `unko-nes`: a pure-Rust core that can be embedded directly
-in another Rust project. A future `unko-snes-host` crate will provide the
-`unko_core::Core` adapter.
+in another Rust project. `unko-snes-host` is the optional `unko_core::Core`
+adapter, and `unko-snes-api` adds the SNES extension trait. A full integration
+guide (boot sequence, firmware, frame loop, audio, save states) is in
+`docs/snes-core.md` at the repository root.
 
 ## Current scope
 
@@ -48,15 +50,14 @@ Donkey Kong Country / Chrono Trigger 1200/1200, Mega Man X3 and Star Fox
 10000/10000, and Mega Man X2 9996/10000 with only three proved torn presents
 excluded. The 212-entry test-ROM baseline and the whole crate test suite pass.
 
-Retail-music S-DSP audio is sample-exact for Donkey Kong Country, Zelda,
-F-Zero, Super Metroid and Super Mario World over 350,000 stereo frames (ares' power-on APU RAM and
-DSP-register pattern is reproduced); Mega Man X2 is 99.44% with its CX4
-firmware installed, while Super Mario World, Super Mario All-Stars and Chrono
-Trigger still differ. The S-SMP runs in a clock-granular peer coroutine that
-advances with ares' exact rational master-clock credit; it is bit-identical to
-the per-access model on every measured title. ST018 and Satellaview/BS-X are
-not implemented; Sufami Turbo and the Sharp S-RTC are. See
-`docs/snes-accuracy-divergences.md`.
+Retail-music S-DSP audio is bit-exact on the 600-frame gate for all seven
+reference titles in the default configuration (Donkey Kong Country, Zelda,
+F-Zero, Castlevania IV, Super Mario All-Stars, Chrono Trigger and Mega Man X2
+with its CX4 firmware installed). The S-SMP runs in a clock-granular peer
+coroutine that advances with ares' exact rational master-clock credit; it is
+bit-identical to the per-access model on every measured title. ST018 and
+Satellaview/BS-X support is limited to the documented interfaces; Sufami Turbo
+and the Sharp S-RTC are implemented. See `docs/snes-accuracy-divergences.md`.
 
 ## Accuracy sources
 

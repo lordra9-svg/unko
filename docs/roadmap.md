@@ -335,6 +335,13 @@ The main effort was the reference-parity accuracy core. Details in
 - [ ] GameCube/Wii is deferred: Dolphin is GPL-2.0+ and application-shaped, so
       it can only be a separate optional process, never a registry core.
 
+## Integration guides
+
+- NES core: `docs/nes-core.md`
+- SNES core: `docs/snes-core.md`
+- N64 scaffold and validation limits: `docs/n64-validation.md`
+- Security audit: `docs/security.md`
+
 ## M4 — distribution
 
 - [x] Desktop packages: Linux tarball and AppImage, Windows zip, macOS

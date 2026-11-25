@@ -1,127 +1,138 @@
 # Security audit
 
-Date: 2026-11-16 (post-fix pass)
+Last full audit: **2026-11-25**. Scope: the whole repository, `Cargo.lock`,
+GitHub workflows, scripts, licenses, and the paths that consume untrusted
+input (ROMs, archives, save states, netplay datagrams, relay rooms, DAT
+downloads, firmware paths).
 
-Scope: the whole repository, its committed dependency lockfile, GitHub
-workflows, scripts and the paths that consume untrusted input (ROMs, archives,
-save states, netplay datagrams, relay rooms and DAT downloads).
+The policy and reporting process are in [`SECURITY.md`](../SECURITY.md).
 
 ## Method
 
-- Queried OSV.dev for every crates.io package in `Cargo.lock` (470 after adding the
-  SNES CPU oracle and Rust `xtask` crate).
-- Ran the repository license allowlist check (`xtask license-audit`).
-- Scanned tracked files and full git history for credentials, private keys and
-  common token formats; checked sensitive file names and world-writable files.
-- Reviewed the `unsafe` surface, panic/error handling in untrusted parsers,
-  archive/network bounds, release workflow permissions and action pinning.
-- Re-ran the functional gates (clippy, fmt, tests, AccuracyCoin, mapper suite,
-  synthetic benchmark).
+- `cargo audit` against the current lockfile (487 crates).
+- `cargo run -p xtask -- license-audit` for the dependency license allowlist.
+- Manual review of every `unsafe` block, every path that writes files, all
+  archive/network code and the save-state decoders.
+- Review of the CI/release workflows (action pinning, token permissions) and
+  the DAT downloader.
+- Full test/clippy/fmt verification after the fixes (see **Verification**).
 
-## Fixes applied
+## 2026-11-25 findings and fixes
 
-### 1. High advisory: quick-xml 0.30 (fixed)
+### 1. `url` stack overflow (fixed)
 
-`RUSTSEC-2026-0194`/`0195` (CVSS 3.1 7.5, availability only) affected
-quick-xml before 0.41 via `zbus_xml -> atspi -> accesskit -> egui-winit ->
-eframe`. The desktop `accesskit` feature is now disabled, which removes the
-whole `zbus`/quick-xml 0.30 chain. The tree now contains only quick-xml 0.41
-(used by `unko-rom-manager`). Screen-reader integration is deferred until the
-desktop stack upgrades; this is documented in `crates/unko-app/Cargo.toml`.
+`RUSTSEC-2026-0592` (CVSS 7.5 availability): `url 2.5.8` can stack-overflow in
+`Url::origin()` on nested `blob:` URLs. It entered through `reqwest` and
+`webbrowser` (egui). Unko never calls `origin()` on attacker URLs, so the path
+was not reachable, but the dependency was updated:
 
-Result: **0 high advisories**; OSV now reports only the four unmaintained
-crates below.
+```
+url 2.5.8 -> 2.5.9
+form_urlencoded 1.2.2 -> 1.2.3
+```
 
-### 2. Archive size cap (fixed)
+`cargo audit` now reports **0 vulnerabilities**.
 
-`unko-rom` now enforces `MAX_ROM_BYTES = 64 MiB`:
+### 2. Unbounded UNIF read while scanning ZIPs (fixed)
 
-- `load` rejects an entry whose declared size exceeds the cap before any I/O;
-- ZIP members are checked against their declared size, allocated with a
-  bounded hint and read through `take(cap + 1)`, then the actual length is
-  checked again.
-- 7z members are streamed through `for_each_entries` with a bounded `take`;
-  RAR parsing/extraction uses `max_member_output_bytes` and
-  `max_total_output_bytes` set to the same cap.
+The ZIP scanner read only a 16-byte prefix for iNES/FDS members, but read the
+whole member for `.unif`/`.unf` so UNIF chunks could be parsed. That path had
+no decompression bound. It now uses `take(MAX_ROM_BYTES + 1)` like the load
+path, so scanning a malicious archive cannot inflate past 64 MiB.
 
-A unit test covers the pre-I/O rejection. ZIP/7z/RAR members are still read
-into memory only; no archive path is ever extracted to disk, so zip-slip is
-not applicable.
+### 3. Unbounded save-state decoding (fixed)
 
-### 3. CI supply chain (fixed)
+NES and SNES states are `bincode` blobs. `bincode::deserialize` trusts encoded
+lengths, so a small malicious state could request a huge allocation.
 
-- Every GitHub Action in `.github/workflows/ci.yml` and `release.yml` is now
-  pinned to a commit SHA, with the version in a trailing comment.
-- A new CI job runs `xtask osv-audit`; it queries OSV.dev for every
-  crates.io package in `Cargo.lock` and fails when an advisory ID is not in
-  `xtask/osv-baseline.txt`.
-- CI remains `contents: read`; the release workflow keeps `contents: write`
-  only for publishing.
+- `unko-nes`: `load_state` rejects blobs over 64 MiB before decoding; the
+  system and mapper decoders use
+  `DefaultOptions::new().with_fixint_encoding().allow_trailing_bytes()
+  .with_limit(64 MiB)` (same wire format as before).
+- `unko-snes`: `load_state` rejects blobs over 64 MiB and uses the same
+  bounded, fixint-compatible options.
+- Existing short-header/size/version checks remain. Save states are still
+  documented as untrusted local input.
 
-### 4. Netplay trust boundary (accepted, documented)
+### 4. Temporary paths (accepted, low risk)
+
+The desktop app creates scan/temporary directories named with the PID under
+`std::env::temp_dir()`. These are not privileged and are created for local
+scans/tests only; there is no world-writable shared location or setuid use. A
+hostile local process with the same UID can already read the user's files.
+`CPU_TRACE_LOG`/`CPU_TRACE_FROM`/`CPU_TRACE_TO` are opt-in debugging variables
+that append a PC trace to a user-chosen path; they do not affect emulation.
+
+### 5. Archive extraction and zip-slip (no issue)
+
+Archives are read into memory to obtain the selected member; no archive path is
+ever extracted to disk, so zip-slip is not applicable. ROM-manager rebuild
+outputs are created from sanitized file names (path separators and reserved
+characters replaced, trailing dots/spaces removed) and duplicate entries are
+rejected. Loading enforces `MAX_ROM_BYTES = 64 MiB` for ZIP (declared and
+actual), 7z (streamed `take`) and RAR (reader output caps).
+
+### 6. DAT downloader (bounded, user-initiated)
+
+`fetch_dat` accepts a user-supplied URL over `reqwest` with rustls native
+roots, a 120 s timeout and a 256 MiB body cap. The body must parse as non-empty
+Logiqx XML before it atomically replaces the destination (`write .part`, then
+`rename`). This is a local CLI action; there is no remote trigger and no
+credential handling.
+
+### 7. Netplay / relay trust boundary (accepted, documented)
 
 GGRS runs over plaintext UDP with no peer authentication. The relay room token
-is a deterministic FNV-1a hash of the room name, not a secret, so anyone who
-knows the relay endpoint and room can join or inject datagrams. The NetPlay
-window now displays a warning to use trusted peers or a private relay, and
-`docs/netplay.md` documents the boundary. Optional pre-shared-key
-authentication/AEAD remains a recommended follow-up; it is not implemented in
-this pass.
+is a deterministic hash of the room name, not a secret: anyone who knows the
+endpoint and room can join or inject datagrams. Relay resources are bounded
+(datagram 2048 bytes, 256 queued per client, 64 rooms × 16 members). The UI
+warns to use trusted peers or a private relay; see `docs/netplay.md`.
+Pre-shared-key/AEAD authentication remains a recommended follow-up.
 
-## Remaining findings
+### 8. `unsafe` surface
 
-### Unmaintained crates (no known CVE)
+Only `unko-app` is not `forbid(unsafe_code)`: `deny(unsafe_code)` with
+allowlisted scopes for OpenGL/glow shader setup in `gpu_shader.rs` and the two
+exported `#[unsafe(no_mangle)]` mobile entry points in `lib.rs`. Every other
+first-party crate (`unko-core`, `unko-rom`, `unko-rom-manager`, `unko-nes*`,
+`unko-snes*`, `unko-n64*`, `unko-netplay`, `unko-cli`, `xtask`) has
+`#![forbid(unsafe_code)]`. Third-party `corosensei` (SNES coroutines) and the
+GUI/graphics stack are not first-party code; their licenses are audited.
 
-- `bincode 1.3.3` — `RUSTSEC-2025-0141`. Used for save-state/mapper state and
-  GGRS wire messages; migration needs a save-state compatibility plan.
-- `instant 0.1.13` — `RUSTSEC-2024-0384`, pulled by GGRS.
-- `paste 1.0.15` — `RUSTSEC-2024-0436`.
-- `ttf-parser 0.25.1` — `RUSTSEC-2026-0192`, pulled by egui text shaping.
+### 9. Supply chain / CI
 
-These are accepted in `xtask/osv-baseline.txt`; a new advisory ID fails CI.
-Malformed GGRS datagrams are handled as errors rather than panics, but the
-plaintext/unauthenticated transport remains an Internet-facing trust boundary.
+- Every GitHub Action is pinned to a commit SHA with the version in a comment.
+- CI is `contents: read`; only the release publish job has `contents: write`.
+- The `osv-audit` job checks every crates.io package in `Cargo.lock` and fails
+  on advisory IDs not listed in `xtask/osv-baseline.txt`.
+- `license-audit`: **468 dependencies, all licenses allowed** (MIT target).
 
-## Positive controls
+## Remaining accepted warnings
 
-- `unsafe` is forbidden in `unko-core`, `unko-rom`, `unko-rom-manager`,
-  `unko-nes`, `unko-nes-api`, `unko-nes-host`, `unko-netplay`, `unko-cli` and
-  the app binary. Only the OpenGL shader module and mobile exported entry
-  points are explicitly allowed.
-- No credentials, private keys or token patterns in tracked files or full git
-  history; no `.env`, key stores or sensitive filenames tracked; no
-  world-writable tracked files.
-- Dependency licenses: all allowed (allowlist audit).
-- DAT download is bounded at 256 MiB, validated as Logiqx XML, written to a
-  temporary file and atomically renamed.
-- Relay rooms/members, per-client relay queues, hole-punch queues and GGRS
-  socket polls are bounded, dropping excess UDP datagrams instead of growing
-  memory without limit.
-- ROM manager rebuild names are reduced to `file_name` and sanitized; it does
-  not extract archive paths.
-- Save states check magic/version, ROM fingerprint and mapper state lengths;
-  malformed states return errors.
+`cargo audit` reports four **unmaintained** crates with no known exploit and no
+fixed upgrade:
 
-## Gate results from this pass
+| Crate | Advisory | Why it remains |
+|---|---|---|
+| `bincode 1.3.3` | RUSTSEC-2025-0141 | Save-state and GGRS wire format; migration needs a compatibility plan. Save-state decoding is size/depth bounded as above. |
+| `instant 0.1.13` | RUSTSEC-2024-0384 | Pulled by GGRS. |
+| `paste 1.0.15` | RUSTSEC-2024-0436 | Transitive macro dependency. |
+| `ttf-parser 0.25.1` | RUSTSEC-2026-0192 | egui text shaping. |
 
-- `cargo test --workspace`: 1,026 passed, 0 failed (4 ignored)
-- `cargo clippy --workspace --all-targets -- -D warnings`: clean
-- `cargo fmt --all -- --check`: clean
-- `nestest`: 8,980 / 8,980 lines exact
-- AccuracyCoin: 146/151, 0 failed, 5 DRAW skips, 0 unrun
-- Mapper suite: 65/65 cases, 0 failed
-- Synthetic benchmark: 780.5 fps, 12.99x realtime (CI floor 300 fps)
-- License audit: 467 dependencies, all allowed
-- OSV: 470 packages, 4 advisories (all unmaintained, baseline), 0 new
-- `cargo metadata --locked`: clean
+None are reachable with attacker-controlled data in a way that produces memory
+unsafety in first-party code; they are tracked for a future dependency refresh
+(notably `bincode` → 2.x with state versioning).
 
-## Recommended next actions
+## Verification (2026-11-25)
 
-1. Add optional netplay authentication/encryption (PSK + AEAD) or keep the
-   trusted-LAN warning prominent.
-2. Plan the bincode 1.x migration with the next save-state magic bump.
-3. Upgrade egui/eframe when convenient to move `ttf-parser` forward and
-   restore accessibility with a fixed quick-xml.
-4. Keep `xtask/osv-baseline.txt` reviewed on every dependency upgrade.
+```
+cargo audit                      -> 0 vulnerabilities, 4 allowed warnings
+cargo run -p xtask -- license-audit -> 468 deps, all licenses allowed
+cargo test --workspace           -> green (see README for counts)
+cargo clippy --workspace --all-targets -> clean
+cargo fmt --all -- --check       -> clean
+```
 
-No ROMs, BIOS images or secrets are part of this repository.
+SNES reference gates were re-run after the changes (600-frame audio, 0
+differing samples for Mega Man X2 and Donkey Kong Country); see the commit log
+for the exact commands and outputs.

@@ -196,6 +196,9 @@ impl std::error::Error for StateError {}
 /// Size of the SNES work RAM.
 pub const WRAM_SIZE: usize = 0x2_0000;
 
+/// Largest accepted save-state blob.
+pub const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
+
 /// Master clocks the 5A22 spends refreshing WRAM on every scanline
 /// (ares `CPU::step`: five stalls of 6 + 2 clocks).
 const DRAM_REFRESH_CLOCKS: u32 = 40;
@@ -900,8 +903,16 @@ impl Snes {
 
     /// Deserialize and restore a state produced by [`Self::save_state`].
     pub fn load_state(&mut self, bytes: &[u8]) -> Result<(), StateError> {
-        let state: SnesState =
-            bincode::deserialize(bytes).map_err(|error| StateError::Decode(error.to_string()))?;
+        if bytes.len() > MAX_STATE_BYTES {
+            return Err(StateError::Corrupt("save state exceeds 64 MiB"));
+        }
+        use bincode::Options as _;
+        let state: SnesState = bincode::DefaultOptions::new()
+            .with_fixint_encoding()
+            .allow_trailing_bytes()
+            .with_limit(MAX_STATE_BYTES as u64)
+            .deserialize(bytes)
+            .map_err(|error| StateError::Decode(error.to_string()))?;
         self.restore(&state)
     }
 

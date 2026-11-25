@@ -1,16 +1,18 @@
 # Unko
 
-A multi-platform, multi-core emulator shell in Rust. The first system is the
-NES, powered by the standalone `unko-nes` core. The base
-`unko_core::Core` contract is system-generic; NES-only controls live in the
-`unko-nes-api` `NesCore` extension trait. A second isolated core,
-`unko-snes`, is in progress.
+A multi-platform, multi-core emulator shell in Rust with three isolated,
+independently usable cores: NES (`unko-nes`), SNES (`unko-snes`) and N64
+(`unko-n64`). The base `unko_core::Core` contract is system-generic; system-
+specific controls live in the `unko-*-api` extension traits. Each core has no
+dependency on the shell, so it can back an independent emulator (see
+`docs/nes-core.md` and `docs/snes-core.md`).
 
 > Formerly `multi-emu` / `multiemu`. Host crates: `unko-core`, `unko-rom`,
 > `unko-cli`, `unko-app`. NES core: `unko-nes`. Adapter: `unko-nes-host`
 > (registry id `nes_accuracy_core`). SNES core: `unko-snes`.
 
 **Repository:** <https://github.com/lordra9-svg/unko>
+**Security:** [`SECURITY.md`](SECURITY.md) · audit: [`docs/security.md`](docs/security.md)
 
 [![CI](https://github.com/lordra9-svg/unko/actions/workflows/ci.yml/badge.svg)](https://github.com/lordra9-svg/unko/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/lordra9-svg/unko)](https://github.com/lordra9-svg/unko/releases)
@@ -28,6 +30,15 @@ records WAV/PNG/GIF and verifies determinism. FDS images use a user-supplied
 An offscreen wgpu/Vulkan renderer and opt-in wgpu presenter are available
 behind `--features vulkan`; the glow path remains the default presenter.
 
+The three cores are independent crates: `unko-nes`, `unko-snes` and
+`unko-n64` do not depend on `unko-core`, the app or each other. The host crates
+(`unko-*-host`) are optional `unko_core::Core` adapters. Integration guides:
+
+- NES: [`docs/nes-core.md`](docs/nes-core.md)
+- SNES: [`docs/snes-core.md`](docs/snes-core.md)
+- N64: scaffold status and validation limits in
+  [`docs/n64-validation.md`](docs/n64-validation.md)
+
 Accuracy milestone **A5** is complete. **A6/A7** NES breadth and capture work is
 frozen as done for now (2026-11-16); VS. System and PlayChoice-10 remain paused
 by the owner pending a 2C05 title, a good DualSystem dump and PC10 images. The
@@ -44,19 +55,15 @@ Super Mario World 600/600 presents (the last one uses the documented per-title
 HDMA phase calibration), Zelda / Super Mario All-Stars / F-Zero / Donkey Kong
 Country / Chrono Trigger 1200/1200, Mega Man X3 and Star Fox 10000/10000, and
 Mega Man X2 9996/10000 with only three proved torn presents excluded. The 212
-test-ROM baseline and the `unko-snes` test suite are green. Retail-music audio
-parity is measured per title against ares' pre-resampler stream with its exact
-DSP thread clocks: **Donkey Kong Country, Zelda, F-Zero, Castlevania IV,
-Super Mario All-Stars and Chrono Trigger are bit-exact** (0 differing samples
-over the 600-frame gate, 639,656 interleaved i16); Mega Man X2 is 92.3001%
-(its CX4 firmware must be supplied via `CX4_ROM`). Two real clock
-bugs drove the gains: ares rounds each thread frequency with `+0.5` before
-building its fixed-point scalar, so the NTSC CPU scalar uses 21,477,273, not
-21,477,272 (CV4); and a `$420B` DMA starts at the **second** bus access after
-the write, with `status.clockCount` taken from that access (SMAS, and the
-shared boot alignment that also improved the rest). The remaining
-residual is an S-SMP boot-handshake visibility phase in the port exchange,
-tracked in the SNES ledger. The reference oracles are
+test-ROM baseline and the `unko-snes` test suite are green. Retail-music audio is measured per title against ares'
+pre-resampler stream with its exact DSP thread clocks: **all seven reference
+titles are bit-exact on the 600-frame gate in the default configuration**
+(Donkey Kong Country, Zelda, F-Zero, Castlevania IV, Super Mario All-Stars,
+Chrono Trigger and Mega Man X2; 0 differing samples over 639,656 interleaved
+i16). The S-SMP schedule and DSP phase are selected from the cartridge header
+(CX4 carts use the thread-clock/pull schedule and phase 2; others use
+plan/credit and phase 0), which resolved the earlier per-title residuals. The
+SNES ledger in `docs/snes-accuracy-divergences.md` keeps the detailed history. The reference oracles are
 ares (primary, ISC), MesenCE (GPL-3.0, black-box), Mednafen 1.32.1 (GPL-2.0,
 black-box) and RustySNES (Apache-2.0).
 
@@ -69,7 +76,7 @@ Reference gates:
 - mapper matrix (Holy Mapperel, blargg MMC3, MMC5, VRC2a, MMC1-A12):
   **65/65**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW**, 0 failed, 5 DRAW skips
-- `cargo test --workspace`: **1,026 passed, 0 failed** (4 ignored); clippy/fmt clean
+- `cargo test --workspace`: **1,163 passed, 0 failed** (6 ignored); clippy/fmt clean
 - VS. System: mapper 99, cabinet input, UniSystem/DualSystem parsing,
   2C03/2C04/2C05 palettes and 2C05 security; 13 repaired local images boot
   (including Gumshoe's outer bank)
@@ -109,7 +116,7 @@ and run-ahead. The legacy input-framing session remains for tests and
 |---|---:|
 | Workspace crates | 11 |
 | First-party Rust lines | ~129,200 |
-| Workspace tests | 1,026 pass, 0 failed |
+| Workspace tests | 1,163 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images | 7,101 |
 

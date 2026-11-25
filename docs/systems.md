@@ -20,12 +20,12 @@ The former TetaNES compatibility core was retired after the accuracy core
 gained save states and became the default. A future NES core can be registered
 beside it; the host chooses by `CoreInfo.id`.
 
-## SNES / Super Famicom — in progress
+## SNES / Super Famicom — shipped
 
 | | |
 |---|---|
 | Core | `unko-snes` (standalone Rust crate, MIT) |
-| Adapter | `crates/unko-snes-host` (`Core` + `SnesCore`) — planned |
+| Adapter | `crates/unko-snes-host` (`Core` + `SnesCore`) — shipped |
 | Implementation source | **ares `sfc/`** (C++, ISC) — primary behavioural source |
 | Oracles | **MesenCE `Core/SNES`** (C++, GPL-3.0) — reference only · **Mednafen 1.32.1** (C++, GPL-2.0) — black-box peer only · **RustySNES** (Rust, Apache-2.0) — oracle/reference only |
 | Size | ares 19.9k LOC; Mesen 35.7k LOC |
@@ -33,7 +33,8 @@ beside it; the host chooses by `CoreInfo.id`.
 | Status | isolated core started 2026-11-16: ROM parsing/checksums/mapping, SRAM, cycle-exact 65C816 timing, full SPC700, APU IPL/ports/timers, S-DSP, dot/scanline PPU modes 0-7 with hires/interlace, sprites, windows, mosaic and subscreen/colour math, DMA/HDMA and the memory map. Coprocessors: SuperFX, SA-1, SDD1, SPC7110 (+EXSPC7110 expansion), CX4, NEC DSP-1/2/3/4, OBC1, MSU1 (data ROM + 44.1 kHz audio), Sharp S-RTC and the two-slot Sufami Turbo base cartridge. Every reference title is pixel-identical to the calibrated ares oracle (SMW 600/600, five 1200/1200 titles, MMX3/Star Fox 10000/10000, MMX2 9996/10000 with torn presents proved), the 212 test-ROM baseline is green, and the blargg S-DSP PCM oracle is bit-exact. ST018 and Satellaview/BS-X are verified. Retail audio: all seven reference titles (DKC, Zelda, F-Zero, Castlevania IV, Super Mario All-Stars, Chrono Trigger, Mega Man X2) are bit-exact on the 600-frame gate in one configuration; the S-SMP schedule and DSP phase are selected from the cartridge header (CX4 carts use the thread-clock/pull schedule and phase 2, others plan/credit and phase 0). |
 
 Why an isolated Rust core: the SNES crate has no `unko-core` or shell
-dependency, exactly like `unko-nes`. ares remains the primary implementation
+dependency, exactly like `unko-nes`. Its integration guide is
+`docs/snes-core.md`. ares remains the primary implementation
 source because it is ISC and closest to the silicon; MesenCE remains the
 compatibility oracle and must not be read while implementing the core. The
 adapter crate is added only after the core has a stable CPU/bus/frame surface,
@@ -52,16 +53,15 @@ Reference documentation: [SNESdev Wiki](https://snes.nesdev.org/wiki/SNESdev_Wik
 Integration: implement the core in `unko-snes`, then add `unko-snes-host` with
 the generic `Core` plus a SNES extension trait. Do not port Mesen code.
 
-## Nintendo 64 — planned
+## Nintendo 64 — scaffold shipped
 
 | | |
 |---|---|
-| Primary | **ares `n64/`** (C++, ISC) — linkable via a C ABI |
-| Reference | **gopher64** (Rust, GPL-3.0) — structural reference only |
-| Size | ares 31.9k LOC excluding vendored Vulkan; gopher64 23.9k Rust LOC |
-| Renderer | parallel-rdp (MIT) over Vulkan, used by both |
-| Coverage | VR4300 CPU + recompiler, RSP + recompiler, TLB/FPU/COP2, VI/AI/PI/SI/RI/MI, RDRAM, PIF/CIC, 64DD, Aleck 64 |
-| Status | planned after SNES |
+| Core | `unko-n64` (standalone Rust scaffold, MIT) |
+| Adapter | `crates/unko-n64-host` (`Core` + `N64Adapter`) — shipped |
+| Reference | ares `n64/` (ISC) and gopher64 (GPL-3.0, structural reference only) |
+| Coverage | VR4300 interpreter + TLB/FPU/CP0, RSP scalar/vector subset, RDP fill/edgewalker/combiner/blender/texture/LOD/depth, VI presentation, AI DMA + resampling, MI interrupts |
+| Status | boots a cartridge's IPL3 (PIF HLE) and renders/plays synthetic command streams; validates with synthetic tests. No standard cartridge image was available locally, so real-game validation is pending a user-supplied `UNKO_N64_ROM`; see `docs/n64-validation.md` |
 
 Why ares: ISC, genuinely low-level, recompilers, 64DD/Aleck 64, and the same
 framework as the other systems. gopher64 proves the Rust shape but is GPL, so
@@ -94,10 +94,11 @@ implementation.
 ## Order
 
 1. NES — shipped and frozen as done on 2026-11-16; outstanding fixes are
-   deferred to a later date.
-2. SNES — isolated Rust core (`unko-snes`) with ares as the implementation
-   source and a `unko-snes-host` adapter later.
-3. N64 — ares backend + Vulkan renderer.
+   deferred to a later date. Core guide: `docs/nes-core.md`.
+2. SNES — shipped standalone core with ares as the implementation source and
+   the `unko-snes-host` adapter. Core guide: `docs/snes-core.md`.
+3. N64 — shipped scaffold core + adapter; real-game validation and broader GPU
+   coverage remain (`docs/n64-validation.md`).
 4. GC/Wii — optional external Dolphin process, only if the product needs it.
 
 ## NES backends

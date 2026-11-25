@@ -16,6 +16,9 @@ use crate::types::Cheat;
 use crate::types::DebugSpace;
 use crate::types::{AudioFilterModel, AudioQuality, AudioSource, PpuResetBehavior, RamClear};
 
+/// Largest accepted save-state blob.
+pub const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
+
 /// CPU clock in Hz (NTSC).
 pub const CPU_HZ: f64 = 1_789_773.0;
 
@@ -1488,6 +1491,9 @@ impl System {
     /// Restores a state produced by [`System::save_state`].
     #[cfg(feature = "save-states")]
     pub fn load_state(&mut self, data: &[u8]) -> Result<(), String> {
+        if data.len() > MAX_STATE_BYTES {
+            return Err("save state is larger than the 64 MiB limit".into());
+        }
         if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST21" {
             return Err("not an Unko state (bad magic/version)".into());
         }
@@ -1509,8 +1515,13 @@ impl System {
             .filter(|end| *end <= data.len())
             .ok_or("truncated mapper state")?;
         self.cart.load_state(&data[20..cart_end])?;
-        let state: SystemState =
-            bincode::deserialize(&data[cart_end..]).map_err(|err| err.to_string())?;
+        use bincode::Options as _;
+        let state: SystemState = bincode::DefaultOptions::new()
+            .with_fixint_encoding()
+            .allow_trailing_bytes()
+            .with_limit(MAX_STATE_BYTES as u64)
+            .deserialize(&data[cart_end..])
+            .map_err(|err| err.to_string())?;
         self.cpu = state.cpu;
         self.ppu = state.ppu;
         self.apu = state.apu;

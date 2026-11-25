@@ -20,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **1,026 workspace tests**, 0 failed (4 ignored), plus the ROM-backed suites |
+| Test suite | **1,163 workspace tests**, 0 failed (6 ignored), plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -186,7 +186,7 @@ Implemented so far:
 
 Validation so far:
 
-- **1,026 workspace tests**, 0 failed (4 ignored)
+- **1,163 workspace tests**, 0 failed (6 ignored)
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,
@@ -673,8 +673,15 @@ Validation so far:
   CX4 image and the CPU thread-scalar fix. On the current 600-frame gate
   (639,656 interleaved samples) the default driver is 0 differing for DKC,
   Zelda, F-Zero, Castlevania IV, Super Mario All-Stars and Chrono Trigger,
-  and 92.3001% for Mega Man X2 with the canonical `cx4.rom`. The earlier MMX2 99.44% used a non-canonical firmware image and is
-  not reproducible; see the SNES ledger.
+  and 92.3001% for Mega Man X2 with the canonical `cx4.rom`. The earlier MMX2
+  99.44% used a non-canonical firmware image and is not reproducible; see the
+  SNES ledger.
+  *Correction (2026-11-25):* with refreshed ares references and the
+  header-selected S-SMP schedule/DSP phase (CX4 carts: thread-clock/pull,
+  phase 2; others: plan/credit, phase 0), **all seven reference titles are now
+  0 differing on the 600-frame gate**, including Mega Man X2 with the
+  canonical CX4 image. The root `README.md` and `docs/systems.md` carry the
+  current result; the figures above are retained as history.
 
 - Power-on APU RAM and the S-DSP register file now reproduce ares' low-entropy
   `Random` pattern (the same deterministic stream that fills work RAM, drawn in

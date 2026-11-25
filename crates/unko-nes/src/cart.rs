@@ -6,6 +6,7 @@
 //! Scope: iNES 1.0 headers plus the NES 2.0 mapper-number extension, NROM
 //! (mapper 0) and MMC1 (mapper 1). Further mappers slot into [`Mapper`].
 
+use bincode::Options as _;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fmt;
@@ -45008,7 +45009,15 @@ macro_rules! mapper_states {
                     Ok(())
                 }
                 fn load_state(&mut self, data: &[u8]) -> Result<(), String> {
-                    *self = bincode::deserialize(data).map_err(|err| err.to_string())?;
+                    if data.len() > crate::system::MAX_STATE_BYTES {
+                        return Err("mapper state is larger than the 64 MiB limit".into());
+                    }
+                    *self = bincode::DefaultOptions::new()
+                        .with_fixint_encoding()
+                        .allow_trailing_bytes()
+                        .with_limit(crate::system::MAX_STATE_BYTES as u64)
+                        .deserialize(data)
+                        .map_err(|err| err.to_string())?;
                     Ok(())
                 }
             }
@@ -45296,8 +45305,15 @@ impl MapperState for Supervisor446 {
     }
 
     fn load_state(&mut self, data: &[u8]) -> Result<(), String> {
-        let state: Supervisor446State =
-            bincode::deserialize(data).map_err(|err| err.to_string())?;
+        if data.len() > crate::system::MAX_STATE_BYTES {
+            return Err("mapper state is larger than the 64 MiB limit".into());
+        }
+        let state: Supervisor446State = bincode::DefaultOptions::new()
+            .with_fixint_encoding()
+            .allow_trailing_bytes()
+            .with_limit(crate::system::MAX_STATE_BYTES as u64)
+            .deserialize(data)
+            .map_err(|err| err.to_string())?;
         self.prg = state.prg;
         self.chr = state.chr;
         self.prg_ram = state.prg_ram;
