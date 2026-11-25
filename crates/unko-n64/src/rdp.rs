@@ -130,12 +130,38 @@ impl Rdp {
                 0x3B => self.environment_color = command as u32,
                 0x3C => self.combine_mode = command as u32,
                 0x08..=0x0F => {
-                    // Triangle: edge coefficients (3 words), plus shade colour
-                    // for the shaded variants. Rasterisation is a later
-                    // milestone, but the command length is consumed so the
-                    // stream stays aligned.
                     self.triangles += 1;
-                    let words = if opcode >= 0x0C { 12 } else { 4 };
+                    let shaded = opcode >= 0x0C;
+                    let words = if shaded { 12 } else { 4 };
+                    let start = self.current as usize;
+                    let mut edge = [0u64; 4];
+                    for (index, slot) in edge.iter_mut().enumerate() {
+                        let offset = start + index * 8;
+                        let Some(bytes) = rdram.get(offset..offset + 8) else {
+                            break;
+                        };
+                        let mut word = [0u8; 8];
+                        word.copy_from_slice(bytes);
+                        *slot = u64::from_be_bytes(word);
+                    }
+                    let mut color = self.primitive_color;
+                    if shaded {
+                        let offset = start + 4 * 8;
+                        if let Some(bytes) = rdram.get(offset..offset + 8) {
+                            let mut word = [0u8; 8];
+                            word.copy_from_slice(bytes);
+                            let shade = u64::from_be_bytes(word);
+                            let r = ((shade >> 48) & 0xFFFF) >> 8;
+                            let g = ((shade >> 32) & 0xFFFF) >> 8;
+                            let b = ((shade >> 16) & 0xFFFF) >> 8;
+                            let a = (shade & 0xFFFF) >> 8;
+                            color = ((r as u32) << 24)
+                                | ((g as u32) << 16)
+                                | ((b as u32) << 8)
+                                | a as u32;
+                        }
+                    }
+                    self.rasterize_triangle(edge, color, rdram);
                     self.current = self.current.wrapping_add((words - 1) * 8);
                 }
                 0x3F => {
@@ -147,6 +173,74 @@ impl Rdp {
                 _ => {}
             }
             self.current = self.current.wrapping_add(8);
+        }
+    }
+
+    fn rasterize_triangle(&mut self, edge: [u64; 4], color: u32, rdram: &mut [u8]) {
+        if self.color_size != 2 || self.color_format != 2 {
+            return;
+        }
+        let y_low = sext14(edge[0] >> 32) as f32 / 4.0;
+        let y_mid = sext14(edge[0] >> 16) as f32 / 4.0;
+        let y_high = sext14(edge[0]) as f32 / 4.0;
+        let x_low = fixed16(edge[1] >> 48, edge[1] >> 32);
+        let x_high = fixed16(edge[2] >> 48, edge[2] >> 32);
+        let x_mid = fixed16(edge[3] >> 48, edge[3] >> 32);
+        // The edge coefficients identify three points on the triangle's edge
+        // functions. This scaffold treats them as the triangle's vertices and
+        // rasterises with a half-space test; full RDP edgewalk traversal is a
+        // later milestone.
+        let vertices = [(x_low, y_low), (x_mid, y_mid), (x_high, y_high)];
+        let min_x = vertices
+            .iter()
+            .map(|(x, _)| *x)
+            .fold(f32::INFINITY, f32::min)
+            .floor()
+            .max(0.0) as i32;
+        let max_x = vertices
+            .iter()
+            .map(|(x, _)| *x)
+            .fold(f32::NEG_INFINITY, f32::max)
+            .ceil() as i32;
+        let min_y = vertices
+            .iter()
+            .map(|(_, y)| *y)
+            .fold(f32::INFINITY, f32::min)
+            .ceil()
+            .max(0.0) as i32;
+        let max_y = vertices
+            .iter()
+            .map(|(_, y)| *y)
+            .fold(f32::NEG_INFINITY, f32::max)
+            .floor() as i32;
+        let area = edge_function(vertices[0], vertices[1], vertices[2]);
+        if area == 0.0 {
+            return;
+        }
+        let pixel = rgba8888_to_5551(color).to_be_bytes();
+        for y in min_y..=max_y {
+            for x in min_x..=max_x {
+                let point = (x as f32 + 0.5, y as f32 + 0.5);
+                let w0 = edge_function(vertices[1], vertices[2], point);
+                let w1 = edge_function(vertices[2], vertices[0], point);
+                let w2 = edge_function(vertices[0], vertices[1], point);
+                let inside = if area > 0.0 {
+                    w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0
+                } else {
+                    w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0
+                };
+                if !inside {
+                    continue;
+                }
+                if self.color_width != 0 && x as u32 >= self.color_width {
+                    continue;
+                }
+                let address = self.color_address as usize
+                    + ((y as u32 * self.color_width + x as u32) as usize) * 2;
+                if let Some(slot) = rdram.get_mut(address..address + 2) {
+                    slot.copy_from_slice(&pixel);
+                }
+            }
         }
     }
 
@@ -176,6 +270,23 @@ impl Rdp {
             }
         }
     }
+}
+
+fn sext14(value: u64) -> i32 {
+    let value = (value & 0x3FFF) as i32;
+    if value & 0x2000 != 0 {
+        value - 0x4000
+    } else {
+        value
+    }
+}
+
+fn fixed16(integer: u64, fraction: u64) -> f32 {
+    (integer as u16 as i16 as f32) + (fraction as u16 as f32) / 65_536.0
+}
+
+fn edge_function(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
+    (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0)
 }
 
 fn rgba8888_to_5551(color: u32) -> u16 {

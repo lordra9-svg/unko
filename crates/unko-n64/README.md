@@ -7,6 +7,6 @@ covers DMEM/IMEM, DMA, a scalar interpreter and the vector subset
 (`LQV/SQV/LHV/SHV/LBV/SBV`, `VADD/VSUB`, `VMULF/VMULU`, `VMACF/VMACU`,
 `VRCP/VRCPL/VRCPH`); the RDP scaffold processes
 `SET_COLOR_IMAGE`/`SET_FILL_COLOR`/`FILL_RECTANGLE` into a 16-bit framebuffer
-that `run_frame` presents from RDRAM, and tracks primitive/environment/combine
-state plus triangle command lengths. Triangle rasterisation, texturing and
-audio are next.
+that `run_frame` presents from RDRAM, tracks primitive/environment/combine
+state, and rasterises unshaded/shaded triangles (half-space coverage from the
+edge coefficients). Texturing, combiner blending and audio are next.

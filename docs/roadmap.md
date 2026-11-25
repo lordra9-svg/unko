@@ -278,9 +278,10 @@ The main effort was the reference-parity accuracy core. Details in
       `VADD/VSUB`, `VMULF/VMULU`, `VMACF/VMACU`, `VRCP/VRCPL/VRCPH`). The RDP
       scaffold parses `SET_COLOR_IMAGE`/`SET_FILL_COLOR`/`FILL_RECTANGLE` into
       a 16-bit framebuffer, tracks primitive/environment/combine state and
-      consumes triangle command lengths; `run_frame` presents the VI
-      framebuffer from RDRAM as RGBA. Triangle rasterisation, texturing,
-      audio, the TLB and FPU are the next milestones; no
+      rasterises unshaded/shaded triangles with a half-space test over the
+      edge coefficients; `run_frame` presents the VI framebuffer from RDRAM as
+      RGBA. Texturing, full combiner/blender, audio, the TLB and FPU are the
+      next milestones; no
       standard N64 cartridge image was available locally to boot (only 64DD
       IPL firmware). See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.

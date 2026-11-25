@@ -337,6 +337,59 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::vec_init_then_push)]
+    fn rdp_triangles_render_non_rectangular_geometry() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        let origin = 0x2000u32;
+        machine.write_register(0x0440_0004, origin);
+        machine.write_register(0x0440_0008, 64);
+
+        let mut words: Vec<u64> = Vec::new();
+        words.push(
+            (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (64u64 << 32) | u64::from(origin),
+        );
+        words.push((0x3Au64 << 56) | 0xFF00_00FF); // red
+                                                   // Unshaded triangle: (4,4) (12,4) (4,12), Y in 1/4 pixels.
+        words.push((0x08u64 << 56) | (48u64 << 32) | (16u64 << 16) | 16);
+        words.push(4u64 << 48);
+        words.push(4u64 << 48);
+        words.push(12u64 << 48);
+        // Shaded triangle: (20,4) (28,4) (20,12), green shade colour.
+        words.push((0x0Cu64 << 56) | (48u64 << 32) | (16u64 << 16) | 16);
+        words.push(20u64 << 48);
+        words.push(20u64 << 48);
+        words.push(28u64 << 48);
+        words.push((0xFF00u64 << 32) | 0xFF00); // shade: g=0xFF, a=0xFF
+        words.push(0);
+        words.push(0);
+        words.push(0);
+        for (index, word) in words.iter().enumerate() {
+            machine.write_u32(index as u64 * 8, (word >> 32) as u32);
+            machine.write_u32(index as u64 * 8 + 4, *word as u32);
+        }
+        let end = (words.len() * 8) as u32;
+        machine.write_u32(0x0410_0000, 0);
+        machine.write_u32(0x0410_0004, end);
+        machine.run_frame().expect("frame");
+
+        let pixel = |x: usize, y: usize| {
+            let index = (y * WIDTH as usize + x) * 4;
+            let frame = machine.frame();
+            [
+                frame[index],
+                frame[index + 1],
+                frame[index + 2],
+                frame[index + 3],
+            ]
+        };
+        assert_eq!(pixel(5, 5), [0xFF, 0, 0, 0xFF], "inside red triangle");
+        assert_eq!(pixel(10, 10), [0, 0, 0, 0], "outside red hypotenuse");
+        assert_eq!(pixel(21, 5), [0, 0xFF, 0, 0xFF], "inside green triangle");
+        assert_eq!(pixel(27, 10), [0, 0, 0, 0], "outside green hypotenuse");
+    }
+
+    #[test]
     fn pi_dma_copies_cart_into_rdram() {
         let cart = cart_with(&[]);
         let mut machine = Machine::new(&cart);
