@@ -288,9 +288,16 @@ fn run() -> Result<(), Box<dyn Error>> {
             }
         }
         "cores" => {
-            for registration in registry().cores_for(SystemId::Nes) {
+            let registry = registry();
+            for registration in registry.iter() {
                 let info = registration.info;
-                println!("{:<24} {:<28} {:?}", info.id, info.name, info.accuracy);
+                println!(
+                    "{:<6} {:<24} {:<28} {:?}",
+                    info.system.as_str(),
+                    info.id,
+                    info.name,
+                    info.accuracy
+                );
             }
         }
         "signatures" => {
@@ -1187,6 +1194,7 @@ fn synthetic_benchmark_rom() -> Vec<u8> {
 fn registry() -> Registry {
     let mut registry = Registry::new();
     registry.register(unko_nes_host::registration());
+    registry.register(unko_snes_host::registration());
     registry
 }
 

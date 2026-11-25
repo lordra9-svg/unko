@@ -15,5 +15,6 @@ unko-core.workspace = true
 unko-nes = { path = "../unko-nes" }
 unko-nes-api = { path = "../unko-nes-api" }
 unko-nes-host = { path = "../unko-nes-host" }
+unko-snes-host = { path = "../unko-snes-host" }
 unko-rom-manager = { path = "../unko-rom-manager" }
 unko-rom = { path = "../unko-rom" }

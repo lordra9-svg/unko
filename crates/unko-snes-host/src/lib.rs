@@ -19,17 +19,17 @@
 //!
 //! # Coprocessor firmware
 //!
-//! Coprocessors that need external firmware (CX4, NEC DSP, ST018) are loaded by
-//! the host through the native core API before the first frame. A cartridge
-//! whose firmware is absent runs the base console (as the regression baseline
-//! does).
+//! Firmware is supplied by the user (never bundled) through
+//! [`SnesCore::set_firmware`] before the first [`Core::load`]: the S-SMP IPL
+//! ROM, the CX4 data ROM, or the NEC DSP program ROM. A cartridge whose
+//! firmware is absent runs the base console (as the regression baseline does).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 use unko_core::{
-    Accuracy, AudioBuffer, AudioQuality, Core, CoreError, CoreInfo, Features, FrameBuffer,
-    FrameStats, InputState, LoadOptions, PixelFormat, SystemId,
+    Accuracy, AudioBuffer, AudioQuality, Core, CoreError, CoreInfo, CoreRegistration, Features,
+    FrameBuffer, FrameStats, InputState, LoadOptions, PixelFormat, SystemId,
 };
 use unko_snes::{Cartridge, Region, Snes};
 
@@ -53,12 +53,36 @@ pub fn factory() -> Box<dyn Core> {
     Box::new(SnesCore::new())
 }
 
+/// Registers this core for discovery (matches `unko_nes_host::registration`).
+#[must_use]
+pub fn registration() -> CoreRegistration {
+    let info = SnesCore::new().info();
+    CoreRegistration { info, factory }
+}
+
+/// External firmware an SNES cartridge or its coprocessor may require.
+///
+/// Firmware is supplied by the user (never bundled) and applied by
+/// [`SnesCore::set_firmware`] before the first [`Core::load`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FirmwareKind {
+    /// S-SMP IPL ROM (64 bytes). Required for the SPC700 boot.
+    Ipl,
+    /// CX4 / Hitachi HG51B data ROM (3072 bytes).
+    Cx4,
+    /// NEC DSP-1/2/3/4 program ROM.
+    NecDsp,
+}
+
 /// One emulated SNES.
 pub struct SnesCore {
     system: Option<Snes>,
     region: Region,
     audio: Vec<f32>,
     sample_rate: f32,
+    ipl: Option<[u8; 64]>,
+    cx4: Option<Vec<u8>>,
+    nec_dsp: Option<Vec<u8>>,
 }
 
 impl SnesCore {
@@ -70,7 +94,45 @@ impl SnesCore {
             region: Region::Ntsc,
             audio: Vec::new(),
             sample_rate: SAMPLE_RATE,
+            ipl: None,
+            cx4: None,
+            nec_dsp: None,
         }
+    }
+
+    /// Installs external firmware used by the next [`Core::load`].
+    ///
+    /// The data is validated when the core is loaded, so a bad size or image is
+    /// reported then as [`CoreError::Io`] / [`CoreError::Unsupported`].
+    pub fn set_firmware(&mut self, kind: FirmwareKind, bytes: &[u8]) -> Result<(), CoreError> {
+        match kind {
+            FirmwareKind::Ipl => {
+                let ipl: [u8; 64] = bytes.try_into().map_err(|_| {
+                    CoreError::Io(format!("IPL ROM must be 64 bytes, got {}", bytes.len()))
+                })?;
+                self.ipl = Some(ipl);
+            }
+            FirmwareKind::Cx4 => self.cx4 = Some(bytes.to_vec()),
+            FirmwareKind::NecDsp => self.nec_dsp = Some(bytes.to_vec()),
+        }
+        Ok(())
+    }
+
+    fn apply_firmware(&self, system: &mut Snes) -> Result<(), CoreError> {
+        if let Some(ipl) = self.ipl {
+            system.set_ipl(ipl);
+        }
+        if let Some(cx4) = self.cx4.as_ref() {
+            system
+                .set_cx4_firmware(cx4)
+                .map_err(|error| CoreError::Unsupported(error.to_string()))?;
+        }
+        if let Some(dsp) = self.nec_dsp.as_ref() {
+            system
+                .set_dsp1_firmware(dsp)
+                .map_err(|error| CoreError::Unsupported(error.to_string()))?;
+        }
+        Ok(())
     }
 
     fn machine(&mut self) -> Result<&mut Snes, CoreError> {
@@ -103,6 +165,8 @@ impl Core for SnesCore {
             Cartridge::from_bytes(rom).map_err(|error| CoreError::InvalidRom(error.to_string()))?;
         let region = cart.header().region();
         let mut system = Snes::new(cart);
+        // Firmware must be in place before the reset that boots the APU.
+        self.apply_firmware(&mut system)?;
         system.reset();
         self.system = Some(system);
         self.region = region;
@@ -280,5 +344,29 @@ mod tests {
         let mut b = Vec::new();
         core.save_state(&mut b).expect("save again");
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn rejects_malformed_firmware_sizes() {
+        let mut core = SnesCore::new();
+        assert!(core.set_firmware(FirmwareKind::Ipl, &[0u8; 32]).is_err());
+
+        // A wrong-sized CX4 image is only detected when the core is loaded.
+        core.set_firmware(FirmwareKind::Cx4, &[0u8; 16])
+            .expect("staged");
+        let error = core
+            .load(&build_lorom(0x8000), &LoadOptions::default())
+            .expect_err("bad CX4 firmware must be rejected");
+        assert!(matches!(error, CoreError::Unsupported(_)), "{error:?}");
+    }
+
+    #[test]
+    fn applies_ipl_before_reset() {
+        let mut core = SnesCore::new();
+        core.set_firmware(FirmwareKind::Ipl, &[0u8; 64])
+            .expect("stage IPL");
+        core.load(&build_lorom(0x8000), &LoadOptions::default())
+            .expect("load with IPL");
+        assert!(core.run_frame().is_ok());
     }
 }

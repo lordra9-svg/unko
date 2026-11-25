@@ -3788,6 +3788,7 @@ dependencies = [
  "unko-nes-host",
  "unko-rom",
  "unko-rom-manager",
+ "unko-snes-host",
 ]
 
 [[package]]

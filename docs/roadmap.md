@@ -249,8 +249,9 @@ The main effort was the reference-parity accuracy core. Details in
       pixel-identical to ares and all seven reference titles audio-bit-exact
       in one configuration. `unko-snes-host` now adapts the core to
       `unko-core` (load/reset/run-frame, RGBA video, 32040 Hz stereo audio,
-      input, save states, SRAM); coprocessor firmware provisioning and the
-      frontend follow. Then **N64 from ares** with gopher64 as a GPL structural
+      input, save states, SRAM, and user-supplied IPL/CX4/NEC-DSP firmware);
+      it is registered for discovery (`unko cores` lists `snes`), and the
+      frontend wiring follows. Then **N64 from ares** with gopher64 as a GPL structural
       reference. See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.
 - [ ] GameCube/Wii is deferred: Dolphin is GPL-2.0+ and application-shaped, so
