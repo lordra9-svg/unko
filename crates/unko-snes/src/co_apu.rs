@@ -68,7 +68,6 @@ impl ThreadState for SmpThread {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::co_scheduler::ThreadClock;
     use crate::spc700::Spc700;
 
     fn smp_with(program: &[u8], pc: u16) -> SmpThread {
