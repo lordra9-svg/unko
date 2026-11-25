@@ -13653,3 +13653,45 @@ through 887,719).
 Log: `/tmp/opencode/ares-bus.log` (regenerate with
 `ARES_BUSLOG2=... ARES_BUSLOG2_FROM=83560000 ARES_BUSLOG2_TO=83590000
 tools/snes-oracle/ares-capture.sh "<MMX2>" 240 <outdir>`).
+
+## The 887,720 divergence is an NMI boundary, and the exact driver has it too (2026-11-24)
+
+The four stack writes at `$013A-$013D` and the `$FFEA/$FFEB` fetch are an **NMI
+interrupt frame**, not a JSR. In ares the NMI is recognised before the S-CPU
+executes the `$83F3` counter write, so counter `0x76` is written only after the
+per-frame handler. In our driver the NMI is recognised ~20 clocks later, after
+that instruction, so we write `0x76` first and take the NMI immediately after
+(NMI frame at `83,573,222` vs ares `83,573,208`; vector fetch `83,573,254` vs
+`83,573,240`). The NMI itself lands within 14 clocks of ares; the CPU is simply
+~20 clocks earlier at the same instruction, which moves the instruction
+boundary one step relative to the vblank edge.
+
+Decisive check: the **default driver's** S-SMP trace (`/tmp/opencode/def-spc.log`,
+audio-exact: MMX2 0 differing) has the *same* first divergence:
+
+```
+default-driver SPC trace vs ares: first PC divergence: 887720
+  887719 def FFDC  ares FFDC
+  887720 def FFDE  ares FFE9
+  887721 def FFE0  ares FFDA
+```
+
+So `CO_TRACE` diverging at 887,720 is **not** a proxy for audio exactness: the
+verified bit-exact default driver would fail the same gate identically. Chasing
+the gate further does not advance the audio objective.
+
+## `SNES_DSP_PRIME=0` MMX2 is exact until 7.071 s (2026-11-24)
+
+The default driver's `prime` is a fixed DSP catch-up lead (default 4
+micro-steps; `SNES_DSP_PRIME=0` selects 0). MMX2 measured at prime 0:
+
+```
+offset 0: 49253 differing samples over 639656 (92.3001% identical)
+first differing sample 453120  (frame 226560, t = 7.071 s)
+```
+
+So prime 0 is bit-exact for MMX2's first 7.071 s and then diverges at a
+localised event (92.3% overall), not from a global phase offset. That makes the
+constant `prime = 4` default a stopgap masking one DSP event, and a principled
+prime-0 model that fixes that event is the plausible route to one configuration
+that is exact for all seven.
