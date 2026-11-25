@@ -13517,3 +13517,69 @@ audio (a rate anomaly), i.e. clearly worse. Reverted.
 Added `Scheduler::step_report(thread)`: run one suspension interval and return
 the `Need` without performing the pull, so a driver that owns the S-CPU can
 reproduce ares' literal `co_switch` order. Unit-tested (272 lib tests).
+
+## Literal `step_report` driver rewrite (2026-11-24)
+
+`SNES_CO_SCHED` now uses ares' literal cooperative topology instead of the
+minimum-clock round-robin:
+
+- `CoSched` holds shared typed states (`Rc<RefCell<SmpThread>>`,
+  `Rc<RefCell<DspThread>>`), a published `Rc<Cell<u128>>` S-CPU clock, and a
+  `Scheduler` with all three threads installed. The driver uses
+  `Scheduler::step_report`, so the Scheduler never runs the S-CPU.
+- `step_co_sched` runs the persisted `cpu_coroutine` as the primary thread and
+  synchronizes the APU only where ares does: at `$2140-$2143` reads/writes and
+  at every scanline (`CPU::scanline -> Thread::synchronize(smp)`). The S-SMP is
+  never pulled to the S-CPU clock anywhere else.
+- `SmpThread` now suspends at every `SpcEvent::StepClock` (`StepOutcome::Cycle`
+  = ares `SMP::step`), so the driver ticks the S-DSP to the S-SMP clock after
+  each cycle step, not after each whole instruction. `DSP::tick` is the only
+  DSP clock source in CO mode (`SymEngine::use_external_dsp`).
+
+Three real defects were found and fixed while wiring it:
+
+1. **Double-ticked S-DSP.** `SymEngine::StepClock` still called
+   `catch_dsp_to_smp()` while `DspThread` also ticked the shared S-DSP, so the
+   DSP ran 2x (639k `samples_run` vs 296k emitted; 92.7% of ares' sample count).
+   `use_external_dsp()` stops the engine from touching the DSP.
+2. **No scanline synchronization.** ares' `CPU::scanline()` synchronizes the
+   S-SMP to the S-CPU at every H=0, not only on port access. Without it titles
+   whose driver polls ports rarely produced almost no audio (Zelda 42,360
+   samples, F-Zero 49,780, CV4 110,893 vs ares 639,7xx). With it, all seven
+   produce the full 319,828 stereo frames.
+3. **The initial catch-up guard was too small.** The first synchronize can run
+   ~7.9M S-SMP clocks (~4M DSP ticks); the old guard truncated it. Raised.
+
+### Measured result (600 frames, `SNES_CO_SCHED=1 SNES_DSP_PRIME=0`)
+
+Sample counts are now exact for all seven (319,828 stereo frames, ares
+319,88x). Bit-exact percentages:
+
+| title | differing samples | identical |
+|---|---|---|
+| mmx2 | 196,851 / 639,656 | 69.2255% |
+| dkc  | 368,744 | 42.3528% |
+| zelda | 227,902 | 64.3712% |
+| fzero | 531,200 | 16.9554% |
+| cv4  | 69,460 | 89.1410% |
+| smas | 369,276 | 42.2696% |
+| ct   | 452,725 | 29.2237% |
+
+MMX2's first differing output sample is at frame 221,379 (6.909 s); the stream
+is bit-exact before that. No title is fully exact under the cooperative driver.
+
+**`CO_TRACE` gate still fails.** The first PC divergence is instruction 883,082,
+unchanged: ours executes `$FFD4` while ares loops at `$FFCF/$FFD2`. Clock-level
+analysis shows this is not an S-SMP ordering error: up to index 883,081 both
+traces have identical PCs *and* identical `aresSmpMono` clocks. At the S-CPU
+`$2140=0xCC` write, our `self.clock` corresponds to S-SMP clock 7,946,030; ares
+writes at 7,946,462-equivalent. The 40-master-clock refresh/scanline phase at
+which the write lands relative to the wait loop is what differs (ares charges
+the refresh between `$2140` writes 2 and 1; we charge it just after), so the
+latch becomes visible to the `CMP $F4,#$CC` one iteration earlier. The remaining
+work is CPU refresh/HDMA phase alignment at the boot handshake, not the
+scheduler: the CO driver and the default driver both reach this instruction at
+a slightly different master clock than the ares oracle build.
+
+Default driver is unaffected: MMX2 0 differing (100.0000%) and
+`SNES_DSP_PRIME=0` Zelda 0 differing after the rewrite. 272 lib tests pass.

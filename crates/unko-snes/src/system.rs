@@ -223,6 +223,11 @@ pub struct Snes {
     apu_actor: crate::cpu_coroutine::ApuActorSlot,
     /// Whether the APU actor is driving the S-SMP (inside [`Snes::step`]).
     apu_actor_driven: bool,
+    /// Pending ares `CPU::scanline` -> `synchronize(smp)` target (fixed-point
+    /// S-CPU clock at the H=0 crossing), consumed by the cooperative driver.
+    co_sync: Option<u128>,
+    /// The cooperative driver is inside `step_co_sched`.
+    co_driving: bool,
     /// The inserted cartridge.
     pub cart: Cartridge,
     /// BS-X (Satellaview) memory controller, when the cartridge is BS-X.
@@ -599,6 +604,8 @@ impl Snes {
             ipl: [0; 64],
             apu_actor: crate::cpu_coroutine::ApuActorSlot::default(),
             apu_actor_driven: false,
+            co_sync: None,
+            co_driving: false,
             cart,
             bsx,
             st018: None,
@@ -937,9 +944,9 @@ impl Snes {
         let (ram, dsp_registers) = crate::random::power_on_apu();
         let mut core = crate::spc700::Spc700::new();
         core.pc = 0xFFC0;
-        let mut co = crate::co_apu::CoSched::new(self.ipl, &ram, &dsp_registers, core);
+        let co = crate::co_apu::CoSched::new(self.ipl, &ram, &dsp_registers, core);
         if std::env::var_os("CO_TRACE").is_some() {
-            co.smp.enable_trace();
+            co.smp.borrow_mut().enable_trace();
         }
         self.co = crate::co_apu::CoSchedSlot(Some(Box::new(co)));
     }
@@ -1062,6 +1069,8 @@ impl Snes {
         self.install_co();
         self.apu_actor = crate::cpu_coroutine::ApuActorSlot::default();
         self.apu_actor_driven = false;
+        self.co_sync = None;
+        self.co_driving = false;
         self.sa1_credit = 0;
         self.snes_mar = 0;
         self.refresh_active = false;
@@ -1482,7 +1491,8 @@ impl Snes {
                         break;
                     }
                 }
-                crate::sym_scheduler::StepOutcome::Ran => {}
+                crate::sym_scheduler::StepOutcome::Ran
+                | crate::sym_scheduler::StepOutcome::Cycle => {}
                 crate::sym_scheduler::StepOutcome::Halted => break,
             }
             guard += 1;
@@ -1528,7 +1538,7 @@ impl Snes {
     /// `Need::Synchronize` is satisfied by the driver (the Scheduler cannot own
     /// the S-CPU because it needs the whole `Snes` bus).
     fn step_co_sched(&mut self) -> u32 {
-        use crate::co_scheduler::{Need, Thread, ThreadState};
+        use crate::co_scheduler::{Thread, ThreadState};
         use crate::cpu_coroutine::{BusRequest, BusResponse, CpuInput, CpuOutput};
         let mut co = self.co.0.take().expect("co sched installed");
         let mut coroutine = self
@@ -1541,6 +1551,7 @@ impl Snes {
             self.nested_cpu.pending = Some(CpuInput::Start(cpu));
         }
         self.apu_actor_driven = true;
+        self.co_driving = true;
         let cpu_scalar = crate::apu::scheduler_cpu_scalar(self.region.master_clock());
         let mut cycles = 0u32;
         let mut done = false;
@@ -1554,37 +1565,121 @@ impl Snes {
             };
         }
 
+        // Publish the S-CPU clock to the scheduler and the S-SMP engine.
+        macro_rules! publish_cpu_clock {
+            () => {{
+                let fixed = cpuclock!();
+                co.cpu_clock.set(fixed);
+                co.smp.borrow_mut().set_cpu_clock_fixed(fixed);
+            }};
+        }
+
+        // ares' literal `Thread::synchronize` leapfrog for the APU: run the
+        // S-SMP to `target`, keeping the S-DSP caught up to the S-SMP after
+        // every step (`SMP::step -> synchronize(dsp)`), and letting a DSP tick
+        // pull the S-SMP back up to the DSP clock (`DSP::tick ->
+        // synchronize(smp)`).
+        //
+        // The S-CPU is the caller and is suspended inside its `$2140-$2143`
+        // access, so an S-SMP `synchronize(cpu)` cannot advance it; a parked
+        // `$F4-$F7` read therefore resumes from the current latch, exactly like
+        // ares' `Scheduler::synchronizing()` path.
+        // Publish an explicit S-CPU clock to the scheduler and the S-SMP engine.
+        macro_rules! publish_cpu_clock_at {
+            ($fixed:expr) => {{
+                let fixed: u128 = $fixed;
+                co.cpu_clock.set(fixed);
+                co.smp.borrow_mut().set_cpu_clock_fixed(fixed);
+            }};
+        }
+
+        // ares' literal `Thread::synchronize` leapfrog for the APU: run the
+        // S-SMP to `target`, keeping the S-DSP caught up to the S-SMP after
+        // every step (`SMP::step -> synchronize(dsp)`), and letting a DSP tick
+        // pull the S-SMP back up to the DSP clock (`DSP::tick ->
+        // synchronize(smp)`).
+        //
+        // The S-CPU is the caller and is suspended inside its `$2140-$2143`
+        // access or line crossing, so an S-SMP `synchronize(cpu)` cannot
+        // advance it; a parked `$F4-$F7` read therefore resumes from the
+        // current latch, exactly like ares' `Scheduler::synchronizing()` path.
+        macro_rules! advance_apu_to {
+            ($target:expr, $publish:expr) => {{
+                let target: u128 = $target;
+                let publish: u128 = $publish;
+                let mut guard = 0u64;
+                loop {
+                    let smp = co.smp.borrow().clock();
+                    let dsp = co.dsp.borrow().clock();
+                    if smp >= target && dsp <= smp {
+                        break;
+                    }
+                    if dsp < smp {
+                        // ares `DSP::tick`: 24 DSP clocks, then
+                        // `synchronize(smp)`.
+                        let _ = co.scheduler.step_report(Thread::Dsp);
+                    } else {
+                        // ares `SMP::step`: one instruction, then
+                        // `synchronize(cpu, dsp)`.
+                        publish_cpu_clock_at!(publish);
+                        let _ = co.scheduler.step_report(Thread::Smp);
+                    }
+                    guard += 1;
+                    if guard > 32_000_000 {
+                        break;
+                    }
+                }
+            }};
+        }
+
         macro_rules! answer {
             ($request:expr) => {{
                 let request = $request;
                 match request {
                     BusRequest::Read { address, .. } if is_port(address) => {
                         let port = ((address & 0xFFFF) - 0x2140) as u8;
-                        co.smp.set_cpu_clock_fixed(cpuclock!());
-                        co.smp.engine_mut().synchronize_cpu_clock();
-                        BusResponse::Byte(co.smp.engine().cpu_port(port))
+                        // ares `CPU::readAPU`: `synchronize(smp)` before the
+                        // port is sampled.
+                        advance_apu_to!(cpuclock!(), cpuclock!());
+                        self.co_sync = None;
+                        BusResponse::Byte(co.smp.borrow().engine().cpu_port(port))
                     }
                     BusRequest::Write { address, value } if is_port(address) => {
                         let port = ((address & 0xFFFF) - 0x2140) as u8;
                         if port == 0 {
                             if let Some(path) = std::env::var_os("CO_PORT_LOG") {
                                 use std::io::Write;
-                                let smp = co.smp.engine().smp_clock();
+                                let smp = co.smp.borrow().engine().smp_clock();
                                 if let Ok(mut f) = std::fs::OpenOptions::new()
                                     .create(true)
                                     .append(true)
                                     .open(path)
                                 {
-                                    let _ = writeln!(f, "W {} {} {:02X}", self.clock, smp, value);
+                                    let _ = writeln!(
+                                        f,
+                                        "W {} {} {:02X} {:04X}",
+                                        self.clock, smp, value, self.live_pc & 0xFFFF
+                                    );
                                 }
                             }
                         }
-                        co.smp.set_cpu_clock_fixed(cpuclock!());
-                        co.smp.engine_mut().synchronize_cpu_clock();
-                        co.smp.engine_mut().write_apu_latch(port, value);
+                        // ares `CPU::writeAPU`: `synchronize(smp)` before the
+                        // latch is written.
+                        advance_apu_to!(cpuclock!(), cpuclock!());
+                        self.co_sync = None;
+                        co.smp.borrow_mut().engine_mut().write_apu_latch(port, value);
                         BusResponse::None
                     }
-                    other => self.handle_cpu_request(other),
+                    other => {
+                        let response = self.handle_cpu_request(other);
+                        // ares `CPU::scanline()` synchronized the S-SMP at
+                        // every H=0 crossing; apply any pending sync now that
+                        // the S-CPU is suspended at a bus boundary.
+                        if let Some(target) = self.co_sync.take() {
+                            advance_apu_to!(target, cpuclock!());
+                        }
+                        response
+                    }
                 }
             }};
         }
@@ -1614,64 +1709,29 @@ impl Snes {
             }};
         }
 
-        macro_rules! pull_smp_to {
-            ($target:expr) => {{
-                let target = $target;
-                let mut pull = 0u32;
-                while co.smp.clock() < target && pull < 100_000 {
-                    co.smp.set_cpu_clock_fixed(cpuclock!());
-                    match co.smp.step() {
-                        Need::Synchronize(Thread::Cpu) => {
-                            let t = co.smp.clock();
-                            while cpuclock!() < t {
-                                cpu_yield!();
-                            }
-                        }
-                        Need::Halt => break,
-                        _ => {}
-                    }
-                    pull += 1;
-                }
-            }};
-        }
-
+        // The S-CPU is the scheduler's primary thread: it runs freely and only
+        // the `$2140-$2143` accesses synchronize the APU. This is ares'
+        // topology (the S-SMP is never pulled to the S-CPU clock anywhere
+        // else).
+        publish_cpu_clock!();
         let mut guard = 0u64;
-        loop {
+        while !done {
             guard += 1;
             if guard > 50_000_000 {
                 break;
             }
-            let cc = cpuclock!();
-            let sc = co.smp.clock();
-            let dc = co.dsp.clock();
-            if done && sc >= cc && dc >= cc {
-                break;
-            }
-            let min = cc.min(sc).min(dc);
-            if min == cc {
-                cpu_yield!();
-            } else if min == sc {
-                co.smp.set_cpu_clock_fixed(cc);
-                match co.smp.step() {
-                    Need::Synchronize(Thread::Cpu) => {
-                        let t = co.smp.clock();
-                        while cpuclock!() < t {
-                            cpu_yield!();
-                        }
-                    }
-                    Need::Halt => break,
-                    _ => {}
-                }
-            } else {
-                if let Need::Synchronize(Thread::Smp) = co.dsp.step() {
-                    let t = co.dsp.clock();
-                    pull_smp_to!(t);
-                }
-            }
+            cpu_yield!();
         }
-        let samples: Vec<_> = co.dsp.drain_samples().collect();
+        // Apply a scanline sync whose H=0 crossing landed on the instruction's
+        // final bus event.
+        if let Some(target) = self.co_sync.take() {
+            advance_apu_to!(target, cpuclock!());
+        }
+        let samples: Vec<_> = co.dsp.borrow_mut().drain_samples().collect();
         self.apu.push_samples(samples);
         self.apu_actor_driven = false;
+        self.co_driving = false;
+        self.co_sync = None;
         self.cpu_coroutine.0 = Some(coroutine);
         self.co.0 = Some(co);
         cycles
@@ -1769,7 +1829,7 @@ impl Snes {
                     }
                 }
                 StepOutcome::Halted => break,
-                StepOutcome::Ran => {
+                StepOutcome::Ran | StepOutcome::Cycle => {
                     if done && self.nested_cpu.at_done {
                         break;
                     }
@@ -2357,6 +2417,16 @@ impl Snes {
                 if line == 0 {
                     self.auto_poll_started = false;
                 }
+                // ares `CPU::scanline()`: `Thread::synchronize(smp, ppu)` at
+                // every H=0, independent of `$2140-$2143` accesses. The
+                // cooperative driver consumes this target at its next
+                // suspension.
+                if self.co_driving {
+                    let start = self.clock.saturating_sub(u64::from(clocks));
+                    let target = u128::from(start)
+                        * crate::apu::scheduler_cpu_scalar(self.region.master_clock());
+                    self.co_sync = Some(self.co_sync.map_or(target, |old| old.min(target)));
+                }
             }
             // ares `PPU::main` runs `step(renderingCycle)` before rendering a
             // line, and `renderingCycle` is 512 master clocks - 128 dots - so a
@@ -2560,7 +2630,7 @@ impl Snes {
         self.co
             .0
             .as_ref()
-            .map(|co| co.smp.trace().to_vec())
+            .map(|co| co.smp.borrow().trace().to_vec())
             .unwrap_or_default()
     }
 

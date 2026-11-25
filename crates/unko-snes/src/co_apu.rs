@@ -10,7 +10,10 @@
 //! registers remain the ones already exercised by `SymEngine`, which keeps the
 //! diff reviewable while the scheduler is brought up incrementally.
 
-use crate::co_scheduler::{Need, Thread, ThreadState};
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+
+use crate::co_scheduler::{Need, Scheduler, Thread, ThreadClock, ThreadState};
 use crate::sym_scheduler::{StepOutcome, SymEngine};
 
 /// The S-SMP as a cooperative thread.
@@ -27,6 +30,9 @@ impl SmpThread {
         core: crate::spc700::Spc700,
     ) -> Self {
         let mut engine = SymEngine::new();
+        // The cooperative scheduler owns the S-DSP as a separate thread; the
+        // engine must not tick it from `SMP::step`.
+        engine.use_external_dsp();
         engine.load_power_on_state(ram, dsp_registers);
         engine.load_ipl(ipl);
         engine.load_core(core);
@@ -77,6 +83,9 @@ impl ThreadState for SmpThread {
     fn step(&mut self) -> Need {
         match self.engine.smp_step_parking() {
             StepOutcome::Ran => Need::None,
+            // ares `SMP::step -> synchronize(cpu, dsp)`: the driver ticks the
+            // S-DSP to the S-SMP clock before the instruction continues.
+            StepOutcome::Cycle => Need::Synchronize(Thread::Dsp),
             // The S-SMP suspended on an ahead `$F4-$F7` access: the S-CPU must
             // reach the S-SMP clock before it can continue.
             StepOutcome::Parked(_) => Need::Synchronize(Thread::Cpu),
@@ -104,7 +113,12 @@ mod tests {
         // MOV A,$F4 ; BRA -2
         let mut smp = smp_with(&[0xE4, 0xF4, 0x2F, 0xFC], 0x0200);
         smp.set_cpu_clock_fixed(0);
-        assert_eq!(smp.step(), Need::Synchronize(Thread::Cpu));
+        let mut need = smp.step();
+        // Cycle steps (`SMP::step -> synchronize(dsp)`) come first.
+        while need == Need::Synchronize(Thread::Dsp) {
+            need = smp.step();
+        }
+        assert_eq!(need, Need::Synchronize(Thread::Cpu));
     }
 
     #[test]
@@ -126,7 +140,13 @@ mod tests {
         let mut smp = smp_with(&[0xE8, 0x55, 0x2F, 0xFD], 0x0200);
         // Keep the S-CPU far ahead so no access parks.
         smp.set_cpu_clock_fixed(crate::co_scheduler::SECOND);
-        assert_eq!(smp.step(), Need::None);
+        let mut need = smp.step();
+        let mut guard = 0;
+        while need == Need::Synchronize(Thread::Dsp) && guard < 32 {
+            need = smp.step();
+            guard += 1;
+        }
+        assert_eq!(need, Need::None);
         assert!(smp.clock() > 0);
     }
 }
@@ -141,9 +161,6 @@ pub struct DspThread {
     dsp: std::rc::Rc<std::cell::RefCell<crate::dsp::Dsp>>,
     ram: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
     samples: std::collections::VecDeque<crate::dsp::Sample>,
-    /// The thread is mid-micro-step and must suspend after the S-SMP has caught
-    /// up (so a re-entry returns `None` rather than ticking again).
-    pending: bool,
 }
 
 impl DspThread {
@@ -157,7 +174,6 @@ impl DspThread {
             dsp,
             ram,
             samples: std::collections::VecDeque::new(),
-            pending: false,
         }
     }
 
@@ -178,15 +194,13 @@ impl ThreadState for DspThread {
     }
 
     fn step(&mut self) -> Need {
-        if self.pending {
-            self.pending = false;
-            return Need::None;
-        }
         self.clock.step(24);
         if let Some(sample) = self.dsp.borrow_mut().tick(&mut self.ram.borrow_mut()[..]) {
             self.samples.push_back(sample);
         }
-        self.pending = true;
+        // ares `DSP::tick`: `Thread::step(3 * 8)` then `synchronize(smp)`.
+        // Every call is one whole micro-step; the driver runs the S-SMP to the
+        // DSP clock before calling again.
         Need::Synchronize(Thread::Smp)
     }
 }
@@ -204,16 +218,16 @@ mod dsp_tests {
     }
 
     #[test]
-    fn a_micro_step_pulls_the_smp_then_suspends() {
+    fn a_micro_step_pulls_the_smp() {
         let mut dsp = thread();
         assert_eq!(dsp.step(), Need::Synchronize(Thread::Smp));
         let after_tick = dsp.clock();
         assert!(after_tick > 0);
-        assert_eq!(dsp.step(), Need::None);
-        assert_eq!(dsp.clock(), after_tick);
         // One micro-step is 24 DSP clocks in the fixed-point base.
         let one_step = ThreadClock::new(24_606_720).scalar() * 24;
         assert_eq!(after_tick, one_step);
+        assert_eq!(dsp.step(), Need::Synchronize(Thread::Smp));
+        assert_eq!(dsp.clock(), one_step * 2);
     }
 
     #[test]
@@ -221,18 +235,67 @@ mod dsp_tests {
         let mut dsp = thread();
         for _ in 0..32 {
             assert_eq!(dsp.step(), Need::Synchronize(Thread::Smp));
-            assert_eq!(dsp.step(), Need::None);
         }
         assert_eq!(dsp.sample_count(), 1);
     }
 }
 
+/// [`SmpThread`] as a scheduler-owned state, shared with the driver.
+///
+/// The driver owns the S-CPU (it needs the whole [`crate::system::Snes`] bus),
+/// so the S-SMP is installed behind an `Rc<RefCell<..>>`: the scheduler steps
+/// it, the driver inspects its clock and its `$2140-$2143` latches.
+pub struct SmpState(pub Rc<RefCell<SmpThread>>);
+
+impl ThreadState for SmpState {
+    fn clock(&self) -> u128 {
+        self.0.borrow().clock()
+    }
+
+    fn step(&mut self) -> Need {
+        self.0.borrow_mut().step()
+    }
+}
+
+/// [`DspThread`] as a scheduler-owned state, shared with the driver.
+pub struct DspState(pub Rc<RefCell<DspThread>>);
+
+impl ThreadState for DspState {
+    fn clock(&self) -> u128 {
+        self.0.borrow().clock()
+    }
+
+    fn step(&mut self) -> Need {
+        self.0.borrow_mut().step()
+    }
+}
+
+/// The S-CPU's scheduler clock, published by the driver (which steps the CPU
+/// coroutine itself). It never advances the CPU; it only lets `Scheduler`
+/// answer clock queries and keeps the three clocks in one place.
+pub struct CpuState(pub Rc<Cell<u128>>);
+
+impl ThreadState for CpuState {
+    fn clock(&self) -> u128 {
+        self.0.get()
+    }
+
+    fn step(&mut self) -> Need {
+        // The driver, not the scheduler, runs the S-CPU.
+        Need::None
+    }
+}
+
 /// The cooperative APU: the S-SMP and S-DSP states plus their shared RAM/DSP.
 pub struct CoSched {
-    /// The S-SMP thread state.
-    pub smp: SmpThread,
-    /// The S-DSP thread state.
-    pub dsp: DspThread,
+    /// The S-SMP thread state (also installed in `scheduler`).
+    pub smp: Rc<RefCell<SmpThread>>,
+    /// The S-DSP thread state (also installed in `scheduler`).
+    pub dsp: Rc<RefCell<DspThread>>,
+    /// The three-thread scheduler; the driver uses `step_report`.
+    pub scheduler: Scheduler,
+    /// The published S-CPU clock (fixed-point `Second` units).
+    pub cpu_clock: Rc<Cell<u128>>,
 }
 
 impl CoSched {
@@ -243,9 +306,37 @@ impl CoSched {
         dsp_registers: &[u8],
         core: crate::spc700::Spc700,
     ) -> Self {
-        let smp = SmpThread::new(ipl, ram, dsp_registers, core);
-        let dsp = DspThread::new(smp.ram_handle(), smp.dsp_handle());
-        Self { smp, dsp }
+        let smp = Rc::new(RefCell::new(SmpThread::new(ipl, ram, dsp_registers, core)));
+        let dsp = {
+            let smp = smp.borrow();
+            Rc::new(RefCell::new(DspThread::new(
+                smp.ram_handle(),
+                smp.dsp_handle(),
+            )))
+        };
+        let cpu_clock = Rc::new(Cell::new(0));
+        let mut scheduler = Scheduler::new();
+        scheduler.install(
+            Thread::Cpu,
+            ThreadClock::new(21_477_273),
+            Box::new(CpuState(cpu_clock.clone())),
+        );
+        scheduler.install(
+            Thread::Smp,
+            ThreadClock::new(2_050_560),
+            Box::new(SmpState(smp.clone())),
+        );
+        scheduler.install(
+            Thread::Dsp,
+            ThreadClock::new(24_606_720),
+            Box::new(DspState(dsp.clone())),
+        );
+        Self {
+            smp,
+            dsp,
+            scheduler,
+            cpu_clock,
+        }
     }
 }
 

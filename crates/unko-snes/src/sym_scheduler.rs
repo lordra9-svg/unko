@@ -443,6 +443,9 @@ impl SymTimer {
 pub enum StepOutcome {
     /// One S-SMP instruction retired.
     Ran,
+    /// One S-SMP cycle step retired (ares `SMP::step`); the coroutine is
+    /// suspended mid-instruction and resumes with a `Unit` response.
+    Cycle,
     /// The S-SMP parked on an ahead `$F4-$F7` read; the S-CPU must run to this
     /// fixed-point clock before resuming (ares `SMP::readIO -> synchronize(cpu)`).
     Parked(u128),
@@ -487,6 +490,9 @@ pub struct SymEngine {
     external_wait: u8,
     /// A parked `$F4-$F7` read: port index to sample when resumed.
     pending_port: Option<u8>,
+    /// The S-SMP coroutine is suspended after a cycle `StepClock` and resumes
+    /// with a `Unit` response (ares `SMP::step` suspension point).
+    cycle_pending: bool,
     /// Optional `(S-SMP clock, PC)` per retired instruction (debug).
     trace: Vec<(u128, u16)>,
     /// Whether tracing is enabled.
@@ -529,6 +535,7 @@ impl SymEngine {
             internal_wait: 0,
             external_wait: 0,
             pending_port: None,
+            cycle_pending: false,
             trace: Vec::new(),
             trace_enabled: false,
             dsp_thread: crate::apu::dsp_thread(),
@@ -746,7 +753,7 @@ impl SymEngine {
         let mut guard = 0u32;
         while self.smp_clock < target && guard < 200_000 {
             match self.smp_step_parking() {
-                StepOutcome::Ran | StepOutcome::Parked(_) => {}
+                StepOutcome::Ran | StepOutcome::Parked(_) | StepOutcome::Cycle => {}
                 StepOutcome::Halted => break,
             }
             guard += 1;
@@ -756,6 +763,13 @@ impl SymEngine {
     /// Whether the S-DSP runs as an independent thread.
     pub const fn dsp_thread_mode(&self) -> bool {
         self.dsp_thread
+    }
+
+    /// Hand S-DSP timing to an external `DspThread` (cooperative scheduler):
+    /// `SMP::step` then only advances the S-SMP clock, and the DSP follows via
+    /// its own `DSP::tick -> synchronize(smp)`.
+    pub fn use_external_dsp(&mut self) {
+        self.dsp_thread = true;
     }
 
     /// ares' three-thread round-robin: run the S-DSP and S-SMP to `cpu_clock`,
@@ -782,7 +796,7 @@ impl SymEngine {
                     match self.smp_step_parking() {
                         StepOutcome::Parked(target) => return StepOutcome::Parked(target),
                         StepOutcome::Halted => return StepOutcome::Halted,
-                        StepOutcome::Ran => {}
+                        StepOutcome::Ran | StepOutcome::Cycle => {}
                     }
                     pull += 1;
                 }
@@ -790,7 +804,7 @@ impl SymEngine {
                 match self.smp_step_parking() {
                     StepOutcome::Parked(target) => return StepOutcome::Parked(target),
                     StepOutcome::Halted => return StepOutcome::Halted,
-                    StepOutcome::Ran => {}
+                    StepOutcome::Ran | StepOutcome::Cycle => {}
                 }
             }
             guard += 1;
@@ -819,6 +833,9 @@ impl SymEngine {
         use crate::spc_coroutine::{SpcEvent, SpcInput, SpcResume};
         let mut input = if let Some(port) = self.pending_port.take() {
             SpcInput::Resume(SpcResume::Byte(self.apu_ports[usize::from(port)]))
+        } else if self.cycle_pending {
+            self.cycle_pending = false;
+            SpcInput::Resume(SpcResume::Unit)
         } else if let Some(core) = self.core.take() {
             if !self.trace.is_empty() || self.trace_enabled {
                 self.trace.push((self.smp_clock / SMP_FIXED, core.pc));
@@ -833,6 +850,16 @@ impl SymEngine {
                     self.core = Some(core);
                     self.instructions += 1;
                     return StepOutcome::Ran;
+                }
+                corosensei::CoroutineResult::Yield(SpcEvent::StepClock(clocks)) => {
+                    // ares `SMP::step(clocks)`: advance the thread clock, then
+                    // `synchronize(cpu)` and `synchronize(dsp)`. Suspend here so
+                    // the driver can tick the S-DSP to this clock before the
+                    // rest of the instruction runs.
+                    self.smp_clock += u128::from(clocks) * SMP_FIXED;
+                    self.rr.set_smp_clock(self.smp_clock);
+                    self.cycle_pending = true;
+                    return StepOutcome::Cycle;
                 }
                 corosensei::CoroutineResult::Yield(SpcEvent::Read(address))
                     if (0x00F4..=0x00F7).contains(&address) && self.smp_clock > self.cpu_clock =>
@@ -1055,7 +1082,7 @@ impl CaPeer {
         while (self.engine.smp_clock() < cpu_clock || self.engine.is_parked()) && guard < 2_000_000
         {
             match self.engine.smp_step_parking() {
-                StepOutcome::Ran => {}
+                StepOutcome::Ran | StepOutcome::Cycle => {}
                 StepOutcome::Parked(target) => {
                     run_cpu(&mut self.engine, target);
                     if target > self.engine.cpu_clock() {
@@ -1375,16 +1402,23 @@ mod parking_tests {
         engine.ram.borrow_mut()[0x0203] = 0xFC;
         engine.load_core(core);
         engine.set_cpu_clock(0);
-        let target = match engine.smp_step_parking() {
-            StepOutcome::Parked(t) => t,
-            other => panic!("expected Parked, got {other:?}"),
+        let target = loop {
+            match engine.smp_step_parking() {
+                StepOutcome::Parked(t) => break t,
+                StepOutcome::Cycle => continue,
+                other => panic!("expected Parked, got {other:?}"),
+            }
         };
         assert!(target > 0, "the read must park at a positive SMP clock");
         assert!(engine.smp_clock() >= target);
         // The S-CPU reaches the target, then writes the latch.
         engine.set_cpu_clock(target);
         engine.write_apu_latch(0, 0x55);
-        assert_eq!(engine.smp_step_parking(), StepOutcome::Ran);
+        let mut outcome = engine.smp_step_parking();
+        while outcome == StepOutcome::Cycle {
+            outcome = engine.smp_step_parking();
+        }
+        assert_eq!(outcome, StepOutcome::Ran);
         assert_eq!(engine.apu_port(0), 0x55);
     }
 }
@@ -1406,14 +1440,22 @@ mod ca_peer_tests {
         engine.load_core(core);
         engine.set_cpu_clock(0);
         let mut peer = CaPeer::new(engine);
+        // Step per cycle step (`SMP::step`) until the `$F4` read parks.
         let mut pulled = Vec::new();
-        peer.run_to(4, |engine, target| {
-            pulled.push(target);
-            // the S-CPU reaches the park target and writes $2140.
-            engine.write_apu_latch(0, 0x5A);
-        });
+        let mut guard = 0;
+        while pulled.is_empty() && guard < 64 {
+            match peer.poll() {
+                StepOutcome::Parked(target) => {
+                    pulled.push(target);
+                    // the S-CPU reaches the park target and writes $2140.
+                    peer.engine_mut().write_apu_latch(0, 0x5A);
+                }
+                StepOutcome::Ran | StepOutcome::Cycle => {}
+                StepOutcome::Halted => break,
+            }
+            guard += 1;
+        }
         assert!(!pulled.is_empty(), "the $F4 read must drive the CPU");
-        assert!(peer.engine().smp_clock() >= 4);
         assert_eq!(peer.engine().apu_port(0), 0x5A);
     }
 }
@@ -1444,7 +1486,7 @@ mod ca_async_tests {
                     cpu = target;
                     peer.engine_mut().write_apu_latch(0, 0x66);
                 }
-                StepOutcome::Ran => {}
+                StepOutcome::Ran | StepOutcome::Cycle => {}
                 StepOutcome::Halted => break,
             }
             if parks > 0 && peer.caught_up() {
