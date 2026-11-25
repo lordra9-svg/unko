@@ -14179,9 +14179,14 @@ and `PRIME=2` on its own shifts DKC/SMAS off their exact phase:
 
 ```
 DKC, PRIME=2 + ACCESS_STOP=1 : 368678 differing (42.3631%)   [600 frames]
-CT , PRIME=2 + ACCESS_STOP=1 : 139578 differing (56.6240%)   [partial: 321786
-                               samples before the run was interrupted; already
-                               far off exact, and its full-run reference is 0]
+CT , PRIME=2 + ACCESS_STOP=1 : 139578 differing (56.6240%)   [partial: the run
+                               deadlocks deterministically at 321786 samples
+                               (exactly half the 600-frame stream, reproduced
+                               twice and hit a 240 s timeout); already far off
+                               exact, and its full-run reference is 0]
+
+`SNES_SMP_ACCESS_STOP` is therefore not merely a phase shift: it deadlocks CT
+partway through. The path is diagnostic-only and cannot be the fix.
 ```
 
 So the six exact titles sit on a zero-phase cliff at `PRIME=0`, and MMX2 sits
