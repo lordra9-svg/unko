@@ -294,8 +294,9 @@ The main effort was the reference-parity accuracy core. Details in
       palettes (`LOAD_TLUT`, 4/8-bit CI lookup) and perspective-correct W
       interpolation; `run_frame` presents the VI framebuffer from RDRAM as
       RGBA. The AI register block queues double-buffered `AI_LEN` DMAs of
-      16-bit stereo pairs, raises/acknowledges the DMA interrupt, reports
-      `AI_STATUS` and remaining length, and linearly resamples the DAC rate to
+      16-bit stereo pairs and reads RDRAM on demand as the DAC clock consumes
+      samples; buffer-boundary promotion raises the AI interrupt, `AI_STATUS`
+      and remaining length are live, and the DAC rate is linearly resampled to
       the host sample rate for `Core::audio`. The VR4300 has a 32-entry TLB
       (TLBR/TLBWI/TLBWR/TLBP, mapped KUSEG translation) and a single-precision
       COP1 FPU (ADD/SUB/MUL/DIV/SQRT/ABS/MOV/NEG, CVT and compares, LWC1/SWC1/

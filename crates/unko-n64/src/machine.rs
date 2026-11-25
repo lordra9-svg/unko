@@ -130,7 +130,7 @@ impl Machine {
         }
         // Resample the queued AI stream to the host rate for one frame.
         let samples = (self.ai.output_rate() / 60.0).round() as usize;
-        self.ai.generate(samples, &mut self.audio);
+        self.ai.generate(samples, &self.rdram, &mut self.audio);
         self.frames += 1;
         self.vi_line = (self.vi_line + 1) % 525;
         self.present();
@@ -459,6 +459,39 @@ mod tests {
         assert!((audio[3].0 - 7).abs() <= 1, "{:?}", audio[3]);
         assert!(machine.audio_sample_rate() > 40_000.0);
         // AI_STATUS acknowledges the DMA interrupt.
+        machine.write_u32(0x0450_000C, 1);
+        assert!(!machine.audio_interrupt_pending());
+    }
+
+    #[test]
+    fn ai_buffer_boundary_interrupts_and_host_rate() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        for (index, (left, right)) in [(1i16, -1i16), (2, -2), (3, -3), (4, -4)]
+            .iter()
+            .enumerate()
+        {
+            let mut word = [0u8; 4];
+            word[..2].copy_from_slice(&left.to_be_bytes());
+            word[2..].copy_from_slice(&right.to_be_bytes());
+            machine.write_u32(0x100 + index as u64 * 4, u32::from_be_bytes(word));
+        }
+        machine.write_u32(0x0450_0008, 1); // enable
+        machine.write_u32(0x0450_0010, 1013); // ~48 kHz DAC
+        machine.write_u32(0x0450_0000, 0x100);
+        machine.write_u32(0x0450_0004, 8); // first two samples
+                                           // Acknowledge the start interrupt, then queue the second buffer.
+        machine.write_u32(0x0450_000C, 1);
+        machine.write_u32(0x0450_0000, 0x108);
+        machine.write_u32(0x0450_0004, 8);
+        machine.run_frame().expect("frame");
+        let audio = machine.take_audio();
+        assert_eq!(audio.len(), 800);
+        assert_eq!(audio[0], (1, -1));
+        assert!(
+            machine.audio_interrupt_pending(),
+            "second buffer promotion raises AI IRQ during the frame"
+        );
         machine.write_u32(0x0450_000C, 1);
         assert!(!machine.audio_interrupt_pending());
     }

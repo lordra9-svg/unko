@@ -18,9 +18,10 @@ bypass, fog, coverage modes driven by the exact 8-bit subpixel AA mask, RGB
 dithering, alpha compare (blend-alpha or dithered threshold) and chroma keying
 (`SET_KEY_GB`/`SET_KEY_R` widths). It
 models the AI register block:
-`AI_LEN` queues double-buffered DMAs of 16-bit stereo pairs from RDRAM, raises
-and acknowledges the AI DMA interrupt, exposes `AI_STATUS`/remaining length,
-and linearly resamples the DAC rate to the host rate (with underrun decay). CI palettes load through LOAD_TLUT and 4/8-bit CI texels look up
+`AI_LEN` queues double-buffered DMAs of 16-bit stereo pairs from RDRAM; samples
+are read on demand as the DAC clock consumes them, buffer completion raises the
+AI interrupt at the boundary, `AI_STATUS`/remaining length are live, and the DAC
+rate is linearly resampled to the host rate (with underrun decay). CI palettes load through LOAD_TLUT and 4/8-bit CI texels look up
 the TLUT, and texture coordinates are perspective-corrected by the parsed W
 coefficients. `SET_MASK_IMAGE`/`SET_PRIMITIVE_DEPTH` drive a Z-buffered depth
 pipeline: interpolated 16.16 Z compressed to the RDP's 16-bit depth word with

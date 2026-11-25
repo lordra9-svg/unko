@@ -10,8 +10,8 @@
 //! (cycle/copy, fog, exact subpixel coverage, dither, alpha compare, chroma
 //! key), presents the VI
 //! framebuffer from
-//! RDRAM and runs double-buffered AI DMA with interrupts and DAC-to-host
-//! resampling ([`ai::Ai`]). CI/TLUT palettes and
+//! RDRAM and runs DAC-clocked double-buffered AI DMA with boundary interrupts
+//! and host-rate resampling ([`ai::Ai`]). CI/TLUT palettes and
 //! perspective-correct W interpolation and the compressed Z-buffer depth
 //! pipeline are implemented, and precise exceptions (TLB, unaligned access,
 //! SYSCALL/BREAK, reserved instructions, coprocessor-unusable, integer
