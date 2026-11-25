@@ -1566,6 +1566,19 @@ impl Snes {
                     }
                     BusRequest::Write { address, value } if is_port(address) => {
                         let port = ((address & 0xFFFF) - 0x2140) as u8;
+                        if port == 0 {
+                            if let Some(path) = std::env::var_os("CO_PORT_LOG") {
+                                use std::io::Write;
+                                let smp = co.smp.engine().smp_clock();
+                                if let Ok(mut f) = std::fs::OpenOptions::new()
+                                    .create(true)
+                                    .append(true)
+                                    .open(path)
+                                {
+                                    let _ = writeln!(f, "W {} {} {:02X}", self.clock, smp, value);
+                                }
+                            }
+                        }
                         co.smp.set_cpu_clock_fixed(cpuclock!());
                         co.smp.engine_mut().synchronize_cpu_clock();
                         co.smp.engine_mut().write_apu_latch(port, value);

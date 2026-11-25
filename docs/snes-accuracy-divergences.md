@@ -13465,3 +13465,24 @@ Fix: give the direct engine the **deferring/split** SPC coroutine
 (`new_spc_coroutine()`), and handle its deferred `$F4-$F7` event in
 `smp_step_parking` by advancing half the access before sampling (the plan engine
 already implements this as `defer`/`split`). This is the next change.
+
+## Root cause located: the S-CPU clock is ~4,540 clocks behind ares at the handshake (2026-11-24)
+
+Added `CO_PORT_LOG` (cooperative driver) logging every S-CPU `$2140` write as
+`master_clock smp_clock value`. At MMX2's upload handshake:
+
+```
+ours:  W 83225594 7946038 CC     (cpu=3.87491s, smp=3.87493s - co-located)
+ares:  W 83230134 CC             (cpu=3.87525s; SMP-equivalent ~7,946,4xx)
+```
+
+Our `$2140` write is **4,540 master clocks earlier** than ares (0.2 ms) while the
+S-SMP trace at 7,946,040 is identical. Because our CPU is co-located with the
+SMP at the write, `synchronize(smp)` stops at 7,946,038 - *before* the `CMP Y,$F4`
+at 7,946,040 - then latches, so the CMP sees the new byte. ares' CPU is ~0.3 ms
+ahead, so its synchronize runs through the CMP (old byte) before latching.
+
+So the residual is an **accumulating S-CPU master-clock deficit** (~4,540 clocks
+by 3.9 s, ~0.12%) relative to ares; the S-SMP and DSP are correct. The next
+investigation is the missing CPU cycles (wait states/DMA/refresh accounting) that
+make our CPU clock short.
