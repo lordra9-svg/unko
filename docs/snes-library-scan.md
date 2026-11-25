@@ -71,9 +71,9 @@ Mapping / region coverage was preserved exactly as selected:
 
 All 500 produced non-zero video and audio hashes. Output varied across **454
 distinct framebuffer hashes** and **231 distinct audio hashes**; the largest
-single video-hash group was 34 images that were still showing the same static
-boot frame at frame 300. That is expected for a boot sweep with no input and is
-why the status is *Runs (smoke)*, not *Playable*.
+single video-hash group was 34 images with an identical framebuffer at frame
+300 (a static boot/no-input state). That is expected for a boot sweep with no
+input and is why the status is *Runs (smoke)*, not *Playable*.
 
 ## Candidate exclusions
 
