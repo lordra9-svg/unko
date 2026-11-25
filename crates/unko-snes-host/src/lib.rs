@@ -357,6 +357,9 @@ impl unko_snes_api::SnesCore for SnesCore {
     fn debug_peek(&self, space: unko_snes_api::DebugSpace, address: u32) -> Option<u8> {
         let system = self.system.as_ref()?;
         let address = space.clamp(address);
+        if let unko_snes_api::DebugSpace::Rom = space {
+            return system.cart.rom().get(address as usize).copied();
+        }
         Some(match space {
             unko_snes_api::DebugSpace::Wram => system.wram()[address as usize],
             unko_snes_api::DebugSpace::Vram => {
@@ -378,6 +381,7 @@ impl unko_snes_api::SnesCore for SnesCore {
             }
             unko_snes_api::DebugSpace::ApuRam => system.apu.ram()[address as usize],
             unko_snes_api::DebugSpace::DspRegisters => system.apu.dsp().registers[address as usize],
+            unko_snes_api::DebugSpace::Rom => unreachable!("handled above"),
         })
     }
 
@@ -393,6 +397,14 @@ impl unko_snes_api::SnesCore for SnesCore {
             return false;
         };
         let address = space.clamp(address);
+        if let unko_snes_api::DebugSpace::Rom = space {
+            let length = system.cart.rom().len();
+            if address as usize >= length {
+                return false;
+            }
+            system.cart.rom_mut()[address as usize] = value;
+            return true;
+        }
         match space {
             unko_snes_api::DebugSpace::Wram => {
                 system.wram_mut()[address as usize] = value;
@@ -426,6 +438,7 @@ impl unko_snes_api::SnesCore for SnesCore {
             unko_snes_api::DebugSpace::DspRegisters => {
                 system.apu.dsp_mut().registers[address as usize] = value;
             }
+            unko_snes_api::DebugSpace::Rom => unreachable!(),
         }
         true
     }
@@ -576,8 +589,18 @@ mod tests {
         assert_eq!(core.debug_peek(DebugSpace::ApuRam, 0x10), Some(0x7E));
         assert!(core.debug_poke(DebugSpace::DspRegisters, 0x6C, 0x20));
         assert_eq!(core.debug_peek(DebugSpace::DspRegisters, 0x6C), Some(0x20));
+        // ROM offset 0 is bank 0 `$8000` on this LoROM image (the reset vector).
+        assert!(core.debug_poke(DebugSpace::Rom, 0, 0xEA)); // NOP
+        assert_eq!(core.debug_peek(DebugSpace::Rom, 0), Some(0xEA));
+        let pc_before = core.debug_cpu().expect("cpu").pc;
         let cycles = core.debug_step().expect("one instruction");
         assert!(cycles > 0, "step retired no clocks");
+        let pc_after = core.debug_cpu().expect("cpu").pc;
+        assert_eq!(
+            pc_after,
+            pc_before.wrapping_add(1),
+            "the patched NOP should execute at the reset vector"
+        );
     }
 
     #[test]

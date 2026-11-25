@@ -402,6 +402,15 @@ impl Cartridge {
         &self.rom
     }
 
+    /// Mutable cartridge ROM image (debugger/patch helper).
+    ///
+    /// The S-CPU bus reads this buffer on every access, so edits take effect
+    /// immediately. Coprocessors that copied ROM at construction (SPC7110,
+    /// BS-X) keep their own copy and are not patched here.
+    pub fn rom_mut(&mut self) -> &mut [u8] {
+        &mut self.rom
+    }
+
     /// Decoded cartridge header.
     pub fn header(&self) -> &RomHeader {
         &self.header

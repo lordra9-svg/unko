@@ -4501,6 +4501,7 @@ fn snes_debugger_window(
                             unko_snes_api::DebugSpace::Cgram,
                             unko_snes_api::DebugSpace::ApuRam,
                             unko_snes_api::DebugSpace::DspRegisters,
+                            unko_snes_api::DebugSpace::Rom,
                         ] {
                             ui.selectable_value(&mut debug.snes_mem_space, space, space.label());
                         }

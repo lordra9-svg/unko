@@ -2742,6 +2742,13 @@ mod tests {
             player.snes_debug_peek(unko_snes_api::DebugSpace::Wram, 0x201),
             Some(0x10)
         );
+        assert!(player
+            .snes_patch(unko_snes_api::DebugSpace::Rom, 0, "NOP")
+            .is_ok());
+        assert_eq!(
+            player.snes_debug_peek(unko_snes_api::DebugSpace::Rom, 0),
+            Some(0xEA)
+        );
         let pc = player.snes_pc().expect("pc");
         player.debug.snes_breaks.push(pc);
         assert_eq!(player.snes_run_to_breakpoint(4), Some(pc));
@@ -2827,6 +2834,15 @@ mod tests {
             .unwrap_or(0);
         player.snes_debug_poke(unko_snes_api::DebugSpace::Wram, 0x100, before);
         println!("poke wram 000100: {before:02X} -> {after:02X}");
+        let rom_before = player
+            .snes_debug_peek(unko_snes_api::DebugSpace::Rom, 0)
+            .unwrap_or(0);
+        player.snes_debug_poke(unko_snes_api::DebugSpace::Rom, 0, rom_before ^ 0xFF);
+        let rom_after = player
+            .snes_debug_peek(unko_snes_api::DebugSpace::Rom, 0)
+            .unwrap_or(0);
+        player.snes_debug_poke(unko_snes_api::DebugSpace::Rom, 0, rom_before);
+        println!("poke rom 000000: {rom_before:02X} -> {rom_after:02X}");
         if let Ok(bytes) = player.snes_patch(unko_snes_api::DebugSpace::Wram, 0x300, "LDA #$42") {
             println!("assembled at 000300: {bytes:02X?}");
         }

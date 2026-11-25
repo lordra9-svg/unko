@@ -20,6 +20,8 @@ pub enum DebugSpace {
     ApuRam,
     /// S-DSP register file (`$00-$7F`).
     DspRegisters,
+    /// Cartridge ROM image bytes (file offsets, up to 8 MiB).
+    Rom,
 }
 
 impl DebugSpace {
@@ -33,6 +35,7 @@ impl DebugSpace {
             Self::Cgram => "CGRAM",
             Self::ApuRam => "APU RAM",
             Self::DspRegisters => "DSP",
+            Self::Rom => "ROM",
         }
     }
 
@@ -46,6 +49,7 @@ impl DebugSpace {
             Self::Cgram => 0x200,
             Self::ApuRam => 0x1_0000,
             Self::DspRegisters => 0x80,
+            Self::Rom => 0x80_0000,
         }
     }
 
@@ -140,6 +144,8 @@ mod tests {
         assert_eq!(DebugSpace::Oam.clamp(0x1_0000), 0);
         assert_eq!(DebugSpace::DspRegisters.size(), 0x80);
         assert_eq!(DebugSpace::Vram.label(), "VRAM");
+        assert_eq!(DebugSpace::Rom.label(), "ROM");
+        assert_eq!(DebugSpace::Rom.clamp(0x80_0001), 1);
     }
 }
 
