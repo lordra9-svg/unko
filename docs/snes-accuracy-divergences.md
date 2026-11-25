@@ -13975,3 +13975,25 @@ constant or a single event. The +40 refresh variant is visible throughout.
 This confirms there is no single placement to fix; the phase accumulates from
 many small per-access differences in code loops, so matching ares across the
 whole run is a CPU core cycle-accuracy effort rather than a local change.
+
+## The +22 -> +14 step is a DMA trigger at $420B (clock ~23,894,6xx)
+
+Zooming into the exact step site (address-aligned):
+
+```
+ours  23,894,640 $7E2075  23,894,648 $420B<-DMAEN  23,894,654 $7E2076  ...DMA stall
+ares  23,894,640 $7E2077  ...DMA stall
+```
+
+Before the write both traces agree (delta +22). ares reaches `$7E2077` and
+immediately enters the DMA; we reach `$7E2075`, write `$420B`, fetch `$7E2076`,
+then enter the DMA. After the DMA the base delta is +14 (one 8-clock DMA unit
+shift). So this propagation step is the DMA edge/trigger accounting, not a
+generic access-cycle difference: the transfer is entered one 8-clock unit
+differently relative to the instruction stream.
+
+The other bisected steps (e.g. +46 -> +22, +14 -> -8) are expected to be the
+same class - DMA/refresh edges - since the DMA registers (`$4300-$4306`,
+`$420B`) and `$0609CE`/RAM copies appear at the step sites. Matching them
+requires ares-exact DMA edge timing (the 8-clock `dmaRun` granularity and
+entry point), not a single constant.
