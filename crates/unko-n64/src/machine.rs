@@ -884,6 +884,71 @@ mod tests {
 
     #[test]
     #[allow(clippy::vec_init_then_push)]
+    fn rdp_perspective_lod_selects_tiles() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        let origin = 0x2000u32;
+        let texture = 0x3000u32;
+        machine.write_register(0x0440_0004, origin);
+        machine.write_register(0x0440_0008, 32);
+        for row in 0..4 {
+            for column in 0..4 {
+                machine.write_u16(texture as u64 + (row * 8 + column * 2), 0xF801); // red
+                machine.write_u16(texture as u64 + 0x20 + (row * 8 + column * 2), 0x07C1);
+                // green
+            }
+        }
+        let mut words: Vec<u64> = Vec::new();
+        words.push(
+            (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (32u64 << 32) | u64::from(origin),
+        );
+        words.push((0x3Du64 << 56) | (2u64 << 51) | (4u64 << 32) | u64::from(texture));
+        words.push((0x35u64 << 56) | (2u64 << 51) | (1u64 << 41));
+        words.push((0x35u64 << 56) | (2u64 << 51) | (1u64 << 41) | (1u64 << 24) | (4u64 << 32));
+        words.push((0x32u64 << 56) | (3u64 << 12) | 3);
+        words.push((0x32u64 << 56) | (1u64 << 24) | (3u64 << 12) | 3);
+        words.push((0x2Fu64 << 56) | (0xCu64 << 36) | (1u64 << 48)); // tex LOD
+                                                                     // Constant W=1: linear derivative 2 texels/pixel selects mip level 1.
+        let mut edge = triangle_edge(0x0A, [(4.0, 4.0), (10.0, 6.0), (4.0, 12.0)]);
+        edge[0] |= 2u64 << 51; // max LOD level 2
+        words.extend(edge);
+        words.push(1u64 << 16); // w.c.i = 1 (constant W)
+        words.push(2u64 << 48); // s.x.i = 2
+        words.push(0);
+        words.push(0);
+        words.extend([0u64; 4]);
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("linear LOD");
+        assert_eq!(
+            frame_pixel(&machine, 5, 9),
+            [0, 0xFF, 0, 0xFF],
+            "level 1 tile"
+        );
+
+        // Perspective W=1+x: s/w derivative is ~0.33 texel/pixel, magnifying
+        // to level 0 (the red base tile).
+        let mut words: Vec<u64> = Vec::new();
+        let mut edge = triangle_edge(0x0A, [(4.0, 4.0), (10.0, 6.0), (4.0, 12.0)]);
+        edge[0] |= 2u64 << 51;
+        words.extend(edge);
+        words.push(1u64 << 16); // w.c.i = 1
+        words.push((2u64 << 48) | (1u64 << 16)); // s.x.i = 2, w.x.i = 1
+        words.push(0);
+        words.push(0);
+        words.extend([0u64; 4]);
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("perspective LOD");
+        assert_eq!(
+            frame_pixel(&machine, 5, 9),
+            [0xFF, 0, 0, 0xFF],
+            "level 0 tile"
+        );
+        assert_eq!(machine.rdp.tile_mip_level(1), 1);
+        assert_eq!(machine.rdp.tile_mip_level(2), 2);
+    }
+
+    #[test]
+    #[allow(clippy::vec_init_then_push)]
     fn rdp_combiner_k4_k5_lod_and_noise_inputs() {
         let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
         let mut machine = Machine::new(&cart);

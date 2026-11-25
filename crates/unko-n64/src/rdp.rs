@@ -132,6 +132,8 @@ pub struct Rdp {
     prim_lod_frac: u8,
     min_level: u8,
     lod_fraction: u8,
+    /// Mip level registered for each tile index in the current chain.
+    mip_levels: [u8; 8],
 }
 
 impl Default for Rdp {
@@ -177,6 +179,7 @@ impl Rdp {
             prim_lod_frac: 0,
             min_level: 0,
             lod_fraction: 0xFF,
+            mip_levels: [0; 8],
         }
     }
 
@@ -466,6 +469,9 @@ impl Rdp {
             .unwrap_or(0);
 
         let modes = self.other_modes;
+        for level in 0..=setup.level {
+            self.mip_levels[(usize::from(setup.tile) + usize::from(level)) & 7] = level;
+        }
         for y in y_start.max(0)..=y_end {
             // Per-subpixel-row left/right edges in 1/8-pixel units.
             let mut spans = [(0i64, 0i64); 4];
@@ -532,15 +538,18 @@ impl Rdp {
         ));
         let lod = if let Some(coords) = coords {
             let base = self.tiles[base_tile.min(7)];
-            let s_step = coords.s[1]
-                .abs()
-                .max(coords.s[2].abs())
+            // Perspective-corrected derivatives: difference of s/w and t/w
+            // between neighbouring pixels; the linear coefficients are used
+            // when W is absent.
+            let (s_dx, t_dx, s_dy, t_dy) =
+                perspective_derivatives(&coords, x - origin.0, y - origin.1);
+            let s_step = s_dx
                 .unsigned_abs()
+                .max(s_dy.unsigned_abs())
                 .wrapping_shr(u32::from(base.s_shift));
-            let t_step = coords.t[1]
-                .abs()
-                .max(coords.t[2].abs())
+            let t_step = t_dx
                 .unsigned_abs()
+                .max(t_dy.unsigned_abs())
                 .wrapping_shr(u32::from(base.t_shift));
             let step = s_step.max(t_step) as i32;
             let max_d = step >> 11;
@@ -551,19 +560,20 @@ impl Rdp {
                 modes.sharpen_tex,
                 modes.detail_tex,
                 modes.tex_lod,
-                base_tile,
             )
         } else {
-            compute_lod(0, level, self.min_level, false, false, false, base_tile)
+            compute_lod(0, level, self.min_level, false, false, false)
         };
         self.lod_fraction = lod.frac;
+        let tile0 = self.tile_for_mip_level(base_tile, lod.level0);
+        let tile1 = self.tile_for_mip_level(base_tile, lod.level1);
         let texel = coords
             .and_then(|coords| {
-                let a = self.sample_texture_coords(&coords, x, y, origin, lod.tile0, rdram);
-                if lod.tile1 == lod.tile0 {
+                let a = self.sample_texture_coords(&coords, x, y, origin, tile0, rdram);
+                if tile1 == tile0 {
                     return a;
                 }
-                let b = self.sample_texture_coords(&coords, x, y, origin, lod.tile1, rdram);
+                let b = self.sample_texture_coords(&coords, x, y, origin, tile1, rdram);
                 match (a, b) {
                     (Some(a), Some(b)) => Some(blend_texel(a, b, lod.frac)),
                     (Some(a), None) => Some(a),
@@ -767,6 +777,22 @@ impl Rdp {
         if let Some(slot) = rdram.get_mut(address..address + 2) {
             slot.copy_from_slice(&pixel);
         }
+    }
+
+    fn tile_for_mip_level(&self, base_tile: usize, level: u8) -> usize {
+        for offset in 0..=usize::from(level) {
+            let tile = (base_tile + offset) & 7;
+            if self.mip_levels[tile] == level {
+                return tile;
+            }
+        }
+        (base_tile + usize::from(level)) & 7
+    }
+
+    /// Mip level registered for a tile in the current texture chain.
+    #[must_use]
+    pub fn tile_mip_level(&self, index: usize) -> u8 {
+        self.mip_levels[index & 7]
     }
 
     fn sample_texture_coords(
@@ -1504,8 +1530,42 @@ fn blender(
 
 struct LodResult {
     frac: u8,
-    tile0: usize,
-    tile1: usize,
+    level0: u8,
+    level1: u8,
+}
+
+/// Perspective-corrected s/t derivatives in 16.16 texels per pixel, computed
+/// as the difference of s/w and t/w between neighbouring pixels. Falls back to
+/// the linear coefficients when W is absent or zero.
+fn perspective_derivatives(coords: &TexCoords, dx: i32, dy: i32) -> (i32, i32, i32, i32) {
+    let w0 = i64::from(coords.w[0])
+        + i64::from(dx) * i64::from(coords.w[1])
+        + i64::from(dy) * i64::from(coords.w[2]);
+    if w0 == 0 || (coords.w[0] | coords.w[1] | coords.w[2]) == 0 {
+        return (coords.s[1], coords.t[1], coords.s[2], coords.t[2]);
+    }
+    let s0 = i64::from(coords.s[0])
+        + i64::from(dx) * i64::from(coords.s[1])
+        + i64::from(dy) * i64::from(coords.s[2]);
+    let t0 = i64::from(coords.t[0])
+        + i64::from(dx) * i64::from(coords.t[1])
+        + i64::from(dy) * i64::from(coords.t[2]);
+    let w1 = w0 + i64::from(coords.w[1]);
+    let wy = w0 + i64::from(coords.w[2]);
+    if w1 == 0 || wy == 0 {
+        return (coords.s[1], coords.t[1], coords.s[2], coords.t[2]);
+    }
+    let sx = s0 + i64::from(coords.s[1]);
+    let tx = t0 + i64::from(coords.t[1]);
+    let sy = s0 + i64::from(coords.s[2]);
+    let ty = t0 + i64::from(coords.t[2]);
+    let divide = |s: i64, w: i64| (s * 65_536) / w;
+    (
+        (divide(sx, w1) - divide(s0, w0)) as i32,
+        (divide(tx, w1) - divide(t0, w0)) as i32,
+        (divide(sy, wy) - divide(s0, w0)) as i32,
+        (divide(ty, wy) - divide(t0, w0)) as i32,
+    )
 }
 
 /// Texture LOD selection following the RDP 2-cycle model. `max_d` is the
@@ -1518,7 +1578,6 @@ fn compute_lod(
     sharpen: bool,
     detail: bool,
     tex_lod: bool,
-    base_tile: usize,
 ) -> LodResult {
     let level = i32::from(max_level);
     let (distant, magnify, mut tile_offset, frac) = if max_d >= 0x4000 {
@@ -1546,26 +1605,29 @@ fn compute_lod(
             (distant, false, mip_base, frac)
         }
     };
-    let mut tile0 = base_tile;
-    let mut tile1 = base_tile;
+    let mut level0 = 0u8;
+    let mut level1 = 0u8;
     if tex_lod {
         if distant {
             tile_offset = level;
         }
         if !detail {
-            tile0 = (base_tile + tile_offset as usize) & 7;
-            tile1 = if distant || (!sharpen && magnify) {
-                tile0
+            level0 = tile_offset.clamp(0, level) as u8;
+            level1 = if distant || (!sharpen && magnify) {
+                level0
             } else {
-                (tile0 + 1) & 7
+                (i32::from(level0) + 1).min(level) as u8
             };
         } else {
-            let base = base_tile + tile_offset as usize;
-            tile1 = (base + if distant || magnify { 1 } else { 2 }) & 7;
-            tile0 = (base + if magnify { 0 } else { 1 }) & 7;
+            level1 = (tile_offset + if distant || magnify { 1 } else { 2 }).min(level) as u8;
+            level0 = (tile_offset + if magnify { 0 } else { 1 }).min(level) as u8;
         }
     }
-    LodResult { frac, tile0, tile1 }
+    LodResult {
+        frac,
+        level0,
+        level1,
+    }
 }
 
 fn blend_texel(a: u32, b: u32, frac: u8) -> u32 {
@@ -1716,38 +1778,67 @@ mod tests {
     }
 
     #[test]
+    fn perspective_derivatives_use_w_coefficients() {
+        // Linear fallback when W is zero.
+        let mut coords = TexCoords {
+            s: [0, 65_536, 0, 0],
+            t: [0, 0, 65_536, 0],
+            w: [0; 4],
+        };
+        assert_eq!(
+            perspective_derivatives(&coords, 0, 0),
+            (65_536, 0, 0, 65_536)
+        );
+        // Constant W scales both derivatives by 1/W.
+        coords.w = [2 << 16, 0, 0, 0];
+        assert_eq!(
+            perspective_derivatives(&coords, 0, 0),
+            (32_768, 0, 0, 32_768)
+        );
+        // Perspective W compresses the derivative as W grows with x.
+        coords.w = [1 << 16, 1 << 16, 0, 0];
+        let (s_dx, _, _, _) = perspective_derivatives(&coords, 0, 0);
+        assert_eq!(s_dx, 32_768); // s/w goes 0 -> 0.5 across one pixel
+        let (s_dx, _, _, _) = perspective_derivatives(&coords, 1, 0);
+        assert!(
+            s_dx < 32_768 && s_dx > 0,
+            "derivative shrinks with W: {s_dx}"
+        );
+    }
+
+    #[test]
     fn lod_tile_offsets_and_detail_sharpen() {
-        // LOD in [1, 2): tile offset 1, fractional 0 at max_d = 64.
-        let lod = compute_lod(64, 2, 0, false, false, true, 0);
-        assert_eq!(lod.tile0, 1);
-        assert_eq!(lod.tile1, 2);
+        // LOD in [1, 2): level 1, fractional 0 at max_d = 64.
+        let lod = compute_lod(64, 2, 0, false, false, true);
+        assert_eq!(lod.level0, 1);
+        assert_eq!(lod.level1, 2);
         assert_eq!(lod.frac, 0);
         // Fractional part from max_d = 100 (mip base 1) -> 144.
-        let lod = compute_lod(100, 2, 0, false, false, true, 0);
-        assert_eq!(lod.tile0, 1);
-        assert_eq!(lod.tile1, 2);
+        let lod = compute_lod(100, 2, 0, false, false, true);
+        assert_eq!(lod.level0, 1);
+        assert_eq!(lod.level1, 2);
         assert_eq!(lod.frac, 144);
-        // Distant: clamp to the max level and use a single tile.
-        let lod = compute_lod(128, 2, 0, false, false, true, 0);
-        assert_eq!(lod.tile0, 2);
-        assert_eq!(lod.tile1, 2);
+        // Distant: clamp to the max level and use a single level.
+        let lod = compute_lod(128, 2, 0, false, false, true);
+        assert_eq!(lod.level0, 2);
+        assert_eq!(lod.level1, 2);
         assert_eq!(lod.frac, 0xFF);
-        // Detail mode advances both tiles.
-        let lod = compute_lod(64, 2, 0, false, true, true, 0);
-        assert_eq!(lod.tile0, 2);
-        assert_eq!(lod.tile1, 3);
-        // Magnification near LOD 0 uses the base tile only (no sharpen).
-        let lod = compute_lod(8, 2, 0, false, false, true, 0);
-        assert_eq!(lod.tile0, 0);
-        assert_eq!(lod.tile1, 0);
+        // Detail mode advances both levels.
+        let lod = compute_lod(64, 2, 0, false, true, true);
+        assert_eq!(lod.level0, 2);
+        assert_eq!(lod.level1, 2);
+        // Magnification near LOD 0 uses level 0 only (no sharpen).
+        let lod = compute_lod(8, 2, 0, false, false, true);
+        assert_eq!(lod.level0, 0);
+        assert_eq!(lod.level1, 0);
         assert_eq!(lod.frac, 0);
         // Sharpen biases the magnified fraction downward (clamped to 0).
-        let lod = compute_lod(8, 2, 0, true, false, true, 0);
+        let lod = compute_lod(8, 2, 0, true, false, true);
         assert_eq!(lod.frac, 0);
-        // With max_level 0 magnification is distant: full fraction, one tile.
-        let lod = compute_lod(8, 0, 0, false, false, true, 0);
+        // With max_level 0 magnification is distant: full fraction, one level.
+        let lod = compute_lod(8, 0, 0, false, false, true);
         assert_eq!(lod.frac, 0xFF);
-        assert_eq!(lod.tile0, lod.tile1);
+        assert_eq!(lod.level0, lod.level1);
     }
 
     #[test]

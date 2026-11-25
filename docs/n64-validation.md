@@ -56,7 +56,7 @@ provide the image.
 Recent full runs:
 
 ```
-unko-n64       64 passed
+unko-n64       66 passed
 unko-n64-host   6 passed, 1 ignored (the gate above)
 unko-app       86 passed, 2 ignored
 unko-snes     272 passed
@@ -84,7 +84,7 @@ N64 coverage highlights:
 
 | Item | Current model | Basis / measured scope |
 | --- | --- | --- |
-| LOD | RDP 2-cycle LOD: texel-space derivatives (scaled by the tile s/t shifts), per-tile mip selection, detail/sharpen tile advancing, and LOD-fraction blending | verified by `lod_tile_offsets_and_detail_sharpen` and the mip frame test; derivatives are not perspective-corrected and there is no per-tile mip-level table |
+| LOD | RDP 2-cycle LOD: perspective-corrected s/w and t/w derivatives, texel-space scaling by the tile s/t shifts, a per-tile mip-level metadata table, detail/sharpen tile advancing, and LOD-fraction blending | verified by `perspective_derivatives_use_w_coefficients`, `lod_tile_offsets_and_detail_sharpen`, the perspective-LOD frame test and `tile_mip_level`; tiles still describe mips implicitly by chain position rather than an independent per-level table |
 | Noise | LCG reseed over `(x, y, primitive)` identical to the reference renderer's `noise.h` | verified against reference seed vectors `(0,0,0)->0x0000`, `(5,9,3)->0xCEC4`, `(1028,16,14)->0xB1BC`; our "primitive" is the triangle counter, not a span-buffer primitive index + base |
 | CP0 Count | cycle-cost model (ALU 1, load/store/branch/COP0 2, COP1 4, mul 5, div 37) | verified by `count_advances_by_instruction_cycle_cost`; not a full pipeline/cache timing model |
 | Cache/NMI | external pending lines consumed at `step()` | there is no cache parity/ECC model; conditions are signalled by the system layer |
