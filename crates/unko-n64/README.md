@@ -11,14 +11,16 @@ that `run_frame` presents from RDRAM, tracks primitive/environment/combine
 state, rasterises unshaded/shaded/textured triangles with the RDP edgewalker
 (half-pixel X, 1/4-pixel Y, lmajor and Yl/Ym/Yh subpixel spans), samples
 triangles using the interpolated texture coefficient words (SET_TEXTURE_IMAGE/SET_TILE/SET_TILE_SIZE; 4/8/16-bit
-RGBA/IA/I texels with clamp/mirror/mask), runs the two-cycle combiner
+RGBA/IA/I texels with clamp/mirror/mask and mip/LOD selection: per-pixel
+texture derivatives compute the LOD, adjacent mip tiles are blended by the
+LOD fraction, and that fraction feeds the combiner LOD source, runs the two-cycle combiner
 (`SET_COMBINE_MODE`), and applies the `SET_OTHER_MODES` blender: 1/2-cycle
 selectors (pixel/memory/blend/fog colour and alpha), force blend, copy-cycle
 bypass, fog, coverage modes driven by the exact 8-bit subpixel AA mask, RGB
 dithering, alpha compare (blend-alpha or dithered threshold) and chroma keying
 from the exact 17-bit combiner accumulator, with `SET_KEY_GB`/`SET_KEY_R`
-centres/scales and the noise, Convert K4/K5, LOD-fraction and PrimLODFrac
-combiner sources. It
+centres/scales and the hardware-noise-table, Convert K4/K5, LOD-fraction and
+PrimLODFrac combiner sources. It
 models the AI register block:
 `AI_LEN` queues double-buffered DMAs of 16-bit stereo pairs from RDRAM; samples
 are read on demand as the DAC clock consumes them, buffer completion raises the

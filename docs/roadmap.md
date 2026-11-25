@@ -282,13 +282,15 @@ The main effort was the reference-parity accuracy core. Details in
       (lmajor, Yl/Ym/Yh in 1/4-pixel units, 16.16 X slopes and per-subpixel
       left/right spans), and samples textured triangles using the interpolated
       texture-coefficient words via `SET_TEXTURE_IMAGE`/`SET_TILE`/
-      `SET_TILE_SIZE` (4/8/16-bit RGBA/IA/I with clamp/mirror/mask), running the
+      `SET_TILE_SIZE` (4/8/16-bit RGBA/IA/I with clamp/mirror/mask), with
+      mip/LOD tile selection and LOD-fraction blending from texture
+      derivatives, running the
       two-cycle combiner (`SET_COMBINE_MODE`) and the `SET_OTHER_MODES` blender
       (1/2-cycle selectors, fog, copy cycle, coverage modes driven by the exact
       8-bit subpixel AA mask, RGB dither, alpha compare with dithered
       threshold, chroma key from the 17-bit combiner accumulator with
-      `SET_KEY_GB`/`SET_KEY_R` centre/scale, noise, Convert K4/K5, LOD and
-      PrimLODFrac combiner inputs), a Z-buffered
+      `SET_KEY_GB`/`SET_KEY_R` centre/scale, hardware noise table, Convert
+      K4/K5, LOD and PrimLODFrac combiner inputs), a Z-buffered
       depth pipeline
       (`SET_MASK_IMAGE`/`SET_PRIMITIVE_DEPTH`, interpolated 16.16 Z compressed
       to 16-bit depth + delta, z compare/update with the interpenetrating

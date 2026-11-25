@@ -64,6 +64,7 @@ struct OtherModes {
     alpha_compare: bool,
     alpha_dither: bool,
     key_enable: bool,
+    tex_lod: bool,
     dither: u8,
     coverage_mode: u8,
     /// `[cycle][1a, 1b, 2a, 2b]`.
@@ -129,7 +130,6 @@ pub struct Rdp {
     prim_lod_frac: u8,
     min_level: u8,
     lod_fraction: u8,
-    noise: u32,
 }
 
 impl Default for Rdp {
@@ -175,7 +175,6 @@ impl Rdp {
             prim_lod_frac: 0,
             min_level: 0,
             lod_fraction: 0xFF,
-            noise: 0x1234_5678,
         }
     }
 
@@ -344,6 +343,7 @@ impl Rdp {
                         alpha_compare: low & 1 != 0,
                         alpha_dither: low & 2 != 0,
                         key_enable: high & (1 << 8) != 0,
+                        tex_lod: high & (1 << 16) != 0,
                         coverage_mode: ((low >> 8) & 3) as u8,
                         blend: [
                             [
@@ -494,6 +494,8 @@ impl Rdp {
                     zbuffer,
                     (origin_x, origin_y),
                     modes,
+                    setup.level,
+                    usize::from(setup.tile),
                     rdram,
                 );
             }
@@ -512,13 +514,47 @@ impl Rdp {
         zbuffer: Option<ZBuffer>,
         origin: (i32, i32),
         modes: OtherModes,
+        level: u8,
+        base_tile: usize,
         rdram: &mut [u8],
     ) {
+        let primitive = self.triangles as u32;
+        let seed = noise_seed(x as u32, y as u32, primitive);
+        let noise0 = combiner_noise(seed);
+        let noise1 = combiner_noise(noise_seed(
+            (x + 1023) as u32,
+            (y + 7) as u32,
+            primitive.wrapping_add(11),
+        ));
+        let (tile_index, lod_frac) =
+            if let (Some(coords), true) = (coords, modes.tex_lod && level > 0) {
+                let step = coords.s[1]
+                    .abs()
+                    .max(coords.t[1].abs())
+                    .max(coords.s[2].abs())
+                    .max(coords.t[2].abs()) as f32
+                    / 65_536.0;
+                let lod = step.max(1.0 / 65_536.0).log2().clamp(0.0, f32::from(level));
+                let base = base_tile + lod.floor() as usize;
+                (base.min(7), (lod.fract() * 255.0) as u8)
+            } else {
+                (base_tile, 0)
+            };
+        self.lod_fraction = lod_frac;
         let texel = coords
-            .and_then(|coords| self.sample_texture_coords(&coords, x, y, origin, rdram))
+            .and_then(|coords| {
+                let a = self.sample_texture_coords(&coords, x, y, origin, tile_index, rdram);
+                let next = (tile_index + 1).min(base_tile + usize::from(level)).min(7);
+                let b = self.sample_texture_coords(&coords, x, y, origin, next, rdram);
+                match (a, b) {
+                    (Some(a), Some(b)) => Some(blend_texel(a, b, lod_frac)),
+                    (Some(a), None) => Some(a),
+                    (None, Some(b)) => Some(b),
+                    (None, None) => None,
+                }
+            })
             .unwrap_or(color);
         let combined = if self.combine_mode != 0 {
-            let noise = self.next_noise();
             combine(
                 self.combine_mode,
                 shade,
@@ -531,7 +567,8 @@ impl Rdp {
                 self.convert,
                 self.prim_lod_frac,
                 self.lod_fraction,
-                noise,
+                noise0,
+                noise1,
                 modes.cycle == 1,
                 modes.key_enable,
             )
@@ -553,7 +590,7 @@ impl Rdp {
                 base
             };
             let threshold = if modes.alpha_dither {
-                u32::from(self.next_noise())
+                u32::from((seed & 0xFF) as u8)
             } else {
                 self.blend_color & 0xFF
             };
@@ -681,8 +718,14 @@ impl Rdp {
                 blend_shift,
             )
         };
-        if modes.dither >> 2 < 2 {
-            surface = dither(surface, x, y, ((modes.dither >> 2) & 3) as usize);
+        if modes.dither >> 2 < 3 {
+            surface = dither(
+                surface,
+                x,
+                y,
+                ((modes.dither >> 2) & 3) as usize,
+                seed as u32,
+            );
         }
         if modes.aa {
             let coverage8 = u32::from(coverage).min(8);
@@ -708,23 +751,17 @@ impl Rdp {
         }
     }
 
-    fn next_noise(&mut self) -> u8 {
-        self.noise ^= self.noise << 13;
-        self.noise ^= self.noise >> 17;
-        self.noise ^= self.noise << 5;
-        (self.noise >> 24) as u8
-    }
-
     fn sample_texture_coords(
         &self,
         coords: &TexCoords,
         x: i32,
         y: i32,
         origin: (i32, i32),
+        tile_index: usize,
         rdram: &[u8],
     ) -> Option<u32> {
-        let tile = self.tiles[0];
-        let size = self.tile_sizes[0];
+        let tile = self.tiles[tile_index.min(7)];
+        let size = self.tile_sizes[tile_index.min(7)];
         if size.s_high <= size.s_low || size.t_high <= size.t_low {
             return None;
         }
@@ -860,6 +897,8 @@ fn fixed16_i64(integer: u64, fraction: u64) -> i64 {
 /// pixels; each of the three edge points carries its slope along the edge.
 struct EdgeSetup {
     lmajor: bool,
+    level: u8,
+    tile: u8,
     yl: i32,
     ym: i32,
     yh: i32,
@@ -875,6 +914,8 @@ impl EdgeSetup {
     fn parse(edge: [u64; 4]) -> Option<Self> {
         let setup = Self {
             lmajor: edge[0] & (1 << 55) != 0,
+            level: ((edge[0] >> 51) & 7) as u8,
+            tile: ((edge[0] >> 48) & 7) as u8,
             yl: sext14(edge[0] >> 32),
             ym: sext14(edge[0] >> 16),
             yh: sext14(edge[0]),
@@ -1251,6 +1292,30 @@ fn sign_extend_17(value: i32) -> i32 {
     }
 }
 
+/// Hardware noise reseed: three LCG rounds over (x, y, primitive offset).
+fn noise_seed(x: u32, y: u32, primitive: u32) -> u16 {
+    const PRIME: u32 = 1_103_515_245;
+    let mut seed = [x, y, primitive];
+    for _ in 0..3 {
+        let next = [
+            (seed[0] >> 8) ^ seed[1],
+            (seed[1] >> 8) ^ seed[2],
+            (seed[2] >> 8) ^ seed[0],
+        ];
+        seed = [
+            next[0].wrapping_mul(PRIME),
+            next[1].wrapping_mul(PRIME),
+            next[2].wrapping_mul(PRIME),
+        ];
+    }
+    (seed[0] >> 16) as u16
+}
+
+/// Combiner noise source (0x20..0x1E0 in 6-bit steps).
+fn combiner_noise(seed: u16) -> i32 {
+    i32::from(((seed & 7) << 6) | 0x20)
+}
+
 fn chroma_key_alpha(accumulators: &[i32; 3], width: &[u16; 3]) -> u8 {
     let mut alpha = 0xFFi32;
     for (accumulator, width) in accumulators.iter().zip(width.iter()) {
@@ -1275,7 +1340,8 @@ fn combine(
     convert: [u16; 6],
     prim_lod_frac: u8,
     lod_fraction: u8,
-    noise: u8,
+    noise0: i32,
+    noise1: i32,
     two_cycle: bool,
     key_enable: bool,
 ) -> u32 {
@@ -1287,7 +1353,7 @@ fn combine(
         shade,
         key_center,
         key_scale,
-        noise: i32::from(noise),
+        noise: noise0,
         lod_frac: i32::from(lod_fraction),
         prim_lod_frac: i32::from(prim_lod_frac),
         convert_k4: i32::from(convert[4]),
@@ -1309,6 +1375,7 @@ fn combine(
     }
     let values1 = CombinerValues {
         combined: cycle0,
+        noise: noise1,
         ..values
     };
     let (cycle1, _alpha1, acc1) = combine_cycle(
@@ -1417,15 +1484,31 @@ fn blender(
     (result & 0xFFFF_FF00) | (pixel & 0xFF)
 }
 
-fn dither(color: u32, x: i32, y: i32, mode: usize) -> u32 {
+fn blend_texel(a: u32, b: u32, frac: u8) -> u32 {
+    let frac = u32::from(frac);
+    let mut result = 0u32;
+    for index in 0..4 {
+        let ca = (a >> (24 - index * 8)) & 0xFF;
+        let cb = (b >> (24 - index * 8)) & 0xFF;
+        let value = (ca * (255 - frac) + cb * frac) / 255;
+        result |= value.min(255) << (24 - index * 8);
+    }
+    result
+}
+
+fn dither(color: u32, x: i32, y: i32, mode: usize, noise: u32) -> u32 {
     const MATRICES: [[u8; 16]; 2] = [
         [0, 6, 1, 7, 4, 2, 5, 3, 3, 5, 2, 4, 7, 1, 6, 0],
         [0, 4, 1, 5, 4, 0, 5, 1, 3, 7, 2, 6, 7, 3, 6, 2],
     ];
-    let threshold = u32::from(MATRICES[mode][(y as usize & 3) * 4 + (x as usize & 3)]);
     let mut result = color & 0xFF;
     for channel_index in 0..3 {
         let value = (color >> (24 - channel_index * 8)) & 0xFF;
+        let threshold = if mode < 2 {
+            u32::from(MATRICES[mode][(y as usize & 3) * 4 + (x as usize & 3)])
+        } else {
+            (noise >> (channel_index * 3)) & 7
+        };
         let quantized = (value & 0xF8) + if value & 7 > threshold { 8 } else { 0 };
         result |= quantized.min(0xFF) << (24 - channel_index * 8);
     }
@@ -1590,6 +1673,7 @@ mod tests {
             0,
             0xFF,
             0,
+            0,
             false,
             true,
         );
@@ -1607,6 +1691,7 @@ mod tests {
             [0; 6],
             0,
             0xFF,
+            0,
             0,
             false,
             true,
@@ -1666,8 +1751,8 @@ mod tests {
     fn dither_pattern_rounds_rgb_up_by_threshold() {
         // 0x85 has a fractional 5-bit remainder of 5; the magic matrix entry
         // at (0,0) is 0 so it rounds up, while (1,0) is 6 and stays.
-        assert_eq!(dither(0x8585_85FF, 0, 0, 0), 0x8888_88FF);
-        assert_eq!(dither(0x8585_85FF, 1, 0, 0), 0x8080_80FF);
+        assert_eq!(dither(0x8585_85FF, 0, 0, 0, 0), 0x8888_88FF);
+        assert_eq!(dither(0x8585_85FF, 1, 0, 0, 0), 0x8080_80FF);
     }
 
     #[test]

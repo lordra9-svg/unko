@@ -6,7 +6,8 @@
 //! and PI/VI register stubs, runs RSP
 //! scalar/vector code and DMA ([`rsp::Rsp`]), applies RDP solid-fill commands
 //! and rasterises unshaded/shaded/textured triangles ([`rdp::Rdp`]) with the
-//! RDP edgewalker, two-cycle combiner and the SET_OTHER_MODES blender
+//! RDP edgewalker, mip/LOD texture selection, two-cycle combiner and the
+//! SET_OTHER_MODES blender
 //! (cycle/copy, fog, exact subpixel coverage, dither, alpha compare and the
 //! full combiner input table including noise, Convert K4/K5, LOD fractions
 //! and accumulator-based chroma key), presents the VI
