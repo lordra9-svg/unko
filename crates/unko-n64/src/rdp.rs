@@ -4,8 +4,10 @@
 //! `DPC_START` and `DPC_END`. Implemented: `SET_COLOR_IMAGE`,
 //! `SET_FILL_COLOR`, `FILL_RECTANGLE`, `SET_OTHER_MODES` (1/2-cycle copy and
 //! alpha blender, coverage, dither), the two-cycle combiner, texture sampling
-//! (RGBA/IA/I/CI with TLUT) and the triangle edgewalker. Depth testing and
-//! tile loading are later milestones.
+//! (RGBA/IA/I/CI with TLUT), the triangle edgewalker and the Z-buffer pipeline
+//! (`SET_MASK_IMAGE`, `SET_PRIMITIVE_DEPTH`, z compare/update with 16-bit
+//! compressed depth and delta). Tile loading and exact depth-blend shifters are
+//! later milestones.
 
 /// Texture image descriptor (`SET_TEXTURE_IMAGE`).
 #[derive(Debug, Clone, Copy, Default)]
@@ -54,11 +56,24 @@ struct OtherModes {
     color_on_coverage: bool,
     #[allow(dead_code)] // image-read coverage blending is a later milestone.
     image_read: bool,
+    z_compare: bool,
+    z_update: bool,
+    z_source: bool,
+    z_mode: u8,
     aa: bool,
     dither: u8,
     coverage_mode: u8,
     /// `[cycle][1a, 1b, 2a, 2b]`.
     blend: [[u8; 4]; 2],
+}
+
+/// Triangle Z coefficients: depth at the interpolation origin plus per-pixel
+/// X/Y deltas, all in 16.16.
+#[derive(Debug, Clone, Copy, Default)]
+struct ZBuffer {
+    z: i64,
+    dzdx: i64,
+    dzdy: i64,
 }
 
 /// Interpolated texture coordinates (16.16 fixed point).
@@ -98,6 +113,12 @@ pub struct Rdp {
     tile_sizes: [TileSize; 8],
     tlut: [u16; 256],
     tlut_valid: bool,
+    depth_address: u32,
+    primitive_depth: u16,
+    primitive_delta: u16,
+    /// Low delta bits that the packed 16-bit depth word cannot hold (the
+    /// hardware keeps them in hidden VRAM alongside the Z buffer).
+    depth_delta: std::collections::BTreeMap<u32, u8>,
 }
 
 impl Default for Rdp {
@@ -132,6 +153,10 @@ impl Rdp {
             tile_sizes: [TileSize::default(); 8],
             tlut: [0; 256],
             tlut_valid: false,
+            depth_address: 0,
+            primitive_depth: 0,
+            primitive_delta: 0,
+            depth_delta: std::collections::BTreeMap::new(),
         }
     }
 
@@ -253,6 +278,11 @@ impl Rdp {
                 0x3C => self.combine_mode = command,
                 0x39 => self.blend_color = command as u32,
                 0x38 => self.fog_color = command as u32,
+                0x3E => self.depth_address = (command & 0x03FF_FFFF) as u32,
+                0x2E => {
+                    self.primitive_depth = ((command >> 16) & 0xFFFF) as u16;
+                    self.primitive_delta = (command & 0xFFFF) as u16;
+                }
                 0x2F => {
                     let high = (command >> 32) as u32;
                     let low = command as u32;
@@ -264,6 +294,10 @@ impl Rdp {
                         cvg_times_alpha: low & (1 << 12) != 0,
                         color_on_coverage: low & (1 << 7) != 0,
                         image_read: low & (1 << 6) != 0,
+                        z_compare: low & (1 << 4) != 0,
+                        z_update: low & (1 << 5) != 0,
+                        z_source: low & (1 << 2) != 0,
+                        z_mode: ((low >> 10) & 3) as u8,
                         aa: low & (1 << 3) != 0,
                         coverage_mode: ((low >> 8) & 3) as u8,
                         blend: [
@@ -294,13 +328,14 @@ impl Rdp {
                     self.triangles += 1;
                     let shaded = opcode >= 0x0C;
                     let textured = matches!(opcode, 0x0A | 0x0B | 0x0E | 0x0F);
+                    let zbuffered = opcode & 1 != 0;
                     let words = if shaded && textured {
                         20
                     } else if shaded || textured {
                         12
                     } else {
                         4
-                    };
+                    } + if zbuffered { 2 } else { 0 };
                     let start = self.current as usize;
                     let mut edge = [0u64; 4];
                     for (index, slot) in edge.iter_mut().enumerate() {
@@ -330,8 +365,14 @@ impl Rdp {
                     } else {
                         None
                     };
+                    let zbuffer = if zbuffered {
+                        let offset = 4 + if shaded { 8 } else { 0 } + if textured { 8 } else { 0 };
+                        Some(parse_zbuffer(rdram, start + offset * 8))
+                    } else {
+                        None
+                    };
                     let base_color = if shaded { shade } else { self.primitive_color };
-                    self.rasterize_triangle(edge, base_color, shade, coords, rdram);
+                    self.rasterize_triangle(edge, base_color, shade, coords, zbuffer, rdram);
                     self.current = self.current.wrapping_add((words - 1) * 8);
                 }
                 0x3F => {
@@ -352,6 +393,7 @@ impl Rdp {
         color: u32,
         shade: u32,
         coords: Option<TexCoords>,
+        zbuffer: Option<ZBuffer>,
         rdram: &mut [u8],
     ) {
         if self.color_size != 2 || self.color_format != 2 {
@@ -402,6 +444,7 @@ impl Rdp {
                     color,
                     shade,
                     coords,
+                    zbuffer,
                     (origin_x, origin_y),
                     modes,
                     rdram,
@@ -412,13 +455,14 @@ impl Rdp {
 
     #[allow(clippy::too_many_arguments)]
     fn render_pixel(
-        &self,
+        &mut self,
         x: i32,
         y: i32,
         coverage: u8,
         color: u32,
         shade: u32,
         coords: Option<TexCoords>,
+        zbuffer: Option<ZBuffer>,
         origin: (i32, i32),
         modes: OtherModes,
         rdram: &mut [u8],
@@ -439,13 +483,56 @@ impl Rdp {
         } else {
             color
         };
-        let address =
-            self.color_address as usize + ((y as u32 * self.color_width + x as u32) as usize) * 2;
+        let index = (y as u32 * self.color_width + x as u32) as usize;
+        let address = self.color_address as usize + index * 2;
         let destination = rdram
             .get(address..address + 2)
             .map(|bytes| u16::from_be_bytes([bytes[0], bytes[1]]))
             .unwrap_or(0);
-        let memory = rgba5551_to_8888(destination);
+        let memory = if modes.image_read {
+            rgba5551_to_8888(destination)
+        } else {
+            0
+        };
+
+        // Depth test and update (only for Z-buffered triangle primitives).
+        if let Some(zb) = zbuffer {
+            let (z, dz_compressed) = if modes.z_source {
+                (
+                    i32::from(self.primitive_depth) << 2,
+                    dz_compress(i32::from(self.primitive_delta).max(1)),
+                )
+            } else {
+                let zf =
+                    zb.z + i64::from(x - origin.0) * zb.dzdx + i64::from(y - origin.1) * zb.dzdy;
+                let dzpix = normalize_dzpix(
+                    (zb.dzdx >> 16).unsigned_abs() as i32 + (zb.dzdy >> 16).unsigned_abs() as i32,
+                );
+                (((zf >> 14) as i32).clamp(0, 0x3_FFFF), dz_compress(dzpix))
+            };
+            let depth_address = self.depth_address as usize + index * 2;
+            let depth_word = rdram
+                .get(depth_address..depth_address + 2)
+                .map(|bytes| u16::from_be_bytes([bytes[0], bytes[1]]))
+                .unwrap_or(0);
+            let memory_z = depth_word >> 2;
+            let memory_dz = self
+                .depth_delta
+                .get(&(depth_address as u32))
+                .copied()
+                .unwrap_or(((depth_word & 3) as u8) << 2);
+            if modes.z_compare && !depth_pass(z, dz_compressed, memory_z, memory_dz, modes.z_mode) {
+                return;
+            }
+            if modes.z_update {
+                let word = z_compress(z) << 2 | u16::from(dz_compressed >> 2);
+                if let Some(slot) = rdram.get_mut(depth_address..depth_address + 2) {
+                    slot.copy_from_slice(&word.to_be_bytes());
+                }
+                self.depth_delta
+                    .insert(depth_address as u32, dz_compressed & 3);
+            }
+        }
         let mut surface = if modes.cycle == 2 {
             // Copy cycle: the texel (or primitive colour) bypasses the
             // combiner and blender.
@@ -496,7 +583,11 @@ impl Rdp {
             } else {
                 surface & 0xFF
             };
-            let memory_coverage = ((memory & 0xFF) >> 5) as u8;
+            let memory_coverage = if modes.image_read {
+                ((memory & 0xFF) >> 5) as u8
+            } else {
+                7
+            };
             let stored = coverage_blend(coverage.min(7), memory_coverage, modes.coverage_mode);
             alpha = (alpha & !0xE0) | (u32::from(stored) << 5);
             surface = (surface & 0xFFFF_FF00) | alpha.min(255);
@@ -640,6 +731,10 @@ fn sext14(value: u64) -> i32 {
     }
 }
 
+fn fixed16_u64(integer: u64, fraction: u64) -> i64 {
+    i64::from(integer as u16) * 65_536 + i64::from(fraction as u16)
+}
+
 fn fixed16_i64(integer: u64, fraction: u64) -> i64 {
     i64::from(integer as u16 as i16) * 65_536 + i64::from(fraction as u16)
 }
@@ -692,6 +787,82 @@ impl EdgeSetup {
         } else {
             (xl, xh)
         }
+    }
+}
+
+fn parse_zbuffer(rdram: &[u8], offset: usize) -> ZBuffer {
+    let first = read_word(rdram, offset).unwrap_or(0);
+    let second = read_word(rdram, offset + 8).unwrap_or(0);
+    ZBuffer {
+        // Z is an unsigned 16-bit integer with 16 fraction bits; the RDP
+        // shifts it left two bits to reach its 18-bit depth range.
+        z: fixed16_u64(first >> 48, first >> 32),
+        dzdx: fixed16_i64(first >> 16, first),
+        dzdy: fixed16_i64(second >> 16, second),
+    }
+}
+
+fn msb(value: i32) -> u8 {
+    if value <= 0 {
+        0
+    } else {
+        (31 - value.leading_zeros()) as u8
+    }
+}
+
+fn normalize_dzpix(dz: i32) -> i32 {
+    if dz >= 0x8000 {
+        0x8000
+    } else if dz == 0 {
+        1
+    } else {
+        1 << (msb(dz) + 1)
+    }
+}
+
+fn dz_compress(dz: i32) -> u8 {
+    msb(dz).min(15)
+}
+
+fn dz_decompress(dz: u8) -> i32 {
+    1 << dz.min(15)
+}
+
+fn z_compress(z: i32) -> u16 {
+    let inv_z = (0x3_FFFF - z).max(1);
+    let exponent = (17 - i32::from(msb(inv_z))).clamp(0, 7);
+    let shift = (6 - exponent).max(0);
+    let mantissa = ((z >> shift) & 0x7FF) as u16;
+    ((exponent as u16) << 11) + mantissa
+}
+
+fn z_decompress(z: u16) -> i32 {
+    let z = i32::from(z);
+    let exponent = z >> 11;
+    let mantissa = z & 0x7FF;
+    let shift = (6 - exponent).max(0);
+    let base = 0x4_0000 - (0x4_0000 >> exponent);
+    (mantissa << shift) + base
+}
+
+fn depth_pass(z: i32, dz_compressed: u8, memory_z: u16, memory_dz: u8, mode: u8) -> bool {
+    // A cleared depth buffer (all ones) behaves as infinitely far.
+    if memory_z == 0x3FFF {
+        return true;
+    }
+    let memory = z_decompress(memory_z);
+    let tolerance = dz_decompress(dz_compressed).max(dz_decompress(memory_dz));
+    let front = z < memory;
+    let nearer = z - tolerance <= memory;
+    let farther = z + tolerance >= memory;
+    match mode {
+        // Opaque / interpenetrating: pass when in front (within the depth
+        // delta tolerance).
+        0 | 1 => nearer,
+        // Transparent: only pixels strictly in front pass.
+        2 => front,
+        // Decal: pass only where coplanar with the existing surface.
+        _ => nearer && farther,
     }
 }
 

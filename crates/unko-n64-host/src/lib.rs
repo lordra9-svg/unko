@@ -6,8 +6,8 @@
 //! and (textured) triangle commands through the two-cycle combiner and the
 //! SET_OTHER_MODES blender (fog, coverage, dither, copy),
 //! presents the VI framebuffer from RDRAM as RGBA and drains AI DMA into
-//! interleaved f32 audio. Depth testing, audio resampling/mixing and precise
-//! exceptions are the next milestone.
+//! interleaved f32 audio. Audio resampling/mixing and precise exceptions are
+//! the next milestone.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

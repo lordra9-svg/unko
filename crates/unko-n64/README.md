@@ -19,5 +19,8 @@ models the AI register block:
 `AI_LEN` DMAs 16-bit stereo pairs from RDRAM into a FIFO that the host turns
 into audio. CI palettes load through LOAD_TLUT and 4/8-bit CI texels look up
 the TLUT, and texture coordinates are perspective-corrected by the parsed W
-coefficients. Fog-alpha edge cases, depth testing and audio resampling are
-next.
+coefficients. `SET_MASK_IMAGE`/`SET_PRIMITIVE_DEPTH` drive a Z-buffered depth
+pipeline: interpolated 16.16 Z compressed to the RDP's 16-bit depth word with
+a 16-bit delta exponent, z compare/update for opaque/transparent/decal/
+interpenetrating modes and primitive-depth source selection. Fog-alpha edge
+cases, exact depth-blend shifters and audio resampling are next.

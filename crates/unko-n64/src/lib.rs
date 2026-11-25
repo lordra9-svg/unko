@@ -9,8 +9,8 @@
 //! (cycle/copy, fog, coverage, dither), presents the VI
 //! framebuffer from
 //! RDRAM and runs AI DMA into an audio FIFO ([`ai::Ai`]). CI/TLUT palettes and
-//! perspective-correct W interpolation are implemented; depth testing and audio
-//! resampling are the next milestones.
+//! perspective-correct W interpolation and the compressed Z-buffer depth
+//! pipeline are implemented; audio resampling is the next milestone.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

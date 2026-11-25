@@ -357,6 +357,13 @@ mod tests {
         ]
     }
 
+    fn z_words(z: f32, dzdx: f32, dzdy: f32) -> [u64; 2] {
+        let (zi, zf) = pack_fixed(z);
+        let (xi, xf) = pack_fixed(dzdx);
+        let (yi, yf) = pack_fixed(dzdy);
+        [(zi << 48) | (zf << 32) | (xi << 16) | xf, (yi << 16) | yf]
+    }
+
     #[test]
     fn boots_ipl3_from_dmem() {
         let cart = cart_with(&[0x3C08_8000, 0x2409_1234, 0xAD09_0000, 0x1000_FFFF]);
@@ -513,8 +520,9 @@ mod tests {
             (3u64 << 52) | (1u64 << 47) | (4u64 << 9) | (2u64 << 37) | (1u64 << 32) | 2u64;
         words.push((0x3Cu64 << 56) | combine);
         // 1 cycle, 1a = pixel, 1b = pixel alpha, 2a = memory, 2b = 1 - alpha.
-        // Dither off (mode 3) keeps the blend result exact for the assert.
-        words.push((0x2Fu64 << 56) | (0xCu64 << 36) | (1u64 << 22));
+        // Image read enables the framebuffer as the blend source; dither off
+        // (mode 3) keeps the blend result exact for the assert.
+        words.push((0x2Fu64 << 56) | (0xCu64 << 36) | (1u64 << 22) | (1u64 << 6));
         words.extend(triangle_edge(0x0A, [(4.0, 4.0), (10.0, 6.0), (4.0, 12.0)]));
         words.extend([0u64; 8]); // texture coefficients: s = t = 0.
                                  // Copy cycle: the next triangle bypasses the blender.
@@ -556,6 +564,64 @@ mod tests {
             "copy cycle writes the texel"
         );
         assert_eq!(pixel(28, 20), [0, 0, 0xFF, 0xFF], "background fill");
+    }
+
+    #[test]
+    fn rdp_depth_test_rejects_farther_triangles() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        let origin = 0x2000u32;
+        let depth = 0x6000u32;
+        machine.write_register(0x0440_0004, origin);
+        machine.write_register(0x0440_0008, 32);
+        // Clear the Z buffer to the maximum (far) depth.
+        for index in 0..32 * 32 {
+            machine.write_u16(depth as u64 + index * 2, 0xFFFF);
+        }
+        let mut words: Vec<u64> = Vec::new();
+        words.push(
+            (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (32u64 << 32) | u64::from(origin),
+        );
+        words.push((0x3Eu64 << 56) | u64::from(depth));
+        // z compare + z update, opaque mode, dither off.
+        let other = (0x2Fu64 << 56) | (0xCu64 << 36) | (1u64 << 5) | (1u64 << 4);
+        words.push(other);
+        let vertices = [(4.0, 4.0), (10.0, 6.0), (4.0, 12.0)];
+        // Far red triangle first (passes against the cleared buffer).
+        words.push((0x3Au64 << 56) | 0xFF00_00FF);
+        words.extend(triangle_edge(0x09, vertices));
+        words.extend(z_words(28_672.0, 0.0, 0.0));
+        // Nearer green triangle passes and overwrites.
+        words.push((0x3Au64 << 56) | 0x00FF_00FF);
+        words.extend(triangle_edge(0x09, vertices));
+        words.extend(z_words(16_384.0, 0.0, 0.0));
+        // Farther yellow triangle must be rejected.
+        words.push((0x3Au64 << 56) | 0xFFFF_00FF);
+        words.extend(triangle_edge(0x09, vertices));
+        words.extend(z_words(24_576.0, 0.0, 0.0));
+        for (index, word) in words.iter().enumerate() {
+            machine.write_u32(index as u64 * 8, (word >> 32) as u32);
+            machine.write_u32(index as u64 * 8 + 4, *word as u32);
+        }
+        let end = (words.len() * 8) as u32;
+        machine.write_u32(0x0410_0000, 0);
+        machine.write_u32(0x0410_0004, end);
+        machine.run_frame().expect("frame");
+
+        let pixel = |x: usize, y: usize| {
+            let index = (y * WIDTH as usize + x) * 4;
+            let frame = machine.frame();
+            [
+                frame[index],
+                frame[index + 1],
+                frame[index + 2],
+                frame[index + 3],
+            ]
+        };
+        assert_eq!(pixel(5, 9), [0, 0xFF, 0, 0xFF], "nearest triangle wins");
+        // Z update stored z_compress(0x10000) = 0x400 in the upper 14 bits.
+        let offset = depth as usize + (9 * 32 + 5) * 2;
+        assert_eq!(&machine.rdram()[offset..offset + 2], &[0x10, 0x00]);
     }
 
     #[test]
