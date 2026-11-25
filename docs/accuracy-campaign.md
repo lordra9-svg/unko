@@ -7,8 +7,8 @@ low oracle match.
 ## NES stage — in progress
 
 Oracle: a local RustyNES trace host built against `refs/rustynes` (GPL-3.0,
-kept outside the MIT tree) and invoked by
-`tools/snes-oracle`-style orchestration. The host emits the same
+kept outside the MIT tree at `~/ai/refs/rustynes-trace-host`). Its
+`run_nes.py` drives one ROM at a time. The host emits the same
 `# unko trace v1` records as `unko trace`.
 
 Method, one ROM at a time:
