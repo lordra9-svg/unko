@@ -585,9 +585,8 @@ mod tests {
         words.push((0x32u64 << 56) | (3u64 << 12) | 3);
         // Primitive alpha 0x80 feeds the combiner alpha.
         words.push((0x3Au64 << 56) | 0x0000_0080);
-        // rgb0 = texel, alpha0 = primitive alpha, cycle1 passes both through.
-        let combine =
-            (3u64 << 52) | (1u64 << 47) | (4u64 << 9) | (2u64 << 37) | (1u64 << 32) | 2u64;
+        // 1-cycle: RGB = texel * texelAlpha, alpha = primitive alpha.
+        let combine = (1u64 << 52) | (8u64 << 28) | (8u64 << 47) | (7u64 << 15) | (3u64 << 9);
         words.push((0x3Cu64 << 56) | combine);
         // 1 cycle, 1a = pixel, 1b = pixel alpha, 2a = memory, 2b = 1 - alpha.
         // Image read enables the framebuffer as the blend source; dither off
@@ -752,9 +751,26 @@ mod tests {
         // key_enable (other modes bit 40), image read, 2a = memory colour.
         let other = (0x2Fu64 << 56) | (0xCu64 << 36) | (1u64 << 40) | (1u64 << 6) | (1u64 << 22);
         words.push(other);
-        // Zero key widths: red is fully keyed out.
-        words.push(0x2Au64 << 56);
-        words.push(0x2Bu64 << 56);
+        // Key windows: width 0x20 per channel, centre G=0xFF, scale 0x80.
+        words.push(
+            (0x2Au64 << 56)
+                | (0x20u64 << 44)
+                | (0x20u64 << 32)
+                | (0xFFu64 << 24)
+                | (0x80u64 << 16)
+                | 0x80,
+        );
+        words.push((0x2Bu64 << 56) | (0x20u64 << 16) | 0x80);
+        // 1-cycle: A=Primitive, B=KeyCentre, C=KeyScale, D=0; alpha=primitive.
+        let combine = (3u64 << 52)
+            | (6u64 << 28)
+            | (6u64 << 47)
+            | (7u64 << 15)
+            | (7u64 << 44)
+            | (7u64 << 12)
+            | (7u64 << 41)
+            | (3u64 << 9);
+        words.push((0x3Cu64 << 56) | combine);
         words.push((0x3Au64 << 56) | 0xFF00_00FF);
         words.extend(triangle_edge(0x08, [(4.0, 4.0), (10.0, 6.0), (4.0, 12.0)]));
         submit_rdp(&mut machine, &words);
@@ -765,10 +781,8 @@ mod tests {
             "red keyed out"
         );
 
-        // Wide key window: green is kept.
+        // Green sits at its key centre (G=0xFF), so it is kept.
         let mut words: Vec<u64> = Vec::new();
-        words.push((0x2Au64 << 56) | (0x200u64 << 44) | (0x200u64 << 32));
-        words.push((0x2Bu64 << 56) | (0x200u64 << 16));
         words.push((0x3Au64 << 56) | 0x00FF_00FF);
         words.extend(triangle_edge(
             0x08,
@@ -792,7 +806,14 @@ mod tests {
             machine.write_u16(depth as u64 + index * 2, 0xFFFF);
         }
         let vertices = [(4.0, 4.0), (10.0, 6.0), (4.0, 12.0)];
-        let combine = (4u64 << 52) | (1u64 << 47) | (4u64 << 9) | (2u64 << 37) | (1u64 << 32) | 2;
+        let combine = (8u64 << 52)
+            | (8u64 << 28)
+            | (16u64 << 47)
+            | (3u64 << 15)
+            | (7u64 << 44)
+            | (7u64 << 12)
+            | (7u64 << 41)
+            | (3u64 << 9);
 
         let mut words: Vec<u64> = Vec::new();
         words.push(
@@ -872,14 +893,16 @@ mod tests {
         words.push((0x35u64 << 56) | (2u64 << 51) | (1u64 << 41));
         words.push((0x32u64 << 56) | (3u64 << 12) | 3);
         // Combiner: cycle0 = texture, cycle1 = pass-through of cycle0.
-        let combine = (3u64 << 52)
-            | (1u64 << 47)
-            | (3u64 << 44)
-            | (1u64 << 41)
-            | (2u64 << 37)
-            | (1u64 << 32)
-            | (2u64 << 21)
-            | (1u64 << 18);
+        // 1-cycle texel passthrough: A=Texel0, B=0, C=Texel0Alpha, D=0;
+        // alpha A=Texel0Alpha, B=0, C=One, D=0.
+        let combine = (1u64 << 52)
+            | (8u64 << 28)
+            | (8u64 << 47)
+            | (7u64 << 15)
+            | (1u64 << 44)
+            | (7u64 << 12)
+            | (6u64 << 41)
+            | (7u64 << 9);
         words.push((0x3Cu64 << 56) | combine);
         words.push(
             (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (64u64 << 32) | u64::from(origin),

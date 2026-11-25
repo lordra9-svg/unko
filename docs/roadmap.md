@@ -286,7 +286,9 @@ The main effort was the reference-parity accuracy core. Details in
       two-cycle combiner (`SET_COMBINE_MODE`) and the `SET_OTHER_MODES` blender
       (1/2-cycle selectors, fog, copy cycle, coverage modes driven by the exact
       8-bit subpixel AA mask, RGB dither, alpha compare with dithered
-      threshold, chroma key using `SET_KEY_GB`/`SET_KEY_R`), a Z-buffered depth pipeline
+      threshold, chroma key from the 17-bit combiner accumulator with
+      `SET_KEY_GB`/`SET_KEY_R` centre/scale combiner inputs), a Z-buffered
+      depth pipeline
       (`SET_MASK_IMAGE`/`SET_PRIMITIVE_DEPTH`, interpolated 16.16 Z compressed
       to 16-bit depth + delta, z compare/update, image-read blending, AA
       exact subpixel coverage accumulation/overflow and memory-alpha

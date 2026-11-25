@@ -506,17 +506,17 @@ impl Rdp {
                 texel,
                 self.primitive_color,
                 self.environment_color,
+                self.key_center,
+                self.key_scale,
+                self.key_width,
+                modes.cycle == 1,
+                modes.key_enable,
             )
         } else if coords.is_some() {
             texel
         } else {
             color
         };
-        let mut combined = combined;
-        if modes.key_enable {
-            let alpha = chroma_key_alpha(combined, &self.key_width);
-            combined = (combined & 0xFFFF_FF00) | u32::from(alpha);
-        }
         if modes.alpha_compare {
             let base = combined & 0xFF;
             let reference = if modes.alpha_cvg_select {
@@ -1084,101 +1084,208 @@ fn channel(color: u32, channel: usize) -> i32 {
     ((color >> (24 - channel * 8)) & 0xFF) as i32
 }
 
-fn combine_input(
-    selector: u64,
-    channel_index: usize,
-    shade: u32,
+struct CombinerValues {
+    combined: u32,
     texel: u32,
     primitive: u32,
     environment: u32,
-) -> i32 {
+    shade: u32,
+    key_center: [u8; 3],
+    key_scale: [u8; 3],
+}
+
+fn combiner_rgb(field: u32, selector: u32, index: usize, values: &CombinerValues) -> i32 {
+    let combined = channel(values.combined, index);
+    let texel = channel(values.texel, index);
+    let primitive = channel(values.primitive, index);
+    let environment = channel(values.environment, index);
+    let shade = channel(values.shade, index);
+    match field {
+        // RGB A (muladd)
+        0 => match selector {
+            0 => combined,
+            1 | 2 => texel,
+            3 => primitive,
+            4 => shade,
+            5 => environment,
+            6 => 255,
+            _ => 0,
+        },
+        // RGB B (mulsub); 6 = key centre, 7 = convert K4.
+        1 => match selector {
+            0 => combined,
+            1 | 2 => texel,
+            3 => primitive,
+            4 => shade,
+            5 => environment,
+            6 => i32::from(values.key_center[index]),
+            _ => 0,
+        },
+        // RGB C (multiplier); 6 = key scale, 7.. = alpha sources.
+        2 => match selector {
+            0 => combined,
+            1 | 2 => texel,
+            3 => primitive,
+            4 => shade,
+            5 => environment,
+            6 => i32::from(values.key_scale[index]),
+            7 => channel(values.combined, 3),
+            8 | 9 => channel(values.texel, 3),
+            10 => channel(values.primitive, 3),
+            11 => channel(values.shade, 3),
+            12 => channel(values.environment, 3),
+            _ => 0,
+        },
+        // RGB D (add)
+        _ => match selector {
+            0 => combined,
+            1 | 2 => texel,
+            3 => primitive,
+            4 => shade,
+            5 => environment,
+            6 => 255,
+            _ => 0,
+        },
+    }
+}
+
+fn combiner_alpha(selector: u32, values: &CombinerValues) -> i32 {
     match selector & 0x7 {
-        0 => 0,
-        1 => 255,
-        2 => channel(shade, channel_index),
-        3 => channel(texel, channel_index),
-        4 => channel(primitive, channel_index),
-        5 => channel(environment, channel_index),
+        0 => channel(values.combined, 3),
+        1 | 2 => channel(values.texel, 3),
+        3 => channel(values.primitive, 3),
+        4 => channel(values.shade, 3),
+        5 => channel(values.environment, 3),
+        6 => 255,
         _ => 0,
     }
 }
 
+/// Evaluates one combiner cycle, returning the (RGB, alpha) result plus the
+/// per-channel 17-bit accumulators used for chroma keying.
 #[allow(clippy::too_many_arguments)]
 fn combine_cycle(
-    a: u64,
-    b: u64,
-    c: u64,
-    d: u64,
+    a: u32,
+    b: u32,
+    c: u32,
+    d: u32,
+    aa: u32,
+    ab: u32,
+    ac: u32,
+    ad: u32,
+    values: &CombinerValues,
+) -> (u32, u8, [i32; 3]) {
+    let mut rgb = 0u32;
+    let mut accumulators = [0i32; 3];
+    for (index, accumulator) in accumulators.iter_mut().enumerate() {
+        let av = combiner_rgb(0, a, index, values);
+        let bv = combiner_rgb(1, b, index, values);
+        let cv = combiner_rgb(2, c, index, values);
+        let dv = combiner_rgb(3, d, index, values);
+        *accumulator = ((av - bv) * cv + (dv << 8) + 0x80) & 0x1_FFFF;
+        let value = (((av - bv) * cv + 0x80) >> 8) + dv;
+        rgb |= (value.clamp(0, 255) as u32) << (24 - index * 8);
+    }
+    let av = combiner_alpha(aa, values);
+    let bv = combiner_alpha(ab, values);
+    let cv = combiner_alpha(ac, values);
+    let dv = combiner_alpha(ad, values);
+    let alpha = ((((av - bv) * cv + 0x80) >> 8) + dv).clamp(0, 255) as u8;
+    (rgb | u32::from(alpha), alpha, accumulators)
+}
+
+fn sign_extend_17(value: i32) -> i32 {
+    let value = value & 0x1_FFFF;
+    if value & 0x1_0000 != 0 {
+        value - 0x2_0000
+    } else {
+        value
+    }
+}
+
+fn chroma_key_alpha(accumulators: &[i32; 3], width: &[u16; 3]) -> u8 {
+    let mut alpha = 0xFFi32;
+    for (accumulator, width) in accumulators.iter().zip(width.iter()) {
+        let dist = sign_extend_17(*accumulator);
+        let bias = if dist > 0 && dist & 0xF == 8 { 0x10 } else { 0 };
+        let key = (i32::from(*width) << 4) - dist.abs() + bias;
+        alpha = alpha.min(key.clamp(0, 0xFF));
+    }
+    alpha as u8
+}
+
+#[allow(clippy::too_many_arguments)]
+fn combine(
+    mode: u64,
     shade: u32,
     texel: u32,
     primitive: u32,
     environment: u32,
+    key_center: [u8; 3],
+    key_scale: [u8; 3],
+    key_width: [u16; 3],
+    two_cycle: bool,
+    key_enable: bool,
 ) -> u32 {
-    let mut result = 0u32;
-    for channel_index in 0..4 {
-        let av = combine_input(a, channel_index, shade, texel, primitive, environment);
-        let bv = combine_input(b, channel_index, shade, texel, primitive, environment);
-        let cv = combine_input(c, channel_index, shade, texel, primitive, environment);
-        let dv = combine_input(d, channel_index, shade, texel, primitive, environment);
-        let value = (((av - bv) * cv) >> 8) + dv;
-        let value = value.clamp(0, 255) as u32;
-        result |= value << (24 - channel_index * 8);
+    let values = CombinerValues {
+        combined: 0,
+        texel,
+        primitive,
+        environment,
+        shade,
+        key_center,
+        key_scale,
+    };
+    let (cycle0, _alpha0, acc0) = combine_cycle(
+        ((mode >> 52) & 0xF) as u32,
+        ((mode >> 28) & 0xF) as u32,
+        ((mode >> 47) & 0x1F) as u32,
+        ((mode >> 15) & 0x7) as u32,
+        ((mode >> 44) & 0x7) as u32,
+        ((mode >> 12) & 0x7) as u32,
+        ((mode >> 41) & 0x7) as u32,
+        ((mode >> 9) & 0x7) as u32,
+        &values,
+    );
+    if !two_cycle {
+        return finish_combiner_key(cycle0, &acc0, mode >> 52, &values, key_width, key_enable);
     }
-    result
+    let values1 = CombinerValues {
+        combined: cycle0,
+        ..values
+    };
+    let (cycle1, _alpha1, acc1) = combine_cycle(
+        ((mode >> 37) & 0xF) as u32,
+        ((mode >> 24) & 0xF) as u32,
+        ((mode >> 32) & 0x1F) as u32,
+        ((mode >> 6) & 0x7) as u32,
+        ((mode >> 21) & 0x7) as u32,
+        ((mode >> 3) & 0x7) as u32,
+        ((mode >> 18) & 0x7) as u32,
+        (mode & 0x7) as u32,
+        &values1,
+    );
+    finish_combiner_key(cycle1, &acc1, mode >> 37, &values1, key_width, key_enable)
 }
 
-fn combine(mode: u64, shade: u32, texel: u32, primitive: u32, environment: u32) -> u32 {
-    let cycle0 = combine_cycle(
-        (mode >> 52) & 0xF,
-        (mode >> 28) & 0xF,
-        (mode >> 47) & 0x1F,
-        (mode >> 15) & 0x7,
-        shade,
-        texel,
-        primitive,
-        environment,
-    );
-    let cycle1 = combine_cycle(
-        (mode >> 37) & 0xF,
-        (mode >> 24) & 0xF,
-        (mode >> 32) & 0x1F,
-        (mode >> 6) & 0x7,
-        cycle0,
-        texel,
-        primitive,
-        environment,
-    );
-    let alpha0 = combine_cycle(
-        (mode >> 44) & 0x7,
-        (mode >> 12) & 0x7,
-        (mode >> 41) & 0x7,
-        (mode >> 9) & 0x7,
-        shade,
-        texel,
-        primitive,
-        environment,
-    );
-    let alpha1 = combine_cycle(
-        (mode >> 21) & 0x7,
-        (mode >> 3) & 0x7,
-        (mode >> 18) & 0x7,
-        mode & 0x7,
-        alpha0,
-        texel,
-        primitive,
-        environment,
-    );
-    (cycle1 & 0xFFFF_FF00) | (alpha1 & 0xFF)
-}
-
-fn chroma_key_alpha(color: u32, width: &[u16; 3]) -> u8 {
-    let mut alpha = 0xFFi32;
-    for (index, width) in width.iter().enumerate() {
-        let component = ((color >> (24 - index * 8)) & 0xFF) as i32;
-        let key = (i32::from(*width) << 4) - component;
-        alpha = alpha.min(key.clamp(0, 0xFF));
+fn finish_combiner_key(
+    color: u32,
+    accumulators: &[i32; 3],
+    a_selector: u64,
+    values: &CombinerValues,
+    key_width: [u16; 3],
+    key_enable: bool,
+) -> u32 {
+    if !key_enable {
+        return color;
     }
-    alpha as u8
+    let alpha = chroma_key_alpha(accumulators, &key_width);
+    let mut rgb = 0u32;
+    for index in 0..3 {
+        let value = combiner_rgb(0, (a_selector & 0xF) as u32, index, values);
+        rgb |= (value.clamp(0, 255) as u32) << (24 - index * 8);
+    }
+    rgb | u32::from(alpha)
 }
 
 fn blend_source(selector: u8, pixel: u32, memory: u32, blend_color: u32, fog_color: u32) -> u32 {
@@ -1376,6 +1483,51 @@ mod tests {
         // Without AA only the first subpixel sample matters.
         assert_eq!(coverage_mask(&spans, 4) & 1, 0);
         assert_eq!(coverage_mask(&spans, 5) & 1, 1);
+    }
+
+    #[test]
+    fn combiner_key_center_scale_and_accumulator() {
+        // 1-cycle: A=Primitive, B=KeyCentre, C=KeyScale, D=0; alpha=primitive.
+        let mode = (3u64 << 52)
+            | (6u64 << 28)
+            | (6u64 << 47)
+            | (7u64 << 15)
+            | (7u64 << 44)
+            | (7u64 << 12)
+            | (7u64 << 41)
+            | (3u64 << 9);
+        let center = [0, 0xFF, 0];
+        let scale = [0x80, 0x80, 0x80];
+        let width = [0x20, 0x20, 0x20];
+        // Green sits at its key centre: accumulator is the 0x80 rounding bias,
+        // and the key alpha covers it.
+        let green = combine(
+            mode,
+            0,
+            0,
+            0x00FF_00FF,
+            0,
+            center,
+            scale,
+            width,
+            false,
+            true,
+        );
+        assert_eq!(green, 0x00FF_00FF);
+        // Red is far outside its centre (R distance 255*128), so it keys out.
+        let red = combine(
+            mode,
+            0,
+            0,
+            0xFF00_00FF,
+            0,
+            center,
+            scale,
+            width,
+            false,
+            true,
+        );
+        assert_eq!(red, 0xFF00_0000);
     }
 
     #[test]
