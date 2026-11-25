@@ -2786,6 +2786,8 @@ mod tests {
         rom[0x3C] = b'N';
         rom[0x3D] = b'D';
         rom[0x3E] = b'E';
+        // IPL3: beq zero,zero,-1 ; nop (a valid endless loop).
+        rom[0x80..0x84].copy_from_slice(&0x1000_FFFFu32.to_be_bytes());
         fs::write(&rom_path, &rom).expect("rom");
         let entries = crate::library::probe_path_any(&rom_path).expect("probe");
         assert_eq!(entries[0].system, "n64");

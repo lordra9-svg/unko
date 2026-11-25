@@ -273,8 +273,12 @@ The main effort was the reference-parity accuracy core. Details in
       `unko-n64-host` exposes it as a registered `Core`, so `unko cores`
       lists `n64`). The machine HLEs the PIF: a VR4300 (MIPS III) integer
       interpreter boots the cartridge's IPL3 from RSP DMEM with RDRAM/RSP
-      memory and PI/VI register stubs, and `run_frame` presents blank frames.
-      RSP/RDP rendering, audio, the TLB and FPU are the next milestones; no
+      memory and PI/VI register stubs. The RSP scaffold has DMEM/IMEM, DMA and
+      a scalar interpreter; the RDP scaffold parses
+      `SET_COLOR_IMAGE`/`SET_FILL_COLOR`/`FILL_RECTANGLE` into a 16-bit
+      framebuffer and `run_frame` presents it from RDRAM as RGBA. Textured
+      triangles, the RSP vector unit, audio, the TLB and FPU are the next
+      milestones; no
       standard N64 cartridge image was available locally to boot (only 64DD
       IPL firmware). See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.

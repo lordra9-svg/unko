@@ -2,8 +2,9 @@
 //!
 //! `load` validates and normalises the cartridge, then boots its IPL3 on the
 //! VR4300 interpreter (PIF HLE) with RDRAM, RSP memory and PI/VI stubs.
-//! `run_frame` advances a placeholder frame and presents a blank RGBA image;
-//! RSP/RDP rendering, audio and precise exceptions are the next milestone.
+//! `run_frame` runs RSP scalar code/DMA, applies pending RDP fill commands and
+//! presents the VI framebuffer from RDRAM as RGBA. Textured triangles, the RSP
+//! vector unit, audio and precise exceptions are the next milestone.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -40,7 +41,6 @@ pub fn registration() -> CoreRegistration {
 pub struct N64Core {
     cart: Option<Cartridge>,
     machine: Option<Machine>,
-    frame: Vec<u8>,
     sample_rate: f32,
 }
 
@@ -51,7 +51,6 @@ impl N64Core {
         Self {
             cart: None,
             machine: None,
-            frame: vec![0; (WIDTH * HEIGHT * 4) as usize],
             sample_rate: 48_000.0,
         }
     }
@@ -119,8 +118,12 @@ impl Core for N64Core {
     }
 
     fn video(&self) -> FrameBuffer<'_> {
+        let data = self
+            .machine
+            .as_ref()
+            .map_or(&[][..], |machine| machine.frame());
         FrameBuffer {
-            data: &self.frame,
+            data,
             width: WIDTH,
             height: HEIGHT,
             stride: WIDTH as usize * 4,
@@ -168,6 +171,8 @@ mod tests {
         rom[0x3C] = b'N';
         rom[0x3D] = b'D';
         rom[0x3E] = b'E';
+        // IPL3: beq zero,zero,-1 ; nop (a valid endless loop).
+        rom[0x80..0x84].copy_from_slice(&0x1000_FFFFu32.to_be_bytes());
         rom
     }
 

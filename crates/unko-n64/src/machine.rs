@@ -1,35 +1,45 @@
-//! Minimal N64 machine: RDRAM, RSP memory, cart ROM and the register stubs
-//! needed to run a cartridge's IPL3 boot code on the VR4300.
+//! Minimal N64 machine: RDRAM, the RSP/RDP scaffolds, cart ROM and the register
+//! stubs needed to boot a cartridge's IPL3 and present a framebuffer.
 //!
-//! This HLEs the PIF (IPL1/IPL2): the cartridge's 4 KiB IPL3 is copied from
-//! ROM offset `0x40` into RSP DMEM and the CPU starts at `0xA4000040`, exactly
-//! where the real boot ROM hands off. PI DMA is modelled instantly so IPL3 can
-//! load the game's boot code into RDRAM. RSP/RDP rendering, audio, the TLB and
-//! precise exceptions are later milestones, so frames are blank.
+//! The PIF is HLE'd: the cartridge's 4 KiB IPL3 is copied from ROM offset
+//! `0x40` into RSP DMEM and the CPU starts at `0xA4000040`, the real handoff
+//! point. PI DMA is modelled instantly so IPL3 can load the game's boot code.
+//! `run_frame` boots a placeholder frame, runs a bounded amount of RSP scalar
+//! code, applies pending RDP fill commands and presents the VI framebuffer from
+//! RDRAM as RGBA. Textured triangles, audio, the TLB and FPU are later.
 
-use crate::cpu::{Cpu, CpuError};
+use crate::cpu::{Bus, Cpu, CpuError};
+use crate::rdp::Rdp;
+use crate::rsp::Rsp;
 use crate::Cartridge;
 
-/// Instruction budget for one presented frame (placeholder until VI timing is
-/// modelled from the RCP).
+/// CPU instruction budget for one presented frame.
 pub const INSTRUCTIONS_PER_FRAME: u32 = 200_000;
+/// RSP scalar instruction budget for one presented frame.
+pub const RSP_INSTRUCTIONS_PER_FRAME: u32 = 4_096;
+/// Presented width.
+pub const WIDTH: u32 = 640;
+/// Presented height.
+pub const HEIGHT: u32 = 480;
 
 /// One N64 machine.
 pub struct Machine {
     /// Architectural CPU.
     pub cpu: Cpu,
+    /// RSP scaffold.
+    pub rsp: Rsp,
+    /// RDP scaffold.
+    pub rdp: Rdp,
     /// Work RAM (4 MiB).
     rdram: Vec<u8>,
-    /// RSP data memory (4 KiB).
-    dmem: Vec<u8>,
-    /// RSP instruction memory (4 KiB).
-    imem: Vec<u8>,
     /// Cartridge image (normalised big-endian).
     rom: Vec<u8>,
     /// Presented frames.
     pub frames: u64,
+    frame: Vec<u8>,
+    vi_origin: u32,
+    vi_width: u32,
     vi_line: u32,
-    vi_intr: u32,
     pi_dram: u32,
     pi_cart: u32,
 }
@@ -39,22 +49,24 @@ impl Machine {
     #[must_use]
     pub fn new(cart: &Cartridge) -> Self {
         let rom = cart.rom().to_vec();
-        let mut dmem = vec![0u8; 0x1000];
+        let mut rsp = Rsp::new();
         // PIF HLE: load IPL3 (4 KiB at ROM 0x40) into DMEM and start at +0x40.
         let end = (0x40 + 0x1000).min(rom.len());
         if end > 0x40 {
-            let length = (end - 0x40).min(dmem.len());
-            dmem[..length].copy_from_slice(&rom[0x40..0x40 + length]);
+            let length = (end - 0x40).min(rsp.dmem.len());
+            rsp.dmem[..length].copy_from_slice(&rom[0x40..0x40 + length]);
         }
         Self {
             cpu: Cpu::new(0xA400_0040),
+            rsp,
+            rdp: Rdp::new(),
             rdram: vec![0; 4 * 1024 * 1024],
-            dmem,
-            imem: vec![0; 0x1000],
             rom,
             frames: 0,
+            frame: vec![0; (WIDTH * HEIGHT * 4) as usize],
+            vi_origin: 0,
+            vi_width: 320,
             vi_line: 0,
-            vi_intr: 0,
             pi_dram: 0,
             pi_cart: 0,
         }
@@ -66,7 +78,18 @@ impl Machine {
         &self.rdram
     }
 
-    /// Executes one instruction.
+    /// Mutable work RAM (tests/diagnostics).
+    pub fn rdram_mut(&mut self) -> &mut [u8] {
+        &mut self.rdram
+    }
+
+    /// Most recently presented RGBA frame.
+    #[must_use]
+    pub fn frame(&self) -> &[u8] {
+        &self.frame
+    }
+
+    /// Executes one CPU instruction.
     pub fn step(&mut self) -> Result<(), CpuError> {
         let mut cpu = std::mem::replace(&mut self.cpu, Cpu::new(0));
         let result = cpu.step(self);
@@ -76,22 +99,61 @@ impl Machine {
 
     /// Runs one placeholder frame and returns its index.
     pub fn run_frame(&mut self) -> Result<u64, CpuError> {
+        if !self.rsp.halted {
+            self.rsp.run(RSP_INSTRUCTIONS_PER_FRAME);
+        }
         for _ in 0..INSTRUCTIONS_PER_FRAME {
             self.step()?;
         }
         self.frames += 1;
         self.vi_line = (self.vi_line + 1) % 525;
+        self.present();
         Ok(self.frames)
+    }
+
+    fn present(&mut self) {
+        self.frame.fill(0);
+        let width = self.vi_width.min(WIDTH) as usize;
+        if width == 0 {
+            return;
+        }
+        let height = 240usize;
+        for y in 0..height {
+            for x in 0..width {
+                let index = self.vi_origin as usize + (y * width + x) * 2;
+                let Some(bytes) = self.rdram.get(index..index + 2) else {
+                    continue;
+                };
+                let color = u16::from_be_bytes([bytes[0], bytes[1]]);
+                let r = expand5((color >> 11) & 0x1F);
+                let g = expand5((color >> 6) & 0x1F);
+                let b = expand5((color >> 1) & 0x1F);
+                let a = if color & 1 != 0 { 0xFF } else { 0x00 };
+                let out = (y * WIDTH as usize + x) * 4;
+                self.frame[out..out + 4].copy_from_slice(&[r, g, b, a]);
+            }
+        }
     }
 }
 
-impl crate::cpu::Bus for Machine {
+fn expand5(value: u16) -> u8 {
+    let value = value as u8;
+    (value << 3) | (value >> 2)
+}
+
+impl Bus for Machine {
     fn read_u8(&mut self, address: u64) -> u8 {
         let address = address as u32;
         match address {
             0x0000_0000..=0x003F_FFFF => self.rdram[address as usize],
-            0x0400_0000..=0x0400_0FFF => self.dmem[(address & 0xFFF) as usize],
-            0x0400_1000..=0x0400_1FFF => self.imem[(address & 0xFFF) as usize],
+            0x0400_0000..=0x0400_0FFF => self.rsp.dmem[(address & 0xFFF) as usize],
+            0x0400_1000..=0x0400_1FFF => self.rsp.imem[(address & 0xFFF) as usize],
+            0x0404_0000..=0x0404_003F => {
+                (self.rsp.read_register(address - 0x0404_0000) >> ((3 - (address & 3)) * 8)) as u8
+            }
+            0x0410_0000..=0x0410_001F => {
+                (self.rdp.read_register(address - 0x0410_0000) >> ((3 - (address & 3)) * 8)) as u8
+            }
             0x1000_0000..=0x1FBF_FFFF => self
                 .rom
                 .get((address - 0x1000_0000) as usize)
@@ -105,8 +167,8 @@ impl crate::cpu::Bus for Machine {
         let address = address as u32;
         match address {
             0x0000_0000..=0x003F_FFFF => self.rdram[address as usize] = value,
-            0x0400_0000..=0x0400_0FFF => self.dmem[(address & 0xFFF) as usize] = value,
-            0x0400_1000..=0x0400_1FFF => self.imem[(address & 0xFFF) as usize] = value,
+            0x0400_0000..=0x0400_0FFF => self.rsp.dmem[(address & 0xFFF) as usize] = value,
+            0x0400_1000..=0x0400_1FFF => self.rsp.imem[(address & 0xFFF) as usize] = value,
             _ => {}
         }
     }
@@ -114,6 +176,8 @@ impl crate::cpu::Bus for Machine {
     fn read_u32(&mut self, address: u64) -> u32 {
         let address = address as u32;
         match address {
+            0x0404_0000..=0x0404_003C => self.rsp.read_register(address - 0x0404_0000),
+            0x0410_0000..=0x0410_001C => self.rdp.read_register(address - 0x0410_0000),
             0x0000_0000..=0x003F_FFFF => {
                 let mut bytes = [0u8; 4];
                 for (offset, byte) in bytes.iter_mut().enumerate() {
@@ -124,14 +188,14 @@ impl crate::cpu::Bus for Machine {
             0x0400_0000..=0x0400_0FFF => {
                 let mut bytes = [0u8; 4];
                 for (offset, byte) in bytes.iter_mut().enumerate() {
-                    *byte = self.dmem[(address & 0xFFF) as usize + offset];
+                    *byte = self.rsp.dmem[(address & 0xFFF) as usize + offset];
                 }
                 u32::from_be_bytes(bytes)
             }
             0x0400_1000..=0x0400_1FFF => {
                 let mut bytes = [0u8; 4];
                 for (offset, byte) in bytes.iter_mut().enumerate() {
-                    *byte = self.imem[(address & 0xFFF) as usize + offset];
+                    *byte = self.rsp.imem[(address & 0xFFF) as usize + offset];
                 }
                 u32::from_be_bytes(bytes)
             }
@@ -158,24 +222,51 @@ impl crate::cpu::Bus for Machine {
                     .copy_from_slice(&value.to_be_bytes());
             }
             0x0400_0000..=0x0400_0FFF => {
-                self.dmem[(address & 0xFFF) as usize..(address & 0xFFF) as usize + 4]
+                self.rsp.dmem[(address & 0xFFF) as usize..(address & 0xFFF) as usize + 4]
                     .copy_from_slice(&value.to_be_bytes());
             }
             0x0400_1000..=0x0400_1FFF => {
-                self.imem[(address & 0xFFF) as usize..(address & 0xFFF) as usize + 4]
+                self.rsp.imem[(address & 0xFFF) as usize..(address & 0xFFF) as usize + 4]
                     .copy_from_slice(&value.to_be_bytes());
             }
-            0x0460_0000 => self.pi_dram = value,
-            0x0460_0004 => self.pi_cart = value,
-            0x0460_0008 => self.pi_dma(value),
-            0x0460_000C => self.pi_dma(value),
-            0x0440_000C => self.vi_intr = value,
-            _ => {}
+            0x0404_0000..=0x0404_003C => {
+                self.rsp
+                    .write_register(address - 0x0404_0000, value, &mut self.rdram);
+            }
+            0x0410_0000..=0x0410_001C => {
+                self.rdp
+                    .write_register(address - 0x0410_0000, value, &mut self.rdram);
+            }
+            _ => self.write_register(address, value),
         }
     }
 }
 
 impl Machine {
+    fn read_register(&mut self, address: u32) -> u32 {
+        match address {
+            0x0440_0000 => 0, // VI status
+            0x0440_0004 => self.vi_origin,
+            0x0440_0008 => self.vi_width,
+            0x0440_000C => 0,
+            0x0440_0010 => self.vi_line,
+            0x0460_0000 => self.pi_dram,
+            0x0460_0004 => self.pi_cart,
+            _ => 0,
+        }
+    }
+
+    fn write_register(&mut self, address: u32, value: u32) {
+        match address {
+            0x0440_0004 => self.vi_origin = value & 0x00FF_FFFF,
+            0x0440_0008 => self.vi_width = value & 0x0FFF,
+            0x0460_0000 => self.pi_dram = value,
+            0x0460_0004 => self.pi_cart = value,
+            0x0460_0008 | 0x0460_000C => self.pi_dma(value),
+            _ => {}
+        }
+    }
+
     fn pi_dma(&mut self, length: u32) {
         let length = length.min(0x0080_0000);
         let source = self.pi_cart as usize;
@@ -185,16 +276,6 @@ impl Machine {
             if let Some(slot) = self.rdram.get_mut(destination + offset) {
                 *slot = byte;
             }
-        }
-    }
-
-    fn read_register(&mut self, address: u32) -> u32 {
-        match address {
-            0x0440_0010 => self.vi_line,
-            0x0440_000C => self.vi_intr,
-            0x0460_0000 => self.pi_dram,
-            0x0460_0004 => self.pi_cart,
-            _ => 0,
         }
     }
 }
@@ -220,7 +301,6 @@ mod tests {
 
     #[test]
     fn boots_ipl3_from_dmem() {
-        // lui t0,0x8000 ; addiu t1,zero,0x1234 ; sw t1,0(t0) ; beq zero,zero,-1
         let cart = cart_with(&[0x3C08_8000, 0x2409_1234, 0xAD09_0000, 0x1000_FFFF]);
         let mut machine = Machine::new(&cart);
         assert_eq!(machine.cpu.pc, 0xA400_0040);
@@ -229,6 +309,31 @@ mod tests {
         }
         assert_eq!(&machine.rdram()[..4], &[0x00, 0x00, 0x12, 0x34]);
         assert_eq!(machine.run_frame().expect("frame"), 1);
+    }
+
+    #[test]
+    fn rdp_fill_is_presented_from_rdram() {
+        // A forever loop keeps the CPU in valid code while the RDP renders.
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        let origin = 0x1000u32;
+        machine.write_register(0x0440_0004, origin);
+        machine.write_register(0x0440_0008, 64);
+        let commands = [
+            (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (64u64 << 32) | u64::from(origin),
+            (0x37u64 << 56) | 0xFF00_00FF,
+            (0x36u64 << 56) | (3u64 << 12) | 3,
+        ];
+        for (index, command) in commands.iter().enumerate() {
+            machine.write_u32(index as u64 * 8, (command >> 32) as u32);
+            machine.write_u32(index as u64 * 8 + 4, *command as u32);
+        }
+        machine.write_u32(0x0410_0000, 0);
+        machine.write_u32(0x0410_0004, 24);
+        machine.run_frame().expect("frame");
+        assert_eq!(&machine.frame()[..4], &[0xFF, 0x00, 0x00, 0xFF]);
+        let outside = 4 * 4;
+        assert_eq!(&machine.frame()[outside..outside + 4], &[0, 0, 0, 0]);
     }
 
     #[test]

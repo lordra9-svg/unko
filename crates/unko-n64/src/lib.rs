@@ -1,15 +1,19 @@
 //! Nintendo 64 cartridge parsing and system scaffold.
 //!
 //! The image layer (byte order, header, region) is complete, and the machine
-//! scaffold now boots a cartridge's IPL3 on the [`cpu::Cpu`] (VR4300 integer
-//! interpreter) with RDRAM/RSP memory and PI/VI register stubs. RSP/RDP
-//! rendering and audio are the next milestone.
+//! scaffold boots a cartridge's IPL3 on the [`cpu::Cpu`] (VR4300 integer
+//! interpreter) with RDRAM/RSP memory and PI/VI register stubs, runs RSP
+//! scalar code/DMA ([`rsp::Rsp`]), applies RDP solid-fill commands
+//! ([`rdp::Rdp`]) and presents the VI framebuffer from RDRAM. Textured
+//! triangles, the RSP vector unit and audio are the next milestones.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod cpu;
 pub mod machine;
+pub mod rdp;
+pub mod rsp;
 
 use std::fmt;
 
