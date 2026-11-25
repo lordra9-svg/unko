@@ -7,7 +7,7 @@
 //! scalar/vector code and DMA ([`rsp::Rsp`]), applies RDP solid-fill commands
 //! and rasterises unshaded/shaded/textured triangles ([`rdp::Rdp`]) with the
 //! RDP edgewalker, two-cycle combiner and the SET_OTHER_MODES blender
-//! (cycle/copy, fog, coverage, dither), presents the VI
+//! (cycle/copy, fog, exact subpixel coverage, dither), presents the VI
 //! framebuffer from
 //! RDRAM and runs double-buffered AI DMA with interrupts and DAC-to-host
 //! resampling ([`ai::Ai`]). CI/TLUT palettes and

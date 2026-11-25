@@ -418,23 +418,25 @@ impl Rdp {
 
         let modes = self.other_modes;
         for y in y_start.max(0)..=y_end {
+            // Per-subpixel-row left/right edges in 1/8-pixel units.
             let mut spans = [(0i64, 0i64); 4];
-            let mut any = false;
             for (sub, span) in spans.iter_mut().enumerate() {
-                *span = setup.span(y * 4 + sub as i32);
-                any |= span.1 > span.0;
+                let (left, right) = setup.span(y * 4 + sub as i32);
+                *span = (left >> 13, right >> 13);
             }
-            if !any {
+            let min_x = spans.iter().map(|(left, _)| (*left >> 3) as i32).min();
+            let max_x = spans.iter().map(|(_, right)| (*right >> 3) as i32).max();
+            let (Some(min_x), Some(max_x)) = (min_x, max_x) else {
                 continue;
-            }
-            for x in 0..self.color_width as i32 {
-                let center = (i64::from(x) << 16) + 0x8000;
-                let coverage = spans
-                    .iter()
-                    .filter(|(left, right)| center >= *left && center < *right)
-                    .count() as u8
-                    * 2;
+            };
+            for x in min_x.max(0)..=max_x {
+                let mask = coverage_mask(&spans, x);
+                let coverage = mask.count_ones() as u8;
                 if coverage == 0 {
+                    continue;
+                }
+                // Without AA only the first subpixel sample is significant.
+                if !modes.aa && mask & 1 == 0 {
                     continue;
                 }
                 self.render_pixel(
@@ -494,7 +496,6 @@ impl Rdp {
         } else {
             0
         };
-
         let memory_coverage = if modes.image_read {
             ((memory & 0xFF) >> 5) as u8
         } else {
@@ -873,6 +874,24 @@ fn z_decompress(z: u16) -> i32 {
     let shift = (6 - exponent).max(0);
     let base = 0x4_0000 - (0x4_0000 >> exponent);
     (mantissa << shift) + base
+}
+
+/// Builds the RDP 8-bit AA coverage mask for one pixel from the four subpixel
+/// row spans (in 1/8-pixel units). Rows sample two staggered X positions:
+/// rows 0/2 at offsets 0 and 4, rows 1/3 at offsets 2 and 6.
+fn coverage_mask(spans: &[(i64, i64); 4], x: i32) -> u8 {
+    let mut mask = 0u8;
+    for (row, (left, right)) in spans.iter().enumerate() {
+        let base = i64::from(x) * 8;
+        let offsets = if row & 1 == 0 { [0, 4] } else { [2, 6] };
+        for (index, offset) in offsets.iter().enumerate() {
+            let sample = base + offset;
+            if sample >= *left && sample < *right {
+                mask |= 1 << (row * 2 + index);
+            }
+        }
+    }
+    mask
 }
 
 /// Result of the RDP depth test: whether the fragment passes, whether the
@@ -1274,6 +1293,19 @@ mod tests {
         assert_eq!(rdp.triangles(), 1);
         // The following SET_FILL_COLOR was reached (stream stayed aligned).
         assert_eq!(rdp.fill_color, 0x0000_00FF);
+    }
+
+    #[test]
+    fn coverage_mask_samples_eight_subpixels() {
+        // Left edge at 4.5 px and right edge at 7.5 px (1/8-pixel units).
+        let spans = [(36i64, 60i64); 4];
+        assert_eq!(coverage_mask(&spans, 3), 0x00);
+        assert_eq!(coverage_mask(&spans, 4), 0xAA); // 4 of 8 samples
+        assert_eq!(coverage_mask(&spans, 7), 0x55); // 4 of 8 samples
+        assert_eq!(coverage_mask(&spans, 8), 0x00);
+        // Without AA only the first subpixel sample matters.
+        assert_eq!(coverage_mask(&spans, 4) & 1, 0);
+        assert_eq!(coverage_mask(&spans, 5) & 1, 1);
     }
 
     #[test]

@@ -284,11 +284,12 @@ The main effort was the reference-parity accuracy core. Details in
       texture-coefficient words via `SET_TEXTURE_IMAGE`/`SET_TILE`/
       `SET_TILE_SIZE` (4/8/16-bit RGBA/IA/I with clamp/mirror/mask), running the
       two-cycle combiner (`SET_COMBINE_MODE`) and the `SET_OTHER_MODES` blender
-      (1/2-cycle selectors, fog, copy cycle, coverage modes with AA subpixel
-      coverage, RGB dither), a Z-buffered depth pipeline
+      (1/2-cycle selectors, fog, copy cycle, coverage modes driven by the exact
+      8-bit subpixel AA mask, RGB dither), a Z-buffered depth pipeline
       (`SET_MASK_IMAGE`/`SET_PRIMITIVE_DEPTH`, interpolated 16.16 Z compressed
       to 16-bit depth + delta, z compare/update, image-read blending, AA
-      coverage accumulation/overflow and memory-alpha depth-delta shifters), with CI/TLUT
+      exact subpixel coverage accumulation/overflow and memory-alpha
+      depth-delta shifters), with CI/TLUT
       palettes (`LOAD_TLUT`, 4/8-bit CI lookup) and perspective-correct W
       interpolation; `run_frame` presents the VI framebuffer from RDRAM as
       RGBA. The AI register block queues double-buffered `AI_LEN` DMAs of
