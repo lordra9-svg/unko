@@ -13740,3 +13740,39 @@ global phase. The principled fix is ares' per-tick DSP synchronisation
 (`DSP::tick -> synchronize(smp)`), which the cooperative driver implements but
 which still has its own audio divergences; the bulk `drain_dsp_to(target)+prime`
 model cannot express it.
+
+## Why no prime is exact for all seven: it is the 887,720 NMI boundary (2026-11-24)
+
+The default driver already performs ares' per-step DSP synchronisation, not a
+bulk drain. `SpcBus::step_clock` is called for every SPC700 `step(clocks)` and
+calls `step_dsp_clock`, which adds the S-SMP clocks and then
+`drain_dsp_to(target)` with `target = smp_clock` (`dsp_lag()` 0 by default).
+`drain_dsp_to` is exactly `while dsp_clock < target { DSP::tick }` - ares'
+`SMP::step -> Thread::synchronize(dsp)`. The default flags that would change
+this (`SNES_DSP_FLOOR`, `SNES_DSP_SAMPLE_SYNC`, `SNES_DSP_INSTR_SYNC`,
+`SNES_DSP_CPU_PHASE`) are all off. So with `SNES_DSP_PRIME=0` the DSP phase rule
+**is** the ares rule; replacing "bulk drain + prime" is already done.
+
+The title dependence is upstream. The DSP-write log (`ARES_DSP_WRITES`; the
+absolute S-SMP clock is the last field, `aresSmpMono`, because `smp.clock()` is
+scheduler-relative) puts the game's sound-driver `$6D` write at
+`aresSmpMono=8,103,956` - after the 887,720 NMI divergence. The same write:
+
+```
+ares  dspTicks 4,051,979  = sample 126,624
+ours  dspTicks 4,051,913  = sample 126,622
+```
+
+Ours writes the DSP init two samples earlier in DSP time, so the echo ring
+starts two samples early and MMX2 first differs when echo becomes audible
+(sample 226,560). The cause is the already-documented 887,720 NMI boundary shift
+(our S-CPU is ~20 clocks earlier at the `$83F3` counter write, so it writes
+`0x76` before recognising the NMI instead of after). `prime = 4` masks it by
+moving the DSP phase to the far side of the sample boundary; `prime = 0` is the
+faithful rule but inherits the shifted write timing. No single prime can be
+correct for both classes because the underlying discrepancy is a CPU-clock
+phase at an interrupt boundary, not a DSP model error.
+
+Closing the gap therefore requires the S-CPU clock to match ares at the NMI
+boundary (refresh/DMA-edge placement at the +-20-clock level), not another DSP
+synchronisation change.
