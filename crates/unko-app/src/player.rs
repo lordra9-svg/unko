@@ -2206,6 +2206,20 @@ impl Player {
             .snes_debug_step()
     }
 
+    /// Assembles one 65816 instruction and writes it into a SNES debug space.
+    pub fn snes_patch(
+        &mut self,
+        space: unko_snes_api::DebugSpace,
+        address: u32,
+        text: &str,
+    ) -> Result<Vec<u8>, String> {
+        self.core
+            .as_any_mut()
+            .downcast_mut::<crate::snes::SnesAdapter>()
+            .ok_or_else(|| "no SNES core loaded".to_owned())?
+            .snes_patch(space, address, text)
+    }
+
     /// Current SNES program counter (`bank << 16 | pc`).
     #[must_use]
     pub fn snes_pc(&self) -> Option<u32> {
@@ -2716,6 +2730,18 @@ mod tests {
             player.snes_debug_peek(unko_snes_api::DebugSpace::Wram, 0x100),
             Some(0xAB)
         );
+        let bytes = player
+            .snes_patch(unko_snes_api::DebugSpace::Wram, 0x200, "LDA #$10")
+            .expect("assemble and patch");
+        assert_eq!(bytes, [0xA9, 0x10]);
+        assert_eq!(
+            player.snes_debug_peek(unko_snes_api::DebugSpace::Wram, 0x200),
+            Some(0xA9)
+        );
+        assert_eq!(
+            player.snes_debug_peek(unko_snes_api::DebugSpace::Wram, 0x201),
+            Some(0x10)
+        );
         let pc = player.snes_pc().expect("pc");
         player.debug.snes_breaks.push(pc);
         assert_eq!(player.snes_run_to_breakpoint(4), Some(pc));
@@ -2801,6 +2827,9 @@ mod tests {
             .unwrap_or(0);
         player.snes_debug_poke(unko_snes_api::DebugSpace::Wram, 0x100, before);
         println!("poke wram 000100: {before:02X} -> {after:02X}");
+        if let Ok(bytes) = player.snes_patch(unko_snes_api::DebugSpace::Wram, 0x300, "LDA #$42") {
+            println!("assembled at 000300: {bytes:02X?}");
+        }
         if let Some(pc) = player.snes_pc() {
             player.debug.snes_breaks.push(pc);
             let hit = player.snes_run_to_breakpoint(4);

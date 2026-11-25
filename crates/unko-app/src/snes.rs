@@ -97,6 +97,34 @@ impl SnesAdapter {
         self.inner.debug_poke(space, address, value)
     }
 
+    /// Assembles one 65816 instruction for `address`.
+    pub fn snes_assemble(
+        &self,
+        text: &str,
+        address: u32,
+    ) -> Result<Vec<u8>, unko_snes_api::AsmError> {
+        unko_snes_api::assemble(text, address)
+    }
+
+    /// Assembles one instruction and writes the bytes into a debug space.
+    pub fn snes_patch(
+        &mut self,
+        space: unko_snes_api::DebugSpace,
+        address: u32,
+        text: &str,
+    ) -> Result<Vec<u8>, String> {
+        let bytes = self
+            .snes_assemble(text, address)
+            .map_err(|error| error.to_string())?;
+        for (offset, byte) in bytes.iter().enumerate() {
+            let target = address.wrapping_add(offset as u32);
+            if !self.snes_debug_poke(space, target, *byte) {
+                return Err(format!("write failed at {target:06X}"));
+            }
+        }
+        Ok(bytes)
+    }
+
     /// Executes one SNES CPU instruction.
     pub fn snes_debug_step(&mut self) -> Option<u32> {
         use unko_snes_api::SnesCore as _;

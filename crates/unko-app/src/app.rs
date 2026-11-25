@@ -4303,6 +4303,20 @@ impl eframe::App for App {
                             } => {
                                 player.snes_debug_poke(space, address, value);
                             }
+                            SnesDebugAction::Patch {
+                                space,
+                                address,
+                                text,
+                            } => {
+                                player.debug.message =
+                                    match player.snes_patch(space, address, &text) {
+                                        Ok(bytes) => format!(
+                                            "assembled {} byte(s) at {address:06X}",
+                                            bytes.len()
+                                        ),
+                                        Err(error) => error,
+                                    };
+                            }
                             SnesDebugAction::ToggleBreak(address) => {
                                 if let Some(index) = player
                                     .debug
@@ -4406,12 +4420,17 @@ impl App {
 }
 
 /// Actions collected by the SNES debugger window and applied by the caller.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum SnesDebugAction {
     Poke {
         space: unko_snes_api::DebugSpace,
         address: u32,
         value: u8,
+    },
+    Patch {
+        space: unko_snes_api::DebugSpace,
+        address: u32,
+        text: String,
     },
     ToggleBreak(u32),
     ClearBreaks,
@@ -4535,6 +4554,22 @@ fn snes_debugger_window(
                             });
                         }
                     }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("asm");
+                ui.add(
+                    egui::TextEdit::singleline(&mut debug.snes_asm_text)
+                        .desired_width(180.0)
+                        .hint_text("LDA #$10"),
+                );
+                if ui.button("Assemble & write").clicked() && !debug.snes_asm_text.trim().is_empty()
+                {
+                    actions.push(SnesDebugAction::Patch {
+                        space: debug.snes_mem_space,
+                        address: debug.snes_mem_addr,
+                        text: debug.snes_asm_text.clone(),
+                    });
                 }
             });
             ui.horizontal(|ui| {

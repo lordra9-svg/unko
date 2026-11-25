@@ -77,6 +77,8 @@ pub struct Debugger {
     pub snes_write_value: String,
     /// SNES program counters (24-bit) that stop a run.
     pub snes_breaks: Vec<u32>,
+    /// 65816 assembly text for the "assemble and write" field.
+    pub snes_asm_text: String,
 }
 
 impl Default for Debugger {
@@ -98,6 +100,7 @@ impl Default for Debugger {
             snes_write_address: String::new(),
             snes_write_value: String::new(),
             snes_breaks: Vec::new(),
+            snes_asm_text: String::new(),
         }
     }
 }

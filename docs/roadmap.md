@@ -265,7 +265,9 @@ The main effort was the reference-parity accuracy core. Details in
       with a disassembler), surfaced through `SnesAdapter` and a dedicated
       player window: live listing at PC, a memory editor with writes into
       WRAM/VRAM/OAM/CGRAM/APU RAM/DSP registers, and single-step /
-      run-to-breakpoint with 24-bit PC breakpoints. A 65816 assembler remains. Then **N64 from ares** with gopher64 as a GPL structural
+      run-to-breakpoint with 24-bit PC breakpoints, plus a one-instruction
+      65816 assembler that assembles and writes into any writable debug space.
+      ROM patching and the N64 library tag remain. Then **N64 from ares** with gopher64 as a GPL structural
       reference. See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.
 - [ ] GameCube/Wii is deferred: Dolphin is GPL-2.0+ and application-shaped, so

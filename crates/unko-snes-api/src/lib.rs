@@ -13,8 +13,10 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod asm;
 pub mod debug;
 
+pub use asm::{assemble, AsmError};
 pub use debug::{CpuState, DebugSpace, Disassembly, DspState, PpuState};
 
 use unko_core::{Core, CoreError};
