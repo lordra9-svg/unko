@@ -2,9 +2,10 @@
 //!
 //! `load` validates and normalises the cartridge, then boots its IPL3 on the
 //! VR4300 interpreter (PIF HLE) with RDRAM, RSP memory and PI/VI stubs.
-//! `run_frame` runs RSP scalar code/DMA, applies pending RDP fill commands and
-//! presents the VI framebuffer from RDRAM as RGBA. Textured triangles, the RSP
-//! vector unit, audio and precise exceptions are the next milestone.
+//! `run_frame` runs RSP scalar/vector code and DMA, applies pending RDP fill
+//! commands/combiner state and presents the VI framebuffer from RDRAM as RGBA.
+//! Triangle rasterisation, texturing, audio and precise exceptions are the
+//! next milestone.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

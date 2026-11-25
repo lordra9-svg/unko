@@ -23,6 +23,10 @@ pub struct Rdp {
     color_format: u8,
     color_size: u8,
     fill_color: u32,
+    primitive_color: u32,
+    environment_color: u32,
+    combine_mode: u32,
+    triangles: u64,
 }
 
 impl Default for Rdp {
@@ -45,6 +49,10 @@ impl Rdp {
             color_format: 2,
             color_size: 2,
             fill_color: 0,
+            primitive_color: 0,
+            environment_color: 0,
+            combine_mode: 0,
+            triangles: 0,
         }
     }
 
@@ -81,6 +89,30 @@ impl Rdp {
         (self.color_address, self.color_width)
     }
 
+    /// Current primitive colour (RGBA8888, set by `SET_PRIMITIVE_COLOR`).
+    #[must_use]
+    pub fn primitive_color(&self) -> u32 {
+        self.primitive_color
+    }
+
+    /// Current environment colour (RGBA8888).
+    #[must_use]
+    pub fn environment_color(&self) -> u32 {
+        self.environment_color
+    }
+
+    /// Raw combiner configuration (`SET_COMBINE_MODE`).
+    #[must_use]
+    pub fn combine_mode(&self) -> u32 {
+        self.combine_mode
+    }
+
+    /// Number of triangle commands seen (rasterisation is not implemented yet).
+    #[must_use]
+    pub fn triangles(&self) -> u64 {
+        self.triangles
+    }
+
     fn process(&mut self, rdram: &mut [u8]) {
         while self.current.wrapping_add(8) <= self.end {
             let address = self.current as usize;
@@ -94,6 +126,18 @@ impl Rdp {
             match opcode {
                 0x36 => self.fill_rectangle(command, rdram),
                 0x37 => self.fill_color = command as u32,
+                0x3A => self.primitive_color = command as u32,
+                0x3B => self.environment_color = command as u32,
+                0x3C => self.combine_mode = command as u32,
+                0x08..=0x0F => {
+                    // Triangle: edge coefficients (3 words), plus shade colour
+                    // for the shaded variants. Rasterisation is a later
+                    // milestone, but the command length is consumed so the
+                    // stream stays aligned.
+                    self.triangles += 1;
+                    let words = if opcode >= 0x0C { 12 } else { 4 };
+                    self.current = self.current.wrapping_add((words - 1) * 8);
+                }
                 0x3F => {
                     self.color_format = ((command >> 53) & 7) as u8;
                     self.color_size = ((command >> 51) & 3) as u8;
@@ -149,6 +193,28 @@ mod tests {
     fn put_command(rdram: &mut [u8], index: usize, command: u64) {
         let offset = index * 8;
         rdram[offset..offset + 8].copy_from_slice(&command.to_be_bytes());
+    }
+
+    #[test]
+    fn parses_combiner_state_and_triangle_length() {
+        let mut rdram = vec![0u8; 0x4000];
+        put_command(&mut rdram, 0, (0x3Au64 << 56) | 0x1122_33FF);
+        put_command(&mut rdram, 1, (0x3Bu64 << 56) | 0x4455_66FF);
+        put_command(&mut rdram, 2, (0x3Cu64 << 56) | 0x00AA_55AA);
+        put_command(&mut rdram, 3, 0x08u64 << 56); // triangle + 3 edge words
+        put_command(&mut rdram, 4, 0);
+        put_command(&mut rdram, 5, 0);
+        put_command(&mut rdram, 6, 0);
+        put_command(&mut rdram, 7, (0x37u64 << 56) | 0x0000_00FF);
+        let mut rdp = Rdp::new();
+        rdp.write_register(0x00, 0, &mut rdram);
+        rdp.write_register(0x04, 64, &mut rdram);
+        assert_eq!(rdp.primitive_color(), 0x1122_33FF);
+        assert_eq!(rdp.environment_color(), 0x4455_66FF);
+        assert_eq!(rdp.combine_mode(), 0x00AA_55AA);
+        assert_eq!(rdp.triangles(), 1);
+        // The following SET_FILL_COLOR was reached (stream stayed aligned).
+        assert_eq!(rdp.fill_color, 0x0000_00FF);
     }
 
     #[test]
