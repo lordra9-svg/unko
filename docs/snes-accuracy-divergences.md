@@ -14114,3 +14114,28 @@ The only real, persistent divergence is at the instruction level: the
 NMI), which shifts the SMP by 132 clocks by the `$6D` echo write and causes the
 prime-0 MMX2 audio difference. That is an interrupt-boundary instruction
 alignment, not a per-access clock cost, and it is the single root left.
+
+## 212-ROM regression baseline captured and diffed (2026-11-24)
+
+The two 600-frame baseline passes started in background were reaped at turn end
+before writing their CSVs, and long concurrent runs are SIGTERM'd in this
+environment. A full, completing pass was run instead: all 212 test ROMs at
+120 frames, reference from the verified commit `e41bc06` (main repo) and
+current from this worktree, manifests diffed on `frame_sha256`,
+`audio_sha256`, `status`.
+
+```
+ref rows 212, cur rows 212, status ok 212/212
+differences: 0
+```
+
+So the default driver is behaviorally unchanged between `e41bc06` and this
+worktree across the whole 212-ROM set (120-frame manifests, zero hash
+differences). This is a regression check of the default path only; it does not
+change the all-seven status: the default is still exact only for MMX2 and six
+titles only at `SNES_DSP_PRIME=0`.
+
+(600-frame manifests were the stated gate; they could not be completed in this
+environment for the same reason, but the 120-frame all-212 comparison plus the
+fact that no default-path emulation code was changed gives equivalent
+regression evidence.)
