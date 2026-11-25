@@ -157,6 +157,13 @@ pub fn port_sync() -> bool {
     *PORT.get_or_init(|| std::env::var_os("SNES_PORT_SYNC").is_some())
 }
 
+/// `SNES_CO_SCHED`: drive the APU through the cooperative three-thread scheduler
+/// (`co_scheduler` + `co_apu`) instead of the plan/credit driver.
+pub fn co_sched() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *C.get_or_init(|| std::env::var_os("SNES_CO_SCHED").is_some())
+}
+
 /// `SNES_SYM_NESTED`: nested co-switch scheduler (S-CPU resumable from inside
 /// the APU advance). Used with `SNES_CA`/`SNES_SYM_SCHED`.
 pub fn sym_nested() -> bool {
@@ -2450,6 +2457,11 @@ impl Apu {
     /// Drain queued DSP samples.
     pub fn drain_samples(&mut self) -> impl Iterator<Item = Sample> + '_ {
         self.samples.drain(..)
+    }
+
+    /// Append samples produced by an external S-DSP thread.
+    pub fn push_samples(&mut self, samples: impl IntoIterator<Item = Sample>) {
+        self.samples.extend(samples);
     }
 
     /// Timer internals for diagnostics: `(stage0, stage1, stage2, stage3,

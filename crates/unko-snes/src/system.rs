@@ -216,6 +216,8 @@ pub struct Snes {
     cpu_coroutine: crate::cpu_coroutine::CpuCoroutineSlot,
     /// Pending S-CPU coroutine input for the nested scheduler.
     nested_cpu: crate::cpu_coroutine::CpuNestedSlot,
+    /// Cooperative APU (S-SMP + S-DSP) for `SNES_CO_SCHED`.
+    co: crate::co_apu::CoSchedSlot,
     apu_actor: crate::cpu_coroutine::ApuActorSlot,
     /// Whether the APU actor is driving the S-SMP (inside [`Snes::step`]).
     apu_actor_driven: bool,
@@ -591,6 +593,7 @@ impl Snes {
             cpu: Cpu::new(),
             cpu_coroutine: crate::cpu_coroutine::CpuCoroutineSlot::default(),
             nested_cpu: crate::cpu_coroutine::CpuNestedSlot::default(),
+            co: crate::co_apu::CoSchedSlot::default(),
             apu_actor: crate::cpu_coroutine::ApuActorSlot::default(),
             apu_actor_driven: false,
             cart,
@@ -919,6 +922,17 @@ impl Snes {
         if crate::apu::ca_enabled() {
             self.install_ca(ipl);
         }
+        if crate::apu::co_sched() {
+            let (ram, dsp_registers) = crate::random::power_on_apu();
+            let mut core = crate::spc700::Spc700::new();
+            core.pc = 0xFFC0;
+            self.co = crate::co_apu::CoSchedSlot(Some(Box::new(crate::co_apu::CoSched::new(
+                ipl,
+                &ram,
+                &dsp_registers,
+                core,
+            ))));
+        }
     }
 
     /// Attach an MSU1 data ROM (`msu1.data.rom`), enabling `$2000-$2007`.
@@ -1035,6 +1049,7 @@ impl Snes {
         self.rtc_credit = 0;
         self.cpu_coroutine = crate::cpu_coroutine::CpuCoroutineSlot::default();
         self.nested_cpu = crate::cpu_coroutine::CpuNestedSlot::default();
+        self.co = crate::co_apu::CoSchedSlot::default();
         self.apu_actor = crate::cpu_coroutine::ApuActorSlot::default();
         self.apu_actor_driven = false;
         self.sa1_credit = 0;
@@ -1194,6 +1209,9 @@ impl Snes {
         // case that matters is a `$4200` write, which is its instruction's last
         // access, so clearing once per instruction is equivalent.
         self.nmi_lock = false;
+        if crate::apu::co_sched() && self.co.0.is_some() {
+            return self.step_co_sched();
+        }
         if crate::apu::sym_sched() {
             if crate::apu::sym_nested() && self.ca.0.is_some() {
                 return self.step_sym_sched_nested();
@@ -1494,6 +1512,148 @@ impl Snes {
     /// Nested ares scheduler (`SNES_SYM_NESTED`): the S-CPU coroutine is
     /// resumable from inside the APU advance, so the DSP/SMP loop can
     /// `synchronize(cpu)` at every access (the extracted ares order).
+    /// Cooperative three-thread step (`SNES_CO_SCHED`): the S-SMP and S-DSP are
+    /// `co_apu` thread states sharing APU RAM and the DSP, and the S-CPU is the
+    /// resumable `cpu_coroutine`. Threads run in minimum-clock order and a
+    /// `Need::Synchronize` is satisfied by the driver (the Scheduler cannot own
+    /// the S-CPU because it needs the whole `Snes` bus).
+    fn step_co_sched(&mut self) -> u32 {
+        use crate::co_scheduler::{Need, Thread, ThreadState};
+        use crate::cpu_coroutine::{BusRequest, BusResponse, CpuInput, CpuOutput};
+        let mut co = self.co.0.take().expect("co sched installed");
+        let mut coroutine = self
+            .cpu_coroutine
+            .0
+            .take()
+            .unwrap_or_else(crate::cpu_coroutine::new_coroutine);
+        if !self.nested_cpu.at_done && self.nested_cpu.pending.is_none() {
+            let cpu = std::mem::take(&mut self.cpu);
+            self.nested_cpu.pending = Some(CpuInput::Start(cpu));
+        }
+        self.apu_actor_driven = true;
+        let cpu_scalar = crate::apu::scheduler_cpu_scalar(self.region.master_clock());
+        let mut cycles = 0u32;
+        let mut done = false;
+        let is_port = |address: u32| {
+            address & 0x40_FF00 == 0x2100 && (0x2140..=0x2143).contains(&(address & 0xFFFF))
+        };
+
+        macro_rules! cpuclock {
+            () => {
+                u128::from(self.clock) * cpu_scalar
+            };
+        }
+
+        macro_rules! answer {
+            ($request:expr) => {{
+                let request = $request;
+                match request {
+                    BusRequest::Read { address, .. } if is_port(address) => {
+                        let port = ((address & 0xFFFF) - 0x2140) as u8;
+                        co.smp.set_cpu_clock_fixed(cpuclock!());
+                        co.smp.engine_mut().synchronize_cpu_clock();
+                        BusResponse::Byte(co.smp.engine().cpu_port(port))
+                    }
+                    BusRequest::Write { address, value } if is_port(address) => {
+                        let port = ((address & 0xFFFF) - 0x2140) as u8;
+                        co.smp.set_cpu_clock_fixed(cpuclock!());
+                        co.smp.engine_mut().synchronize_cpu_clock();
+                        co.smp.engine_mut().write_apu_latch(port, value);
+                        BusResponse::None
+                    }
+                    other => self.handle_cpu_request(other),
+                }
+            }};
+        }
+
+        macro_rules! cpu_yield {
+            () => {{
+                let payload = if self.nested_cpu.at_done {
+                    self.nested_cpu.at_done = false;
+                    done = false;
+                    CpuInput::Start(std::mem::take(&mut self.cpu))
+                } else {
+                    self.nested_cpu.pending.take().expect("CPU input")
+                };
+                match coroutine.resume(payload) {
+                    corosensei::CoroutineResult::Yield(CpuOutput::Request(request)) => {
+                        self.nested_cpu.pending = Some(CpuInput::Response(answer!(request)));
+                    }
+                    corosensei::CoroutineResult::Yield(CpuOutput::Done(cpu, count)) => {
+                        self.cpu = cpu;
+                        cycles += count;
+                        self.apply_interrupts();
+                        done = true;
+                        self.nested_cpu.at_done = true;
+                    }
+                    corosensei::CoroutineResult::Return(()) => unreachable!(),
+                }
+            }};
+        }
+
+        macro_rules! pull_smp_to {
+            ($target:expr) => {{
+                let target = $target;
+                let mut pull = 0u32;
+                while co.smp.clock() < target && pull < 100_000 {
+                    co.smp.set_cpu_clock_fixed(cpuclock!());
+                    match co.smp.step() {
+                        Need::Synchronize(Thread::Cpu) => {
+                            let t = co.smp.clock();
+                            while cpuclock!() < t {
+                                cpu_yield!();
+                            }
+                        }
+                        Need::Halt => break,
+                        _ => {}
+                    }
+                    pull += 1;
+                }
+            }};
+        }
+
+        let mut guard = 0u64;
+        loop {
+            guard += 1;
+            if guard > 50_000_000 {
+                break;
+            }
+            let cc = cpuclock!();
+            let sc = co.smp.clock();
+            let dc = co.dsp.clock();
+            if done && sc >= cc && dc >= cc {
+                break;
+            }
+            let min = cc.min(sc).min(dc);
+            if min == cc {
+                cpu_yield!();
+            } else if min == sc {
+                co.smp.set_cpu_clock_fixed(cc);
+                match co.smp.step() {
+                    Need::Synchronize(Thread::Cpu) => {
+                        let t = co.smp.clock();
+                        while cpuclock!() < t {
+                            cpu_yield!();
+                        }
+                    }
+                    Need::Halt => break,
+                    _ => {}
+                }
+            } else {
+                if let Need::Synchronize(Thread::Smp) = co.dsp.step() {
+                    let t = co.dsp.clock();
+                    pull_smp_to!(t);
+                }
+            }
+        }
+        let samples: Vec<_> = co.dsp.drain_samples().collect();
+        self.apu.push_samples(samples);
+        self.apu_actor_driven = false;
+        self.cpu_coroutine.0 = Some(coroutine);
+        self.co.0 = Some(co);
+        cycles
+    }
+
     fn step_sym_sched_nested(&mut self) -> u32 {
         use crate::cpu_coroutine::{BusRequest, BusResponse, CpuInput, CpuOutput};
         use crate::sym_scheduler::StepOutcome;

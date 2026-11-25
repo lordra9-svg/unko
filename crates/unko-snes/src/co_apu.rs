@@ -216,3 +216,54 @@ mod dsp_tests {
         assert_eq!(dsp.sample_count(), 1);
     }
 }
+
+/// The cooperative APU: the S-SMP and S-DSP states plus their shared RAM/DSP.
+pub struct CoSched {
+    /// The S-SMP thread state.
+    pub smp: SmpThread,
+    /// The S-DSP thread state.
+    pub dsp: DspThread,
+}
+
+impl CoSched {
+    /// Build from an IPL ROM, power-on RAM/DSP registers and an SPC700 core.
+    pub fn new(
+        ipl: [u8; 64],
+        ram: &[u8],
+        dsp_registers: &[u8],
+        core: crate::spc700::Spc700,
+    ) -> Self {
+        let smp = SmpThread::new(ipl, ram, dsp_registers, core);
+        let dsp = DspThread::new(smp.ram_handle(), smp.dsp_handle());
+        Self { smp, dsp }
+    }
+}
+
+impl Default for CoSched {
+    fn default() -> Self {
+        let mut core = crate::spc700::Spc700::new();
+        core.pc = 0xFFC0;
+        Self::new([0u8; 64], &[0u8; 0x1_0000], &[0u8; 128], core)
+    }
+}
+
+/// Derivable-transient slot for the cooperative APU inside `Snes`.
+#[derive(Default)]
+pub struct CoSchedSlot(pub Option<Box<CoSched>>);
+
+impl Clone for CoSchedSlot {
+    fn clone(&self) -> Self {
+        Self(None)
+    }
+}
+impl PartialEq for CoSchedSlot {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+impl Eq for CoSchedSlot {}
+impl std::fmt::Debug for CoSchedSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CoSched")
+    }
+}

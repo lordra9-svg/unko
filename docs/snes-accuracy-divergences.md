@@ -13399,3 +13399,22 @@ instruction **883,082**: ours takes `$FFD4 -> $FFEF` while ares keeps the
 correct but the loop still ends the poll too early.
 
 Opt-in; default verified unchanged (mmx2 0), 261 tests, fmt/clippy clean.
+
+## Cooperative scheduler wired: six exact, MMX2 unchanged (2026-11-24)
+
+`SNES_CO_SCHED` now drives the entire APU through the new cooperative scheduler:
+`CoSched { SmpThread, DspThread }` (shared RAM and S-DSP), with the S-CPU as the
+resumable `cpu_coroutine` driven from `Snes::step_co_sched`. Threads run in
+minimum-clock order; `Need::Synchronize(Cpu|Smp|Dsp)` is satisfied by the driver,
+and `$2140-$2143` accesses route to `SmpThread::engine_mut()`.
+
+600-frame gate at `SNES_DSP_PRIME=0`:
+
+```
+dkc 0  zelda 0  fzero 0  cv4 0  smas 0  ct 0   mmx2 49253 (92.3001%)
+```
+
+So the new three-thread driver reproduces the six-exact configuration exactly,
+but does not change MMX2: the `$FFDC` offset is not the old plan/replay driver
+(the new scheduler has none). The next check is the `$FFDC` instruction trace
+under this driver.
