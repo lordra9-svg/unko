@@ -22,7 +22,8 @@
 //! are delivered through CP0
 //! EPC/Cause/BadVAddr/CE, Status.EXL and the refill/general vectors, with ERET
 //! returning to the faulting context, with reset/NMI/watchdog/cache-error
-//! entry through ErrorEPC/ERL; the FPU
+//! entry through ErrorEPC/ERL, with a CP0 Count/Compare watchdog and external
+//! NMI/cache-error lines; the FPU
 //! tracks `fcr31` flags/causes (including unimplemented operations and
 //! precise D-format inexact detection) and flush-to-zero. The FPU also implements double-precision arithmetic,
 //! comparisons and conversions with paired 64-bit FPR storage. Exact

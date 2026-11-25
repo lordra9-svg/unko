@@ -205,6 +205,12 @@ pub struct Cpu {
     pub fcr31: u32,
     /// Whether the instruction about to execute is a branch delay slot.
     pub delay_slot: bool,
+    /// External NMI line pending.
+    pending_nmi: bool,
+    /// External cache-error line pending.
+    pending_cache_error: bool,
+    /// CP0 Count/Compare match already taken.
+    compare_latched: bool,
 }
 
 impl Cpu {
@@ -223,12 +229,18 @@ impl Cpu {
             fpr: [0; 32],
             fcr31: 0,
             delay_slot: false,
+            pending_nmi: false,
+            pending_cache_error: false,
+            compare_latched: false,
         }
     }
 
     /// Executes one instruction.
     pub fn step<B: Bus>(&mut self, bus: &mut B) -> Result<(), CpuError> {
         let pc = self.pc;
+        if self.take_hardware_error() {
+            return Ok(());
+        }
         let delay_slot = self.delay_slot;
         if self.take_interrupt() {
             return Ok(());
@@ -366,6 +378,45 @@ impl Cpu {
             return Err(CpuError::CoprocessorUnusable { coprocessor });
         }
         Ok(())
+    }
+
+    /// Raises the external non-maskable-interrupt line.
+    pub fn signal_nmi(&mut self) {
+        self.pending_nmi = true;
+    }
+
+    /// Raises the external cache-error line.
+    pub fn signal_cache_error(&mut self) {
+        self.pending_cache_error = true;
+    }
+
+    /// Services pending NMI/cache error and the CP0 Count/Compare watchdog.
+    /// Returns true when an error-level exception was taken.
+    fn take_hardware_error(&mut self) -> bool {
+        if self.pending_nmi {
+            self.pending_nmi = false;
+            self.take_error(ErrorSource::Nmi);
+            return true;
+        }
+        if self.pending_cache_error {
+            self.pending_cache_error = false;
+            self.take_error(ErrorSource::CacheError);
+            return true;
+        }
+        // Count advances once per instruction retirement.
+        self.cp0[9] = self.cp0[9].wrapping_add(1) & 0xFFFF_FFFF;
+        let count = self.cp0[9];
+        let compare = self.cp0[11];
+        if count == compare && compare != 0 {
+            if !self.compare_latched {
+                self.compare_latched = true;
+                self.take_error(ErrorSource::Watchdog);
+                return true;
+            }
+        } else {
+            self.compare_latched = false;
+        }
+        false
     }
 
     fn gpr(&self, index: u32) -> u64 {
@@ -2264,6 +2315,62 @@ mod tests {
         cpu.take_error(ErrorSource::Reset);
         assert_eq!(cpu.pc, 0xBFC0_0000);
         assert_eq!(cpu.cp0[30], 0x1234);
+        assert_ne!(cpu.cp0[12] & 4, 0);
+    }
+    #[test]
+    fn watchdog_count_compare_enters_and_eret_returns() {
+        let mut memory = Memory::new(0x3000);
+        memory.write_u32(0x180, 0x4200_0018); // eret
+        let mut cpu = Cpu::new(0x8000_1000);
+        cpu.cp0[9] = 0xFFFF_FFFE; // Count
+        cpu.cp0[11] = 0xFFFF_FFFF; // Compare
+        cpu.step(&mut memory).expect("watchdog");
+        assert_eq!(cpu.cp0[9], 0xFFFF_FFFF);
+        assert_eq!(cpu.pc, 0xBFC0_0000);
+        assert_eq!(cpu.cp0[30], 0x8000_1000);
+        assert_ne!(cpu.cp0[12] & 4, 0);
+
+        cpu.pc = 0x8000_0180;
+        cpu.next_pc = 0x8000_0184;
+        cpu.step(&mut memory).expect("eret");
+        assert_eq!(cpu.pc, 0x8000_1000);
+        assert_eq!(cpu.cp0[12] & 4, 0);
+        // Count wrapped past Compare, so the match does not re-fire.
+        cpu.step(&mut memory).expect("resume");
+        assert_eq!(cpu.cp0[9], 1);
+
+        // Compare reached mid-run triggers exactly once.
+        let mut cpu = Cpu::new(0x8000_1000);
+        cpu.cp0[9] = 0;
+        cpu.cp0[11] = 3;
+        run(&mut cpu, &mut memory, 2);
+        assert_eq!(cpu.cp0[9], 2);
+        assert_eq!(cpu.cp0[12] & 4, 0, "no error before the match");
+        cpu.step(&mut memory).expect("watchdog at 3");
+        assert_eq!(cpu.pc, 0xBFC0_0000);
+        assert_eq!(cpu.cp0[30], 0x8000_1008);
+    }
+
+    #[test]
+    fn hardware_nmi_and_cache_error_lines() {
+        let mut memory = Memory::new(0x3000);
+        memory.write_u32(0x180, 0x4200_0018);
+        let mut cpu = Cpu::new(0x8000_2000);
+        cpu.signal_nmi();
+        cpu.step(&mut memory).expect("NMI");
+        assert_eq!(cpu.pc, 0xBFC0_0000);
+        assert_eq!(cpu.cp0[30], 0x8000_2000);
+        assert_ne!(cpu.cp0[12] & 4, 0);
+        cpu.pc = 0x8000_0180;
+        cpu.next_pc = 0x8000_0184;
+        cpu.step(&mut memory).expect("eret");
+        assert_eq!(cpu.pc, 0x8000_2000);
+        assert_eq!(cpu.cp0[12] & 4, 0);
+
+        cpu.signal_cache_error();
+        cpu.step(&mut memory).expect("cache error");
+        assert_eq!(cpu.pc, 0xA000_0000);
+        assert_eq!(cpu.cp0[30], 0x8000_2000);
         assert_ne!(cpu.cp0[12] & 4, 0);
     }
 }

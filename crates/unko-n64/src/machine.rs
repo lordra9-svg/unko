@@ -112,6 +112,16 @@ impl Machine {
         self.cpu.take_error(source);
     }
 
+    /// Raises the CPU external NMI line.
+    pub fn signal_nmi(&mut self) {
+        self.cpu.signal_nmi();
+    }
+
+    /// Raises the CPU external cache-error line.
+    pub fn signal_cache_error(&mut self) {
+        self.cpu.signal_cache_error();
+    }
+
     /// Whether the AI DMA interrupt is pending.
     #[must_use]
     pub fn audio_interrupt_pending(&self) -> bool {
@@ -1191,6 +1201,28 @@ mod tests {
         assert_eq!(pixel(5, 12), [0, 0, 0, 0], "outside red left edge");
         assert_eq!(pixel(23, 9), [0, 0xFF, 0, 0xFF], "inside green triangle");
         assert_eq!(pixel(26, 10), [0, 0, 0, 0], "outside green hypotenuse");
+    }
+
+    #[test]
+    fn machine_watchdog_and_nmi_lines() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        machine.cpu.cp0[9] = 0xFFFF_FFFE;
+        machine.cpu.cp0[11] = 0xFFFF_FFFF;
+        machine.step().expect("watchdog");
+        assert_eq!(machine.cpu.pc, 0xBFC0_0000);
+        assert_eq!(machine.cpu.cp0[30], 0xA400_0040);
+
+        let mut machine = Machine::new(&cart);
+        machine.signal_nmi();
+        machine.step().expect("NMI");
+        assert_eq!(machine.cpu.pc, 0xBFC0_0000);
+        assert_eq!(machine.cpu.cp0[30], 0xA400_0040);
+
+        let mut machine = Machine::new(&cart);
+        machine.signal_cache_error();
+        machine.step().expect("cache error");
+        assert_eq!(machine.cpu.pc, 0xA000_0000);
     }
 
     #[test]
