@@ -14366,3 +14366,55 @@ the only changed ROM is the CX4 test cart, which follows the new CX4 schedule.
 ```
 cargo test -p unko-snes --lib: 272 passed; 0 failed
 ```
+
+## Verification of the single configuration against fresh references (2026-11-25)
+
+### `cx4test.sfc` is explained, not a content regression
+
+The one row that differed in the first 212 comparison was `cx4test.sfc`. Its
+audio is **identical** between the old default (`e41bc06`, plan schedule,
+phase 4), the new default (CX4 schedule, phase 2), and ares:
+
+```
+old default hash          ca1612932dd9d840e0697e6f4324f41e0c4c627f62d6b2f6129ba19ea79914dd
+new default hash          ca1612932dd9d840e0697e6f4324f41e0c4c627f62d6b2f6129ba19ea79914dd
+vs ares (120 frames)      0 differing / 127860   (both)
+```
+
+The difference appeared only against `e41bc06 + SNES_DSP_PRIME=0`, and it is a
+stream-length artifact, not content:
+
+```
+e41bc06 + PRIME=0 : 511432 bytes
+new default       : 511440 bytes
+common prefix     : byte-identical for all 511432 bytes
+extra tail        : 8 zero bytes (one silent stereo frame)
+```
+
+So the CX4 schedule reproduces the old MMX2-first default for the CX4 cart and
+does not change its samples.
+
+### 212-ROM baseline against a fresh reference for the intended model
+
+Fresh reference captured on the verified commit `e41bc06` with the intended
+per-cartridge model made explicit (no `CX4_ROM` firmware in any run, as the
+baseline script does):
+
+- non-CX4 ROMs: `SNES_DSP_PRIME=0` (plan/credit, phase 0);
+- CX4 ROM (`cx4test.sfc`): `SNES_CLOCK_SYNC=1 SNES_DSP_PRIME=2`.
+
+```
+fresh reference rows 212, current rows 212
+status ok ref 212 / cur 212
+frame/audio/status differences: 0
+```
+
+### 600-frame seven-title gate against freshly captured ares references
+
+ares captures were regenerated for all seven titles (600 frames,
+`ARES_RAW_AUDIO`, `ARES_DETERMINISTIC=1`) into `/tmp/opencode/fresh/<title>/`,
+then the gate re-run:
+
+```
+mmx2 dkc zelda fzero cv4 smas ct : 0 differing / 639656  (100.0000% each)
+```
