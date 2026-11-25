@@ -254,9 +254,12 @@ The main effort was the reference-parity accuracy core. Details in
       exposes `unko snes` to run a title through the adapter (bit-exact vs
       ares for MMX2 and DKC at 600 frames). `unko-snes-api` adds the SNES
       button/region/metadata extension trait, and the desktop player
-      dispatches by image signature (`snes::create_for_rom`) through a
-      `NesCore` bridge; real titles run through that GUI-facing path bit-exact
-      vs ares. Firmware path settings and the SNES debugger remain. Then **N64 from ares** with gopher64 as a GPL structural
+      dispatches by image signature through a `NesCore` bridge. The library
+      probe now recognises SNES images and persisted `snes_ipl`/`snes_cx4`/
+      `snes_dsp1` firmware paths feed the adapter, so a SNES title opens and
+      runs through the real `Player::start_with` flow (bit-exact vs ares for
+      MMX2 and DKC at 600 frames). The library scan and Settings UI for SNES,
+      plus the SNES debugger, remain. Then **N64 from ares** with gopher64 as a GPL structural
       reference. See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.
 - [ ] GameCube/Wii is deferred: Dolphin is GPL-2.0+ and application-shaped, so

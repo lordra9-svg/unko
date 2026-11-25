@@ -128,6 +128,8 @@ pub struct RomEntry {
     pub source: Source,
     /// Container label.
     pub container: Container,
+    /// System tag (`"nes"`, `"snes"`, ...).
+    pub system: &'static str,
     /// Display title, derived from the member/file name.
     pub title: String,
     /// File name (member name for archives).
@@ -146,7 +148,7 @@ impl RomEntry {
     /// System tag for the library column.
     #[must_use]
     pub const fn system(&self) -> &'static str {
-        "nes"
+        self.system
     }
 
     /// Whether this entry is a raw Famicom Disk System image.
@@ -341,6 +343,7 @@ fn plain_entry(path: PathBuf) -> Option<RomEntry> {
     Some(RomEntry {
         source: Source::File(path),
         container: Container::File,
+        system: "nes",
         title,
         file_name,
         size: bytes.len() as u64,
@@ -425,6 +428,7 @@ fn scan_zip(path: &Path) -> Vec<RomEntry> {
                 index: Some(index),
             },
             container: Container::Zip,
+            system: "nes",
             title,
             file_name: name,
             size,
@@ -463,6 +467,7 @@ fn scan_7z(path: &Path) -> Vec<RomEntry> {
                     index: None,
                 },
                 container: Container::SevenZ,
+                system: "nes",
                 title: member_title(&inner),
                 file_name: inner.clone(),
                 size: file.size(),
@@ -499,6 +504,7 @@ fn scan_rar(path: &Path) -> Vec<RomEntry> {
                     index: Some(index),
                 },
                 container: Container::Rar,
+                system: "nes",
                 title: member_title(&inner),
                 file_name: inner.clone(),
                 size: member.meta.unpacked_size,
@@ -708,6 +714,7 @@ mod tests {
         let entry = RomEntry {
             source: Source::File(PathBuf::from("/does/not/exist.nes")),
             container: Container::File,
+            system: "nes",
             title: "oversized".into(),
             file_name: "oversized.nes".into(),
             size: MAX_ROM_BYTES + 1,
@@ -851,6 +858,7 @@ mod tests {
         let entry = RomEntry {
             source: Source::File(PathBuf::from("game.fds")),
             container: Container::File,
+            system: "nes",
             title: "game".into(),
             file_name: "game.fds".into(),
             size: 65_500,

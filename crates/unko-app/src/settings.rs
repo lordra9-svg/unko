@@ -395,6 +395,12 @@ pub struct Settings {
     pub save_dir: PathBuf,
     /// User-supplied FDS BIOS (`disksys.rom`); never bundled.
     pub fds_bios: PathBuf,
+    /// User-supplied S-SMP IPL ROM for SNES titles; never bundled.
+    pub snes_ipl: PathBuf,
+    /// User-supplied CX4 firmware for SNES coprocessor titles.
+    pub snes_cx4: PathBuf,
+    /// User-supplied NEC DSP program ROM for SNES coprocessor titles.
+    pub snes_dsp1: PathBuf,
     /// FDS transfer-speed multiplier (1, 2, 4 or 8).
     pub fds_speed: u8,
     /// Automatically move to the next FDS side.
@@ -548,6 +554,9 @@ impl Default for Settings {
             rom_dir: paths::roms_dir(),
             save_dir: paths::saves_dir(),
             fds_bios: paths::fds_bios_path(),
+            snes_ipl: PathBuf::new(),
+            snes_cx4: PathBuf::new(),
+            snes_dsp1: PathBuf::new(),
             fds_speed: 1,
             fds_auto_side: false,
             region: Region::Auto,
@@ -656,6 +665,15 @@ impl Settings {
                 "save_dir" => settings.save_dir = paths::resolve_from(&base, Path::new(value)),
                 "fds_bios" => {
                     settings.fds_bios = paths::resolve_from(&base, Path::new(value));
+                }
+                "snes_ipl" => {
+                    settings.snes_ipl = optional_path(&base, value);
+                }
+                "snes_cx4" => {
+                    settings.snes_cx4 = optional_path(&base, value);
+                }
+                "snes_dsp1" => {
+                    settings.snes_dsp1 = optional_path(&base, value);
                 }
                 "fds_speed" => {
                     settings.fds_speed = match value.parse().unwrap_or(1) {
@@ -886,6 +904,9 @@ impl Settings {
 rom_dir={}
 save_dir={}
 fds_bios={}
+snes_ipl={}
+snes_cx4={}
+snes_dsp1={}
 fds_speed={}
 fds_auto_side={}
 speed_percent={}
@@ -957,6 +978,9 @@ layout_main={}
             paths::store_relative(&self.rom_dir, &base),
             paths::store_relative(&self.save_dir, &base),
             paths::store_relative(&self.fds_bios, &base),
+            paths::store_relative(&self.snes_ipl, &base),
+            paths::store_relative(&self.snes_cx4, &base),
+            paths::store_relative(&self.snes_dsp1, &base),
             self.fds_speed,
             self.fds_auto_side,
             self.speed_percent,
@@ -1128,6 +1152,15 @@ pub fn load_palette(path: &Path) -> Option<[[u8; 3]; 64]> {
 
 fn parse_bool(value: &str) -> bool {
     matches!(value, "true" | "1" | "yes" | "on")
+}
+
+/// Resolves an optional path setting; an empty value stays empty.
+fn optional_path(base: &Path, value: &str) -> PathBuf {
+    if value.is_empty() {
+        PathBuf::new()
+    } else {
+        paths::resolve_from(base, Path::new(value))
+    }
 }
 
 fn parse_region(value: &str) -> Region {

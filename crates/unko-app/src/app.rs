@@ -766,12 +766,12 @@ impl App {
     }
 
     fn start_game(&mut self, path: &Path) {
-        match library::probe_path(path) {
+        match library::probe_path_any(path) {
             Ok(entries) => match entries.into_iter().next() {
                 Some(entry) => self.start_entry(entry),
-                None => self.set_status(format!("No playable NES image in {}", path.display())),
+                None => self.set_status(format!("No playable image in {}", path.display())),
             },
-            Err(err) => self.set_status(format!("{err}")),
+            Err(err) => self.set_status(err),
         }
     }
 
@@ -4365,7 +4365,7 @@ fn scan(dir: &std::path::Path) -> Vec<GameEntry> {
 }
 
 fn resolve_first(path: &Path) -> Option<GameEntry> {
-    library::probe_path(path).ok()?.into_iter().next()
+    library::probe_path_any(path).ok()?.into_iter().next()
 }
 
 fn apply_theme(ctx: &egui::Context, theme: Theme) {

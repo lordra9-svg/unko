@@ -462,7 +462,48 @@ impl Player {
             }
             apply_mapper_override(&mut rom, mapper)?;
         }
-        let mut core: Box<dyn NesCore> = crate::snes::create_for_rom(&rom);
+        let is_snes = unko_snes_host::is_snes_rom(&rom) && !entry.is_fds();
+        let mut core: Box<dyn NesCore> = if is_snes {
+            // SNES titles need the user-supplied S-SMP IPL; coprocessor
+            // firmware is optional and selected by what the user installed.
+            let mut adapter = crate::snes::SnesAdapter::new();
+            let ipl = &settings.snes_ipl;
+            if ipl.as_os_str().is_empty() {
+                return Err(
+                    "SNES titles need an S-SMP IPL ROM; set Settings -> Paths -> SNES IPL".into(),
+                );
+            }
+            let bytes = fs::read(ipl)
+                .map_err(|err| format!("SNES IPL ROM not found at {} ({err})", ipl.display()))?;
+            adapter
+                .set_firmware(unko_snes_host::FirmwareKind::Ipl, &bytes)
+                .map_err(|err| err.to_string())?;
+            if !settings.snes_cx4.as_os_str().is_empty() {
+                let bytes = fs::read(&settings.snes_cx4).map_err(|err| {
+                    format!(
+                        "SNES CX4 firmware not found at {} ({err})",
+                        settings.snes_cx4.display()
+                    )
+                })?;
+                adapter
+                    .set_firmware(unko_snes_host::FirmwareKind::Cx4, &bytes)
+                    .map_err(|err| err.to_string())?;
+            }
+            if !settings.snes_dsp1.as_os_str().is_empty() {
+                let bytes = fs::read(&settings.snes_dsp1).map_err(|err| {
+                    format!(
+                        "SNES NEC DSP firmware not found at {} ({err})",
+                        settings.snes_dsp1.display()
+                    )
+                })?;
+                adapter
+                    .set_firmware(unko_snes_host::FirmwareKind::NecDsp, &bytes)
+                    .map_err(|err| err.to_string())?;
+            }
+            Box::new(adapter)
+        } else {
+            crate::snes::create_for_rom(&rom)
+        };
         core.set_palette(settings.palette);
         core.set_video_filter(settings.filter);
         let save_dir = settings.save_dir.clone();
@@ -2548,5 +2589,112 @@ mod tests {
             assert!(wait <= frame, "wait {wait:?} exceeds one frame");
         }
         assert_eq!(frames, 600);
+    }
+
+    fn snes_lorom() -> Vec<u8> {
+        let mut rom = vec![0u8; 0x8000];
+        let offset = 0x7FC0;
+        rom[offset..offset + 21].copy_from_slice(b"TEST ROM             ");
+        rom[offset + 0x15] = 0x20;
+        rom[offset + 0x16] = 0x02;
+        rom[offset + 0x17] = 5;
+        rom[offset + 0x18] = 0x03;
+        rom[offset + 0x1A] = 0x01;
+        rom[offset + 0x3C..offset + 0x3E].copy_from_slice(&0x8000u16.to_le_bytes());
+        let mut source = rom.clone();
+        source[offset + 0x1C..offset + 0x20].fill(0);
+        let base: u32 = source.iter().map(|&b| u32::from(b)).sum();
+        let checksum = ((base + 0x01FE) & 0xFFFF) as u16;
+        rom[offset + 0x1C..offset + 0x1E].copy_from_slice(&(!checksum).to_le_bytes());
+        rom[offset + 0x1E..offset + 0x20].copy_from_slice(&checksum.to_le_bytes());
+        rom
+    }
+
+    #[test]
+    fn snes_image_starts_through_the_gui_entry() {
+        let dir = std::env::temp_dir().join(format!("unko-snes-start-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("dir");
+        let rom_path = dir.join("Snes.sfc");
+        fs::write(&rom_path, snes_lorom()).expect("rom");
+        let ipl_path = dir.join("ipl.rom");
+        fs::write(&ipl_path, [0u8; 64]).expect("ipl");
+        let entries = crate::library::probe_path_any(&rom_path).expect("probe");
+        assert_eq!(entries[0].system, "snes");
+        let settings = Settings {
+            save_dir: dir.join("saves"),
+            snes_ipl: ipl_path.clone(),
+            ..Settings::default()
+        };
+        let mut player = Player::start_with(&entries[0], &settings, GameProperties::default())
+            .expect("start SNES title");
+        assert_eq!(player.core_id, "snes_accuracy_core");
+        player.core.run_frame().expect("frame");
+        assert_eq!(player.core.video().width, 256);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snes_without_ipl_is_a_clear_error() {
+        let dir = std::env::temp_dir().join(format!("unko-snes-noipl-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("dir");
+        let rom_path = dir.join("Snes.sfc");
+        fs::write(&rom_path, snes_lorom()).expect("rom");
+        let entries = crate::library::probe_path_any(&rom_path).expect("probe");
+        let settings = Settings {
+            save_dir: dir.join("saves"),
+            ..Settings::default()
+        };
+        match Player::start_with(&entries[0], &settings, GameProperties::default()) {
+            Ok(_) => panic!("missing IPL must fail"),
+            Err(error) => assert!(error.contains("SNES IPL"), "{error}"),
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Real-title verification through `start_with`; opt in with env vars:
+    /// UNKO_SNES_ROM, UNKO_SNES_IPL, optional UNKO_SNES_CX4/UNKO_SNES_OUT.
+    #[test]
+    #[ignore = "requires a commercial SNES ROM and firmware (env paths)"]
+    fn snes_real_title_through_start_with() {
+        let (Ok(rom_path), Ok(ipl_path)) = (
+            std::env::var("UNKO_SNES_ROM"),
+            std::env::var("UNKO_SNES_IPL"),
+        ) else {
+            return;
+        };
+        let frames: u32 = std::env::var("UNKO_SNES_FRAMES")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(600);
+        let out = std::env::var("UNKO_SNES_OUT")
+            .unwrap_or_else(|_| "/tmp/unko-snes-start.f32".to_owned());
+        let entries =
+            crate::library::probe_path_any(std::path::Path::new(&rom_path)).expect("probe");
+        let mut settings = Settings {
+            save_dir: std::env::temp_dir().join("unko-snes-start-saves"),
+            snes_ipl: PathBuf::from(ipl_path),
+            ..Settings::default()
+        };
+        if let Ok(cx4) = std::env::var("UNKO_SNES_CX4") {
+            settings.snes_cx4 = PathBuf::from(cx4);
+        }
+        let mut player = Player::start_with(&entries[0], &settings, GameProperties::default())
+            .expect("start SNES title");
+        let mut bytes = Vec::new();
+        for _ in 0..frames {
+            player.core.run_frame().expect("frame");
+            for sample in player.core.audio().samples {
+                bytes.extend_from_slice(&sample.to_le_bytes());
+            }
+        }
+        fs::write(&out, &bytes).expect("write audio");
+        println!(
+            "wrote {out} frames={frames} core={} video={}x{}",
+            player.core_id,
+            player.core.video().width,
+            player.core.video().height
+        );
     }
 }
