@@ -97,3 +97,96 @@ mod tests {
         assert!(smp.clock() > 0);
     }
 }
+
+/// The S-DSP as a cooperative thread.
+///
+/// ares `DSP::main` runs a 32-micro-step sample; each `DSP::tick` does
+/// `Thread::step(3 * 8)` (24 DSP clocks) and then `synchronize(smp)`. The DSP is
+/// therefore the fastest-ticking thread and pulls the S-SMP every micro-step.
+pub struct DspThread {
+    clock: crate::co_scheduler::ThreadClock,
+    dsp: crate::dsp::Dsp,
+    ram: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
+    samples: std::collections::VecDeque<crate::dsp::Sample>,
+    /// The thread is mid-micro-step and must suspend after the S-SMP has caught
+    /// up (so a re-entry returns `None` rather than ticking again).
+    pending: bool,
+}
+
+impl DspThread {
+    /// Create the DSP thread sharing the APU RAM with the S-SMP.
+    pub fn new(ram: std::rc::Rc<std::cell::RefCell<Vec<u8>>>) -> Self {
+        Self {
+            clock: crate::co_scheduler::ThreadClock::new(24_606_720),
+            dsp: crate::dsp::Dsp::new(),
+            ram,
+            samples: std::collections::VecDeque::new(),
+            pending: false,
+        }
+    }
+
+    /// Number of finished samples waiting to be consumed.
+    pub fn sample_count(&self) -> usize {
+        self.samples.len()
+    }
+
+    /// Drain finished samples.
+    pub fn drain_samples(&mut self) -> impl Iterator<Item = crate::dsp::Sample> + '_ {
+        self.samples.drain(..)
+    }
+}
+
+impl ThreadState for DspThread {
+    fn clock(&self) -> u128 {
+        self.clock.clock()
+    }
+
+    fn step(&mut self) -> Need {
+        if self.pending {
+            self.pending = false;
+            return Need::None;
+        }
+        self.clock.step(24);
+        if let Some(sample) = self.dsp.tick(&mut self.ram.borrow_mut()[..]) {
+            self.samples.push_back(sample);
+        }
+        self.pending = true;
+        Need::Synchronize(Thread::Smp)
+    }
+}
+
+#[cfg(test)]
+mod dsp_tests {
+    use super::*;
+    use crate::co_scheduler::ThreadClock;
+
+    fn thread() -> DspThread {
+        DspThread::new(std::rc::Rc::new(std::cell::RefCell::new(vec![
+            0u8;
+            0x1_0000
+        ])))
+    }
+
+    #[test]
+    fn a_micro_step_pulls_the_smp_then_suspends() {
+        let mut dsp = thread();
+        assert_eq!(dsp.step(), Need::Synchronize(Thread::Smp));
+        let after_tick = dsp.clock();
+        assert!(after_tick > 0);
+        assert_eq!(dsp.step(), Need::None);
+        assert_eq!(dsp.clock(), after_tick);
+        // One micro-step is 24 DSP clocks in the fixed-point base.
+        let one_step = ThreadClock::new(24_606_720).scalar() * 24;
+        assert_eq!(after_tick, one_step);
+    }
+
+    #[test]
+    fn a_sample_is_emitted_every_32_micro_steps() {
+        let mut dsp = thread();
+        for _ in 0..32 {
+            assert_eq!(dsp.step(), Need::Synchronize(Thread::Smp));
+            assert_eq!(dsp.step(), Need::None);
+        }
+        assert_eq!(dsp.sample_count(), 1);
+    }
+}
