@@ -13486,3 +13486,23 @@ So the residual is an **accumulating S-CPU master-clock deficit** (~4,540 clocks
 by 3.9 s, ~0.12%) relative to ares; the S-SMP and DSP are correct. The next
 investigation is the missing CPU cycles (wait states/DMA/refresh accounting) that
 make our CPU clock short.
+
+## CPU-clock deficit is DMA time; dmaEdge-only is wrong (2026-11-24)
+
+Aligning `CO_PORT_LOG` with ares' `$2140` write log:
+
+* the offset is **4,540 clocks at the very first write** (pre-handshake boot),
+* it then grows steadily to **790,840** by the end (~0.86% of the CPU clock).
+
+The pre-handshake deficit is only 0.0055%, but that is 4,540 clocks = one poll
+iteration at the handshake. The steady post-handshake growth (0.86%) tracks
+gameplay DMA/HDMA.
+
+Calling the default driver's `dmaEdge` handling inside `step_co_sched` made CT
+*worse* (25.69% vs 32.64%), so the DMA edge is not a drop-in: `step_co_sched`
+does not call `run_dma(cycles)` at the end at all (the default does). The missing
+DMA master time is the likely source of the deficit, and the fix must run DMA and
+also advance the cooperative S-SMP/S-DSP by those clocks (they are clocked
+independently of `self.clock`).
+
+Reverted; default and six-exact modes unchanged.
