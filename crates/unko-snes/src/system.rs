@@ -1635,6 +1635,17 @@ impl Snes {
         macro_rules! answer {
             ($request:expr) => {{
                 let request = $request;
+                // ares DMA edge: `$420B` arms the transfer (`arm = 1`), the next
+                // bus access stages it (`arm = 2`), and the following access runs
+                // it. The transfer's master clocks advance `self.clock` (and the
+                // PPU/HDMA), so the APU must be caught up to the new clock.
+                if let Some(wait) = dma_edge_wait(request, self.fast_rom) {
+                    if self.dma_edge_stage(wait) {
+                        let _ = self.dma_edge_run();
+                        let target = cpuclock!();
+                        advance_apu_to!(target, target);
+                    }
+                }
                 match request {
                     BusRequest::Read { address, .. } if is_port(address) => {
                         let port = ((address & 0xFFFF) - 0x2140) as u8;
@@ -1726,6 +1737,13 @@ impl Snes {
         // final bus event.
         if let Some(target) = self.co_sync.take() {
             advance_apu_to!(target, cpuclock!());
+        }
+        // Resume a DMA parked at a frame boundary (ares runs the transfer tail
+        // at the end of `CPU::step`).
+        if self.dma_transfer.is_some() {
+            let _ = self.run_dma(0);
+            let target = cpuclock!();
+            advance_apu_to!(target, target);
         }
         let samples: Vec<_> = co.dsp.borrow_mut().drain_samples().collect();
         self.apu.push_samples(samples);
@@ -2422,7 +2440,7 @@ impl Snes {
                 // cooperative driver consumes this target at its next
                 // suspension.
                 if self.co_driving {
-                    let start = self.clock.saturating_sub(u64::from(clocks));
+                    let start = self.clock - u64::try_from(rem).unwrap_or(0);
                     let target = u128::from(start)
                         * crate::apu::scheduler_cpu_scalar(self.region.master_clock());
                     self.co_sync = Some(self.co_sync.map_or(target, |old| old.min(target)));

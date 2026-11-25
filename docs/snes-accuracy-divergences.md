@@ -13583,3 +13583,43 @@ a slightly different master clock than the ares oracle build.
 
 Default driver is unaffected: MMX2 0 differing (100.0000%) and
 `SNES_DSP_PRIME=0` Zelda 0 differing after the rewrite. 272 lib tests pass.
+
+## DMA edge in the cooperative driver; `$FFDC` gate at 887,720 (2026-11-24)
+
+The cooperative driver never handled general-purpose DMA: `answer!` sent every
+bus request straight to `handle_cpu_request`, so `dma_edge_stage` never advanced
+`arm` 1 -> 2 and `run_dma` never ran. The S-CPU therefore lost all DMA master
+time (and never performed the transfers). The default `step` path does this at
+every request and again at the end of the step.
+
+`answer!` now reproduces it: `dma_edge_wait` -> `dma_edge_stage` ->
+`dma_edge_run` (which advances `self.clock` and the PPU/HDMA), then the APU is
+caught up to the new clock; a transfer parked at a frame boundary is resumed at
+the end of `step_co_sched`. The DMA edge runs before the request is answered,
+matching ares' `CPU::Channel::step -> CPU::step`.
+
+Effect on the `CO_TRACE` gate (MMX2, `SNES_CO_SCHED=1 SNES_DSP_PRIME=0`):
+
+| | first PC divergence |
+|---|---|
+| before DMA edge | 883,082 (ours `$FFD4`, ares `$FFCF/$FFD2`) |
+| after DMA edge  | **887,720** (ours `$FFDE`, ares `$FFE9`) |
+
+The `$2140=0xCC` write now lands at `self.clock=83,230,164` with S-SMP clock
+7,946,462 — matching ares (`oracleNow 83,230,134`, `aresSmpMono 7,946,462`).
+The earlier 4,500-master-clock deficit was entirely the missing DMA time; there
+is no ares oracle clock-base offset.
+
+The remaining divergence is one IPL block-transfer byte. At the `$FFDA`
+`CMP Y,$F4` / `$FFDC BNE $FFE9` loop, ares has `$F4=0x75` and waits 6,164 CPU
+clocks before writing counter `0x76` (at `oracleNow 83,578,880`); our S-CPU
+writes `0x76` 508 clocks after `0x75` (`83,573,202`), so the S-SMP's CMP sees
+`$F4=0x76` and transfers one byte ares has not yet released. All S-SMP
+instruction PCs and `aresSmpMono` clocks are identical through index 887,719,
+so this is S-CPU/S-SMP port-ack pacing in the transfer loop, not an S-SMP
+ordering error.
+
+Audio is unchanged by the DMA fix (the boot transfer is not in the audio path
+after init): `SNES_CO_SCHED` remains non-exact (mmx2 69.2269%, cv4 89.1410%,
+ct 29.2237%). Default driver re-verified: MMX2 0 differing and
+`SNES_DSP_PRIME=0` Zelda 0 differing; 272 tests pass.
