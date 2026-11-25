@@ -13866,3 +13866,32 @@ The persistent +30 offset seen at APU-port accesses by frame 232 is therefore
 not from the boot sequence; it appears later. The refresh placement is the one
 concrete sub-access divergence in the early CPU path and the next thing to
 align.
+
+## Bisecting the S-CPU phase: it wanders, there is no single insertion (2026-11-24)
+
+Same-run `ARES_BUSLOG2`/`BUS_LOG` windows at several points (MMX2, default
+driver), clock delta = ours - ares at the window edges:
+
+| window end | delta (ours - ares) |
+|---|---|
+| 60k (boot) | 0 |
+| 1M | -12 |
+| 10M | -2 |
+| 83M (frame 232) | +30 |
+
+The offset is **non-monotonic and bounded to a few tens of clocks**: 0 -> -12
+-> -2 -> +30. It is not a single event inserted between boot and frame 232, and
+it is not a persistent global phase. It is the net of repeated sub-access
+placement jitter (the 40-clock DRAM refresh and DMA edges landing on different
+bus accesses; each realigns at the next instruction boundary but leaves a small
+residual). The `887,720` NMI boundary flips when that residual happens to put
+the instruction boundary on the other side of the vblank edge.
+
+Consequently "find and fix the +30 insertion" is not well-posed: there is no
+such insertion. Eliminating the boundary flip requires bit-exact sub-access
+refresh/DMA/access-cycle placement across the whole boot, not a constant or a
+single-site change.
+
+Measured with the joint NMI/boundary trace (commit b986389): the NMI already
+fires at line-225 dot 0 (ares fires later at dot ~1.5), so the edge is not the
+thing to move; the CPU boundary crosses it because of this accumulated jitter.
