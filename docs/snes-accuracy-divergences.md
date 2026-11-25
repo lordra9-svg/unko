@@ -14041,3 +14041,32 @@ step must come from the surrounding refresh/RAM-wait placement, not the DMA.
 This supersedes the earlier claim that the step was DMA pre/post rounding. The
 remaining wandering source is the DRAM refresh position / RAM wait accounting,
 still the -40/±40 variants seen throughout.
+
+## Refresh probe: pos constant, ares fire hcounter alternates by 4 (2026-11-24)
+
+Instrumented our refresh fire (`REFRESH_LOG`: clock, hcounter, position,
+counter_cpu&7) and compared to ares `ARES_REFRESH_LOG` (clock, vcounter,
+hcounter):
+
+```
+ours  540 hc=540 pos=538 cc=4 | 1904 hc=540 pos=538 cc=0 | 3268 hc=540 ... | 4632 ...
+ares  540 L0 H540 | 1900 L1 H536 | 3268 L2 H540 | 4628 L3 H536 | 5994 L4 H538 | ...
+```
+
+Our `refresh_position` is 538 and constant per frame; our fire clock is
+0/+4 from ares on alternate lines and our fire hcounter is a constant 540.
+ares' fire hcounter alternates 540/536 within a frame. ares `PPUcounter::tick`
+adds 2 to `time.hcounter` (master-clock units, 0..1364) and
+`dramRefreshPosition = 538 - dmaCounter()`, so the alternation is the access
+grid crossing the fixed position at hcounter 540 vs 536 - i.e. a 4-clock
+difference in where the refresh check samples relative to the access boundary.
+Our `ppu_hcounter` is a plain `+= clocks` accumulator, so our crossing point is
+always hc=540.
+
+So the residual is a 4-clock refresh *sampling-point* phase, not the position
+value. Matching it requires the refresh check to sample the same half-access
+boundary ares does (ares tests at the start of `CPU::step`, whose `hcounter()`
+is the post-tick `time.hcounter`), rather than our post-access accumulator.
+This is the concrete remaining refresh/RAM-wait item; it was not changed here
+because it touches the shared access-boundary path and needs full 212-ROM
+regression to validate.
