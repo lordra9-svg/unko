@@ -305,86 +305,67 @@ impl Rdp {
         if self.color_size != 2 || self.color_format != 2 {
             return;
         }
-        let y_low = sext14(edge[0] >> 32) as f32 / 4.0;
-        let y_mid = sext14(edge[0] >> 16) as f32 / 4.0;
-        let y_high = sext14(edge[0]) as f32 / 4.0;
-        let x_low = fixed16(edge[1] >> 48, edge[1] >> 32);
-        let x_high = fixed16(edge[2] >> 48, edge[2] >> 32);
-        let x_mid = fixed16(edge[3] >> 48, edge[3] >> 32);
-        // The edge coefficients identify three points on the triangle's edge
-        // functions. This scaffold treats them as the triangle's vertices and
-        // rasterises with a half-space test; full RDP edgewalk traversal is a
-        // later milestone.
-        let vertices = [(x_low, y_low), (x_mid, y_mid), (x_high, y_high)];
-        let min_x = vertices
-            .iter()
-            .map(|(x, _)| *x)
-            .fold(f32::INFINITY, f32::min)
-            .floor()
-            .max(0.0) as i32;
-        let max_x = vertices
-            .iter()
-            .map(|(x, _)| *x)
-            .fold(f32::NEG_INFINITY, f32::max)
-            .ceil() as i32;
-        let min_y = vertices
-            .iter()
-            .map(|(_, y)| *y)
-            .fold(f32::INFINITY, f32::min)
-            .ceil()
-            .max(0.0) as i32;
-        let max_y = vertices
-            .iter()
-            .map(|(_, y)| *y)
-            .fold(f32::NEG_INFINITY, f32::max)
-            .floor() as i32;
-        let area = edge_function(vertices[0], vertices[1], vertices[2]);
-        if area == 0.0 {
+        let Some(setup) = EdgeSetup::parse(edge) else {
+            return;
+        };
+        // The RDP requires all four subpixel rows of a scanline to be between
+        // Yh and Yl; a partially covered top/bottom line is dropped.
+        let y_start = (setup.yh + 3) / 4;
+        let y_end = (setup.yl - 1) / 4;
+        if y_end < y_start {
             return;
         }
-        let bounds = (min_x, min_y, max_x, max_y);
-        for y in min_y..=max_y {
-            for x in min_x..=max_x {
-                let point = (x as f32 + 0.5, y as f32 + 0.5);
-                let w0 = edge_function(vertices[1], vertices[2], point);
-                let w1 = edge_function(vertices[2], vertices[0], point);
-                let w2 = edge_function(vertices[0], vertices[1], point);
-                let inside = if area > 0.0 {
-                    w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0
-                } else {
-                    w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0
-                };
-                if !inside {
+        let origin_y = setup.yh.div_euclid(4);
+        let origin_x = [setup.xh, setup.xm, setup.xl]
+            .iter()
+            .map(|value| (value >> 16) as i32)
+            .min()
+            .unwrap_or(0);
+
+        for y in y_start.max(0)..=y_end {
+            for sub in 0..4 {
+                let row = y * 4 + sub;
+                let (x_left, x_right) = setup.span(row);
+                let left = x_left as f64 / 65_536.0;
+                let right = x_right as f64 / 65_536.0;
+                if right <= left {
                     continue;
                 }
-                if self.color_width != 0 && x as u32 >= self.color_width {
-                    continue;
-                }
-                let texel = coords
-                    .and_then(|coords| self.sample_texture_coords(&coords, x, y, bounds, rdram))
-                    .unwrap_or(color);
-                let mut surface = if self.combine_mode != 0 {
-                    combine(
-                        self.combine_mode,
-                        shade,
-                        texel,
-                        self.primitive_color,
-                        self.environment_color,
-                    )
-                } else if coords.is_some() {
-                    texel
-                } else {
-                    color
-                };
-                let address = self.color_address as usize
-                    + ((y as u32 * self.color_width + x as u32) as usize) * 2;
-                if let Some(bytes) = rdram.get(address..address + 2) {
-                    let destination = u16::from_be_bytes([bytes[0], bytes[1]]);
-                    surface = blend(surface, rgba5551_to_8888(destination));
-                }
-                let pixel = rgba8888_to_5551(surface).to_be_bytes();
-                if let Some(slot) = rdram.get_mut(address..address + 2) {
-                    slot.copy_from_slice(&pixel);
+                let first = (left - 0.5).ceil() as i32;
+                let mut x = first.max(0);
+                while (x as f64 + 0.5) < right {
+                    if self.color_width != 0 && x as u32 >= self.color_width {
+                        break;
+                    }
+                    let texel = coords
+                        .and_then(|coords| {
+                            self.sample_texture_coords(&coords, x, y, (origin_x, origin_y), rdram)
+                        })
+                        .unwrap_or(color);
+                    let mut surface = if self.combine_mode != 0 {
+                        combine(
+                            self.combine_mode,
+                            shade,
+                            texel,
+                            self.primitive_color,
+                            self.environment_color,
+                        )
+                    } else if coords.is_some() {
+                        texel
+                    } else {
+                        color
+                    };
+                    let address = self.color_address as usize
+                        + ((y as u32 * self.color_width + x as u32) as usize) * 2;
+                    if let Some(bytes) = rdram.get(address..address + 2) {
+                        let destination = u16::from_be_bytes([bytes[0], bytes[1]]);
+                        surface = blend(surface, rgba5551_to_8888(destination));
+                    }
+                    let pixel = rgba8888_to_5551(surface).to_be_bytes();
+                    if let Some(slot) = rdram.get_mut(address..address + 2) {
+                        slot.copy_from_slice(&pixel);
+                    }
+                    x += 1;
                 }
             }
         }
@@ -395,7 +376,7 @@ impl Rdp {
         coords: &TexCoords,
         x: i32,
         y: i32,
-        bounds: (i32, i32, i32, i32),
+        origin: (i32, i32),
         rdram: &[u8],
     ) -> Option<u32> {
         let tile = self.tiles[0];
@@ -403,7 +384,7 @@ impl Rdp {
         if size.s_high <= size.s_low || size.t_high <= size.t_low {
             return None;
         }
-        let (min_x, min_y, _, _) = bounds;
+        let (min_x, min_y) = origin;
         let scale = |value: i32| i64::from(value);
         let mut s_fixed = scale(coords.s[0])
             + i64::from(x - min_x) * scale(coords.s[1])
@@ -523,8 +504,59 @@ fn sext14(value: u64) -> i32 {
     }
 }
 
-fn fixed16(integer: u64, fraction: u64) -> f32 {
-    (integer as u16 as i16 as f32) + (fraction as u16 as f32) / 65_536.0
+fn fixed16_i64(integer: u64, fraction: u64) -> i64 {
+    i64::from(integer as u16 as i16) * 65_536 + i64::from(fraction as u16)
+}
+
+/// Parsed triangle edge coefficients. Y is in 1/4-pixel units and X in 16.16
+/// pixels; each of the three edge points carries its slope along the edge.
+struct EdgeSetup {
+    lmajor: bool,
+    yl: i32,
+    ym: i32,
+    yh: i32,
+    xl: i64,
+    xh: i64,
+    xm: i64,
+    dxldy: i64,
+    dxhdy: i64,
+    dxmdy: i64,
+}
+
+impl EdgeSetup {
+    fn parse(edge: [u64; 4]) -> Option<Self> {
+        let setup = Self {
+            lmajor: edge[0] & (1 << 55) != 0,
+            yl: sext14(edge[0] >> 32),
+            ym: sext14(edge[0] >> 16),
+            yh: sext14(edge[0]),
+            xl: fixed16_i64(edge[1] >> 48, edge[1] >> 32),
+            dxldy: fixed16_i64(edge[1] >> 16, edge[1]),
+            xh: fixed16_i64(edge[2] >> 48, edge[2] >> 32),
+            dxhdy: fixed16_i64(edge[2] >> 16, edge[2]),
+            xm: fixed16_i64(edge[3] >> 48, edge[3] >> 32),
+            dxmdy: fixed16_i64(edge[3] >> 16, edge[3]),
+        };
+        (setup.yl > setup.yh).then_some(setup)
+    }
+
+    /// Left/right edge X at a subpixel row, in 16.16 pixels.
+    fn span(&self, row: i32) -> (i64, i64) {
+        // Interpolation bases: the top edge is latched at the start of its
+        // scanline (Yh rounded down to a whole scanline), the lower at Ym.
+        let yh_base = self.yh & !3;
+        let xh = self.xh + i64::from(row - yh_base) * self.dxhdy / 4;
+        let xm = self.xm + i64::from(row - yh_base) * self.dxmdy / 4;
+        let mut xl = self.xl + i64::from(row - self.ym) * self.dxldy / 4;
+        if row < self.ym {
+            xl = xm;
+        }
+        if self.lmajor {
+            (xh, xl)
+        } else {
+            (xl, xh)
+        }
+    }
 }
 
 fn read_word(rdram: &[u8], offset: usize) -> Option<u64> {
@@ -707,10 +739,6 @@ fn rgba5551(color: u16) -> u32 {
 fn expand5(value: u16) -> u8 {
     let value = value as u8;
     (value << 3) | (value >> 2)
-}
-
-fn edge_function(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
-    (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0)
 }
 
 fn rgba8888_to_5551(color: u32) -> u16 {

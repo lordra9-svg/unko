@@ -322,6 +322,41 @@ mod tests {
         Cartridge::from_bytes(&rom).expect("cart")
     }
 
+    fn pack_fixed(value: f32) -> (u64, u64) {
+        let fixed = (value * 65_536.0).round() as i64;
+        ((fixed >> 16) as u16 as u64, (fixed & 0xFFFF) as u64)
+    }
+
+    fn point_word(coordinate: f32, slope: f32) -> u64 {
+        let (ci, cf) = pack_fixed(coordinate);
+        let (si, sf) = pack_fixed(slope);
+        (ci << 48) | (cf << 32) | (si << 16) | sf
+    }
+
+    /// Encode the four triangle edge words from three vertices sorted by Y.
+    fn triangle_edge(opcode: u64, vertices: [(f32, f32); 3]) -> [u64; 4] {
+        let [(x0, y0), (x1, y1), (x2, y2)] = vertices;
+        let major = (x2 - x0) / (y2 - y0);
+        let upper = (x1 - x0) / (y1 - y0);
+        let lower = (x2 - x1) / (y2 - y1);
+        let yh = (y0 * 4.0).round() as i64;
+        let ym = (y1 * 4.0).round() as i64;
+        let yl = (y2 * 4.0).round() as i64;
+        let yh_base = (yh & !3) as f32 / 4.0;
+        let lmajor = major < upper;
+        let word = (opcode << 56)
+            | if lmajor { 1u64 << 55 } else { 0 }
+            | ((yl as u64 & 0x3FFF) << 32)
+            | ((ym as u64 & 0x3FFF) << 16)
+            | (yh as u64 & 0x3FFF);
+        [
+            word,
+            point_word(x1, lower),
+            point_word(x0 + major * (yh_base - y0), major),
+            point_word(x0 + upper * (yh_base - y0), upper),
+        ]
+    }
+
     #[test]
     fn boots_ipl3_from_dmem() {
         let cart = cart_with(&[0x3C08_8000, 0x2409_1234, 0xAD09_0000, 0x1000_FFFF]);
@@ -415,10 +450,7 @@ mod tests {
         words.push(
             (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (64u64 << 32) | u64::from(origin),
         );
-        words.push((0x0Au64 << 56) | (48u64 << 32) | (16u64 << 16) | 16);
-        words.push(4u64 << 48);
-        words.push(4u64 << 48);
-        words.push(12u64 << 48);
+        words.extend(triangle_edge(0x0A, [(4.0, 4.0), (10.0, 6.0), (4.0, 12.0)]));
         // s.c = 4.0, w.c = 2.0, s/t steps 0.375 -> s = 4/2 = 2 (column 2).
         words.push((4u64 << 48) | (2u64 << 16));
         words.push(0);
@@ -483,10 +515,7 @@ mod tests {
         words.push(
             (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (64u64 << 32) | u64::from(origin),
         );
-        words.push((0x0Au64 << 56) | (48u64 << 32) | (16u64 << 16) | 16);
-        words.push(4u64 << 48); // Xl
-        words.push(4u64 << 48); // Xh
-        words.push(12u64 << 48); // Xm
+        words.extend(triangle_edge(0x0A, [(4.0, 4.0), (10.0, 6.0), (4.0, 12.0)]));
         words.push(0); // s/t/w c.i
         words.push(0); // s/t/w x.i
         words.push(0); // c.f
@@ -534,16 +563,13 @@ mod tests {
             (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (64u64 << 32) | u64::from(origin),
         );
         words.push((0x3Au64 << 56) | 0xFF00_00FF); // red
-                                                   // Unshaded triangle: (4,4) (12,4) (4,12), Y in 1/4 pixels.
-        words.push((0x08u64 << 56) | (48u64 << 32) | (16u64 << 16) | 16);
-        words.push(4u64 << 48);
-        words.push(4u64 << 48);
-        words.push(12u64 << 48);
-        // Shaded triangle: (20,4) (28,4) (20,12), green shade colour.
-        words.push((0x0Cu64 << 56) | (48u64 << 32) | (16u64 << 16) | 16);
-        words.push(20u64 << 48);
-        words.push(20u64 << 48);
-        words.push(28u64 << 48);
+                                                   // Slanted triangle: (4,4) (12,6) (6,14).
+        words.extend(triangle_edge(0x08, [(4.0, 4.0), (12.0, 6.0), (6.0, 14.0)]));
+        // Slanted shaded triangle, green shade colour.
+        words.extend(triangle_edge(
+            0x0C,
+            [(20.0, 4.0), (28.0, 6.0), (22.0, 14.0)],
+        ));
         words.push((0xFF00u64 << 32) | 0xFF00); // shade: g=0xFF, a=0xFF
         words.push(0);
         words.push(0);
@@ -567,10 +593,11 @@ mod tests {
                 frame[index + 3],
             ]
         };
-        assert_eq!(pixel(5, 5), [0xFF, 0, 0, 0xFF], "inside red triangle");
+        assert_eq!(pixel(7, 9), [0xFF, 0, 0, 0xFF], "inside red triangle");
         assert_eq!(pixel(10, 10), [0, 0, 0, 0], "outside red hypotenuse");
-        assert_eq!(pixel(21, 5), [0, 0xFF, 0, 0xFF], "inside green triangle");
-        assert_eq!(pixel(27, 10), [0, 0, 0, 0], "outside green hypotenuse");
+        assert_eq!(pixel(5, 12), [0, 0, 0, 0], "outside red left edge");
+        assert_eq!(pixel(23, 9), [0, 0xFF, 0, 0xFF], "inside green triangle");
+        assert_eq!(pixel(26, 10), [0, 0, 0, 0], "outside green hypotenuse");
     }
 
     #[test]

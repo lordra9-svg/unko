@@ -278,15 +278,16 @@ The main effort was the reference-parity accuracy core. Details in
       `VADD/VSUB`, `VMULF/VMULU`, `VMACF/VMACU`, `VRCP/VRCPL/VRCPH`). The RDP
       scaffold parses `SET_COLOR_IMAGE`/`SET_FILL_COLOR`/`FILL_RECTANGLE` into
       a 16-bit framebuffer, tracks primitive/environment/combine state and
-      rasterises unshaded/shaded triangles with a half-space test over the
-      edge coefficients, and samples textured triangles using the interpolated
+      rasterises unshaded/shaded/textured triangles with the RDP edgewalker
+      (lmajor, Yl/Ym/Yh in 1/4-pixel units, 16.16 X slopes and per-subpixel
+      left/right spans), and samples textured triangles using the interpolated
       texture-coefficient words via `SET_TEXTURE_IMAGE`/`SET_TILE`/
       `SET_TILE_SIZE` (4/8/16-bit RGBA/IA/I with clamp/mirror/mask), running the
       two-cycle combiner (`SET_COMBINE_MODE`) and alpha blending, with CI/TLUT
       palettes (`LOAD_TLUT`, 4/8-bit CI lookup) and perspective-correct W
       interpolation; `run_frame` presents the VI framebuffer from RDRAM as
       RGBA. The AI register block (`AI_LEN` DMA of 16-bit stereo pairs into a
-      FIFO) feeds interleaved f32 audio through `Core::audio`. Texturing, full
+      FIFO) feeds interleaved f32 audio through `Core::audio`. Full
       combiner/blender, audio resampling/mixing, the TLB and FPU are the next
       milestones; no
       standard N64 cartridge image was available locally to boot (only 64DD
