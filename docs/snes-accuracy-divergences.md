@@ -13895,3 +13895,32 @@ single-site change.
 Measured with the joint NMI/boundary trace (commit b986389): the NMI already
 fires at line-225 dot 0 (ares fires later at dot ~1.5), so the edge is not the
 thing to move; the CPU boundary crosses it because of this accumulated jitter.
+
+## Corrected phase bisection: address-aligned deltas wander (2026-11-24)
+
+The previous 1M/10M/83M deltas were measured by fixed-index or occurrence
+pairing, which is invalid when the two bus logs start at different accesses or
+differ by an insertion. Re-measured by aligning on the address sequence (best
+shift, then histogram of clock deltas over matching addresses):
+
+| window | shift | matched | delta (ours - ares) |
+|---|---|---|---|
+| boot (60k) | +6 | 6368/6368 | 0 (6335), -40 (33 refresh side) |
+| 1M | -6 | 1991/~1997 | +54 (1903), +94 (88) |
+| 10M | -4 | 2087/~2093 | +46 (2016), +86 (71) |
+| 83M | +4 | 26666/35095 | -22 (26027), -62 (639) |
+
+So the S-CPU clock is **bit-exact at boot** (delta 0; the -40 entries are the
+refresh logged on the opposite side of one access, which realigns) and then the
+phase **wanders** within roughly +55..-25 master clocks over the run, always
+with an additional -40 variant where a refresh straddles the access. The
+wandering is accumulated sub-access placement jitter (refresh/DMA/access-cycle
+edges landing on different bus accesses), not a single inserted offset. The
+887,720 NMI boundary flips when this wandering phase happens to put the
+instruction boundary on the other side of the vblank edge; the NMI edge itself
+already fires at line 225 dot 0, earlier than ares' dot ~1.5.
+
+Making one configuration exact for all seven therefore requires bit-exact
+placement of every refresh/DMA/access edge over the whole run so the phase
+never wanders, which is a full CPU-timing-fidelity effort rather than a local
+fix or constant.
