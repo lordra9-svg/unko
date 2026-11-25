@@ -13954,3 +13954,24 @@ phase crosses an interrupt boundary.
 
 The data is in /tmp/opencode/{our,ares}-{1000000,10000000,20000000,30000000}.log
 and {def,ares}-bus-full.log.
+
+## Bisection 24M/26M: small steps inside tight copy loops (2026-11-24)
+
+Address-aligned (1M-wide windows), sub-windowed every 100k clocks:
+
+```
+24M window: +22 base up to ~23.90M, then +14 base through 24.5M
+            (transition at clock 23,931,842, in a tight $008100-$008104 /
+             $0609CE copy loop; refresh variant +54)
+26M window: +14 base constant
+```
+
+So between 20M (+46) and 30M (-8) the phase moves in several small steps
+(+46 -> +22 -> +14 -> -8), each of order 8-24 clocks, each located in an S-CPU
+copy/transfer loop, and each associated with the per-access `$0609CE`/RAM
+accesses. These are per-access cycle-count placement differences, not a single
+constant or a single event. The +40 refresh variant is visible throughout.
+
+This confirms there is no single placement to fix; the phase accumulates from
+many small per-access differences in code loops, so matching ares across the
+whole run is a CPU core cycle-accuracy effort rather than a local change.
