@@ -5,6 +5,7 @@
 //! (Xcode, Gradle, linuxdeploy, LLVM tools) are still invoked as external
 //! tools.
 
+mod compat_scan;
 mod license;
 mod osv;
 mod package;
@@ -17,6 +18,7 @@ use std::process::ExitCode;
 fn usage() -> &'static str {
     "usage:
   xtask snes-scan --dir ROMS | --list IMAGES [--ipl IPL.ROM] [--frames N]
+  xtask compat-scan --system ID --core nes|fds|snes|n64|none (--input DIR | --list FILE) --out FILE
   xtask license-audit
   xtask osv-audit
   xtask repair-vs <source-dir> [-o <output-dir>] [--all]
@@ -37,6 +39,10 @@ fn main() -> ExitCode {
     };
     let rest = &args[1..];
     let result = match command {
+        "compat-scan" => match compat_scan::run(rest) {
+            0 => Ok(()),
+            code => Err(format!("compat-scan exited with status {code}")),
+        },
         "snes-scan" => match snes_scan::run(rest) {
             0 => Ok(()),
             code => Err(format!("snes-scan exited with status {code}")),

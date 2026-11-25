@@ -1,10 +1,12 @@
 const REPO = "https://github.com/lordra9-svg/unko";
 const CATALOG_URL = "games.json";
+const PAGE_SIZE = 200;
 
 const state = {
   query: "",
   status: "all",
   open: true,
+  visible: {},
   data: null,
 };
 
@@ -47,6 +49,7 @@ function matches(game) {
   }
   const haystack = [
     game.title,
+    game.format,
     game.region,
     game.revision,
     game.mapping,
@@ -109,7 +112,7 @@ function renderTable(system, games) {
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const headRow = document.createElement("tr");
-  for (const label of ["Game", "Region", "Mapping", "Status", "Evidence", ""]) {
+  for (const label of ["Game", "Format", "Region", "Mapping", "Status", "Evidence", ""]) {
     const th = document.createElement("th");
     th.scope = "col";
     th.textContent = label;
@@ -136,6 +139,7 @@ function renderTable(system, games) {
     }
     row.append(gameCell);
 
+    addCell(row, game.format || "—");
     addCell(row, game.region || "—");
     addCell(row, game.mapping || "—");
 
@@ -232,7 +236,20 @@ function renderSystems() {
         "No per-game reports yet. Use “Report a game” to add the first one, or run the test command above.";
       body.append(empty);
     } else {
-      body.append(renderTable(system, systemGames));
+      const visible = state.visible[system.id] ?? PAGE_SIZE;
+      body.append(renderTable(system, systemGames.slice(0, visible)));
+      if (systemGames.length > visible) {
+        const more = document.createElement("button");
+        more.type = "button";
+        more.className = "button";
+        more.style.marginTop = "12px";
+        more.textContent = `Show next ${PAGE_SIZE} (${systemGames.length - visible} remaining)`;
+        more.addEventListener("click", () => {
+          state.visible[system.id] = visible + PAGE_SIZE;
+          render();
+        });
+        body.append(more);
+      }
     }
     details.append(body);
     el.systems.append(details);
@@ -281,10 +298,12 @@ async function boot() {
 
   el.search.addEventListener("input", () => {
     state.query = el.search.value.trim().toLowerCase();
+    state.visible = {};
     render();
   });
   el.status.addEventListener("change", () => {
     state.status = el.status.value;
+    state.visible = {};
     render();
   });
   el.expand.addEventListener("click", () => {

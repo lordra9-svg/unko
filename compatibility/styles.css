@@ -72,7 +72,7 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accen
 .test-command { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 9px; background: var(--panel-2); }
 .test-command code { color: #c9d5e8; overflow-wrap: anywhere; }
 .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
-table { width: 100%; border-collapse: collapse; min-width: 760px; }
+table { width: 100%; border-collapse: collapse; min-width: 900px; }
 th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 th { position: sticky; top: 78px; z-index: 2; background: #111621; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 tbody tr:hover { background: rgba(110,168,254,.05); }

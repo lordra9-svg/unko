@@ -22,6 +22,7 @@ body:
         - Famicom Disk System
         - SNES / Super Famicom
         - Nintendo 64
+        - Nintendo 64DD
         - Other / frontend issue
     validations:
       required: true

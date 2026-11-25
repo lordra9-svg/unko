@@ -98,10 +98,20 @@ The 500-image sample is deduplicated by SHA-256, includes strict and lenient
 headers, and is a boot/load smoke sweep rather than a pixel/audio oracle:
 [`docs/snes-library-scan.md`](docs/snes-library-scan.md).
 
+Full No-Intro import (2026-11-25, 21,983 archives, 30-frame smoke):
+
+| Supported runs / verified | Load/run failures | Unsupported formats | Page |
+|---:|---:|---:|---|
+| 14,207 | 329 | 7,447 | [`Compatibility tracker`](https://lordra9-svg.github.io/unko/) |
+
+Details: [`docs/library-scan.md`](docs/library-scan.md).
+
 Details: [`docs/accuracy-status.md`](docs/accuracy-status.md),
 [`docs/accuracy-divergences.md`](docs/accuracy-divergences.md),
 [`docs/snes-accuracy-divergences.md`](docs/snes-accuracy-divergences.md),
 [`docs/snes-library-scan.md`](docs/snes-library-scan.md),
+[`docs/library-scan.md`](docs/library-scan.md),
+[`compatibility/README.md`](compatibility/README.md),
 [`docs/compatibility.md`](docs/compatibility.md),
 [`docs/mapper-audit.md`](docs/mapper-audit.md),
 [`docs/test-rom-inventory.md`](docs/test-rom-inventory.md),

@@ -4798,7 +4798,12 @@ dependencies = [
  "sha2",
  "tar",
  "toml",
+ "unko-core",
+ "unko-n64-host",
+ "unko-nes-api",
+ "unko-nes-host",
  "unko-snes",
+ "unko-snes-host",
  "zip",
 ]
 

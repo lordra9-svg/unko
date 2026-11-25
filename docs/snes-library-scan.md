@@ -1,6 +1,8 @@
 # SNES library scan — 500 ROMs (2026-11-25)
 
 This is a **load-and-run smoke sweep**, not a pixel/audio accuracy oracle. The
+full No-Intro import (all SNES images plus NES/FDS/N64 sets) is recorded in
+[`library-scan.md`](library-scan.md). The
 reference gates (ares differential frames and the 600-frame audio gate) remain
 the accuracy evidence in
 [`snes-accuracy-divergences.md`](snes-accuracy-divergences.md) and the root

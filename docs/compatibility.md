@@ -10,6 +10,16 @@ This page remains the system-level evidence summary for the NES core and
 desktop shell. It is deliberately evidence-based: a check mark means a public
 test, a synthetic test, or a smoke audit covers it; a dash means no verdict yet.
 
+## Full No-Intro import (2026-11-25)
+
+The local Myrient No-Intro set was copied to `refs/Minerva_Myrient` and audited
+against the per-system No-Intro DATs. The catalog now has **21,983 archive
+entries** across NES Headered/Headerless, Famicom Disk System (FDS/QD), SNES,
+Nintendo 64 (BigEndian/ByteSwapped) and Nintendo 64DD. DAT-matched archives use
+the No-Intro game name; unmatched archives keep their existing Myrient name.
+Aggregate audit/rename/smoke results are in
+[`library-scan.md`](library-scan.md).
+
 ## Compatibility levels
 
 | Level | Meaning |
