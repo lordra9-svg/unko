@@ -1,6 +1,6 @@
 const REPO = "https://github.com/lordra9-svg/unko";
 const CATALOG_URL = "games.json";
-const ACCURACY_URL = "accuracy.jsonl";
+const ACCURACY_URLS = ["accuracy.jsonl", "accuracy-ares.jsonl"];
 const PAGE_SIZE = 200;
 
 const state = {
@@ -153,21 +153,34 @@ function renderTable(system, games) {
     row.append(statusCell);
 
     const accuracyCell = document.createElement("td");
-    if (game.accuracy && game.accuracy.status === "ok") {
-      accuracyCell.className = "accuracy";
-      const value = document.createElement("strong");
-      value.textContent = `${game.accuracy.geometry_pct.toFixed(2)}%`;
-      const detail = document.createElement("small");
-      detail.textContent = game.accuracy.steady_geometry_pct == null
-        ? "video"
-        : `video · steady ${game.accuracy.steady_geometry_pct.toFixed(2)}%`;
-      accuracyCell.append(value, detail);
-    } else if (game.accuracy && game.accuracy.status !== "ok") {
-      accuracyCell.className = "muted";
-      accuracyCell.textContent = "error";
-    } else {
+    const records = game.accuracy ? Object.entries(game.accuracy) : [];
+    if (records.length === 0) {
       accuracyCell.className = "muted";
       accuracyCell.textContent = "—";
+    } else {
+      const labels = { rustynes: "R", ares: "A", unknown: "?" };
+      let shown = false;
+      for (const [oracle, record] of records) {
+        if (record.status !== "ok") continue;
+        const line = document.createElement("div");
+        const value = document.createElement("strong");
+        const match = record.best_geometry_pct ?? record.geometry_pct;
+        value.textContent = `${labels[oracle] ?? oracle} ${match.toFixed(2)}%`;
+        value.title = `${oracle}: palette-independent geometry ${match.toFixed(2)}% (shift ${record.best_shift ?? 0})`;
+        const detail = document.createElement("small");
+        detail.textContent = record.steady_geometry_pct == null
+          ? "video"
+          : `steady ${record.steady_geometry_pct.toFixed(2)}%`;
+        line.append(value, detail);
+        accuracyCell.append(line);
+        shown = true;
+      }
+      if (!shown) {
+        accuracyCell.className = "muted";
+        accuracyCell.textContent = "error";
+      } else {
+        accuracyCell.className = "accuracy";
+      }
     }
     row.append(accuracyCell);
 
@@ -291,21 +304,26 @@ function render() {
 
 async function loadAccuracy() {
   const map = new Map();
-  try {
-    const response = await fetch(ACCURACY_URL, { cache: "no-store" });
-    if (!response.ok) return map;
-    const text = await response.text();
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const row = JSON.parse(line);
-        if (row.sha256) map.set(row.sha256, row);
-      } catch {
-        // A truncated last line during a live run is not a page error.
+  for (const url of ACCURACY_URLS) {
+    try {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) continue;
+      const text = await response.text();
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const row = JSON.parse(line);
+          if (!row.sha256) continue;
+          const byOracle = map.get(row.sha256) ?? {};
+          byOracle[row.oracle || "unknown"] = row;
+          map.set(row.sha256, byOracle);
+        } catch {
+          // A truncated last line during a live run is not a page error.
+        }
       }
+    } catch {
+      // An oracle ledger is optional until that stage starts.
     }
-  } catch {
-    // The accuracy ledger is optional until the first run starts.
   }
   return map;
 }

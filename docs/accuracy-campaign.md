@@ -47,6 +47,28 @@ geometry is never exactly 100% because the first boot frames differ; that is
 why the steady window starts at frame 30. Headerless NES images remain
 **Unsupported** because they have no iNES header to load.
 
+## Second NES oracle: ares (wired, deferred)
+
+The local ares capture build now emits a fourth trace field:
+`frame N <rgba> <audio> <geometry>`. The geometry hash is the same
+first-appearance RGBA index hash used by `unko trace`, so the page can compare
+ares and RustyNES on the same metric.
+
+The ares host runs through:
+
+```sh
+python3 tools/ares-nes-accuracy/run_nes.py [limit]
+```
+
+It uses `ARES_SYSTEM=Famicom`, `ARES_AUDIO_RATE=44100`, 120 frames and a
+-3..3 frame alignment search; records append to
+`compatibility/accuracy-ares.jsonl`. It is smoke-tested on three ROMs but the
+full pass is deliberately deferred until after the SNES stage. At ~2.7 s/ROM,
+7,101 headered NES images are roughly six hours.
+
+ares audio is not scored: its host stream is resampled/filtered differently
+from our f32 output.
+
 ## SNES stage — pending
 
 The SNES oracle is the calibrated ares capture pipeline in
