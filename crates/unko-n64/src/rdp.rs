@@ -125,6 +125,10 @@ pub struct Rdp {
     key_width: [u16; 3],
     key_center: [u8; 3],
     key_scale: [u8; 3],
+    convert: [u16; 6],
+    prim_lod_frac: u8,
+    min_level: u8,
+    lod_fraction: u8,
     noise: u32,
 }
 
@@ -167,6 +171,10 @@ impl Rdp {
             key_width: [0; 3],
             key_center: [0; 3],
             key_scale: [0; 3],
+            convert: [0; 6],
+            prim_lod_frac: 0,
+            min_level: 0,
+            lod_fraction: 0xFF,
             noise: 0x1234_5678,
         }
     }
@@ -284,7 +292,17 @@ impl Rdp {
                         t_shift: ((command >> 10) & 0xF) as u8,
                     };
                 }
-                0x3A => self.primitive_color = command as u32,
+                0x3A => {
+                    self.primitive_color = command as u32;
+                    self.min_level = ((command >> 40) & 0x1F) as u8;
+                    self.prim_lod_frac = ((command >> 32) & 0xFF) as u8;
+                }
+                0x2C => {
+                    // K5 occupies bits 0:8, K4 9:17, ..., K0 45:53.
+                    for (index, slot) in self.convert.iter_mut().enumerate() {
+                        *slot = ((command >> ((5 - index) * 9)) & 0x1FF) as u16;
+                    }
+                }
                 0x3B => self.environment_color = command as u32,
                 0x3C => self.combine_mode = command,
                 0x39 => self.blend_color = command as u32,
@@ -500,6 +518,7 @@ impl Rdp {
             .and_then(|coords| self.sample_texture_coords(&coords, x, y, origin, rdram))
             .unwrap_or(color);
         let combined = if self.combine_mode != 0 {
+            let noise = self.next_noise();
             combine(
                 self.combine_mode,
                 shade,
@@ -509,6 +528,10 @@ impl Rdp {
                 self.key_center,
                 self.key_scale,
                 self.key_width,
+                self.convert,
+                self.prim_lod_frac,
+                self.lod_fraction,
+                noise,
                 modes.cycle == 1,
                 modes.key_enable,
             )
@@ -1092,6 +1115,11 @@ struct CombinerValues {
     shade: u32,
     key_center: [u8; 3],
     key_scale: [u8; 3],
+    noise: i32,
+    lod_frac: i32,
+    prim_lod_frac: i32,
+    convert_k4: i32,
+    convert_k5: i32,
 }
 
 fn combiner_rgb(field: u32, selector: u32, index: usize, values: &CombinerValues) -> i32 {
@@ -1109,6 +1137,7 @@ fn combiner_rgb(field: u32, selector: u32, index: usize, values: &CombinerValues
             4 => shade,
             5 => environment,
             6 => 255,
+            7 => values.noise,
             _ => 0,
         },
         // RGB B (mulsub); 6 = key centre, 7 = convert K4.
@@ -1119,6 +1148,7 @@ fn combiner_rgb(field: u32, selector: u32, index: usize, values: &CombinerValues
             4 => shade,
             5 => environment,
             6 => i32::from(values.key_center[index]),
+            7 => values.convert_k4,
             _ => 0,
         },
         // RGB C (multiplier); 6 = key scale, 7.. = alpha sources.
@@ -1134,6 +1164,9 @@ fn combiner_rgb(field: u32, selector: u32, index: usize, values: &CombinerValues
             10 => channel(values.primitive, 3),
             11 => channel(values.shade, 3),
             12 => channel(values.environment, 3),
+            13 => values.lod_frac,
+            14 => values.prim_lod_frac,
+            15 => values.convert_k5,
             _ => 0,
         },
         // RGB D (add)
@@ -1149,7 +1182,19 @@ fn combiner_rgb(field: u32, selector: u32, index: usize, values: &CombinerValues
     }
 }
 
-fn combiner_alpha(selector: u32, values: &CombinerValues) -> i32 {
+fn combiner_alpha(field: u32, selector: u32, values: &CombinerValues) -> i32 {
+    if field == 2 {
+        // Alpha multiplier: 0 = LOD fraction, 6 = primitive LOD fraction.
+        return match selector & 0x7 {
+            0 => values.lod_frac,
+            1 | 2 => channel(values.texel, 3),
+            3 => channel(values.primitive, 3),
+            4 => channel(values.shade, 3),
+            5 => channel(values.environment, 3),
+            6 => values.prim_lod_frac,
+            _ => 0,
+        };
+    }
     match selector & 0x7 {
         0 => channel(values.combined, 3),
         1 | 2 => channel(values.texel, 3),
@@ -1186,10 +1231,10 @@ fn combine_cycle(
         let value = (((av - bv) * cv + 0x80) >> 8) + dv;
         rgb |= (value.clamp(0, 255) as u32) << (24 - index * 8);
     }
-    let av = combiner_alpha(aa, values);
-    let bv = combiner_alpha(ab, values);
-    let cv = combiner_alpha(ac, values);
-    let dv = combiner_alpha(ad, values);
+    let av = combiner_alpha(0, aa, values);
+    let bv = combiner_alpha(1, ab, values);
+    let cv = combiner_alpha(2, ac, values);
+    let dv = combiner_alpha(3, ad, values);
     let alpha = ((((av - bv) * cv + 0x80) >> 8) + dv).clamp(0, 255) as u8;
     (rgb | u32::from(alpha), alpha, accumulators)
 }
@@ -1224,6 +1269,10 @@ fn combine(
     key_center: [u8; 3],
     key_scale: [u8; 3],
     key_width: [u16; 3],
+    convert: [u16; 6],
+    prim_lod_frac: u8,
+    lod_fraction: u8,
+    noise: u8,
     two_cycle: bool,
     key_enable: bool,
 ) -> u32 {
@@ -1235,6 +1284,11 @@ fn combine(
         shade,
         key_center,
         key_scale,
+        noise: i32::from(noise),
+        lod_frac: i32::from(lod_fraction),
+        prim_lod_frac: i32::from(prim_lod_frac),
+        convert_k4: i32::from(convert[4]),
+        convert_k5: i32::from(convert[5]),
     };
     let (cycle0, _alpha0, acc0) = combine_cycle(
         ((mode >> 52) & 0xF) as u32,
@@ -1510,6 +1564,10 @@ mod tests {
             center,
             scale,
             width,
+            [0; 6],
+            0,
+            0xFF,
+            0,
             false,
             true,
         );
@@ -1524,6 +1582,10 @@ mod tests {
             center,
             scale,
             width,
+            [0; 6],
+            0,
+            0xFF,
+            0,
             false,
             true,
         );

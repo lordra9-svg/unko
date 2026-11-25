@@ -17,7 +17,8 @@ selectors (pixel/memory/blend/fog colour and alpha), force blend, copy-cycle
 bypass, fog, coverage modes driven by the exact 8-bit subpixel AA mask, RGB
 dithering, alpha compare (blend-alpha or dithered threshold) and chroma keying
 from the exact 17-bit combiner accumulator, with `SET_KEY_GB`/`SET_KEY_R`
-centres/scales available as combiner inputs. It
+centres/scales and the noise, Convert K4/K5, LOD-fraction and PrimLODFrac
+combiner sources. It
 models the AI register block:
 `AI_LEN` queues double-buffered DMAs of 16-bit stereo pairs from RDRAM; samples
 are read on demand as the DAC clock consumes them, buffer completion raises the

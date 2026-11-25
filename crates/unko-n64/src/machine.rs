@@ -736,6 +736,69 @@ mod tests {
 
     #[test]
     #[allow(clippy::vec_init_then_push)]
+    fn rdp_combiner_k4_k5_lod_and_noise_inputs() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        let origin = 0x2000u32;
+        machine.write_register(0x0440_0004, origin);
+        machine.write_register(0x0440_0008, 32);
+        let vertices_a = [(4.0, 4.0), (10.0, 6.0), (4.0, 12.0)];
+        let vertices_b = [(14.0, 4.0), (20.0, 6.0), (14.0, 12.0)];
+        let vertices_c = [(24.0, 4.0), (30.0, 6.0), (24.0, 12.0)];
+        let alpha_one = 6u64 << 9;
+        let white = (0x3Au64 << 56) | 0xFFFF_FFFF;
+
+        let mut words: Vec<u64> = Vec::new();
+        words.push(
+            (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (32u64 << 32) | u64::from(origin),
+        );
+        words.push((0x37u64 << 56) | 0x0000_00FF); // black
+        words.push((0x36u64 << 56) | (31u64 << 12) | 31);
+        words.push((0x2Fu64 << 56) | (0xCu64 << 36)); // 1-cycle, dither off
+                                                      // Convert K5 = 0x80 and use it as the multiplier.
+        words.push((0x2Cu64 << 56) | 0x80u64);
+        let combine = (6u64 << 52) | (8u64 << 28) | (15u64 << 47) | (7u64 << 15) | alpha_one;
+        words.push((0x3Cu64 << 56) | combine);
+        words.push(white);
+        words.extend(triangle_edge(0x08, vertices_a));
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("K5 combiner");
+        assert_eq!(frame_pixel(&machine, 5, 9), [132, 132, 132, 0xFF]);
+
+        // Convert K4 = 0x40 subtracted, multiplied by PrimLODFrac = 0xFF.
+        let mut words: Vec<u64> = Vec::new();
+        words.push((0x2Cu64 << 56) | (0x40u64 << 9));
+        words.push((0x3Au64 << 56) | (0xFFu64 << 32) | 0xFFFF_FFFF);
+        let combine = (6u64 << 52) | (7u64 << 28) | (14u64 << 47) | (7u64 << 15) | alpha_one;
+        words.push((0x3Cu64 << 56) | combine);
+        words.extend(triangle_edge(0x08, vertices_b));
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("K4 combiner");
+        assert_eq!(frame_pixel(&machine, 15, 9), [189, 189, 189, 0xFF]);
+
+        // PrimLODFrac = 0x40 as the multiplier.
+        let mut words: Vec<u64> = Vec::new();
+        words.push((0x3Au64 << 56) | (0x40u64 << 32) | 0xFFFF_FFFF);
+        let combine = (6u64 << 52) | (8u64 << 28) | (14u64 << 47) | (7u64 << 15) | alpha_one;
+        words.push((0x3Cu64 << 56) | combine);
+        words.extend(triangle_edge(0x08, vertices_c));
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("PrimLOD combiner");
+        assert_eq!(frame_pixel(&machine, 25, 9), [66, 66, 66, 0xFF]);
+
+        // Noise source: adjacent pixels differ.
+        let mut words: Vec<u64> = Vec::new();
+        words.push((0x3Au64 << 56) | (0xFFu64 << 32) | 0xFFFF_FFFF);
+        let combine = (7u64 << 52) | (8u64 << 28) | (14u64 << 47) | (7u64 << 15) | alpha_one;
+        words.push((0x3Cu64 << 56) | combine);
+        words.extend(triangle_edge(0x08, vertices_a));
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("noise combiner");
+        assert_ne!(frame_pixel(&machine, 5, 9), frame_pixel(&machine, 6, 9));
+    }
+
+    #[test]
+    #[allow(clippy::vec_init_then_push)]
     fn rdp_chroma_key_masks_matching_pixels() {
         let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
         let mut machine = Machine::new(&cart);
@@ -894,14 +957,14 @@ mod tests {
         words.push((0x32u64 << 56) | (3u64 << 12) | 3);
         // Combiner: cycle0 = texture, cycle1 = pass-through of cycle0.
         // 1-cycle texel passthrough: A=Texel0, B=0, C=Texel0Alpha, D=0;
-        // alpha A=Texel0Alpha, B=0, C=One, D=0.
+        // alpha A=One, B=0, C=Texel0Alpha, D=0.
         let combine = (1u64 << 52)
             | (8u64 << 28)
             | (8u64 << 47)
             | (7u64 << 15)
-            | (1u64 << 44)
+            | (6u64 << 44)
             | (7u64 << 12)
-            | (6u64 << 41)
+            | (1u64 << 41)
             | (7u64 << 9);
         words.push((0x3Cu64 << 56) | combine);
         words.push(

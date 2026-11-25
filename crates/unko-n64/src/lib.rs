@@ -8,7 +8,8 @@
 //! and rasterises unshaded/shaded/textured triangles ([`rdp::Rdp`]) with the
 //! RDP edgewalker, two-cycle combiner and the SET_OTHER_MODES blender
 //! (cycle/copy, fog, exact subpixel coverage, dither, alpha compare and the
-//! full combiner input table with accumulator-based chroma key), presents the VI
+//! full combiner input table including noise, Convert K4/K5, LOD fractions
+//! and accumulator-based chroma key), presents the VI
 //! framebuffer from
 //! RDRAM and runs DAC-clocked double-buffered AI DMA with boundary interrupts
 //! and host-rate resampling ([`ai::Ai`]). CI/TLUT palettes and
