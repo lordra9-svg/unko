@@ -13924,3 +13924,33 @@ Making one configuration exact for all seven therefore requires bit-exact
 placement of every refresh/DMA/access edge over the whole run so the phase
 never wanders, which is a full CPU-timing-fidelity effort rather than a local
 fix or constant.
+
+## Address-aligned bisection continued: phase changes between 20M and 30M (2026-11-24)
+
+Same address-aligned matcher (best shift, then clock-delta histogram over
+matching addresses), wider windows where a 20k window falls in a long no-access
+interval:
+
+| window | shift | matched | base delta | refresh variant |
+|---|---|---|---|---|
+| boot | +6 | 6368/6368 | 0 | -40 |
+| 1M | -6 | 1991 | +54 | +94 |
+| 10M | -4 | 2087/2093 | +46 | +86 |
+| 20M | -5 | 2091/2095 | +46 | +86 |
+| 30M | 0 | 186943/190857 | -8 | -48 |
+| 83M | +4 | 26666/35098 | -22 | -62 |
+
+The base phase is +46 through 20M, then -8 at 30M (-54 change), then -22 at
+83M. It changes repeatedly, not once. (30M needed a 2M-wide capture window
+because the narrow window fell inside a long DMA/no-CPU-access interval, and its
+97.9% address match makes the -8 measurement reliable; the 83M 76% match is
+less certain.)
+
+So the S-CPU phase relative to ares is not a single insertion and not a single
+persistent constant: it wanders (0 -> +54 -> +46 -> -8 -> -22) as refresh/DMA
+edges land on different bus accesses. Aligning one placement cannot make the
+whole run exact; the 887,720 boundary is simply one place where the wandering
+phase crosses an interrupt boundary.
+
+The data is in /tmp/opencode/{our,ares}-{1000000,10000000,20000000,30000000}.log
+and {def,ares}-bus-full.log.
