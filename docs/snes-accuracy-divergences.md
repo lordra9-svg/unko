@@ -13623,3 +13623,33 @@ Audio is unchanged by the DMA fix (the boot transfer is not in the audio path
 after init): `SNES_CO_SCHED` remains non-exact (mmx2 69.2269%, cv4 89.1410%,
 ct 29.2237%). Default driver re-verified: MMX2 0 differing and
 `SNES_DSP_PRIME=0` Zelda 0 differing; 272 tests pass.
+
+## What lives between IPL counters `0x75` and `0x76` (2026-11-24)
+
+A same-run ares CPU bus log (`ARES_BUSLOG2`, window `83,560,000-83,590,000`)
+rules out a DMA in the 5,742-clock gap. There is **no `$420B` write** in the
+window. The S-CPU instead:
+
+1. writes the `$2140`/`$2141` pair for counter `0x75` at `83,572,710/716`;
+2. executes `$83F3`, pushing `$013A-$013D` (a `JSR` return frame) at
+   `83,573,208-232`;
+3. runs a WRAM routine at `$7E2003-$7E233E`, writing `$2100`, `$212C`,
+   `$212D`, `$4207`, `$4209`, `$09CE`, `$09D0`, `$012F`, `$0130`;
+4. is silent for ~33,300 clocks (a frame wait), then writes WRAM
+   `$00AA-$00B3` at `$7E25AD-$7E25DB`;
+5. returns to `$83F6` and writes counter `0x76` at `83,578,874`.
+
+So counter `0x75` ends a 0x76-byte packet; the per-packet routine and the frame
+wait sit between `0x75` and `0x76`.
+
+Our driver writes `0x76` only 508 clocks after `0x75` (`83,572,694 ->
+83,573,202`) and does not run the packet routine between them: our S-CPU treats
+`0x76` as the next byte of the same packet. The packet boundary is therefore
+shifted by one byte. This is an S-CPU packet-counter/branch difference driven
+by the preceding `$2140` poll/ack sequence, not a DMA placement or an S-SMP
+instruction-ordering error (the S-SMP PCs and `aresSmpMono` clocks are equal
+through 887,719).
+
+Log: `/tmp/opencode/ares-bus.log` (regenerate with
+`ARES_BUSLOG2=... ARES_BUSLOG2_FROM=83560000 ARES_BUSLOG2_TO=83590000
+tools/snes-oracle/ares-capture.sh "<MMX2>" 240 <outdir>`).
