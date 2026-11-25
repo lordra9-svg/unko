@@ -10,7 +10,19 @@ use unko_core::{
     AudioBuffer, Core, CoreError, CoreInfo, FrameBuffer, FrameStats, InputState, LoadOptions,
 };
 use unko_nes_api::{NesCore, VideoFilter};
+use unko_snes_api::{CpuState, DspState, PpuState};
 use unko_snes_host::{FirmwareKind, SnesCore};
+
+/// SNES debugger snapshots for the loaded machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SnesDebugView {
+    /// 65C816 registers.
+    pub cpu: CpuState,
+    /// S-PPU position and display state.
+    pub ppu: PpuState,
+    /// S-DSP register file.
+    pub dsp: DspState,
+}
 
 /// iNES magic; anything else with a valid SNES header is treated as SNES.
 const INES_MAGIC: &[u8] = b"NES\x1a";
@@ -54,6 +66,24 @@ impl SnesAdapter {
     #[must_use]
     pub fn inner(&self) -> &SnesCore {
         &self.inner
+    }
+
+    /// SNES debugger snapshots, when a cartridge is loaded.
+    #[must_use]
+    pub fn snes_debug(&self) -> Option<SnesDebugView> {
+        use unko_snes_api::SnesCore as _;
+        Some(SnesDebugView {
+            cpu: self.inner.debug_cpu()?,
+            ppu: self.inner.debug_ppu()?,
+            dsp: self.inner.debug_dsp()?,
+        })
+    }
+
+    /// Reads a byte from a SNES debug address space.
+    #[must_use]
+    pub fn snes_debug_peek(&self, space: unko_snes_api::DebugSpace, address: u32) -> Option<u8> {
+        use unko_snes_api::SnesCore as _;
+        self.inner.debug_peek(space, address)
     }
 }
 
@@ -114,6 +144,10 @@ impl Core for SnesAdapter {
 }
 
 impl NesCore for SnesAdapter {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn set_video_filter(&mut self, _filter: VideoFilter) {}
 
     fn frame_rate(&self) -> f64 {

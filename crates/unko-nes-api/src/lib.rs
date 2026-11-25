@@ -244,6 +244,9 @@ pub trait NesCore: Core {
         60.0988
     }
 
+    /// Downcast hook for system-specific extension surfaces.
+    fn as_any(&self) -> &dyn std::any::Any;
+
     /// Reborrows this machine through the generic [`Core`] interface.
     ///
     /// Used when a generic helper (netplay, tracing, hashing) expects

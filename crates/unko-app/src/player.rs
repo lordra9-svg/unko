@@ -2157,6 +2157,15 @@ impl Player {
     pub fn sample_rate(&self) -> f32 {
         self.sample_rate
     }
+
+    /// SNES-only debugger snapshots, when a SNES title is loaded.
+    #[must_use]
+    pub fn snes_debug(&self) -> Option<crate::snes::SnesDebugView> {
+        self.core
+            .as_any()
+            .downcast_ref::<crate::snes::SnesAdapter>()?
+            .snes_debug()
+    }
 }
 
 /// Parses a region string from the UI.
@@ -2631,6 +2640,10 @@ mod tests {
         assert_eq!(player.core_id, "snes_accuracy_core");
         player.core.run_frame().expect("frame");
         assert_eq!(player.core.video().width, 256);
+        let debug = player.snes_debug().expect("SNES debug snapshots");
+        assert_eq!(debug.ppu.width, 256);
+        assert!(debug.dsp.samples > 0);
+        assert_eq!(debug.cpu.pbr, 0);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -2703,11 +2716,19 @@ mod tests {
             }
         }
         fs::write(&out, &bytes).expect("write audio");
+        let debug = player.snes_debug();
         println!(
-            "wrote {out} frames={frames} core={} video={}x{}",
+            "wrote {out} frames={frames} core={} video={}x{} debug={}",
             player.core_id,
             player.core.video().width,
-            player.core.video().height
+            player.core.video().height,
+            debug.map_or_else(
+                || "none".to_owned(),
+                |view| format!(
+                    "cpu={:02X}:{:04X} ppu line={} dot={} dsp_samples={}",
+                    view.cpu.pbr, view.cpu.pc, view.ppu.line, view.ppu.dot, view.dsp.samples
+                )
+            )
         );
     }
 }

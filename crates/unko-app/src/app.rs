@@ -4281,6 +4281,8 @@ impl eframe::App for App {
                     for action in actions {
                         player.apply_debug(action, ctx);
                     }
+                } else if let Some(view) = player.snes_debug() {
+                    snes_debugger_window(ctx, &mut player.debug, &view);
                 }
             }
         } else {
@@ -4354,6 +4356,51 @@ impl App {
         }
         let _ = self.settings.save(&Settings::path());
     }
+}
+
+/// Minimal SNES debugger window: CPU registers, PPU position and DSP state.
+fn snes_debugger_window(
+    ctx: &egui::Context,
+    debug: &mut crate::debugger::Debugger,
+    view: &crate::snes::SnesDebugView,
+) {
+    egui::Window::new("SNES Debugger")
+        .open(&mut debug.open)
+        .default_pos(egui::pos2(60.0, 60.0))
+        .resizable(false)
+        .show(ctx, |ui| {
+            ui.label(format!(
+                "CPU  A={:04X} X={:04X} Y={:04X} S={:04X} D={:04X}",
+                view.cpu.a, view.cpu.x, view.cpu.y, view.cpu.s, view.cpu.d
+            ));
+            ui.label(format!(
+                "     PC={:02X}:{:04X} P={:02X} {} cycles={}",
+                view.cpu.pbr,
+                view.cpu.pc,
+                view.cpu.p,
+                if view.cpu.emulation { "E" } else { "N" },
+                view.cpu.cycles
+            ));
+            ui.separator();
+            ui.label(format!(
+                "PPU  line={} dot={} {}x{} hires={} vblank={}",
+                view.ppu.line,
+                view.ppu.dot,
+                view.ppu.width,
+                view.ppu.height,
+                view.ppu.hires,
+                view.ppu.vblank
+            ));
+            ui.label(format!(
+                "     brightness={} forced_blank={} frame={}",
+                view.ppu.brightness, view.ppu.forced_blank, view.ppu.frame
+            ));
+            ui.separator();
+            ui.label(format!(
+                "DSP  {} Hz, {} samples",
+                view.dsp.sample_rate, view.dsp.samples
+            ));
+        });
 }
 
 /// One editable path row for user-supplied firmware.

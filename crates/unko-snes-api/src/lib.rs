@@ -13,6 +13,10 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod debug;
+
+pub use debug::{CpuState, DebugSpace, Disassembly, DspState, PpuState};
+
 use unko_core::Core;
 
 /// SNES controller bit for each button (`$4218-$421F` order).
@@ -159,6 +163,31 @@ pub trait SnesCore: Core {
     /// Whether this core implements the debugger hooks.
     fn debug_supported(&self) -> bool {
         false
+    }
+
+    /// Snapshot of the 65C816 registers.
+    fn debug_cpu(&self) -> Option<CpuState> {
+        None
+    }
+
+    /// Snapshot of the S-PPU position and display state.
+    fn debug_ppu(&self) -> Option<PpuState> {
+        None
+    }
+
+    /// Snapshot of the S-DSP register file.
+    fn debug_dsp(&self) -> Option<DspState> {
+        None
+    }
+
+    /// Reads one byte from a debug address space.
+    fn debug_peek(&self, _space: DebugSpace, _address: u32) -> Option<u8> {
+        None
+    }
+
+    /// Decodes one instruction for a disassembly listing.
+    fn debug_disassemble(&self, _address: u32) -> Option<Disassembly> {
+        None
     }
 }
 

@@ -437,6 +437,10 @@ impl Core for AccuracyCore {
 }
 
 impl NesCore for AccuracyCore {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn load_fds(
         &mut self,
         disk: &[u8],

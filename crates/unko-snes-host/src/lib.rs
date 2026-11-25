@@ -296,6 +296,90 @@ impl unko_snes_api::SnesCore for SnesCore {
     fn frame_rate(&self) -> f64 {
         self.region().frame_rate()
     }
+
+    fn debug_supported(&self) -> bool {
+        self.system.is_some()
+    }
+
+    fn debug_cpu(&self) -> Option<unko_snes_api::CpuState> {
+        let system = self.system.as_ref()?;
+        let cpu = &system.cpu;
+        let flags = cpu.flags;
+        let p = u8::from(flags.carry)
+            | (u8::from(flags.zero) << 1)
+            | (u8::from(flags.irq_disable) << 2)
+            | (u8::from(flags.decimal) << 3)
+            | (u8::from(flags.index_8) << 4)
+            | (u8::from(flags.mem_8) << 5)
+            | (u8::from(flags.overflow) << 6)
+            | (u8::from(flags.negative) << 7);
+        Some(unko_snes_api::CpuState {
+            a: cpu.a,
+            x: cpu.x,
+            y: cpu.y,
+            s: cpu.s,
+            d: cpu.d,
+            pbr: cpu.pbr,
+            dbr: cpu.dbr,
+            pc: cpu.pc,
+            p,
+            emulation: cpu.emulation,
+            cycles: cpu.cycles,
+        })
+    }
+
+    fn debug_ppu(&self) -> Option<unko_snes_api::PpuState> {
+        let system = self.system.as_ref()?;
+        let ppu = &system.ppu;
+        Some(unko_snes_api::PpuState {
+            frame: ppu.debug_frame,
+            line: ppu.line(),
+            dot: ppu.dot(),
+            width: ppu.frame_width() as u32,
+            height: ppu.frame_height() as u32,
+            hires: ppu.frame_hires(),
+            vblank: ppu.in_vblank(),
+            brightness: ppu.display_brightness(),
+            forced_blank: ppu.display_disable(),
+        })
+    }
+
+    fn debug_dsp(&self) -> Option<unko_snes_api::DspState> {
+        let system = self.system.as_ref()?;
+        let dsp = system.apu.dsp();
+        Some(unko_snes_api::DspState {
+            sample_rate: SAMPLE_RATE as u32,
+            samples: dsp.samples_run(),
+            registers: dsp.registers,
+        })
+    }
+
+    fn debug_peek(&self, space: unko_snes_api::DebugSpace, address: u32) -> Option<u8> {
+        let system = self.system.as_ref()?;
+        let address = space.clamp(address);
+        Some(match space {
+            unko_snes_api::DebugSpace::Wram => system.wram()[address as usize],
+            unko_snes_api::DebugSpace::Vram => {
+                let word = system.ppu.vram_word((address >> 1) as u16);
+                if address & 1 == 0 {
+                    word as u8
+                } else {
+                    (word >> 8) as u8
+                }
+            }
+            unko_snes_api::DebugSpace::Oam => system.ppu.oam()[address as usize],
+            unko_snes_api::DebugSpace::Cgram => {
+                let word = system.ppu.cgram_word((address >> 1) as u8);
+                if address & 1 == 0 {
+                    word as u8
+                } else {
+                    (word >> 8) as u8
+                }
+            }
+            unko_snes_api::DebugSpace::ApuRam => system.apu.ram()[address as usize],
+            unko_snes_api::DebugSpace::DspRegisters => system.apu.dsp().registers[address as usize],
+        })
+    }
 }
 
 /// Whether `bytes` parses as an SNES cartridge image.
@@ -371,6 +455,30 @@ mod tests {
         let mut b = Vec::new();
         core.save_state(&mut b).expect("save again");
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn debug_snapshots_describe_the_machine() {
+        use unko_snes_api::SnesCore as _;
+        let mut core = SnesCore::new();
+        core.load(&build_lorom(0x8000), &LoadOptions::default())
+            .expect("load");
+        assert!(core.debug_supported());
+        let cpu = core.debug_cpu().expect("cpu");
+        assert!(cpu.emulation, "reset starts in emulation mode");
+        assert_eq!((cpu.pbr, cpu.pc), (0, 0x8000));
+        let ppu = core.debug_ppu().expect("ppu");
+        assert_eq!(ppu.width, 256);
+        let dsp = core.debug_dsp().expect("dsp");
+        assert_eq!(dsp.sample_rate, 32_040);
+        assert_eq!(dsp.registers.len(), 128);
+        assert!(core
+            .debug_peek(unko_snes_api::DebugSpace::Wram, 0)
+            .is_some());
+        assert!(core
+            .debug_peek(unko_snes_api::DebugSpace::ApuRam, 0)
+            .is_some());
+        assert!(core.debug_disassemble(0).is_none());
     }
 
     #[test]

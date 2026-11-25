@@ -459,6 +459,11 @@ impl Dsp {
         self.step
     }
 
+    /// Finished output samples since reset (debugger helper).
+    pub const fn samples_run(&self) -> u64 {
+        self.samples_run
+    }
+
     /// Advance the S-DSP by one micro-step, returning the finished sample when
     /// the 32-step sequence wraps.
     pub fn tick(&mut self, ram: &mut [u8]) -> Option<Sample> {
