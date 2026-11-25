@@ -13447,3 +13447,21 @@ value) and not in ares (old value): our S-CPU's `$2140` byte is visible to the
 S-SMP **8 clocks (one poll) earlier**. Everything before that is bit-identical,
 so the cooperative scheduler itself is correct; only the port-write visibility
 order at this handshake remains.
+
+## The 8-clock skew is the `$F4-$F7` read sample point, not the write (2026-11-24)
+
+Staging the S-CPU `$2140-$2143` byte and publishing it at the next access / next
+instruction (`SNES_CO_STAGE`) changes nothing: CT stays exactly 385471 differing
+(32.6436%) in all variants. So the divergence is not when the CPU latch becomes
+visible.
+
+The `SmpThread` uses `spc_coroutine::new_spc_coroutine_inline()`, which emits a
+direct-page `$F4-$F7` read inline at the access entry. ares' `SMP::read` does
+`wait()` (the first half of the access) and only then `readIO`, which samples
+`io.apuN`. Our read is therefore sampled ~4-8 clocks early - exactly the measured
+skew (ours exits the poll at clock 7,946,044; ares at 7,946,052).
+
+Fix: give the direct engine the **deferring/split** SPC coroutine
+(`new_spc_coroutine()`), and handle its deferred `$F4-$F7` event in
+`smp_step_parking` by advancing half the access before sampling (the plan engine
+already implements this as `defer`/`split`). This is the next change.
