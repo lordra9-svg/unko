@@ -41,8 +41,8 @@ maskable interrupts and enabled FPU exceptions) are delivered through CP0
 returns to the faulting context, and error-level entries (`ErrorEPC`/`ERL`,
 returned through by `ERET`) are driven by the CP0 Count/Compare watchdog,
 modelled cache parity faults, an MI-register RCP NMI source, MI interrupt
-routing to CPU Int0 (IP2) with PI/VI/AI sources and mask/Status gating, and
-reset. The FPU reports Inexact/Underflow/Overflow/
+routing to CPU Int0 (IP2) with cycle-modelled PI DMA/VI line events, AI
+sources and mask/Status gating, and reset. The FPU reports Inexact/Underflow/Overflow/
 Divide-by-zero/Invalid flags and causes in `fcr31`, reports unimplemented
 operations, and honors the FS subnormal flush bit; D-format inexact detection
 uses error-free transformations. Double-precision (`D`-format) arithmetic, comparisons, conversions

@@ -48,6 +48,8 @@ pub struct Machine {
     vi_width: u32,
     vi_line: u32,
     vi_intr: u32,
+    vi_cycle_accum: u32,
+    pending_pi_cycles: u32,
     pi_dram: u32,
     pi_cart: u32,
 }
@@ -79,6 +81,8 @@ impl Machine {
             vi_width: 320,
             vi_line: 0,
             vi_intr: 0,
+            vi_cycle_accum: 0,
+            pending_pi_cycles: 0,
             pi_dram: 0,
             pi_cart: 0,
         }
@@ -164,26 +168,37 @@ impl Machine {
     /// Executes one CPU instruction.
     pub fn step(&mut self) -> Result<(), CpuError> {
         self.update_interrupts();
+        let before = self.cpu.cycles;
         let mut cpu = std::mem::replace(&mut self.cpu, Cpu::new(0));
         let result = cpu.step(self);
         self.cpu = cpu;
+        let retired = (self.cpu.cycles.wrapping_sub(before)) as u32;
+        self.advance_events(retired);
         result
+    }
+
+    /// Advances modelled RCP events by the CPU cycles retired this step.
+    fn advance_events(&mut self, cycles: u32) {
+        if self.pending_pi_cycles != 0 {
+            self.pending_pi_cycles = self.pending_pi_cycles.saturating_sub(cycles);
+            if self.pending_pi_cycles == 0 {
+                self.mi.raise_interrupt(4);
+            }
+        }
+        self.vi_cycle_accum = self.vi_cycle_accum.saturating_add(cycles);
+        // ~93.75 MHz / 60 / 525 lines: VI advances one line per ~3000 CPU cycles.
+        const VI_LINE_CYCLES: u32 = 3000;
+        while self.vi_cycle_accum >= VI_LINE_CYCLES {
+            self.vi_cycle_accum -= VI_LINE_CYCLES;
+            self.vi_line = (self.vi_line + 1) % 525;
+            if self.vi_intr != 0 && self.vi_line == self.vi_intr {
+                self.mi.raise_interrupt(3);
+            }
+        }
     }
 
     /// Runs one placeholder frame and returns its index.
     pub fn run_frame(&mut self) -> Result<u64, CpuError> {
-        // Advance the VI line counter for one frame and raise the VI interrupt
-        // when the programmed line is reached.
-        if self.vi_intr != 0 {
-            for _ in 0..525 {
-                self.vi_line = (self.vi_line + 1) % 525;
-                if self.vi_line == self.vi_intr {
-                    self.mi.raise_interrupt(3);
-                }
-            }
-        } else {
-            self.vi_line = (self.vi_line + 525) % 525;
-        }
         if !self.rsp.halted {
             self.rsp.run(RSP_INSTRUCTIONS_PER_FRAME);
         }
@@ -383,7 +398,9 @@ impl Machine {
             }
         }
         if length != 0 {
-            self.mi.raise_interrupt(4);
+            // Modelled PI DMA duration: fixed overhead plus two CPU cycles per
+            // byte copied.
+            self.pending_pi_cycles = (64 + length * 2).max(1);
         }
     }
 }
@@ -1416,9 +1433,15 @@ mod tests {
     fn machine_pi_dma_raises_mi_interrupt() {
         let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
         let mut machine = Machine::new(&cart);
-        for (index, word) in [0x3C08_0430u32, 0x2409_0010, 0xAD09_0008, 0x4200_0018]
-            .iter()
-            .enumerate()
+        for (index, word) in [
+            0x3C08_0430u32,
+            0x2409_0010,
+            0xAD09_0008,
+            0xAC09_0100, // marker at RDRAM 0x100
+            0x4200_0018,
+        ]
+        .iter()
+        .enumerate()
         {
             machine.write_u32(0x180 + index as u64 * 4, *word);
         }
@@ -1426,21 +1449,49 @@ mod tests {
         machine.write_u32(0x0430_000C, 1 << 9); // set PI mask
         machine.pi_cart = 0x100;
         machine.pi_dram = 0x2000;
-        machine.write_u32(0x0460_0008, 16); // PI DMA completes
-        assert_ne!(machine.mi.read_register(0x08) & (1 << 4), 0);
+        machine.write_u32(0x0460_0008, 16);
+        // Data is copied immediately, but the interrupt waits for the modelled
+        // 64 + 2*length = 96-cycle transfer duration.
+        assert_eq!(machine.pending_pi_cycles, 96);
+        assert_eq!(&machine.rdram()[0x2000..0x2004], &[0, 0, 0, 0]);
+        assert_eq!(machine.mi.read_register(0x08) & (1 << 4), 0);
         machine.run_frame().expect("frame with PI interrupt");
         assert_eq!(machine.frames, 1);
         assert_eq!(machine.mi.read_register(0x08) & (1 << 4), 0, "PI cleared");
         assert_eq!(machine.cpu.cp0[12] & 2, 0, "handler ERET ran");
+        assert_eq!(machine.rdram()[0x103], 0x10, "PI handler ran");
+    }
+
+    #[test]
+    fn machine_pi_dma_completes_after_cycle_budget() {
+        let cart = cart_with(&[0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        machine.pi_cart = 0x100;
+        machine.pi_dram = 0x2000;
+        machine.write_u32(0x0460_0008, 16);
+        assert_eq!(machine.pending_pi_cycles, 96);
+        for _ in 0..95 {
+            machine.step().expect("step");
+        }
+        assert_eq!(machine.mi.read_register(0x08) & (1 << 4), 0);
+        machine.step().expect("final step");
+        assert_ne!(machine.mi.read_register(0x08) & (1 << 4), 0);
+        assert_eq!(machine.pending_pi_cycles, 0);
     }
 
     #[test]
     fn machine_vi_line_raises_mi_interrupt() {
         let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
         let mut machine = Machine::new(&cart);
-        for (index, word) in [0x3C08_0430u32, 0x2409_0008, 0xAD09_0008, 0x4200_0018]
-            .iter()
-            .enumerate()
+        for (index, word) in [
+            0x3C08_0430u32,
+            0x2409_0008,
+            0xAD09_0008,
+            0xAC09_0100,
+            0x4200_0018,
+        ]
+        .iter()
+        .enumerate()
         {
             machine.write_u32(0x180 + index as u64 * 4, *word);
         }
@@ -1449,11 +1500,28 @@ mod tests {
                                                 // Default VI_INTR is disabled (0): no interrupt.
         machine.run_frame().expect("frame without VI");
         assert_eq!(machine.mi.read_register(0x08) & (1 << 3), 0);
-        machine.write_u32(0x0440_000C, 100); // VI interrupt line
+        // Program the next line so the crossing happens within this frame.
+        let next_line = (machine.vi_line % 524) + 1;
+        machine.write_u32(0x0440_000C, next_line);
         machine.run_frame().expect("frame with VI interrupt");
         assert_eq!(machine.frames, 2);
         assert_eq!(machine.mi.read_register(0x08) & (1 << 3), 0, "VI cleared");
         assert_eq!(machine.cpu.cp0[12] & 2, 0, "handler ERET ran");
+        assert_eq!(machine.rdram()[0x103], 0x08, "VI handler ran");
+    }
+
+    #[test]
+    fn machine_vi_line_timing_uses_cycles() {
+        let cart = cart_with(&[0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        machine.write_u32(0x0440_000C, 1); // VI_INTR = line 1
+        for _ in 0..2999 {
+            machine.step().expect("step");
+        }
+        assert_eq!(machine.mi.read_register(0x08) & (1 << 3), 0);
+        machine.step().expect("final step");
+        assert_ne!(machine.mi.read_register(0x08) & (1 << 3), 0);
+        assert_eq!(machine.vi_line, 1);
     }
 
     #[test]

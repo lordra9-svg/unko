@@ -212,6 +212,8 @@ pub struct Cpu {
     pub next_pc: u64,
     /// Retired instructions.
     pub instructions: u64,
+    /// Retired CPU clock cycles (per-instruction cost model).
+    pub cycles: u64,
     /// COP0 register file (Status, Cause, EPC, Count, ...).
     pub cp0: [u64; 32],
     /// 32-entry TLB.
@@ -243,6 +245,7 @@ impl Cpu {
             pc,
             next_pc: pc.wrapping_add(4),
             instructions: 0,
+            cycles: 0,
             cp0: [0; 32],
             tlb: [TlbEntry::default(); 32],
             fpr: [0; 32],
@@ -503,6 +506,7 @@ impl Cpu {
     /// raises the watchdog error when the counter reaches Compare.
     fn advance_cycles(&mut self, cycles: u32) {
         for _ in 0..cycles {
+            self.cycles = self.cycles.wrapping_add(1);
             self.cp0[9] = self.cp0[9].wrapping_add(1) & 0xFFFF_FFFF;
             let count = self.cp0[9];
             let compare = self.cp0[11];

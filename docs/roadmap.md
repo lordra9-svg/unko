@@ -316,8 +316,9 @@ The main effort was the reference-parity accuracy core. Details in
       cost model), modelled cache parity faults and an MI-register-triggered RCP
       NMI source (bit 6, modelled over the retail MI_INTERRUPT layout). MI
       interrupt sources are masked by MI_MASK and routed to the CPU as Int0
-      (Cause.IP2), with PI raised by DMA completion, VI by the line counter crossing
-      VI_INTR and AI mirrored into MI bit 2, all gated by Status.IE/IM. The FPU
+      (Cause.IP2), with PI raised after a modelled 64+2*length-cycle DMA, VI by a
+      line counter advancing one line per 3000 CPU cycles crossing VI_INTR, and
+      AI mirrored into MI bit 2, all gated by Status.IE/IM. The FPU
       reports `fcr31` flags/causes
       (inexact, underflow, overflow, divide-by-zero, invalid, unimplemented
       operation) and honors FS flush-to-zero; D-format inexact detection uses
