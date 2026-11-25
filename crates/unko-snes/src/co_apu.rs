@@ -57,6 +57,16 @@ impl SmpThread {
     pub fn dsp_handle(&self) -> std::rc::Rc<std::cell::RefCell<crate::dsp::Dsp>> {
         self.engine.dsp_handle()
     }
+
+    /// Start recording `(S-SMP clock, PC)` per instruction (debug).
+    pub fn enable_trace(&mut self) {
+        self.engine.enable_trace();
+    }
+
+    /// The recorded instruction trace.
+    pub fn trace(&self) -> &[(u128, u16)] {
+        self.engine.trace()
+    }
 }
 
 impl ThreadState for SmpThread {

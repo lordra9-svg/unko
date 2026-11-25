@@ -863,6 +863,13 @@ fn main() -> ExitCode {
             let _ = std::fs::write(path, out);
         }
     }
+    if let Some(path) = std::env::var_os("CO_TRACE") {
+        let mut out = String::new();
+        for (index, (clock, pc)) in system.co_trace().iter().enumerate() {
+            out.push_str(&format!("{index} {clock} {pc:04X}\n"));
+        }
+        let _ = std::fs::write(path, out);
+    }
     if let Some(path) = std::env::var_os("SPC_TRACE") {
         let mut out = String::new();
         for (index, (clock, pc, clocks)) in system.apu.debug.trace().iter().enumerate() {

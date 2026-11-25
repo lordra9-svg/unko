@@ -218,6 +218,8 @@ pub struct Snes {
     nested_cpu: crate::cpu_coroutine::CpuNestedSlot,
     /// Cooperative APU (S-SMP + S-DSP) for `SNES_CO_SCHED`.
     co: crate::co_apu::CoSchedSlot,
+    /// The loaded IPL ROM, kept so the cooperative APU can be rebuilt on reset.
+    ipl: [u8; 64],
     apu_actor: crate::cpu_coroutine::ApuActorSlot,
     /// Whether the APU actor is driving the S-SMP (inside [`Snes::step`]).
     apu_actor_driven: bool,
@@ -594,6 +596,7 @@ impl Snes {
             cpu_coroutine: crate::cpu_coroutine::CpuCoroutineSlot::default(),
             nested_cpu: crate::cpu_coroutine::CpuNestedSlot::default(),
             co: crate::co_apu::CoSchedSlot::default(),
+            ipl: [0; 64],
             apu_actor: crate::cpu_coroutine::ApuActorSlot::default(),
             apu_actor_driven: false,
             cart,
@@ -918,21 +921,27 @@ impl Snes {
 
     /// Install a user-supplied 64-byte SPC700 IPL ROM.
     pub fn set_ipl(&mut self, ipl: [u8; crate::apu::IPL_SIZE]) {
+        self.ipl = ipl;
         self.apu.set_ipl(ipl);
         if crate::apu::ca_enabled() {
             self.install_ca(ipl);
         }
-        if crate::apu::co_sched() {
-            let (ram, dsp_registers) = crate::random::power_on_apu();
-            let mut core = crate::spc700::Spc700::new();
-            core.pc = 0xFFC0;
-            self.co = crate::co_apu::CoSchedSlot(Some(Box::new(crate::co_apu::CoSched::new(
-                ipl,
-                &ram,
-                &dsp_registers,
-                core,
-            ))));
+        self.install_co();
+    }
+
+    /// Build the cooperative APU (`SNES_CO_SCHED`) from the stored IPL ROM.
+    fn install_co(&mut self) {
+        if !crate::apu::co_sched() {
+            return;
         }
+        let (ram, dsp_registers) = crate::random::power_on_apu();
+        let mut core = crate::spc700::Spc700::new();
+        core.pc = 0xFFC0;
+        let mut co = crate::co_apu::CoSched::new(self.ipl, &ram, &dsp_registers, core);
+        if std::env::var_os("CO_TRACE").is_some() {
+            co.smp.enable_trace();
+        }
+        self.co = crate::co_apu::CoSchedSlot(Some(Box::new(co)));
     }
 
     /// Attach an MSU1 data ROM (`msu1.data.rom`), enabling `$2000-$2007`.
@@ -1050,6 +1059,7 @@ impl Snes {
         self.cpu_coroutine = crate::cpu_coroutine::CpuCoroutineSlot::default();
         self.nested_cpu = crate::cpu_coroutine::CpuNestedSlot::default();
         self.co = crate::co_apu::CoSchedSlot::default();
+        self.install_co();
         self.apu_actor = crate::cpu_coroutine::ApuActorSlot::default();
         self.apu_actor_driven = false;
         self.sa1_credit = 0;
@@ -2530,6 +2540,15 @@ impl Snes {
         engine.load_core(core);
         self.ca =
             crate::sym_scheduler::CaSlot(Some(Box::new(crate::sym_scheduler::CaPeer::new(engine))));
+    }
+
+    /// The cooperative S-SMP instruction trace (debug).
+    pub fn co_trace(&self) -> Vec<(u128, u16)> {
+        self.co
+            .0
+            .as_ref()
+            .map(|co| co.smp.trace().to_vec())
+            .unwrap_or_default()
     }
 
     /// The installed cycle-accurate peer, if any.

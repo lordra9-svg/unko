@@ -13408,13 +13408,18 @@ resumable `cpu_coroutine` driven from `Snes::step_co_sched`. Threads run in
 minimum-clock order; `Need::Synchronize(Cpu|Smp|Dsp)` is satisfied by the driver,
 and `$2140-$2143` accesses route to `SmpThread::engine_mut()`.
 
-600-frame gate at `SNES_DSP_PRIME=0`:
+**Correction:** the first gate run was inert — the harness calls `reset()`
+after `set_ipl`, which cleared the new scheduler, so the six-exact numbers came
+from the fallback driver. The IPL is now stored and the cooperative APU rebuilt
+on reset, so the path is genuinely active. Real 600-frame result with
+`SNES_CO_SCHED=1 SNES_DSP_PRIME=0`:
 
 ```
-dkc 0  zelda 0  fzero 0  cv4 0  smas 0  ct 0   mmx2 49253 (92.3001%)
+ct 385471 differing (32.6436%)
 ```
 
-So the new three-thread driver reproduces the six-exact configuration exactly,
-but does not change MMX2: the `$FFDC` offset is not the old plan/replay driver
-(the new scheduler has none). The next check is the `$FFDC` instruction trace
-under this driver.
+and the S-SMP instruction trace first diverges at the same instruction **883082**
+(`$FFCF/$FFD2` polling vs ares `$FFD4 -> $FFEF`). So the new three-thread driver
+is wired and running, but its switch order still differs from ares; the `$FFDC`
+offset survives the rewrite and is not the plan/replay driver. The next work is
+to correct the driver's interleaving against this trace.
