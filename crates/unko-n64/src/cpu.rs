@@ -94,6 +94,11 @@ pub enum CpuError {
         /// Coprocessor number (1 = FPU).
         coprocessor: u8,
     },
+    /// A signed integer overflow in ADD/ADDI/SUB.
+    Overflow {
+        /// Program counter of the instruction.
+        pc: u64,
+    },
     /// A floating-point exception with its enable bit set.
     Fpu {
         /// Program counter of the instruction.
@@ -123,6 +128,7 @@ impl fmt::Display for CpuError {
             Self::CoprocessorUnusable { coprocessor } => {
                 write!(f, "coprocessor {coprocessor} unusable")
             }
+            Self::Overflow { pc } => write!(f, "integer overflow at {pc:016X}"),
             Self::Fpu { pc } => write!(f, "floating point exception at {pc:016X}"),
             Self::Tlb { address, .. } => write!(f, "TLB fault at {address:016X}"),
             Self::Trap {
@@ -233,7 +239,8 @@ impl Cpu {
                 | CpuError::Trap { .. }
                 | CpuError::ReservedInstruction { .. }
                 | CpuError::CoprocessorUnusable { .. }
-                | CpuError::Fpu { .. }),
+                | CpuError::Fpu { .. }
+                | CpuError::Overflow { .. }),
             ) => {
                 self.deliver_error(&error, pc, delay_slot);
                 Ok(())
@@ -255,6 +262,16 @@ impl Cpu {
         let pc = self.pc;
         self.deliver_exception(0, None, false, pc, false);
         true
+    }
+
+    /// Enters an error-level exception (NMI, cache error, soft reset): saves
+    /// the return address in ErrorEPC, sets Status.ERL and vectors. ERET then
+    /// returns through ErrorEPC and clears ERL.
+    pub fn raise_error_exception(&mut self, vector: u64) {
+        self.cp0[30] = self.pc & 0xFFFF_FFFF;
+        self.cp0[12] |= 4;
+        self.pc = vector;
+        self.next_pc = vector.wrapping_add(4);
     }
 
     fn deliver_error(&mut self, error: &CpuError, pc: u64, delay_slot: bool) {
@@ -288,6 +305,9 @@ impl Cpu {
             CpuError::Fpu { .. } => {
                 self.deliver_exception(15, None, delay_slot, pc, false);
             }
+            CpuError::Overflow { .. } => {
+                self.deliver_exception(12, None, delay_slot, pc, false);
+            }
             _ => {}
         }
     }
@@ -304,7 +324,8 @@ impl Cpu {
     ) {
         let status = self.cp0[12];
         let already_exl = status & 2 != 0;
-        if !already_exl {
+        let error_level = status & 4 != 0;
+        if !already_exl && !error_level {
             let epc = if delay_slot { pc.wrapping_sub(4) } else { pc };
             self.cp0[14] = epc & 0xFFFF_FFFF;
         }
@@ -315,7 +336,7 @@ impl Cpu {
         }
         self.cp0[12] = status | 2;
         let bev = status & (1 << 22) != 0;
-        let refill = refill && !already_exl;
+        let refill = refill && !already_exl && !error_level;
         let vector = match (bev, refill) {
             (false, true) => 0x8000_0000,
             (false, false) => 0x8000_0180,
@@ -413,8 +434,10 @@ impl Cpu {
                 Ok(())
             }
             8 => {
-                let value = self.gpr(rs).wrapping_add(simm as u64);
-                self.set_gpr(rt, sign_extend32(value));
+                let Some(value) = (self.gpr(rs) as i32).checked_add(i32::from(imm as i16)) else {
+                    return Err(CpuError::Overflow { pc });
+                };
+                self.set_gpr(rt, value as i64 as u64);
                 Ok(())
             }
             9 => {
@@ -633,11 +656,25 @@ impl Cpu {
                 }
                 Ok(())
             }
-            0x20 | 0x21 => {
+            0x20 => {
+                let Some(value) = (a as i32).checked_add(b as i32) else {
+                    return Err(CpuError::Overflow { pc });
+                };
+                self.set_gpr(rd, value as i64 as u64);
+                Ok(())
+            }
+            0x21 => {
                 self.set_gpr(rd, sign_extend32(a.wrapping_add(b)));
                 Ok(())
             }
-            0x22 | 0x23 => {
+            0x22 => {
+                let Some(value) = (a as i32).checked_sub(b as i32) else {
+                    return Err(CpuError::Overflow { pc });
+                };
+                self.set_gpr(rd, value as i64 as u64);
+                Ok(())
+            }
+            0x23 => {
                 self.set_gpr(rd, sign_extend32(a.wrapping_sub(b)));
                 Ok(())
             }
@@ -2047,5 +2084,71 @@ mod tests {
         run(&mut cpu, &mut memory, 4);
         cpu.step(&mut memory).expect("resume after FPU exception");
         assert_eq!(cpu.gpr[9], 7);
+    }
+    #[test]
+    fn integer_overflow_delivers_and_resumes() {
+        let mut cpu = Cpu::new(0x8000_1000);
+        let mut memory = Memory::new(0x3000);
+        install_handler(&mut memory, false);
+        memory.write_u32(0x1000, 0x3C08_7FFF); // lui t0,0x7FFF
+        memory.write_u32(0x1004, 0x3508_FFFF); // ori t0,t0,0xFFFF
+        memory.write_u32(0x1008, 0x2409_0001); // addiu t1,zero,1
+        memory.write_u32(0x100C, 0x0109_5020); // add t2,t0,t1
+        memory.write_u32(0x1010, 0x240B_0007); // addiu t3,zero,7
+        run(&mut cpu, &mut memory, 3);
+        assert_eq!(cpu.gpr[8], 0x7FFF_FFFF);
+        assert_eq!(cpu.gpr[9], 1);
+        cpu.step(&mut memory).expect("ADD overflow delivered");
+        assert_eq!(cpu.pc, 0x8000_0180);
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 12, "Ov");
+        assert_eq!(cpu.cp0[14], 0x8000_100C);
+        assert_eq!(cpu.gpr[10], 0, "destination unchanged on overflow");
+        run(&mut cpu, &mut memory, 4);
+        assert_eq!(cpu.pc, 0x8000_1010);
+        cpu.step(&mut memory).expect("resume");
+        assert_eq!(cpu.gpr[11], 7);
+
+        // ADDI and SUB also trap.
+        let mut cpu = Cpu::new(0x8000_1000);
+        memory.write_u32(0x1000, 0x2109_0001); // addi t1,t0,1 with t0=0x7FFFFFFF
+        cpu.gpr[8] = 0x7FFF_FFFF;
+        cpu.step(&mut memory).expect("ADDI overflow");
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 12);
+        assert_eq!(cpu.cp0[14], 0x8000_1000);
+
+        let mut cpu = Cpu::new(0x8000_1000);
+        cpu.cp0[12] = 1; // IE does not matter here, but keep a clean status
+        cpu.cp0[12] = 0;
+        cpu.gpr[8] = 0x8000_0000;
+        cpu.gpr[9] = 1;
+        memory.write_u32(0x1000, 0x0109_5022); // sub t2,t0,t1
+        cpu.step(&mut memory).expect("SUB overflow");
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 12);
+        assert_eq!(cpu.cp0[14], 0x8000_1000);
+    }
+
+    #[test]
+    fn erl_error_exception_entry_and_eret() {
+        let mut cpu = Cpu::new(0x8000_1000);
+        let mut memory = Memory::new(0x3000);
+        memory.write_u32(0x180, 0x4200_0018); // eret
+                                              // NMI/cache-error style entry: ErrorEPC saved, ERL set.
+        cpu.raise_error_exception(0x8000_0180);
+        assert_eq!(cpu.cp0[30], 0x8000_1000);
+        assert_ne!(cpu.cp0[12] & 4, 0, "ERL set");
+        assert_eq!(cpu.pc, 0x8000_0180);
+        cpu.step(&mut memory).expect("eret");
+        assert_eq!(cpu.pc, 0x8000_1000);
+        assert_eq!(cpu.cp0[12] & 4, 0, "ERET clears ERL");
+
+        // With ERL set a regular exception uses the general vector and leaves
+        // EPC untouched (return goes through ErrorEPC).
+        cpu.cp0[12] = 4;
+        cpu.cp0[14] = 0x1234;
+        memory.write_u32(0x1000, 0x8C08_0001); // lw t0,1(zero) -> AdEL
+        cpu.step(&mut memory).expect("AdEL with ERL");
+        assert_eq!(cpu.pc, 0x8000_0180);
+        assert_eq!((cpu.cp0[13] >> 2) & 0x1F, 4);
+        assert_eq!(cpu.cp0[14], 0x1234, "EPC not overwritten at error level");
     }
 }

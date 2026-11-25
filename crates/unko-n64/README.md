@@ -25,10 +25,11 @@ pipeline: interpolated 16.16 Z compressed to the RDP's 16-bit depth word with
 a 16-bit delta exponent, z compare/update for opaque/transparent/decal/
 interpenetrating modes and primitive-depth source selection. Precise
 exceptions (TLB misses/invalid pages, unaligned loads/stores, SYSCALL/BREAK,
-reserved instructions, coprocessor-unusable, delay-slot BD, maskable
-interrupts and enabled FPU exceptions) are delivered through CP0
+reserved instructions, coprocessor-unusable, integer overflow, delay-slot BD,
+maskable interrupts and enabled FPU exceptions) are delivered through CP0
 (EPC/Cause/BadVAddr, CE, Status.EXL, refill vs general vectors) and `ERET`
-returns to the faulting context. The FPU reports Inexact/Underflow/Overflow/
+returns to the faulting context, and error-level entry (`ErrorEPC`/`ERL`,
+returned through by `ERET`) is supported. The FPU reports Inexact/Underflow/Overflow/
 Divide-by-zero/Invalid flags and causes in `fcr31` and honors the FS subnormal
 flush bit. Double-precision (`D`-format) arithmetic, comparisons, conversions
 and 64-bit paired FPR storage are implemented too. Fog-alpha edge cases and

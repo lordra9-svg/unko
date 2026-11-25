@@ -297,10 +297,11 @@ The main effort was the reference-parity accuracy core. Details in
       (TLBR/TLBWI/TLBWR/TLBP, mapped KUSEG translation) and a single-precision
       COP1 FPU (ADD/SUB/MUL/DIV/SQRT/ABS/MOV/NEG, CVT and compares, LWC1/SWC1/
       LDC1/SDC1). Precise exceptions (TLB, unaligned accesses, SYSCALL/BREAK,
-      reserved instructions, coprocessor-unusable with Cause.CE, delay-slot
-      BD, maskable interrupts, enabled FPU exceptions) are delivered through
-      CP0 Cause/EPC/BadVAddr with Status.EXL and the refill/general vectors,
-      and ERET restores execution. The FPU reports `fcr31` flags/causes
+      reserved instructions, coprocessor-unusable with Cause.CE, integer
+      overflow (Ov), delay-slot BD, maskable interrupts, enabled FPU
+      exceptions) are delivered through CP0 Cause/EPC/BadVAddr with Status.EXL
+      and the refill/general vectors, and ERET restores execution. Error-level
+      entry saves ErrorEPC, sets ERL and returns via ERET. The FPU reports `fcr31` flags/causes
       (inexact, underflow, overflow, divide-by-zero, invalid) and honors FS
       flush-to-zero. Double-precision (`D`-format) arithmetic, compares,
       conversions and 64-bit paired FPR storage are also implemented. Exact
