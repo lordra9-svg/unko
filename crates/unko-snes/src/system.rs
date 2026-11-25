@@ -214,6 +214,8 @@ pub struct Snes {
     pub cpu: Cpu,
     /// Resumable S-CPU execution (ares cooperative-thread equivalent).
     cpu_coroutine: crate::cpu_coroutine::CpuCoroutineSlot,
+    /// Pending S-CPU coroutine input for the nested scheduler.
+    nested_cpu: crate::cpu_coroutine::CpuNestedSlot,
     apu_actor: crate::cpu_coroutine::ApuActorSlot,
     /// Whether the APU actor is driving the S-SMP (inside [`Snes::step`]).
     apu_actor_driven: bool,
@@ -588,6 +590,7 @@ impl Snes {
         Self {
             cpu: Cpu::new(),
             cpu_coroutine: crate::cpu_coroutine::CpuCoroutineSlot::default(),
+            nested_cpu: crate::cpu_coroutine::CpuNestedSlot::default(),
             apu_actor: crate::cpu_coroutine::ApuActorSlot::default(),
             apu_actor_driven: false,
             cart,
@@ -1031,6 +1034,7 @@ impl Snes {
         }
         self.rtc_credit = 0;
         self.cpu_coroutine = crate::cpu_coroutine::CpuCoroutineSlot::default();
+        self.nested_cpu = crate::cpu_coroutine::CpuNestedSlot::default();
         self.apu_actor = crate::cpu_coroutine::ApuActorSlot::default();
         self.apu_actor_driven = false;
         self.sa1_credit = 0;
@@ -1493,7 +1497,6 @@ impl Snes {
     fn step_sym_sched_nested(&mut self) -> u32 {
         use crate::cpu_coroutine::{BusRequest, BusResponse, CpuInput, CpuOutput};
         use crate::sym_scheduler::StepOutcome;
-        let cpu = std::mem::take(&mut self.cpu);
         let mut coroutine = self
             .cpu_coroutine
             .0
@@ -1502,10 +1505,13 @@ impl Snes {
         self.apu_actor_driven = true;
         let mut ca = self.ca.0.take().expect("CA peer installed");
         let cpu_scalar = crate::apu::scheduler_cpu_scalar(self.region.master_clock());
-        let mut input = Some(CpuInput::Start(cpu));
+        // A fresh coroutine (or one parked at `Done`) starts with the CPU state.
+        if !self.nested_cpu.at_done && self.nested_cpu.pending.is_none() {
+            let cpu = std::mem::take(&mut self.cpu);
+            self.nested_cpu.pending = Some(CpuInput::Start(cpu));
+        }
         let mut cycles = 0u32;
         let mut done = false;
-        let mut at_done = false;
 
         let is_port = |address: u32| {
             address & 0x40_FF00 == 0x2100 && (0x2140..=0x2143).contains(&(address & 0xFFFF))
@@ -1535,21 +1541,18 @@ impl Snes {
             }};
         }
 
-        // Resume the S-CPU by one yield. `at_done` means the coroutine is parked
-        // at `Done`, so the next resume must be `Start`; otherwise it must be the
-        // pending `Response`.
         macro_rules! cpu_step {
             () => {{
-                let payload = if at_done {
-                    at_done = false;
-                    done = false; // a new instruction has begun
+                let payload = if self.nested_cpu.at_done {
+                    self.nested_cpu.at_done = false;
+                    done = false;
                     CpuInput::Start(std::mem::take(&mut self.cpu))
                 } else {
-                    input.take().expect("CPU input")
+                    self.nested_cpu.pending.take().expect("CPU input")
                 };
                 match coroutine.resume(payload) {
                     corosensei::CoroutineResult::Yield(CpuOutput::Request(request)) => {
-                        input = Some(CpuInput::Response(answer!(request)));
+                        self.nested_cpu.pending = Some(CpuInput::Response(answer!(request)));
                         false
                     }
                     corosensei::CoroutineResult::Yield(CpuOutput::Done(cpu, count)) => {
@@ -1557,7 +1560,7 @@ impl Snes {
                         cycles += count;
                         self.apply_interrupts();
                         done = true;
-                        at_done = true;
+                        self.nested_cpu.at_done = true;
                         true
                     }
                     corosensei::CoroutineResult::Return(()) => unreachable!(),
@@ -1581,11 +1584,10 @@ impl Snes {
                         cpu_step!();
                         pull += 1;
                     }
-                    // If the cap was hit, keep going in the outer loop.
                 }
                 StepOutcome::Halted => break,
                 StepOutcome::Ran => {
-                    if done && at_done {
+                    if done && self.nested_cpu.at_done {
                         break;
                     }
                     cpu_step!();

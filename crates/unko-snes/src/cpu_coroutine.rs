@@ -191,3 +191,34 @@ impl std::fmt::Debug for ApuActorSlot {
         f.write_str("ApuActor")
     }
 }
+
+/// Persistent S-CPU coroutine input for the nested scheduler.
+///
+/// A nested `Snes::step` may end with the coroutine suspended at a bus
+/// `Request` (not only at `Done`); the pending response and the at-done flag must
+/// survive into the next `step`, otherwise the next resume sends `Start` to a
+/// request and panics.
+#[derive(Default)]
+pub struct CpuNestedSlot {
+    /// Response to a suspended bus request, or `Start` for a fresh instruction.
+    pub pending: Option<CpuInput>,
+    /// The coroutine is parked at `Done` and expects `Start` next.
+    pub at_done: bool,
+}
+
+impl Clone for CpuNestedSlot {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+impl PartialEq for CpuNestedSlot {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+impl Eq for CpuNestedSlot {}
+impl std::fmt::Debug for CpuNestedSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CpuNested")
+    }
+}
