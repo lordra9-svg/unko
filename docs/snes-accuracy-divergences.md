@@ -14139,3 +14139,59 @@ titles only at `SNES_DSP_PRIME=0`.
 environment for the same reason, but the 120-frame all-212 comparison plus the
 fact that no default-path emulation code was changed gives equivalent
 regression evidence.)
+
+## DSP register-write *sample phase*: MMX2-specific, not global (2026-11-25)
+
+Directly compared the S-DSP register-write stream against ares' `ARES_DSP_WRITES`
+log (`dspTicks` = absolute micro-steps, ours `micro`).
+
+**DKC at `SNES_DSP_PRIME=0` is exact in the DSP write phase**, not just in audio:
+all 55 writes in the first 120 frames have `ourMicro - aresTicks = 0`
+(`ares-dkc-dspw.log` vs `our-dkc-dspw.log`). The six exact titles therefore
+already match ares' DSP clock phase at every write.
+
+**MMX2 at `SNES_DSP_PRIME=0` is offset from the first write to the sound-driver
+upload** (3.87 s): the boot `$5D/$3D/$2D/$6D` writes are 66 micro-steps early
+(`$6D` ours 4,051,913 vs ares 4,051,979), i.e. the 132-SMP-clock / 2-sample
+offset already reported. The delta then oscillates between about -86 and +4
+from write to write.
+
+That alternation is ares' whole-sample DSP quantisation: `DSP::main` runs all
+32 micro-steps of one sample per thread entry, so ares' DSP clock leads the
+SMP by 0..one sample at every write, while our `drain_dsp_to` pins the DSP to
+the SMP clock. The mean offset is the MMX2 phase error.
+
+### What fixes MMX2, and why it cannot be used
+
+`SNES_SMP_ACCESS_STOP=1` moves the MMX2 boot write from -66 to -2 micro-steps;
+adding `SNES_DSP_PRIME=2` puts it exactly on ares:
+
+```
+config                              MMX2 600-frame audio
+base, PRIME=0                       49253 differing (92.3001%)
+ACCESS_STOP=1, PRIME=0              39626 differing (93.8051%)   $6D -2
+ACCESS_STOP=1, PRIME=2                   0 differing (100.0000%)  $6D  0
+```
+
+But ACCESS_STOP shifts the *other* titles' DSP write stream by a whole
+upload-window (~5080 micro-steps for DKC's first write, from 981805 to 986885),
+and `PRIME=2` on its own shifts DKC/SMAS off their exact phase:
+
+```
+DKC, PRIME=2 + ACCESS_STOP=1 : 368678 differing (42.3631%)
+CT , PRIME=2 + ACCESS_STOP=1 : 139578 differing (56.6240%)
+```
+
+So the six exact titles sit on a zero-phase cliff at `PRIME=0`, and MMX2 sits
+66 micro-steps away from it. No single global prime/latch constant moves MMX2
+onto the cliff without moving the six off it.
+
+### Conclusion (unchanged objective, sharper root)
+
+The residual is not a global DSP-sync rule and not a title-specific hack
+target. MMX2 alone accumulates a DSP/SMP phase offset before its driver upload;
+the six match ares exactly. Fixing MMX2 therefore requires correcting whatever
+makes MMX2's S-SMP clock reach the port handshake 132 clocks ahead of ares
+(the `887,720` IPL `$FFDA CMP Y,$F4` divergence), not a DSP or NMI phase
+constant. The verified split stands: MMX2 exact at default (PRIME=4), the six
+exact at `SNES_DSP_PRIME=0`.
