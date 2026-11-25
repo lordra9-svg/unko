@@ -404,17 +404,31 @@ mod tests {
         words.push((0x3Du64 << 56) | (2u64 << 51) | (4u64 << 32) | u64::from(texture));
         words.push((0x35u64 << 56) | (2u64 << 51) | (1u64 << 41));
         words.push((0x32u64 << 56) | (3u64 << 12) | 3);
+        // Combiner: cycle0 = texture, cycle1 = pass-through of cycle0.
+        let combine = (3u64 << 52)
+            | (1u64 << 47)
+            | (3u64 << 44)
+            | (1u64 << 41)
+            | (2u64 << 37)
+            | (1u64 << 32)
+            | (2u64 << 21)
+            | (1u64 << 18);
+        words.push((0x3Cu64 << 56) | combine);
         words.push(
             (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (64u64 << 32) | u64::from(origin),
         );
         words.push((0x0Au64 << 56) | (48u64 << 32) | (16u64 << 16) | 16);
-        words.push(4u64 << 48);
-        words.push(4u64 << 48);
-        words.push(12u64 << 48);
-        words.push(0); // texture coefficients (unused by the bbox scaffold)
-        words.push(0);
-        words.push(0);
-        words.push(0);
+        words.push(4u64 << 48); // Xl
+        words.push(4u64 << 48); // Xh
+        words.push(12u64 << 48); // Xm
+        words.push(0); // s/t/w c.i
+        words.push(0); // s/t/w x.i
+        words.push(0); // c.f
+        words.push(0x6000u64 << 48); // s.x.f (0.375)
+        words.push(0); // e.i
+        words.push(0); // y.i
+        words.push(0); // e.f
+        words.push(0x6000u64 << 32); // t.y.f (0.375)
         for (index, word) in words.iter().enumerate() {
             machine.write_u32(index as u64 * 8, (word >> 32) as u32);
             machine.write_u32(index as u64 * 8 + 4, *word as u32);
@@ -436,7 +450,7 @@ mod tests {
         };
         assert_eq!(pixel(5, 5), [0xFF, 0, 0, 0xFF], "row 0 red");
         assert_eq!(pixel(5, 7), [0, 0xFF, 0, 0xFF], "row 1 green");
-        assert_eq!(pixel(4, 11), [0xFF, 0xFF, 0xFF, 0xFF], "row 3 white");
+        assert_eq!(pixel(4, 10), [0, 0, 0xFF, 0xFF], "row 2 blue");
         assert_eq!(pixel(10, 10), [0, 0, 0, 0], "outside the triangle");
     }
 

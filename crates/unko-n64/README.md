@@ -9,8 +9,10 @@ covers DMEM/IMEM, DMA, a scalar interpreter and the vector subset
 `SET_COLOR_IMAGE`/`SET_FILL_COLOR`/`FILL_RECTANGLE` into a 16-bit framebuffer
 that `run_frame` presents from RDRAM, tracks primitive/environment/combine
 state, rasterises unshaded/shaded triangles (half-space coverage from the edge
-coefficients), samples textured triangles (SET_TEXTURE_IMAGE/SET_TILE/
-SET_TILE_SIZE; 4/8/16-bit RGBA/IA/I texels with clamp/mirror/mask), and models
-the AI register block: `AI_LEN` DMAs 16-bit stereo pairs from RDRAM into a FIFO
-that the host turns into audio. Full combiner blending, faithful texture
-coordinates and audio resampling are next.
+coefficients), samples textured triangles using the interpolated texture
+coefficient words (SET_TEXTURE_IMAGE/SET_TILE/SET_TILE_SIZE; 4/8/16-bit
+RGBA/IA/I texels with clamp/mirror/mask), runs the two-cycle combiner
+(`SET_COMBINE_MODE`) with alpha blending, and models the AI register block:
+`AI_LEN` DMAs 16-bit stereo pairs from RDRAM into a FIFO that the host turns
+into audio. CI/TLUT palettes, perspective W, full blender modes and audio
+resampling are next.

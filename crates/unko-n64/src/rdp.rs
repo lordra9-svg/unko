@@ -30,6 +30,8 @@ struct Tile {
     s_clamp: bool,
     s_mirror: bool,
     s_mask: u8,
+    s_shift: u8,
+    t_shift: u8,
 }
 
 /// Tile bounds (`SET_TILE_SIZE`).
@@ -39,6 +41,15 @@ struct TileSize {
     t_low: u16,
     s_high: u16,
     t_high: u16,
+}
+
+/// Interpolated texture coordinates (16.16 fixed point).
+#[derive(Debug, Clone, Copy, Default)]
+struct TexCoords {
+    s: [i32; 4],
+    t: [i32; 4],
+    #[allow(dead_code)] // perspective W is interpolated for a later milestone.
+    w: [i32; 4],
 }
 
 /// DPC register block.
@@ -59,7 +70,8 @@ pub struct Rdp {
     fill_color: u32,
     primitive_color: u32,
     environment_color: u32,
-    combine_mode: u32,
+    combine_mode: u64,
+    blend_color: u32,
     triangles: u64,
     texture: TextureImage,
     tiles: [Tile; 8],
@@ -89,6 +101,7 @@ impl Rdp {
             primitive_color: 0,
             environment_color: 0,
             combine_mode: 0,
+            blend_color: 0,
             triangles: 0,
             texture: TextureImage::default(),
             tiles: [Tile::default(); 8],
@@ -143,7 +156,7 @@ impl Rdp {
 
     /// Raw combiner configuration (`SET_COMBINE_MODE`).
     #[must_use]
-    pub fn combine_mode(&self) -> u32 {
+    pub fn combine_mode(&self) -> u64 {
         self.combine_mode
     }
 
@@ -188,11 +201,14 @@ impl Rdp {
                         s_clamp: command & (1 << 9) != 0,
                         s_mirror: command & (1 << 8) != 0,
                         s_mask: ((command >> 4) & 0xF) as u8,
+                        s_shift: (command & 0xF) as u8,
+                        t_shift: ((command >> 10) & 0xF) as u8,
                     };
                 }
                 0x3A => self.primitive_color = command as u32,
                 0x3B => self.environment_color = command as u32,
-                0x3C => self.combine_mode = command as u32,
+                0x3C => self.combine_mode = command,
+                0x39 => self.blend_color = command as u32,
                 0x3D => {
                     self.texture = TextureImage {
                         format: ((command >> 53) & 7) as u8,
@@ -206,11 +222,9 @@ impl Rdp {
                     let shaded = opcode >= 0x0C;
                     let textured = matches!(opcode, 0x0A | 0x0B | 0x0E | 0x0F);
                     let words = if shaded && textured {
-                        16
-                    } else if shaded {
+                        20
+                    } else if shaded || textured {
                         12
-                    } else if textured {
-                        8
                     } else {
                         4
                     };
@@ -225,24 +239,26 @@ impl Rdp {
                         word.copy_from_slice(bytes);
                         *slot = u64::from_be_bytes(word);
                     }
-                    let mut color = self.primitive_color;
-                    if shaded {
-                        let offset = start + 4 * 8;
-                        if let Some(bytes) = rdram.get(offset..offset + 8) {
-                            let mut word = [0u8; 8];
-                            word.copy_from_slice(bytes);
-                            let shade = u64::from_be_bytes(word);
-                            let r = ((shade >> 48) & 0xFFFF) >> 8;
-                            let g = ((shade >> 32) & 0xFFFF) >> 8;
-                            let b = ((shade >> 16) & 0xFFFF) >> 8;
-                            let a = (shade & 0xFFFF) >> 8;
-                            color = ((r as u32) << 24)
-                                | ((g as u32) << 16)
-                                | ((b as u32) << 8)
-                                | a as u32;
-                        }
-                    }
-                    self.rasterize_triangle(edge, color, textured, rdram);
+                    let (shade_offset, texture_offset) = match (textured, shaded) {
+                        (true, true) => (4, 12),
+                        (true, false) => (0, 4),
+                        (false, true) => (4, 0),
+                        (false, false) => (0, 0),
+                    };
+                    let shade = if shaded {
+                        read_word(rdram, start + shade_offset * 8)
+                            .map(shade_color)
+                            .unwrap_or(0xFFFF_FFFF)
+                    } else {
+                        0xFFFF_FFFF
+                    };
+                    let coords = if textured {
+                        Some(parse_texcoords(rdram, start + texture_offset * 8))
+                    } else {
+                        None
+                    };
+                    let base_color = if shaded { shade } else { self.primitive_color };
+                    self.rasterize_triangle(edge, base_color, shade, coords, rdram);
                     self.current = self.current.wrapping_add((words - 1) * 8);
                 }
                 0x3F => {
@@ -257,7 +273,14 @@ impl Rdp {
         }
     }
 
-    fn rasterize_triangle(&mut self, edge: [u64; 4], color: u32, textured: bool, rdram: &mut [u8]) {
+    fn rasterize_triangle(
+        &mut self,
+        edge: [u64; 4],
+        color: u32,
+        shade: u32,
+        coords: Option<TexCoords>,
+        rdram: &mut [u8],
+    ) {
         if self.color_size != 2 || self.color_format != 2 {
             return;
         }
@@ -316,14 +339,29 @@ impl Rdp {
                 if self.color_width != 0 && x as u32 >= self.color_width {
                     continue;
                 }
-                let surface = if textured {
-                    self.sample_texture(x, y, bounds, rdram).unwrap_or(color)
+                let texel = coords
+                    .and_then(|coords| self.sample_texture_coords(&coords, x, y, bounds, rdram))
+                    .unwrap_or(color);
+                let mut surface = if self.combine_mode != 0 {
+                    combine(
+                        self.combine_mode,
+                        shade,
+                        texel,
+                        self.primitive_color,
+                        self.environment_color,
+                    )
+                } else if coords.is_some() {
+                    texel
                 } else {
                     color
                 };
-                let pixel = rgba8888_to_5551(surface).to_be_bytes();
                 let address = self.color_address as usize
                     + ((y as u32 * self.color_width + x as u32) as usize) * 2;
+                if let Some(bytes) = rdram.get(address..address + 2) {
+                    let destination = u16::from_be_bytes([bytes[0], bytes[1]]);
+                    surface = blend(surface, rgba5551_to_8888(destination));
+                }
+                let pixel = rgba8888_to_5551(surface).to_be_bytes();
                 if let Some(slot) = rdram.get_mut(address..address + 2) {
                     slot.copy_from_slice(&pixel);
                 }
@@ -331,8 +369,9 @@ impl Rdp {
         }
     }
 
-    fn sample_texture(
+    fn sample_texture_coords(
         &self,
+        coords: &TexCoords,
         x: i32,
         y: i32,
         bounds: (i32, i32, i32, i32),
@@ -343,15 +382,20 @@ impl Rdp {
         if size.s_high <= size.s_low || size.t_high <= size.t_low {
             return None;
         }
-        let (min_x, min_y, max_x, max_y) = bounds;
-        let span_x = (max_x - min_x).max(1) as f32;
-        let span_y = (max_y - min_y).max(1) as f32;
-        let width = f32::from(size.s_high - size.s_low) + 1.0;
-        let height = f32::from(size.t_high - size.t_low) + 1.0;
-        let s = f32::from(size.s_low) + (x - min_x) as f32 / span_x * (width - 1.0);
-        let t = f32::from(size.t_low) + (y - min_y) as f32 / span_y * (height - 1.0);
+        let (min_x, min_y, _, _) = bounds;
+        let scale = |value: i32| i64::from(value);
+        let s_fixed = scale(coords.s[0])
+            + i64::from(x - min_x) * scale(coords.s[1])
+            + i64::from(y - min_y) * scale(coords.s[2]);
+        let t_fixed = scale(coords.t[0])
+            + i64::from(x - min_x) * scale(coords.t[1])
+            + i64::from(y - min_y) * scale(coords.t[2]);
+        let mut s = (s_fixed >> 16) as i32;
+        let mut t = (t_fixed >> 16) as i32;
+        s >>= tile.s_shift;
+        t >>= tile.t_shift;
         let s = tile_coordinate(
-            s,
+            s as f32,
             size.s_low as i32,
             size.s_high as i32,
             tile.s_clamp,
@@ -359,7 +403,7 @@ impl Rdp {
             tile.s_mask,
         );
         let t = tile_coordinate(
-            t,
+            t as f32,
             size.t_low as i32,
             size.t_high as i32,
             tile.t_clamp,
@@ -368,7 +412,7 @@ impl Rdp {
         );
         let row_bytes = usize::from(tile.line) * 8;
         let base = self.texture.address as usize + usize::from(tile.address) * 8;
-        let texel = match tile.size {
+        let sample = match tile.size {
             0 => {
                 let offset = base + t.max(0) as usize * row_bytes + (s.max(0) as usize) / 2;
                 let byte = *rdram.get(offset)?;
@@ -377,8 +421,7 @@ impl Rdp {
             }
             1 => {
                 let offset = base + t.max(0) as usize * row_bytes + s.max(0) as usize;
-                let byte = *rdram.get(offset)?;
-                intensity(byte)
+                intensity(*rdram.get(offset)?)
             }
             2 => {
                 let offset = base + t.max(0) as usize * row_bytes + s.max(0) as usize * 2;
@@ -400,11 +443,10 @@ impl Rdp {
             _ => {
                 let offset = base + t.max(0) as usize * row_bytes + s.max(0) as usize * 2;
                 let bytes = rdram.get(offset..offset + 2)?;
-                let texel = u16::from_be_bytes([bytes[0], bytes[1]]);
-                rgba5551(texel)
+                rgba5551(u16::from_be_bytes([bytes[0], bytes[1]]))
             }
         };
-        Some(texel)
+        Some(sample)
     }
 
     fn fill_rectangle(&mut self, command: u64, rdram: &mut [u8]) {
@@ -446,6 +488,149 @@ fn sext14(value: u64) -> i32 {
 
 fn fixed16(integer: u64, fraction: u64) -> f32 {
     (integer as u16 as i16 as f32) + (fraction as u16 as f32) / 65_536.0
+}
+
+fn read_word(rdram: &[u8], offset: usize) -> Option<u64> {
+    let bytes = rdram.get(offset..offset + 8)?;
+    let mut word = [0u8; 8];
+    word.copy_from_slice(bytes);
+    Some(u64::from_be_bytes(word))
+}
+
+fn shade_color(word: u64) -> u32 {
+    let r = ((word >> 48) & 0xFFFF) >> 8;
+    let g = ((word >> 32) & 0xFFFF) >> 8;
+    let b = ((word >> 16) & 0xFFFF) >> 8;
+    let a = (word & 0xFFFF) >> 8;
+    ((r as u32) << 24) | ((g as u32) << 16) | ((b as u32) << 8) | a as u32
+}
+
+fn fixed16_word(integer: u64, fraction: u64) -> i32 {
+    ((integer as u16 as i16 as i32) << 16) | fraction as u16 as i32
+}
+
+fn parse_texcoords(rdram: &[u8], offset: usize) -> TexCoords {
+    let word = |index: usize| read_word(rdram, offset + index * 8).unwrap_or(0);
+    let coord = |shift: u64| {
+        [
+            fixed16_word(word(0) >> shift, word(2) >> shift),
+            fixed16_word(word(1) >> shift, word(3) >> shift),
+            fixed16_word(word(5) >> shift, word(7) >> shift),
+            fixed16_word(word(4) >> shift, word(6) >> shift),
+        ]
+    };
+    TexCoords {
+        s: coord(48),
+        t: coord(32),
+        w: coord(16),
+    }
+}
+
+fn channel(color: u32, channel: usize) -> i32 {
+    ((color >> (24 - channel * 8)) & 0xFF) as i32
+}
+
+fn combine_input(
+    selector: u64,
+    channel_index: usize,
+    shade: u32,
+    texel: u32,
+    primitive: u32,
+    environment: u32,
+) -> i32 {
+    match selector & 0x7 {
+        0 => 0,
+        1 => 255,
+        2 => channel(shade, channel_index),
+        3 => channel(texel, channel_index),
+        4 => channel(primitive, channel_index),
+        5 => channel(environment, channel_index),
+        _ => 0,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn combine_cycle(
+    a: u64,
+    b: u64,
+    c: u64,
+    d: u64,
+    shade: u32,
+    texel: u32,
+    primitive: u32,
+    environment: u32,
+) -> u32 {
+    let mut result = 0u32;
+    for channel_index in 0..4 {
+        let av = combine_input(a, channel_index, shade, texel, primitive, environment);
+        let bv = combine_input(b, channel_index, shade, texel, primitive, environment);
+        let cv = combine_input(c, channel_index, shade, texel, primitive, environment);
+        let dv = combine_input(d, channel_index, shade, texel, primitive, environment);
+        let value = (((av - bv) * cv) >> 8) + dv;
+        let value = value.clamp(0, 255) as u32;
+        result |= value << (24 - channel_index * 8);
+    }
+    result
+}
+
+fn combine(mode: u64, shade: u32, texel: u32, primitive: u32, environment: u32) -> u32 {
+    let cycle0 = combine_cycle(
+        (mode >> 52) & 0xF,
+        (mode >> 28) & 0xF,
+        (mode >> 47) & 0x1F,
+        (mode >> 15) & 0x7,
+        shade,
+        texel,
+        primitive,
+        environment,
+    );
+    let cycle1 = combine_cycle(
+        (mode >> 37) & 0xF,
+        (mode >> 24) & 0xF,
+        (mode >> 32) & 0x1F,
+        (mode >> 6) & 0x7,
+        cycle0,
+        texel,
+        primitive,
+        environment,
+    );
+    let alpha0 = combine_cycle(
+        (mode >> 44) & 0x7,
+        (mode >> 12) & 0x7,
+        (mode >> 41) & 0x7,
+        (mode >> 9) & 0x7,
+        shade,
+        texel,
+        primitive,
+        environment,
+    );
+    let alpha1 = combine_cycle(
+        (mode >> 21) & 0x7,
+        (mode >> 3) & 0x7,
+        (mode >> 18) & 0x7,
+        mode & 0x7,
+        alpha0,
+        texel,
+        primitive,
+        environment,
+    );
+    (cycle1 & 0xFFFF_FF00) | (alpha1 & 0xFF)
+}
+
+fn blend(source: u32, destination: u32) -> u32 {
+    let alpha = (source & 0xFF) as i32;
+    let mut result = 0u32;
+    for channel_index in 0..4 {
+        let src = channel(source, channel_index);
+        let dst = channel(destination, channel_index);
+        let value = (src * alpha + dst * (255 - alpha) + 127) / 255;
+        result |= (value.clamp(0, 255) as u32) << (24 - channel_index * 8);
+    }
+    result
+}
+
+fn rgba5551_to_8888(color: u16) -> u32 {
+    rgba5551(color)
 }
 
 fn tile_coordinate(value: f32, low: i32, high: i32, clamp: bool, mirror: bool, mask: u8) -> i32 {
@@ -524,7 +709,7 @@ mod tests {
         rdp.write_register(0x04, 64, &mut rdram);
         assert_eq!(rdp.primitive_color(), 0x1122_33FF);
         assert_eq!(rdp.environment_color(), 0x4455_66FF);
-        assert_eq!(rdp.combine_mode(), 0x00AA_55AA);
+        assert_eq!(rdp.combine_mode(), (0x3Cu64 << 56) | 0x00AA_55AA);
         assert_eq!(rdp.triangles(), 1);
         // The following SET_FILL_COLOR was reached (stream stayed aligned).
         assert_eq!(rdp.fill_color, 0x0000_00FF);

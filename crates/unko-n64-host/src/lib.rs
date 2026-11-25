@@ -3,10 +3,10 @@
 //! `load` validates and normalises the cartridge, then boots its IPL3 on the
 //! VR4300 interpreter (PIF HLE) with RDRAM, RSP memory and PI/VI stubs.
 //! `run_frame` runs RSP scalar/vector code and DMA, applies pending RDP fill
-//! and (textured) triangle commands, presents the VI framebuffer from RDRAM as
-//! RGBA and drains AI DMA into interleaved f32 audio. Full combiner/blender,
-//! faithful texture coordinates, audio resampling/mixing and precise
-//! exceptions are the next milestone.
+//! and (textured) triangle commands through the two-cycle combiner/blend,
+//! presents the VI framebuffer from RDRAM as RGBA and drains AI DMA into
+//! interleaved f32 audio. CI/TLUT, perspective W, full blender modes, audio
+//! resampling/mixing and precise exceptions are the next milestone.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

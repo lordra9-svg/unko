@@ -4,10 +4,10 @@
 //! scaffold boots a cartridge's IPL3 on the [`cpu::Cpu`] (VR4300 integer
 //! interpreter) with RDRAM/RSP memory and PI/VI register stubs, runs RSP
 //! scalar/vector code and DMA ([`rsp::Rsp`]), applies RDP solid-fill commands
-//! and rasterises unshaded/shaded/textured triangles ([`rdp::Rdp`]), presents
-//! the VI framebuffer from RDRAM and runs AI DMA into an audio FIFO
-//! ([`ai::Ai`]). Full combiner/blender, faithful texture coordinates and audio
-//! resampling are the next milestones.
+//! and rasterises unshaded/shaded/textured triangles ([`rdp::Rdp`]) with the
+//! two-cycle combiner and alpha blending, presents the VI framebuffer from
+//! RDRAM and runs AI DMA into an audio FIFO ([`ai::Ai`]). CI/TLUT, perspective
+//! W, full blender modes and audio resampling are the next milestones.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
