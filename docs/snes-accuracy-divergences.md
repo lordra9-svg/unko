@@ -13810,3 +13810,23 @@ stream (and every downstream APU write) changes discontinuously. The NMI latch
 delay is therefore not a standalone fix; the 14-clock gap is a symptom of the
 broader sub-synchronisation CPU-cycle phase, not a single constant. Reverted;
 the calibrated default is unchanged.
+
+## Correction: the S-CPU access-clock offset is a constant +30 (2026-11-24)
+
+Comparing same-run `ARES_BUSLOG2` and our `BUS_LOG` over one full frame
+(83,230,000-83,570,000, MMX2, default driver), the APU-port access clocks are
+offset by a **constant** value, not a drift:
+
+```
+first 062140   ours 83,230,158   ares 83,230,128   delta +30
+last  062140   ours 83,569,882   ares 83,569,852   delta +30
+```
+
+The earlier "-22 at the boundary" was an artifact of comparing against a stale
+ares log from a different run/build; the same-run offset is +30 master clocks
+(five CPU cycles). A constant offset cannot by itself reorder an interrupt, so
+the 887,720 boundary flip is not explained by this access-clock offset; the
+NMI edge must be crossing the instruction boundary at a different point (the
+NMI assertion is ours 83,573,184 vs ares 83,573,188 in the fresh run, i.e. not
+shifted by the same +30). Resolving it needs the NMI edge and the instruction
+boundary expressed in one clock base, which the current hooks do not provide.
