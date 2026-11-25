@@ -167,6 +167,19 @@ impl TlbEntry {
     }
 }
 
+/// Asynchronous error-level exception sources (ErrorEPC / Status.ERL path).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorSource {
+    /// Power-on reset.
+    Reset,
+    /// Non-maskable interrupt.
+    Nmi,
+    /// Watchdog timeout.
+    Watchdog,
+    /// Cache error.
+    CacheError,
+}
+
 /// VR4300 architectural state.
 #[derive(Debug, Clone)]
 pub struct Cpu {
@@ -362,6 +375,26 @@ impl Cpu {
     fn set_gpr(&mut self, index: u32, value: u64) {
         if index != 0 {
             self.gpr[index as usize] = value;
+        }
+    }
+
+    /// Takes an asynchronous error-level exception. `NMI`, watchdog and cache
+    /// errors save `ErrorEPC`, set `Status.ERL` and vector to the boot/cache
+    /// error vectors; reset vectors without saving a return address.
+    pub fn take_error(&mut self, source: ErrorSource) {
+        self.delay_slot = false;
+        match source {
+            ErrorSource::Reset => {
+                self.cp0[12] |= 4;
+                self.pc = 0xBFC0_0000;
+                self.next_pc = self.pc.wrapping_add(4);
+            }
+            ErrorSource::Nmi | ErrorSource::Watchdog => {
+                self.raise_error_exception(0xBFC0_0000);
+            }
+            ErrorSource::CacheError => {
+                self.raise_error_exception(0xA000_0000);
+            }
         }
     }
 
@@ -2194,5 +2227,43 @@ mod tests {
         cpu.step(&mut memory).expect("exact add.d");
         assert_eq!(cpu.fcr31 & (1 << 2), 0, "exact sum has no inexact flag");
         assert_eq!(cpu.fcr31 & (1 << 12), 0);
+    }
+    #[test]
+    fn error_level_sources_and_eret() {
+        let mut memory = Memory::new(0x3000);
+        memory.write_u32(0x180, 0x4200_0018); // eret
+
+        // Watchdog: ErrorEPC saved, ERL set, boot vector; ERET returns.
+        let mut cpu = Cpu::new(0x8000_1000);
+        cpu.take_error(ErrorSource::Watchdog);
+        assert_eq!(cpu.pc, 0xBFC0_0000);
+        assert_eq!(cpu.cp0[30], 0x8000_1000);
+        assert_ne!(cpu.cp0[12] & 4, 0, "ERL set");
+        cpu.pc = 0x8000_0180;
+        cpu.next_pc = 0x8000_0184;
+        cpu.step(&mut memory).expect("eret");
+        assert_eq!(cpu.pc, 0x8000_1000);
+        assert_eq!(cpu.cp0[12] & 4, 0, "ERET clears ERL");
+
+        // Cache error uses the 0xA0000000 vector and saves ErrorEPC.
+        let mut cpu = Cpu::new(0x8000_2000);
+        cpu.take_error(ErrorSource::CacheError);
+        assert_eq!(cpu.pc, 0xA000_0000);
+        assert_eq!(cpu.cp0[30], 0x8000_2000);
+        assert_ne!(cpu.cp0[12] & 4, 0);
+
+        // NMI behaves like a watchdog error.
+        let mut cpu = Cpu::new(0x8000_3000);
+        cpu.take_error(ErrorSource::Nmi);
+        assert_eq!(cpu.pc, 0xBFC0_0000);
+        assert_eq!(cpu.cp0[30], 0x8000_3000);
+
+        // Reset vectors without overwriting ErrorEPC.
+        let mut cpu = Cpu::new(0x8000_4000);
+        cpu.cp0[30] = 0x1234;
+        cpu.take_error(ErrorSource::Reset);
+        assert_eq!(cpu.pc, 0xBFC0_0000);
+        assert_eq!(cpu.cp0[30], 0x1234);
+        assert_ne!(cpu.cp0[12] & 4, 0);
     }
 }

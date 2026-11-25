@@ -9,7 +9,7 @@
 //! RDRAM as RGBA. Textured triangles, audio, the TLB and FPU are later.
 
 use crate::ai::Ai;
-use crate::cpu::{Bus, Cpu, CpuError};
+use crate::cpu::{Bus, Cpu, CpuError, ErrorSource};
 use crate::rdp::Rdp;
 use crate::rsp::Rsp;
 use crate::Cartridge;
@@ -104,6 +104,12 @@ impl Machine {
     #[must_use]
     pub fn audio_sample_rate(&self) -> f32 {
         self.ai.output_rate()
+    }
+
+    /// Takes an asynchronous error-level exception (NMI, watchdog, cache
+    /// error or reset) on the CPU.
+    pub fn take_error(&mut self, source: ErrorSource) {
+        self.cpu.take_error(source);
     }
 
     /// Whether the AI DMA interrupt is pending.
@@ -1185,6 +1191,19 @@ mod tests {
         assert_eq!(pixel(5, 12), [0, 0, 0, 0], "outside red left edge");
         assert_eq!(pixel(23, 9), [0, 0xFF, 0, 0xFF], "inside green triangle");
         assert_eq!(pixel(26, 10), [0, 0, 0, 0], "outside green hypotenuse");
+    }
+
+    #[test]
+    fn machine_error_level_entry() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        assert_eq!(machine.cpu.pc, 0xA400_0040);
+        machine.take_error(ErrorSource::Nmi);
+        assert_eq!(machine.cpu.pc, 0xBFC0_0000);
+        assert_eq!(machine.cpu.cp0[30], 0xA400_0040);
+        assert_ne!(machine.cpu.cp0[12] & 4, 0);
+        machine.take_error(ErrorSource::Reset);
+        assert_eq!(machine.cpu.pc, 0xBFC0_0000);
     }
 
     #[test]

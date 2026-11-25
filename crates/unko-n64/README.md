@@ -37,8 +37,9 @@ exceptions (TLB misses/invalid pages, unaligned loads/stores, SYSCALL/BREAK,
 reserved instructions, coprocessor-unusable, integer overflow, delay-slot BD,
 maskable interrupts and enabled FPU exceptions) are delivered through CP0
 (EPC/Cause/BadVAddr, CE, Status.EXL, refill vs general vectors) and `ERET`
-returns to the faulting context, and error-level entry (`ErrorEPC`/`ERL`,
-returned through by `ERET`) is supported. The FPU reports Inexact/Underflow/Overflow/
+returns to the faulting context, and error-level entries (`ErrorEPC`/`ERL`,
+returned through by `ERET`) cover reset, NMI, watchdog and cache-error
+sources. The FPU reports Inexact/Underflow/Overflow/
 Divide-by-zero/Invalid flags and causes in `fcr31`, reports unimplemented
 operations, and honors the FS subnormal flush bit; D-format inexact detection
 uses error-free transformations. Double-precision (`D`-format) arithmetic, comparisons, conversions
