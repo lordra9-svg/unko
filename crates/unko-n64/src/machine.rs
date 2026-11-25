@@ -386,6 +386,72 @@ mod tests {
 
     #[test]
     #[allow(clippy::vec_init_then_push)]
+    fn rdp_ci_tlut_and_perspective() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        let origin = 0x2000u32;
+        let texture = 0x3000u32;
+        let palette = 0x3100u32;
+        machine.write_register(0x0440_0004, origin);
+        machine.write_register(0x0440_0008, 64);
+        // CI4 texture: row 0 indices [1,2,3,0], rows below repeat.
+        let rows = [[1u8, 2, 3, 0], [2, 3, 0, 1], [3, 0, 1, 2], [0, 1, 2, 3]];
+        for (row, indices) in rows.iter().enumerate() {
+            for pair in 0..2 {
+                let byte = (indices[pair * 2] << 4) | indices[pair * 2 + 1];
+                machine.write_u8(texture as u64 + (row * 8 + pair) as u64, byte);
+            }
+        }
+        // Palette: 1 red, 2 green, 3 blue.
+        for (index, color) in [(1u16, 0xF801u16), (2, 0x07C1), (3, 0x003F)] {
+            machine.write_u16(palette as u64 + u64::from(index) * 2, color);
+        }
+        let mut words: Vec<u64> = Vec::new();
+        words.push((0x3Du64 << 56) | (2u64 << 53) | (4u64 << 32) | u64::from(texture));
+        words.push((0x35u64 << 56) | (2u64 << 53) | (1u64 << 41));
+        words.push((0x32u64 << 56) | (3u64 << 12) | 3);
+        // LOAD_TLUT: entries 0..15 from texture address + 0x20 lines.
+        words.push((0x30u64 << 56) | (32u64 << 32) | (15u64 << 12));
+        words.push(
+            (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (64u64 << 32) | u64::from(origin),
+        );
+        words.push((0x0Au64 << 56) | (48u64 << 32) | (16u64 << 16) | 16);
+        words.push(4u64 << 48);
+        words.push(4u64 << 48);
+        words.push(12u64 << 48);
+        // s.c = 4.0, w.c = 2.0, s/t steps 0.375 -> s = 4/2 = 2 (column 2).
+        words.push((4u64 << 48) | (2u64 << 16));
+        words.push(0);
+        words.push(0);
+        words.push(0x6000u64 << 48); // s.x.f
+        words.push(0);
+        words.push(0);
+        words.push(0);
+        words.push(0x6000u64 << 32); // t.y.f
+        for (index, word) in words.iter().enumerate() {
+            machine.write_u32(index as u64 * 8, (word >> 32) as u32);
+            machine.write_u32(index as u64 * 8 + 4, *word as u32);
+        }
+        let end = (words.len() * 8) as u32;
+        machine.write_u32(0x0410_0000, 0);
+        machine.write_u32(0x0410_0004, end);
+        machine.run_frame().expect("frame");
+        let pixel = |x: usize, y: usize| {
+            let index = (y * WIDTH as usize + x) * 4;
+            let frame = machine.frame();
+            [
+                frame[index],
+                frame[index + 1],
+                frame[index + 2],
+                frame[index + 3],
+            ]
+        };
+        // s = 2, t = 0 -> row 0 col 2 -> index 3 -> palette blue.
+        assert_eq!(pixel(5, 5), [0, 0, 0xFF, 0xFF], "CI index 3 blue");
+    }
+
+    #[test]
+    #[allow(clippy::vec_init_then_push)]
     fn rdp_textured_triangle_samples_the_tile() {
         let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
         let mut machine = Machine::new(&cart);

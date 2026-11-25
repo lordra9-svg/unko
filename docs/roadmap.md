@@ -282,8 +282,10 @@ The main effort was the reference-parity accuracy core. Details in
       edge coefficients, and samples textured triangles using the interpolated
       texture-coefficient words via `SET_TEXTURE_IMAGE`/`SET_TILE`/
       `SET_TILE_SIZE` (4/8/16-bit RGBA/IA/I with clamp/mirror/mask), running the
-      two-cycle combiner (`SET_COMBINE_MODE`) and alpha blending; `run_frame`
-      presents the VI framebuffer from RDRAM as RGBA. The AI register block (`AI_LEN` DMA of 16-bit stereo pairs into a
+      two-cycle combiner (`SET_COMBINE_MODE`) and alpha blending, with CI/TLUT
+      palettes (`LOAD_TLUT`, 4/8-bit CI lookup) and perspective-correct W
+      interpolation; `run_frame` presents the VI framebuffer from RDRAM as
+      RGBA. The AI register block (`AI_LEN` DMA of 16-bit stereo pairs into a
       FIFO) feeds interleaved f32 audio through `Core::audio`. Texturing, full
       combiner/blender, audio resampling/mixing, the TLB and FPU are the next
       milestones; no

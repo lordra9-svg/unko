@@ -76,6 +76,8 @@ pub struct Rdp {
     texture: TextureImage,
     tiles: [Tile; 8],
     tile_sizes: [TileSize; 8],
+    tlut: [u16; 256],
+    tlut_valid: bool,
 }
 
 impl Default for Rdp {
@@ -106,6 +108,8 @@ impl Rdp {
             texture: TextureImage::default(),
             tiles: [Tile::default(); 8],
             tile_sizes: [TileSize::default(); 8],
+            tlut: [0; 256],
+            tlut_valid: false,
         }
     }
 
@@ -179,6 +183,23 @@ impl Rdp {
             match opcode {
                 0x36 => self.fill_rectangle(command, rdram),
                 0x37 => self.fill_color = command as u32,
+                0x30 => {
+                    let s_low = ((command >> 44) & 0xFFF) as usize;
+                    let t_low = ((command >> 32) & 0xFFF) as usize;
+                    let s_high = ((command >> 12) & 0xFFF) as usize;
+                    let count = (s_high.saturating_sub(s_low) + 1).min(256);
+                    let tile = self.tiles[0];
+                    let base = self.texture.address as usize
+                        + t_low * usize::from(tile.line) * 8
+                        + s_low * 2;
+                    for (index, slot) in self.tlut.iter_mut().take(count).enumerate() {
+                        let offset = base + index * 2;
+                        if let Some(bytes) = rdram.get(offset..offset + 2) {
+                            *slot = u16::from_be_bytes([bytes[0], bytes[1]]);
+                        }
+                    }
+                    self.tlut_valid = true;
+                }
                 0x32 => {
                     let index = ((command >> 24) & 7) as usize;
                     self.tile_sizes[index] = TileSize {
@@ -384,12 +405,19 @@ impl Rdp {
         }
         let (min_x, min_y, _, _) = bounds;
         let scale = |value: i32| i64::from(value);
-        let s_fixed = scale(coords.s[0])
+        let mut s_fixed = scale(coords.s[0])
             + i64::from(x - min_x) * scale(coords.s[1])
             + i64::from(y - min_y) * scale(coords.s[2]);
-        let t_fixed = scale(coords.t[0])
+        let mut t_fixed = scale(coords.t[0])
             + i64::from(x - min_x) * scale(coords.t[1])
             + i64::from(y - min_y) * scale(coords.t[2]);
+        let w_fixed = scale(coords.w[0])
+            + i64::from(x - min_x) * scale(coords.w[1])
+            + i64::from(y - min_y) * scale(coords.w[2]);
+        if w_fixed != 0 && (coords.w[0] | coords.w[1] | coords.w[2]) != 0 {
+            s_fixed = (s_fixed * 65_536) / w_fixed;
+            t_fixed = (t_fixed * 65_536) / w_fixed;
+        }
         let mut s = (s_fixed >> 16) as i32;
         let mut t = (t_fixed >> 16) as i32;
         s >>= tile.s_shift;
@@ -417,11 +445,20 @@ impl Rdp {
                 let offset = base + t.max(0) as usize * row_bytes + (s.max(0) as usize) / 2;
                 let byte = *rdram.get(offset)?;
                 let nibble = if s & 1 == 0 { byte >> 4 } else { byte & 0xF };
-                intensity(nibble)
+                if tile.format == 2 && self.tlut_valid {
+                    rgba5551(self.tlut[usize::from(nibble)])
+                } else {
+                    intensity(nibble)
+                }
             }
             1 => {
                 let offset = base + t.max(0) as usize * row_bytes + s.max(0) as usize;
-                intensity(*rdram.get(offset)?)
+                let byte = *rdram.get(offset)?;
+                if tile.format == 2 && self.tlut_valid {
+                    rgba5551(self.tlut[usize::from(byte)])
+                } else {
+                    intensity(byte)
+                }
             }
             2 => {
                 let offset = base + t.max(0) as usize * row_bytes + s.max(0) as usize * 2;

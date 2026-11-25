@@ -5,8 +5,8 @@
 //! `run_frame` runs RSP scalar/vector code and DMA, applies pending RDP fill
 //! and (textured) triangle commands through the two-cycle combiner/blend,
 //! presents the VI framebuffer from RDRAM as RGBA and drains AI DMA into
-//! interleaved f32 audio. CI/TLUT, perspective W, full blender modes, audio
-//! resampling/mixing and precise exceptions are the next milestone.
+//! interleaved f32 audio. Full blender modes, audio resampling/mixing and
+//! precise exceptions are the next milestone.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
