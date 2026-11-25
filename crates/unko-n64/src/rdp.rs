@@ -61,6 +61,9 @@ struct OtherModes {
     z_source: bool,
     z_mode: u8,
     aa: bool,
+    alpha_compare: bool,
+    alpha_dither: bool,
+    key_enable: bool,
     dither: u8,
     coverage_mode: u8,
     /// `[cycle][1a, 1b, 2a, 2b]`.
@@ -119,6 +122,10 @@ pub struct Rdp {
     /// Low delta bits that the packed 16-bit depth word cannot hold (the
     /// hardware keeps them in hidden VRAM alongside the Z buffer).
     depth_delta: std::collections::BTreeMap<u32, u8>,
+    key_width: [u16; 3],
+    key_center: [u8; 3],
+    key_scale: [u8; 3],
+    noise: u32,
 }
 
 impl Default for Rdp {
@@ -157,6 +164,10 @@ impl Rdp {
             primitive_depth: 0,
             primitive_delta: 0,
             depth_delta: std::collections::BTreeMap::new(),
+            key_width: [0; 3],
+            key_center: [0; 3],
+            key_scale: [0; 3],
+            noise: 0x1234_5678,
         }
     }
 
@@ -278,6 +289,19 @@ impl Rdp {
                 0x3C => self.combine_mode = command,
                 0x39 => self.blend_color = command as u32,
                 0x38 => self.fog_color = command as u32,
+                0x2A => {
+                    self.key_width[1] = ((command >> 44) & 0xFFF) as u16;
+                    self.key_width[2] = ((command >> 32) & 0xFFF) as u16;
+                    self.key_center[1] = ((command >> 24) & 0xFF) as u8;
+                    self.key_scale[1] = ((command >> 16) & 0xFF) as u8;
+                    self.key_center[2] = ((command >> 8) & 0xFF) as u8;
+                    self.key_scale[2] = (command & 0xFF) as u8;
+                }
+                0x2B => {
+                    self.key_width[0] = ((command >> 16) & 0xFFF) as u16;
+                    self.key_center[0] = ((command >> 8) & 0xFF) as u8;
+                    self.key_scale[0] = (command & 0xFF) as u8;
+                }
                 0x3E => self.depth_address = (command & 0x03FF_FFFF) as u32,
                 0x2E => {
                     self.primitive_depth = ((command >> 16) & 0xFFFF) as u16;
@@ -299,6 +323,9 @@ impl Rdp {
                         z_source: low & (1 << 2) != 0,
                         z_mode: ((low >> 10) & 3) as u8,
                         aa: low & (1 << 3) != 0,
+                        alpha_compare: low & 1 != 0,
+                        alpha_dither: low & 2 != 0,
+                        key_enable: high & (1 << 8) != 0,
                         coverage_mode: ((low >> 8) & 3) as u8,
                         blend: [
                             [
@@ -485,6 +512,32 @@ impl Rdp {
         } else {
             color
         };
+        let mut combined = combined;
+        if modes.key_enable {
+            let alpha = chroma_key_alpha(combined, &self.key_width);
+            combined = (combined & 0xFFFF_FF00) | u32::from(alpha);
+        }
+        if modes.alpha_compare {
+            let base = combined & 0xFF;
+            let reference = if modes.alpha_cvg_select {
+                let coverage8 = u32::from(coverage).min(8);
+                if modes.cvg_times_alpha {
+                    (base * coverage8 + 4) >> 3
+                } else {
+                    coverage8 << 5
+                }
+            } else {
+                base
+            };
+            let threshold = if modes.alpha_dither {
+                u32::from(self.next_noise())
+            } else {
+                self.blend_color & 0xFF
+            };
+            if reference < threshold {
+                return;
+            }
+        }
         let index = (y as u32 * self.color_width + x as u32) as usize;
         let address = self.color_address as usize + index * 2;
         let destination = rdram
@@ -627,6 +680,13 @@ impl Rdp {
         if let Some(slot) = rdram.get_mut(address..address + 2) {
             slot.copy_from_slice(&pixel);
         }
+    }
+
+    fn next_noise(&mut self) -> u8 {
+        self.noise ^= self.noise << 13;
+        self.noise ^= self.noise >> 17;
+        self.noise ^= self.noise << 5;
+        (self.noise >> 24) as u8
     }
 
     fn sample_texture_coords(
@@ -1109,6 +1169,16 @@ fn combine(mode: u64, shade: u32, texel: u32, primitive: u32, environment: u32) 
         environment,
     );
     (cycle1 & 0xFFFF_FF00) | (alpha1 & 0xFF)
+}
+
+fn chroma_key_alpha(color: u32, width: &[u16; 3]) -> u8 {
+    let mut alpha = 0xFFi32;
+    for (index, width) in width.iter().enumerate() {
+        let component = ((color >> (24 - index * 8)) & 0xFF) as i32;
+        let key = (i32::from(*width) << 4) - component;
+        alpha = alpha.min(key.clamp(0, 0xFF));
+    }
+    alpha as u8
 }
 
 fn blend_source(selector: u8, pixel: u32, memory: u32, blend_color: u32, fog_color: u32) -> u32 {

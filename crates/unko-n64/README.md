@@ -14,8 +14,9 @@ triangles using the interpolated texture coefficient words (SET_TEXTURE_IMAGE/SE
 RGBA/IA/I texels with clamp/mirror/mask), runs the two-cycle combiner
 (`SET_COMBINE_MODE`), and applies the `SET_OTHER_MODES` blender: 1/2-cycle
 selectors (pixel/memory/blend/fog colour and alpha), force blend, copy-cycle
-bypass, fog, coverage modes driven by the exact 8-bit subpixel AA mask and
-RGB dithering. It
+bypass, fog, coverage modes driven by the exact 8-bit subpixel AA mask, RGB
+dithering, alpha compare (blend-alpha or dithered threshold) and chroma keying
+(`SET_KEY_GB`/`SET_KEY_R` widths). It
 models the AI register block:
 `AI_LEN` queues double-buffered DMAs of 16-bit stereo pairs from RDRAM, raises
 and acknowledges the AI DMA interrupt, exposes `AI_STATUS`/remaining length,

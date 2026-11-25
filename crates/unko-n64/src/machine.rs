@@ -663,6 +663,91 @@ mod tests {
 
     #[test]
     #[allow(clippy::vec_init_then_push)]
+    fn rdp_alpha_compare_rejects_low_alpha() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        let origin = 0x2000u32;
+        machine.write_register(0x0440_0004, origin);
+        machine.write_register(0x0440_0008, 32);
+        let mut words: Vec<u64> = Vec::new();
+        words.push(
+            (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (32u64 << 32) | u64::from(origin),
+        );
+        words.push((0x37u64 << 56) | 0x0000_FFFF); // blue
+        words.push((0x36u64 << 56) | (31u64 << 12) | 31);
+        words.push((0x39u64 << 56) | 0x0000_0080); // blend alpha threshold 0x80
+                                                   // alpha compare, dither off; image read for blending,
+                                                   // 2a = memory colour.
+        let other = (0x2Fu64 << 56) | (0xCu64 << 36) | (1u64 << 6) | 1 | (1u64 << 22);
+        words.push(other);
+        words.push((0x3Au64 << 56) | 0xFF00_0040); // red alpha 0x40 < threshold
+        words.extend(triangle_edge(0x08, [(4.0, 4.0), (10.0, 6.0), (4.0, 12.0)]));
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("reject low alpha");
+        assert_eq!(
+            frame_pixel(&machine, 5, 9),
+            [0, 0, 0xFF, 0xFF],
+            "low alpha rejected"
+        );
+
+        // Alpha 0xC0 passes and blends red over blue.
+        let mut words: Vec<u64> = Vec::new();
+        words.push((0x3Au64 << 56) | 0xFF00_00C0);
+        words.extend(triangle_edge(
+            0x08,
+            [(16.0, 4.0), (22.0, 6.0), (16.0, 12.0)],
+        ));
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("accept high alpha");
+        assert_eq!(frame_pixel(&machine, 17, 9), [189, 0, 57, 0xFF]);
+    }
+
+    #[test]
+    #[allow(clippy::vec_init_then_push)]
+    fn rdp_chroma_key_masks_matching_pixels() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        let origin = 0x2000u32;
+        machine.write_register(0x0440_0004, origin);
+        machine.write_register(0x0440_0008, 32);
+        let mut words: Vec<u64> = Vec::new();
+        words.push(
+            (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (32u64 << 32) | u64::from(origin),
+        );
+        words.push((0x37u64 << 56) | 0x0000_FFFF); // blue
+        words.push((0x36u64 << 56) | (31u64 << 12) | 31);
+        // key_enable (other modes bit 40), image read, 2a = memory colour.
+        let other = (0x2Fu64 << 56) | (0xCu64 << 36) | (1u64 << 40) | (1u64 << 6) | (1u64 << 22);
+        words.push(other);
+        // Zero key widths: red is fully keyed out.
+        words.push(0x2Au64 << 56);
+        words.push(0x2Bu64 << 56);
+        words.push((0x3Au64 << 56) | 0xFF00_00FF);
+        words.extend(triangle_edge(0x08, [(4.0, 4.0), (10.0, 6.0), (4.0, 12.0)]));
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("keyed red");
+        assert_eq!(
+            frame_pixel(&machine, 5, 9),
+            [0, 0, 0xFF, 0],
+            "red keyed out"
+        );
+
+        // Wide key window: green is kept.
+        let mut words: Vec<u64> = Vec::new();
+        words.push((0x2Au64 << 56) | (0x200u64 << 44) | (0x200u64 << 32));
+        words.push((0x2Bu64 << 56) | (0x200u64 << 16));
+        words.push((0x3Au64 << 56) | 0x00FF_00FF);
+        words.extend(triangle_edge(
+            0x08,
+            [(20.0, 4.0), (26.0, 6.0), (20.0, 12.0)],
+        ));
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("green kept");
+        assert_eq!(frame_pixel(&machine, 21, 9), [0, 0xFF, 0, 0xFF]);
+    }
+
+    #[test]
+    #[allow(clippy::vec_init_then_push)]
     fn rdp_multilayer_aa_depth_blend() {
         let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
         let mut machine = Machine::new(&cart);
