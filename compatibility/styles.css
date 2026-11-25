@@ -88,6 +88,9 @@ td.game small { color: var(--muted); overflow-wrap: anywhere; }
 .badge[data-status="nothing"] { color: var(--red); }
 .badge[data-status="untested"] { color: var(--yellow); }
 .muted { color: var(--muted); }
+.accuracy strong { display: block; color: var(--text); }
+.accuracy small { color: var(--muted); white-space: nowrap; }
+.accuracy-note { margin: 18px 0 0; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 .empty { padding: 18px; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); background: var(--panel-2); }
 .legend { margin-top: 28px; }
 .legend h2 { font-size: 18px; }

@@ -341,6 +341,7 @@ The main effort was the reference-parity accuracy core. Details in
 - SNES core: `docs/snes-core.md`
 - SNES 500-image library scan: `docs/snes-library-scan.md`
 - Full No-Intro import and smoke sweep: `docs/library-scan.md`
+- Per-ROM accuracy campaign: `docs/accuracy-campaign.md`
 - Per-game compatibility tracker: `compatibility/README.md`
 - N64 scaffold and validation limits: `docs/n64-validation.md`
 - Security audit: `docs/security.md`

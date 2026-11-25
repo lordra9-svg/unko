@@ -1,5 +1,6 @@
 const REPO = "https://github.com/lordra9-svg/unko";
 const CATALOG_URL = "games.json";
+const ACCURACY_URL = "accuracy.jsonl";
 const PAGE_SIZE = 200;
 
 const state = {
@@ -112,7 +113,7 @@ function renderTable(system, games) {
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const headRow = document.createElement("tr");
-  for (const label of ["Game", "Format", "Region", "Mapping", "Status", "Evidence", ""]) {
+  for (const label of ["Game", "Format", "Region", "Mapping", "Status", "Accuracy", "Evidence", ""]) {
     const th = document.createElement("th");
     th.scope = "col";
     th.textContent = label;
@@ -150,6 +151,25 @@ function renderTable(system, games) {
     badge.textContent = statusById(game.status).label;
     statusCell.append(badge);
     row.append(statusCell);
+
+    const accuracyCell = document.createElement("td");
+    if (game.accuracy && game.accuracy.status === "ok") {
+      accuracyCell.className = "accuracy";
+      const value = document.createElement("strong");
+      value.textContent = `${game.accuracy.geometry_pct.toFixed(2)}%`;
+      const detail = document.createElement("small");
+      detail.textContent = game.accuracy.steady_geometry_pct == null
+        ? "video"
+        : `video · steady ${game.accuracy.steady_geometry_pct.toFixed(2)}%`;
+      accuracyCell.append(value, detail);
+    } else if (game.accuracy && game.accuracy.status !== "ok") {
+      accuracyCell.className = "muted";
+      accuracyCell.textContent = "error";
+    } else {
+      accuracyCell.className = "muted";
+      accuracyCell.textContent = "—";
+    }
+    row.append(accuracyCell);
 
     addCell(row, game.evidence || "—", "muted");
 
@@ -269,13 +289,41 @@ function render() {
   renderSystems(games);
 }
 
+async function loadAccuracy() {
+  const map = new Map();
+  try {
+    const response = await fetch(ACCURACY_URL, { cache: "no-store" });
+    if (!response.ok) return map;
+    const text = await response.text();
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const row = JSON.parse(line);
+        if (row.sha256) map.set(row.sha256, row);
+      } catch {
+        // A truncated last line during a live run is not a page error.
+      }
+    }
+  } catch {
+    // The accuracy ledger is optional until the first run starts.
+  }
+  return map;
+}
+
 async function boot() {
   try {
-    const response = await fetch(CATALOG_URL, { cache: "no-store" });
+    const [response, accuracy] = await Promise.all([
+      fetch(CATALOG_URL, { cache: "no-store" }),
+      loadAccuracy(),
+    ]);
     if (!response.ok) {
       throw new Error(`${response.status} ${response.statusText}`);
     }
     state.data = await response.json();
+    for (const game of state.data.games) {
+      const record = accuracy.get(game.sha256);
+      if (record) game.accuracy = record;
+    }
   } catch (error) {
     const failure = document.createElement("div");
     failure.className = "error";

@@ -79,6 +79,16 @@ or edited by hand:
 - The page renders 200 rows per system initially; use **Show next 200** to
   reveal more, or search/status-filter to narrow the set.
 
+## Accuracy ledger
+
+`accuracy.jsonl` is an append-only, resumable per-ROM oracle ledger. The page
+loads it over `games.json` by SHA-256 and shows the NES geometry match. The
+current NES stage uses a local RustyNES trace host, 120 frames, and the
+palette-independent geometry hash; the “steady” percentage starts at frame 30.
+Audio is recorded but not scored as exact PCM because RustyNES exposes a
+DC-blocked frontend stream. See
+[`docs/accuracy-campaign.md`](../docs/accuracy-campaign.md).
+
 ## How to test a game
 
 System-level commands are shown on the page. For a single SNES image:
