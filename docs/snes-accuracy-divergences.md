@@ -14286,3 +14286,33 @@ ares ordering (`SNES_PORT_WRITE_END`, hold the write until the next advance):
 the first read mismatch is unchanged at SMP cycle 7,979,241 (ours `0x76`,
 ares `0x75`). The gap is hundreds of master clocks, not one access, so the
 commit instant is not the discriminator. Reverted (behaviour-neutral here).
+
+## The 887,720 handshake divergence is CX4-title-only (2026-11-25)
+
+The `$F4-$F7` read streams were compared for a non-CX4 and both CX4 titles
+(300 frames; DKC 120 frames; `SNES_SMP_READ_LOG` vs `ARES_SMP_READ_LOG`):
+
+```
+title  chip  reads      first port-value mismatch
+DKC    none  160,504     NONE (identical value/port/cycle for the whole run)
+MMX2   CX4   570,016     443174 / SMP cycle 7,979,241  (ares 0x75, ours 0x76)
+MMX3   CX4   570,030     441276 / SMP cycle 7,947,629  (ares 0x13, ours 0x17)
+```
+
+The non-CX4 title's entire handshake stream is bit-identical to ares. Both CX4
+titles show the same defect at their boot driver-upload handshake: our S-CPU has
+published the next counter byte one step before the S-SMP read, so `$FFDA
+CMP Y,$F4` branches differently. This is **not** a global S-CPU/S-SMP phase
+problem — it is specific to the CX4 titles, so a fix need not move the six exact
+titles at all.
+
+Tested the obvious CX4 tweak — synchronise the CX4 at the exact H=0 `event_clock`
+instead of the end of the crossing bus access (ares `CPU::scanline`), leaving the
+chip up to a few clocks further behind: the first read mismatch is unchanged
+(cycle 7,979,241). Reverted. So the CX4 sync instant is not the discriminator;
+the cause is the CPU-side wait/poll timing around the CX4 job, or the shared
+Capcom handshake pattern both CX4 titles use.
+
+Consequence for the plan: the remaining work is a CX4/interaction fix that is
+closed over the two CX4 titles, not the CPU/PPU phase-fidelity project for all
+seven.
