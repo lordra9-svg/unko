@@ -313,7 +313,8 @@ The main effort was the reference-parity accuracy core. Details in
       and the refill/general vectors, and ERET restores execution. Error-level
       entry saves ErrorEPC, sets ERL and returns via ERET; it is driven by the
       CP0 Count/Compare watchdog (Count advances with a per-instruction cycle
-      cost model), modelled cache parity faults and external NMI lines. The FPU
+      cost model), modelled cache parity faults and an MI-register-triggered RCP
+      NMI source (bit 6, modelled over the retail MI_INTERRUPT layout). The FPU
       reports `fcr31` flags/causes
       (inexact, underflow, overflow, divide-by-zero, invalid, unimplemented
       operation) and honors FS flush-to-zero; D-format inexact detection uses

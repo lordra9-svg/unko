@@ -35,6 +35,7 @@
 pub mod ai;
 pub mod cpu;
 pub mod machine;
+pub mod mi;
 pub mod rdp;
 pub mod rsp;
 

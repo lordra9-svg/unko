@@ -10,6 +10,7 @@
 
 use crate::ai::Ai;
 use crate::cpu::{Bus, Cpu, CpuError, ErrorSource};
+use crate::mi::Mi;
 use crate::rdp::Rdp;
 use crate::rsp::Rsp;
 use crate::Cartridge;
@@ -33,6 +34,8 @@ pub struct Machine {
     pub rdp: Rdp,
     /// Audio interface.
     pub ai: Ai,
+    /// MIPS interface.
+    pub mi: Mi,
     /// Work RAM (4 MiB).
     rdram: Vec<u8>,
     /// Cartridge image (normalised big-endian).
@@ -65,6 +68,7 @@ impl Machine {
             rsp,
             rdp: Rdp::new(),
             ai: Ai::new(),
+            mi: Mi::new(),
             rdram: vec![0; 4 * 1024 * 1024],
             rom,
             frames: 0,
@@ -201,6 +205,9 @@ impl Bus for Machine {
             0x0410_0000..=0x0410_001F => {
                 (self.rdp.read_register(address - 0x0410_0000) >> ((3 - (address & 3)) * 8)) as u8
             }
+            0x0430_0000..=0x0430_000F => {
+                (self.mi.read_register(address - 0x0430_0000) >> ((3 - (address & 3)) * 8)) as u8
+            }
             0x0450_0000..=0x0450_0017 => {
                 (self.ai.read_register(address - 0x0450_0000) >> ((3 - (address & 3)) * 8)) as u8
             }
@@ -228,6 +235,7 @@ impl Bus for Machine {
         match address {
             0x0404_0000..=0x0404_003C => self.rsp.read_register(address - 0x0404_0000),
             0x0410_0000..=0x0410_001C => self.rdp.read_register(address - 0x0410_0000),
+            0x0430_0000..=0x0430_000C => self.mi.read_register(address - 0x0430_0000),
             0x0450_0000..=0x0450_0014 => self.ai.read_register(address - 0x0450_0000),
             0x0000_0000..=0x003F_FFFF => {
                 let mut bytes = [0u8; 4];
@@ -287,6 +295,11 @@ impl Bus for Machine {
             0x0410_0000..=0x0410_001C => {
                 self.rdp
                     .write_register(address - 0x0410_0000, value, &mut self.rdram);
+            }
+            0x0430_0000..=0x0430_000C => {
+                if self.mi.write_register(address - 0x0430_0000, value) {
+                    self.cpu.signal_nmi();
+                }
             }
             0x0450_0000..=0x0450_0014 => {
                 self.ai
@@ -1357,6 +1370,27 @@ mod tests {
         machine.signal_cache_error();
         machine.step().expect("cache error");
         assert_eq!(machine.cpu.pc, 0xA000_0000);
+    }
+
+    #[test]
+    fn machine_mi_rcp_nmi_entry_and_eret() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        // ERET handler reachable at 0x80000180 (physical 0x180).
+        machine.write_u32(0x180, 0x4200_0018);
+        // Writing the modelled RCP NMI bit asserts the CPU NMI line.
+        machine.write_u32(0x0430_0008, 1 << 6);
+        assert!(machine.mi.nmi_pending());
+        machine.step().expect("NMI");
+        assert_eq!(machine.cpu.pc, 0xBFC0_0000);
+        assert_eq!(machine.cpu.cp0[30], 0xA400_0040);
+        assert_ne!(machine.cpu.cp0[12] & 4, 0);
+
+        machine.cpu.pc = 0x8000_0180;
+        machine.cpu.next_pc = 0x8000_0184;
+        machine.step().expect("eret");
+        assert_eq!(machine.cpu.pc, 0xA400_0040);
+        assert_eq!(machine.cpu.cp0[12] & 4, 0, "ERET clears ERL");
     }
 
     #[test]
