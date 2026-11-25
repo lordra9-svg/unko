@@ -1632,6 +1632,19 @@ mod tests {
     }
 
     #[test]
+    fn noise_table_matches_reference_seed() {
+        // Reference LCG reseed (three rounds, prime 1103515245).
+        assert_eq!(noise_seed(0, 0, 0), 0x0000);
+        assert_eq!(combiner_noise(0), 0x20);
+        assert_eq!(noise_seed(5, 9, 3), 0xCEC4);
+        assert_eq!(combiner_noise(0xCEC4), 0x120);
+        assert_eq!(noise_seed(1028, 16, 14), 0xB1BC);
+        assert_eq!(combiner_noise(0xB1BC), 0x120);
+        // Blend-alpha threshold uses the low byte.
+        assert_eq!(noise_seed(5, 9, 3) & 0xFF, 0xC4);
+    }
+
+    #[test]
     fn coverage_mask_samples_eight_subpixels() {
         // Left edge at 4.5 px and right edge at 7.5 px (1/8-pixel units).
         let spans = [(36i64, 60i64); 4];

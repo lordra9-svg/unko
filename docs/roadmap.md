@@ -311,14 +311,19 @@ The main effort was the reference-parity accuracy core. Details in
       overflow (Ov), delay-slot BD, maskable interrupts, enabled FPU
       exceptions) are delivered through CP0 Cause/EPC/BadVAddr with Status.EXL
       and the refill/general vectors, and ERET restores execution. Error-level
-      entry saves ErrorEPC, sets ERL and returns via ERET. The FPU reports `fcr31` flags/causes
+      entry saves ErrorEPC, sets ERL and returns via ERET; it is driven by the
+      CP0 Count/Compare watchdog and external NMI/cache-error lines. The FPU
+      reports `fcr31` flags/causes
       (inexact, underflow, overflow, divide-by-zero, invalid, unimplemented
       operation) and honors FS flush-to-zero; D-format inexact detection uses
       error-free transformations. Double-precision (`D`-format) arithmetic, compares,
-      conversions and 64-bit paired FPR storage are also implemented. Exact
-      broader GPU coverage is the next milestone; no
-      standard N64 cartridge image was available locally to boot (only 64DD
-      IPL firmware). See `docs/systems.md`.
+      conversions and 64-bit paired FPR storage are also implemented. Broader
+      GPU coverage (per-tile mip metadata, detail/sharpen LOD, cache parity)
+      is the next milestone. No standard N64 cartridge image is available
+      locally (only 64DD IPL firmware, which is not a cartridge); an ignored
+      `UNKO_N64_ROM` gate in `unko-n64-host` boots a supplied image, runs N
+      frames and prints video/audio hashes. Approximation inventory and
+      measured status: `docs/n64-validation.md`. See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.
 - [ ] GameCube/Wii is deferred: Dolphin is GPL-2.0+ and application-shaped, so
       it can only be a separate optional process, never a registry core.

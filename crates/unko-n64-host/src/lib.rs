@@ -296,19 +296,26 @@ mod tests {
         assert!(error.to_string().contains("unimplemented"), "{error}");
     }
 
+    fn hash_bytes(hash: &mut u64, bytes: &[u8]) {
+        for byte in bytes {
+            *hash ^= u64::from(*byte);
+            *hash = hash.wrapping_mul(0x100_0000_01B3);
+        }
+    }
+
     #[test]
-    #[ignore = "requires UNKO_N64_ROM to point at a real N64 image"]
-    fn real_image_loads_from_env() {
+    #[ignore = "requires UNKO_N64_ROM to point at a real N64 cartridge image"]
+    fn real_cartridge_validation_from_env() {
         let Ok(path) = std::env::var("UNKO_N64_ROM") else {
+            println!("n64-gate: skipped (UNKO_N64_ROM is not set)");
             return;
         };
         let bytes = std::fs::read(&path).expect("read image");
-        let Ok(cart) = Cartridge::from_bytes(&bytes) else {
-            println!("skipping: {path} is not a standard N64 cartridge image");
-            return;
-        };
+        let cart = Cartridge::from_bytes(&bytes).unwrap_or_else(|error| {
+            panic!("n64-gate: {path} is not a standard N64 cartridge image: {error}")
+        });
         println!(
-            "{:?} title={:?} id={:?} country={} version={} crc={:08X}/{:08X}",
+            "n64-gate: {:?} title={:?} id={:?} country={} version={} crc={:08X}/{:08X}",
             cart.byte_order(),
             cart.header().title,
             cart.header().cart_id,
@@ -317,9 +324,50 @@ mod tests {
             cart.header().crc1,
             cart.header().crc2
         );
+        let frames = std::env::var("UNKO_N64_FRAMES")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(60);
         let mut core = N64Core::new();
         core.load(&bytes, &LoadOptions::default()).expect("load");
-        assert!(core.run_frame().is_err());
+        let mut video_hash = 0xcbf2_9ce4_8422_2325u64;
+        let mut audio_hash = 0xcbf2_9ce4_8422_2325u64;
+        let mut samples = 0usize;
+        let mut rate = 0.0f32;
+        for frame in 0..frames {
+            if let Err(error) = core.run_frame() {
+                panic!("n64-gate: frame {frame} failed: {error}");
+            }
+            hash_bytes(&mut video_hash, core.video().data);
+            let audio = core.audio();
+            rate = audio.sample_rate;
+            samples = audio.samples.len() / 2;
+            let audio_bytes: Vec<u8> = audio
+                .samples
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect();
+            hash_bytes(&mut audio_hash, &audio_bytes);
+        }
+        let nonzero = core
+            .video()
+            .data
+            .chunks(4)
+            .filter(|pixel| pixel.len() == 4 && pixel[..3].iter().any(|channel| *channel != 0))
+            .count();
+        println!(
+            "n64-gate: frames={} video_fnv={:016X} nonzero_pixels={} audio_fnv={:016X} samples_per_frame={} rate={:.1}",
+            frames, video_hash, nonzero, audio_hash, samples, rate
+        );
+        if let Ok(out) = std::env::var("UNKO_N64_OUT") {
+            std::fs::write(
+                out,
+                format!(
+                    "frames={frames} video_fnv={video_hash:016X} nonzero_pixels={nonzero} audio_fnv={audio_hash:016X} samples_per_frame={samples} rate={rate:.1}\n"
+                ),
+            )
+            .expect("write gate output");
+        }
     }
 
     #[test]

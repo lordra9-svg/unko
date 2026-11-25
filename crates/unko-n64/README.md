@@ -43,5 +43,6 @@ external NMI/cache-error lines as well as reset. The FPU reports Inexact/Underfl
 Divide-by-zero/Invalid flags and causes in `fcr31`, reports unimplemented
 operations, and honors the FS subnormal flush bit; D-format inexact detection
 uses error-free transformations. Double-precision (`D`-format) arithmetic, comparisons, conversions
-and 64-bit paired FPR storage are implemented too. Fog-alpha edge cases and
-broader GPU coverage is next.
+and 64-bit paired FPR storage are implemented too. Validation status
+(including why no real cartridge image is used here) and the remaining
+approximation inventory are in `docs/n64-validation.md`.
