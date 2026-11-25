@@ -52,6 +52,11 @@ impl SmpThread {
     pub fn ram_handle(&self) -> std::rc::Rc<std::cell::RefCell<Vec<u8>>> {
         self.engine.ram_handle()
     }
+
+    /// The shared S-DSP handle (also given to [`DspThread`]).
+    pub fn dsp_handle(&self) -> std::rc::Rc<std::cell::RefCell<crate::dsp::Dsp>> {
+        self.engine.dsp_handle()
+    }
 }
 
 impl ThreadState for SmpThread {
@@ -96,9 +101,13 @@ mod tests {
     fn smp_and_dsp_share_apu_ram() {
         let smp = smp_with(&[0xFF], 0x0200);
         let ram = smp.ram_handle();
-        let _dsp = DspThread::new(ram.clone());
+        let dsp = smp.dsp_handle();
+        let _dsp_thread = DspThread::new(ram.clone(), dsp.clone());
         ram.borrow_mut()[0x1234] = 0x5A;
         assert_eq!(smp.engine().ram_handle().borrow()[0x1234], 0x5A);
+        // A register write through the shared DSP is visible to both threads.
+        dsp.borrow_mut().write(0x0C, 0x7F);
+        assert_eq!(smp.dsp_handle().borrow().read(0x0C), 0x7F);
     }
 
     #[test]
@@ -119,7 +128,7 @@ mod tests {
 /// therefore the fastest-ticking thread and pulls the S-SMP every micro-step.
 pub struct DspThread {
     clock: crate::co_scheduler::ThreadClock,
-    dsp: crate::dsp::Dsp,
+    dsp: std::rc::Rc<std::cell::RefCell<crate::dsp::Dsp>>,
     ram: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
     samples: std::collections::VecDeque<crate::dsp::Sample>,
     /// The thread is mid-micro-step and must suspend after the S-SMP has caught
@@ -129,10 +138,13 @@ pub struct DspThread {
 
 impl DspThread {
     /// Create the DSP thread sharing the APU RAM with the S-SMP.
-    pub fn new(ram: std::rc::Rc<std::cell::RefCell<Vec<u8>>>) -> Self {
+    pub fn new(
+        ram: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
+        dsp: std::rc::Rc<std::cell::RefCell<crate::dsp::Dsp>>,
+    ) -> Self {
         Self {
             clock: crate::co_scheduler::ThreadClock::new(24_606_720),
-            dsp: crate::dsp::Dsp::new(),
+            dsp,
             ram,
             samples: std::collections::VecDeque::new(),
             pending: false,
@@ -161,7 +173,7 @@ impl ThreadState for DspThread {
             return Need::None;
         }
         self.clock.step(24);
-        if let Some(sample) = self.dsp.tick(&mut self.ram.borrow_mut()[..]) {
+        if let Some(sample) = self.dsp.borrow_mut().tick(&mut self.ram.borrow_mut()[..]) {
             self.samples.push_back(sample);
         }
         self.pending = true;
@@ -175,10 +187,10 @@ mod dsp_tests {
     use crate::co_scheduler::ThreadClock;
 
     fn thread() -> DspThread {
-        DspThread::new(std::rc::Rc::new(std::cell::RefCell::new(vec![
-            0u8;
-            0x1_0000
-        ])))
+        DspThread::new(
+            std::rc::Rc::new(std::cell::RefCell::new(vec![0u8; 0x1_0000])),
+            std::rc::Rc::new(std::cell::RefCell::new(crate::dsp::Dsp::new())),
+        )
     }
 
     #[test]

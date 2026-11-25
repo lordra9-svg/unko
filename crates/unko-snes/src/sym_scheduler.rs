@@ -465,7 +465,7 @@ pub struct SymEngine {
     pub rr: RoundRobin,
     core: Option<crate::spc700::Spc700>,
     spc: crate::spc_coroutine::SpcCoroutine,
-    dsp: crate::dsp::Dsp,
+    dsp: std::rc::Rc<std::cell::RefCell<crate::dsp::Dsp>>,
     ram: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
     samples: std::collections::VecDeque<crate::dsp::Sample>,
     smp_clock: u128,
@@ -511,7 +511,7 @@ impl SymEngine {
             rr: RoundRobin::new(0, 0, 0),
             core: None,
             spc: crate::spc_coroutine::new_spc_coroutine_inline(),
-            dsp: crate::dsp::Dsp::new(),
+            dsp: std::rc::Rc::new(std::cell::RefCell::new(crate::dsp::Dsp::new())),
             ram: std::rc::Rc::new(std::cell::RefCell::new(vec![0; 0x1_0000])),
             samples: std::collections::VecDeque::new(),
             smp_clock: 0,
@@ -560,6 +560,11 @@ impl SymEngine {
         self.ram.clone()
     }
 
+    /// The shared S-DSP handle (ares `dsp`).
+    pub fn dsp_handle(&self) -> std::rc::Rc<std::cell::RefCell<crate::dsp::Dsp>> {
+        self.dsp.clone()
+    }
+
     /// DSP progress in S-SMP-clock units (2 per micro-step; fixed-point internal).
     pub const fn dsp_units(&self) -> u128 {
         self.dsp_units / SMP_FIXED
@@ -592,7 +597,7 @@ impl SymEngine {
 
     /// Run one S-DSP micro-step and record it in the round-robin state.
     fn dsp_micro_step(&mut self) {
-        if let Some(sample) = self.dsp.tick(&mut self.ram.borrow_mut()[..]) {
+        if let Some(sample) = self.dsp.borrow_mut().tick(&mut self.ram.borrow_mut()[..]) {
             self.samples.push_back(sample);
             if self.samples.len() > 16_384 {
                 self.samples.pop_front();
@@ -624,7 +629,7 @@ impl SymEngine {
                 SpcResume::Byte(self.timers[usize::from(address - 0x00FD)].read())
             }
             SpcEvent::Read(0x00F2) => SpcResume::Byte(self.dsp_address),
-            SpcEvent::Read(0x00F3) => SpcResume::Byte(self.dsp.read(self.dsp_address)),
+            SpcEvent::Read(0x00F3) => SpcResume::Byte(self.dsp.borrow().read(self.dsp_address)),
             SpcEvent::Read(address @ 0x00F4..=0x00F7) => {
                 // ares `SMP::readIO`: synchronize(cpu) before sampling the port.
                 if self.smp_clock > self.cpu_clock {
@@ -663,7 +668,7 @@ impl SymEngine {
                 SpcResume::Unit
             }
             SpcEvent::Write(0x00F3, value) => {
-                self.dsp.write(self.dsp_address, value);
+                self.dsp.borrow_mut().write(self.dsp_address, value);
                 SpcResume::Unit
             }
             SpcEvent::Write(address @ 0x00F4..=0x00F7, value) => {
@@ -969,7 +974,7 @@ impl SymEngine {
             destination.copy_from_slice(ram);
         }
         let count = dsp_registers.len().min(crate::dsp::DSP_REGISTERS);
-        self.dsp.registers[..count].copy_from_slice(&dsp_registers[..count]);
+        self.dsp.borrow_mut().registers[..count].copy_from_slice(&dsp_registers[..count]);
     }
 
     /// Load the 64-byte IPL ROM and enable it at `$FFC0-$FFFF`.
