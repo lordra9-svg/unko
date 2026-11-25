@@ -4284,7 +4284,52 @@ impl eframe::App for App {
                 } else if let Some(view) = player.snes_debug() {
                     let pc = (u32::from(view.cpu.pbr) << 16) | u32::from(view.cpu.pc);
                     let listing = player.snes_listing(pc, 8);
-                    snes_debugger_window(ctx, &mut player.debug, &view, &listing);
+                    let space = player.debug.snes_mem_space;
+                    let base = player.debug.snes_mem_addr;
+                    let memory: Vec<(u32, u8)> = (0..32)
+                        .map(|offset| {
+                            let address = base.wrapping_add(offset);
+                            (address, player.snes_debug_peek(space, address).unwrap_or(0))
+                        })
+                        .collect();
+                    let actions =
+                        snes_debugger_window(ctx, &mut player.debug, &view, pc, &listing, &memory);
+                    for action in actions {
+                        match action {
+                            SnesDebugAction::Poke {
+                                space,
+                                address,
+                                value,
+                            } => {
+                                player.snes_debug_poke(space, address, value);
+                            }
+                            SnesDebugAction::ToggleBreak(address) => {
+                                if let Some(index) = player
+                                    .debug
+                                    .snes_breaks
+                                    .iter()
+                                    .position(|value| *value == address)
+                                {
+                                    player.debug.snes_breaks.remove(index);
+                                } else {
+                                    player.debug.snes_breaks.push(address);
+                                }
+                            }
+                            SnesDebugAction::ClearBreaks => player.debug.snes_breaks.clear(),
+                            SnesDebugAction::Step => {
+                                player.snes_debug_step();
+                                player.paused = true;
+                            }
+                            SnesDebugAction::RunToBreakpoint => {
+                                player.paused = true;
+                                player.debug.message =
+                                    match player.snes_run_to_breakpoint(2_000_000) {
+                                        Some(address) => format!("stopped at {address:06X}"),
+                                        None => "breakpoint not reached".to_owned(),
+                                    };
+                            }
+                        }
+                    }
                 }
             }
         } else {
@@ -4360,13 +4405,35 @@ impl App {
     }
 }
 
-/// Minimal SNES debugger window: CPU registers, PPU position and DSP state.
+/// Actions collected by the SNES debugger window and applied by the caller.
+#[derive(Debug, Clone, Copy)]
+enum SnesDebugAction {
+    Poke {
+        space: unko_snes_api::DebugSpace,
+        address: u32,
+        value: u8,
+    },
+    ToggleBreak(u32),
+    ClearBreaks,
+    Step,
+    RunToBreakpoint,
+}
+
+fn parse_hex(text: &str) -> Option<u32> {
+    let text = text.trim().trim_start_matches('$').trim_start_matches("0x");
+    u32::from_str_radix(text, 16).ok()
+}
+
+/// SNES debugger window: registers, memory editor, breakpoints and listing.
 fn snes_debugger_window(
     ctx: &egui::Context,
     debug: &mut crate::debugger::Debugger,
     view: &crate::snes::SnesDebugView,
+    pc: u32,
     listing: &[unko_snes_api::Disassembly],
-) {
+    memory: &[(u32, u8)],
+) -> Vec<SnesDebugAction> {
+    let mut actions = Vec::new();
     egui::Window::new("SNES Debugger")
         .open(&mut debug.open)
         .default_pos(egui::pos2(60.0, 60.0))
@@ -4404,19 +4471,123 @@ fn snes_debugger_window(
                 view.dsp.sample_rate, view.dsp.samples
             ));
             ui.separator();
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt("snes-mem-space")
+                    .selected_text(debug.snes_mem_space.label())
+                    .show_ui(ui, |ui| {
+                        for space in [
+                            unko_snes_api::DebugSpace::Wram,
+                            unko_snes_api::DebugSpace::Vram,
+                            unko_snes_api::DebugSpace::Oam,
+                            unko_snes_api::DebugSpace::Cgram,
+                            unko_snes_api::DebugSpace::ApuRam,
+                            unko_snes_api::DebugSpace::DspRegisters,
+                        ] {
+                            ui.selectable_value(&mut debug.snes_mem_space, space, space.label());
+                        }
+                    });
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut debug.snes_mem_addr_text)
+                            .desired_width(72.0)
+                            .hint_text("address"),
+                    )
+                    .changed()
+                {
+                    if let Some(value) = parse_hex(&debug.snes_mem_addr_text) {
+                        debug.snes_mem_addr = value & 0x00FF_FFFF;
+                    }
+                }
+            });
+            let mut dump = String::new();
+            for (index, (address, value)) in memory.iter().enumerate() {
+                if index % 16 == 0 {
+                    if index != 0 {
+                        dump.push('\n');
+                    }
+                    dump.push_str(&format!("{address:06X}: "));
+                }
+                dump.push_str(&format!("{value:02X} "));
+            }
+            ui.monospace(dump);
+            ui.horizontal(|ui| {
+                ui.label("write");
+                ui.add(
+                    egui::TextEdit::singleline(&mut debug.snes_write_address)
+                        .desired_width(72.0)
+                        .hint_text("addr"),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut debug.snes_write_value)
+                        .desired_width(36.0)
+                        .hint_text("vv"),
+                );
+                if ui.button("Write").clicked() {
+                    if let (Some(address), Some(value)) = (
+                        parse_hex(&debug.snes_write_address),
+                        parse_hex(&debug.snes_write_value),
+                    ) {
+                        if value <= 0xFF {
+                            actions.push(SnesDebugAction::Poke {
+                                space: debug.snes_mem_space,
+                                address: address & 0x00FF_FFFF,
+                                value: value as u8,
+                            });
+                        }
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Step").clicked() {
+                    actions.push(SnesDebugAction::Step);
+                }
+                if ui.button("Run to breakpoint").clicked() {
+                    actions.push(SnesDebugAction::RunToBreakpoint);
+                }
+                if ui.button("Break at PC").clicked() {
+                    actions.push(SnesDebugAction::ToggleBreak(pc));
+                }
+                if ui.button("Clear breaks").clicked() {
+                    actions.push(SnesDebugAction::ClearBreaks);
+                }
+            });
+            ui.separator();
             ui.monospace("Disassembly");
             if listing.is_empty() {
                 ui.weak("(unavailable)");
             }
             for row in listing {
-                ui.monospace(format!(
-                    "{:02X}:{:04X}  {}",
+                let marked = debug.snes_breaks.contains(&row.address);
+                let marker = if marked { '\u{25CF}' } else { ' ' };
+                let text = format!(
+                    "{marker}{:02X}:{:04X}  {}",
                     (row.address >> 16) & 0xFF,
                     row.address & 0xFFFF,
                     row.text
+                );
+                if ui
+                    .selectable_label(marked, egui::RichText::new(text).monospace())
+                    .clicked()
+                {
+                    actions.push(SnesDebugAction::ToggleBreak(row.address));
+                }
+            }
+            if !debug.snes_breaks.is_empty() {
+                ui.label(format!(
+                    "breakpoints: {}",
+                    debug
+                        .snes_breaks
+                        .iter()
+                        .map(|value| format!("{value:06X}"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
                 ));
             }
+            if !debug.message.is_empty() {
+                ui.weak(debug.message.as_str());
+            }
         });
+    actions
 }
 
 /// One editable path row for user-supplied firmware.

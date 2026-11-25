@@ -387,6 +387,56 @@ impl unko_snes_api::SnesCore for SnesCore {
             machine_peek(system, target)
         }))
     }
+
+    fn debug_poke(&mut self, space: unko_snes_api::DebugSpace, address: u32, value: u8) -> bool {
+        let Some(system) = self.system.as_mut() else {
+            return false;
+        };
+        let address = space.clamp(address);
+        match space {
+            unko_snes_api::DebugSpace::Wram => {
+                system.wram_mut()[address as usize] = value;
+            }
+            unko_snes_api::DebugSpace::Vram => {
+                let word_address = (address >> 1) as u16;
+                let old = system.ppu.vram_word(word_address);
+                let word = if address & 1 == 0 {
+                    (old & 0xFF00) | u16::from(value)
+                } else {
+                    (old & 0x00FF) | (u16::from(value) << 8)
+                };
+                system.ppu.set_vram_word(word_address, word);
+            }
+            unko_snes_api::DebugSpace::Oam => {
+                system.ppu.oam_mut()[address as usize] = value;
+            }
+            unko_snes_api::DebugSpace::Cgram => {
+                let word_address = (address >> 1) as u8;
+                let old = system.ppu.cgram_word(word_address);
+                let word = if address & 1 == 0 {
+                    (old & 0xFF00) | u16::from(value)
+                } else {
+                    (old & 0x00FF) | (u16::from(value) << 8)
+                };
+                system.ppu.set_cgram_word(word_address, word);
+            }
+            unko_snes_api::DebugSpace::ApuRam => {
+                system.apu.ram_mut()[address as usize] = value;
+            }
+            unko_snes_api::DebugSpace::DspRegisters => {
+                system.apu.dsp_mut().registers[address as usize] = value;
+            }
+        }
+        true
+    }
+
+    fn debug_step(&mut self) -> Result<u32, unko_core::CoreError> {
+        let system = self
+            .system
+            .as_mut()
+            .ok_or_else(|| unko_core::CoreError::Internal("no ROM loaded".to_owned()))?;
+        Ok(system.step())
+    }
 }
 
 /// Side-effect-free byte fetch for the disassembler.
@@ -511,6 +561,23 @@ mod tests {
         let row = core.debug_disassemble(0x8000).expect("disassembly");
         assert_eq!(row.address, 0x8000);
         assert!(!row.bytes.is_empty());
+    }
+
+    #[test]
+    fn debug_poke_and_step_update_the_machine() {
+        use unko_snes_api::DebugSpace;
+        use unko_snes_api::SnesCore as _;
+        let mut core = SnesCore::new();
+        core.load(&build_lorom(0x8000), &LoadOptions::default())
+            .expect("load");
+        assert!(core.debug_poke(DebugSpace::Wram, 0x100, 0x5A));
+        assert_eq!(core.debug_peek(DebugSpace::Wram, 0x100), Some(0x5A));
+        assert!(core.debug_poke(DebugSpace::ApuRam, 0x10, 0x7E));
+        assert_eq!(core.debug_peek(DebugSpace::ApuRam, 0x10), Some(0x7E));
+        assert!(core.debug_poke(DebugSpace::DspRegisters, 0x6C, 0x20));
+        assert_eq!(core.debug_peek(DebugSpace::DspRegisters, 0x6C), Some(0x20));
+        let cycles = core.debug_step().expect("one instruction");
+        assert!(cycles > 0, "step retired no clocks");
     }
 
     #[test]

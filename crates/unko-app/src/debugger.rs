@@ -65,6 +65,18 @@ pub struct Debugger {
     pub breakpoints: Vec<u16>,
     /// Last action result shown under the toolbar.
     pub message: String,
+    /// SNES memory-editor address space.
+    pub snes_mem_space: unko_snes_api::DebugSpace,
+    /// SNES memory-editor base address (24-bit).
+    pub snes_mem_addr: u32,
+    /// Hex text for the SNES memory base address.
+    pub snes_mem_addr_text: String,
+    /// Hex text for the SNES write address.
+    pub snes_write_address: String,
+    /// Hex text for the SNES write value.
+    pub snes_write_value: String,
+    /// SNES program counters (24-bit) that stop a run.
+    pub snes_breaks: Vec<u32>,
 }
 
 impl Default for Debugger {
@@ -80,6 +92,12 @@ impl Default for Debugger {
             breakpoint_text: String::new(),
             breakpoints: Vec::new(),
             message: String::new(),
+            snes_mem_space: unko_snes_api::DebugSpace::Wram,
+            snes_mem_addr: 0,
+            snes_mem_addr_text: "000000".into(),
+            snes_write_address: String::new(),
+            snes_write_value: String::new(),
+            snes_breaks: Vec::new(),
         }
     }
 }

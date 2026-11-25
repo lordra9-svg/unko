@@ -17,7 +17,7 @@ pub mod debug;
 
 pub use debug::{CpuState, DebugSpace, Disassembly, DspState, PpuState};
 
-use unko_core::Core;
+use unko_core::{Core, CoreError};
 
 /// SNES controller bit for each button (`$4218-$421F` order).
 ///
@@ -188,6 +188,18 @@ pub trait SnesCore: Core {
     /// Decodes one instruction for a disassembly listing.
     fn debug_disassemble(&mut self, _address: u32) -> Option<Disassembly> {
         None
+    }
+
+    /// Writes one byte into a debug address space.
+    fn debug_poke(&mut self, _space: DebugSpace, _address: u32, _value: u8) -> bool {
+        false
+    }
+
+    /// Executes one CPU instruction, returning its master clocks.
+    fn debug_step(&mut self) -> Result<u32, CoreError> {
+        Err(CoreError::Internal(
+            "single-step is not supported by this core".to_owned(),
+        ))
     }
 }
 

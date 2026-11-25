@@ -368,6 +368,21 @@ impl Ppu {
         self.cgram[usize::from(address)]
     }
 
+    /// Mutable object attribute memory (debugger helper).
+    pub fn oam_mut(&mut self) -> &mut [u8; 0x220] {
+        &mut self.oam
+    }
+
+    /// Write a VRAM word (debugger helper).
+    pub fn set_vram_word(&mut self, address: u16, word: u16) {
+        self.vram[usize::from(address & 0x7FFF)] = word;
+    }
+
+    /// Write a CGRAM word (debugger helper).
+    pub fn set_cgram_word(&mut self, address: u8, word: u16) {
+        self.cgram[usize::from(address)] = word;
+    }
+
     /// Current background mode (debug).
     pub const fn bg_mode(&self) -> u8 {
         self.bg_mode

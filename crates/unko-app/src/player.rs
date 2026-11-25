@@ -2175,6 +2175,60 @@ impl Player {
             .map(|adapter| adapter.snes_listing(address, count))
             .unwrap_or_default()
     }
+
+    /// Reads a SNES debug address-space byte.
+    #[must_use]
+    pub fn snes_debug_peek(&self, space: unko_snes_api::DebugSpace, address: u32) -> Option<u8> {
+        self.core
+            .as_any()
+            .downcast_ref::<crate::snes::SnesAdapter>()?
+            .snes_debug_peek(space, address)
+    }
+
+    /// Writes a SNES debug address-space byte.
+    pub fn snes_debug_poke(
+        &mut self,
+        space: unko_snes_api::DebugSpace,
+        address: u32,
+        value: u8,
+    ) -> bool {
+        self.core
+            .as_any_mut()
+            .downcast_mut::<crate::snes::SnesAdapter>()
+            .is_some_and(|adapter| adapter.snes_debug_poke(space, address, value))
+    }
+
+    /// Executes one SNES CPU instruction.
+    pub fn snes_debug_step(&mut self) -> Option<u32> {
+        self.core
+            .as_any_mut()
+            .downcast_mut::<crate::snes::SnesAdapter>()?
+            .snes_debug_step()
+    }
+
+    /// Current SNES program counter (`bank << 16 | pc`).
+    #[must_use]
+    pub fn snes_pc(&self) -> Option<u32> {
+        let view = self.snes_debug()?;
+        Some((u32::from(view.cpu.pbr) << 16) | u32::from(view.cpu.pc))
+    }
+
+    /// Runs single instructions until the PC matches a SNES breakpoint.
+    ///
+    /// `None` when no breakpoint is set or the step budget is exhausted.
+    pub fn snes_run_to_breakpoint(&mut self, budget: u32) -> Option<u32> {
+        if self.debug.snes_breaks.is_empty() {
+            return None;
+        }
+        for _ in 0..budget {
+            let pc = self.snes_pc()?;
+            if self.debug.snes_breaks.contains(&pc) {
+                return Some(pc);
+            }
+            self.snes_debug_step()?;
+        }
+        None
+    }
 }
 
 /// Parses a region string from the UI.
@@ -2657,6 +2711,14 @@ mod tests {
         assert_eq!(listing.len(), 4);
         assert_eq!(listing[0].address, 0x00_8000);
         assert!(!listing[0].text.is_empty());
+        assert!(player.snes_debug_poke(unko_snes_api::DebugSpace::Wram, 0x100, 0xAB));
+        assert_eq!(
+            player.snes_debug_peek(unko_snes_api::DebugSpace::Wram, 0x100),
+            Some(0xAB)
+        );
+        let pc = player.snes_pc().expect("pc");
+        player.debug.snes_breaks.push(pc);
+        assert_eq!(player.snes_run_to_breakpoint(4), Some(pc));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -2729,6 +2791,22 @@ mod tests {
             }
         }
         fs::write(&out, &bytes).expect("write audio");
+        // Debugger exercise after the audio capture so the gate is unaffected.
+        let before = player
+            .snes_debug_peek(unko_snes_api::DebugSpace::Wram, 0x100)
+            .unwrap_or(0);
+        player.snes_debug_poke(unko_snes_api::DebugSpace::Wram, 0x100, before ^ 0xFF);
+        let after = player
+            .snes_debug_peek(unko_snes_api::DebugSpace::Wram, 0x100)
+            .unwrap_or(0);
+        player.snes_debug_poke(unko_snes_api::DebugSpace::Wram, 0x100, before);
+        println!("poke wram 000100: {before:02X} -> {after:02X}");
+        if let Some(pc) = player.snes_pc() {
+            player.debug.snes_breaks.push(pc);
+            let hit = player.snes_run_to_breakpoint(4);
+            player.debug.snes_breaks.clear();
+            println!("breakpoint {pc:06X} -> {hit:?}");
+        }
         let debug = player.snes_debug();
         if let Some(view) = debug {
             let pc = (u32::from(view.cpu.pbr) << 16) | u32::from(view.cpu.pc);

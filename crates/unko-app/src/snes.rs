@@ -86,6 +86,23 @@ impl SnesAdapter {
         self.inner.debug_peek(space, address)
     }
 
+    /// Writes one byte into a SNES debug address space.
+    pub fn snes_debug_poke(
+        &mut self,
+        space: unko_snes_api::DebugSpace,
+        address: u32,
+        value: u8,
+    ) -> bool {
+        use unko_snes_api::SnesCore as _;
+        self.inner.debug_poke(space, address, value)
+    }
+
+    /// Executes one SNES CPU instruction.
+    pub fn snes_debug_step(&mut self) -> Option<u32> {
+        use unko_snes_api::SnesCore as _;
+        self.inner.debug_step().ok()
+    }
+
     /// Disassembles one instruction at a 24-bit address.
     pub fn snes_disassemble(&mut self, address: u32) -> Option<unko_snes_api::Disassembly> {
         use unko_snes_api::SnesCore as _;
