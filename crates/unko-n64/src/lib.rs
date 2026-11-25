@@ -21,7 +21,7 @@
 //! tracks `fcr31` flags/causes (including unimplemented operations and
 //! precise D-format inexact detection) and flush-to-zero. The FPU also implements double-precision arithmetic,
 //! comparisons and conversions with paired 64-bit FPR storage. Exact
-//! depth-blend shifters and broader GPU coverage are the next milestones.
+//! broader GPU coverage is the next milestone.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

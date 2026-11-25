@@ -495,7 +495,17 @@ impl Rdp {
             0
         };
 
+        let memory_coverage = if modes.image_read {
+            ((memory & 0xFF) >> 5) as u8
+        } else {
+            7
+        };
+
         // Depth test and update (only for Z-buffered triangle primitives).
+        let mut coverage = coverage;
+        let mut blend_enabled = true;
+        let mut coverage_wrap = false;
+        let mut blend_shift = [0u8; 2];
         if let Some(zb) = zbuffer {
             let (z, dz_compressed) = if modes.z_source {
                 (
@@ -521,9 +531,25 @@ impl Rdp {
                 .get(&(depth_address as u32))
                 .copied()
                 .unwrap_or(((depth_word & 3) as u8) << 2);
-            if modes.z_compare && !depth_pass(z, dz_compressed, memory_z, memory_dz, modes.z_mode) {
+            let result = depth_test(
+                z,
+                dz_compressed,
+                memory_z,
+                memory_dz,
+                coverage,
+                memory_coverage,
+                modes.z_compare,
+                modes.z_mode,
+                modes.force_blend,
+                modes.aa,
+            );
+            if !result.pass {
                 return;
             }
+            coverage = result.coverage;
+            blend_enabled = result.blend_en;
+            coverage_wrap = result.coverage_wrap;
+            blend_shift = result.blend_shift;
             if modes.z_update {
                 let word = z_compress(z) << 2 | u16::from(dz_compressed >> 2);
                 if let Some(slot) = rdram.get_mut(depth_address..depth_address + 2) {
@@ -555,7 +581,9 @@ impl Rdp {
                     modes.force_blend,
                     false,
                     modes.color_on_coverage,
-                    false,
+                    coverage_wrap,
+                    true,
+                    blend_shift,
                 );
             }
             blender(
@@ -568,7 +596,9 @@ impl Rdp {
                 modes.force_blend,
                 true,
                 modes.color_on_coverage,
-                false,
+                coverage_wrap,
+                blend_enabled,
+                blend_shift,
             )
         };
         if modes.dither >> 2 < 2 {
@@ -583,12 +613,12 @@ impl Rdp {
             } else {
                 surface & 0xFF
             };
-            let memory_coverage = if modes.image_read {
-                ((memory & 0xFF) >> 5) as u8
-            } else {
-                7
-            };
-            let stored = coverage_blend(coverage.min(7), memory_coverage, modes.coverage_mode);
+            let stored = coverage_blend(
+                coverage.min(7),
+                memory_coverage,
+                blend_enabled,
+                modes.coverage_mode,
+            );
             alpha = (alpha & !0xE0) | (u32::from(stored) << 5);
             surface = (surface & 0xFFFF_FF00) | alpha.min(255);
         }
@@ -845,25 +875,94 @@ fn z_decompress(z: u16) -> i32 {
     (mantissa << shift) + base
 }
 
-fn depth_pass(z: i32, dz_compressed: u8, memory_z: u16, memory_dz: u8, mode: u8) -> bool {
-    // A cleared depth buffer (all ones) behaves as infinitely far.
-    if memory_z == 0x3FFF {
-        return true;
+/// Result of the RDP depth test: whether the fragment passes, whether the
+/// blender is enabled, coverage wrap state and the memory-alpha shift amounts.
+struct DepthResult {
+    pass: bool,
+    blend_en: bool,
+    coverage_wrap: bool,
+    blend_shift: [u8; 2],
+    coverage: u8,
+}
+
+fn combine_dz(dz: i32) -> i32 {
+    if dz == 0 {
+        0
+    } else {
+        1 << msb(dz)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn depth_test(
+    z: i32,
+    dz_compressed: u8,
+    memory_z: u16,
+    memory_dz: u8,
+    coverage: u8,
+    memory_coverage: u8,
+    z_compare: bool,
+    z_mode: u8,
+    force_blend: bool,
+    aa: bool,
+) -> DepthResult {
+    let mut result = DepthResult {
+        pass: true,
+        blend_en: force_blend,
+        coverage_wrap: false,
+        blend_shift: [0, 0],
+        coverage,
+    };
+    let overflow = u16::from(coverage) + u16::from(memory_coverage) >= 8;
+    result.coverage_wrap = overflow;
+    if !z_compare {
+        result.blend_shift = [0, (0xF - dz_compressed).min(4)];
+        result.blend_en = force_blend || (!overflow && aa);
+        return result;
     }
     let memory = z_decompress(memory_z);
-    let tolerance = dz_decompress(dz_compressed).max(dz_decompress(memory_dz));
-    let front = z < memory;
-    let nearer = z - tolerance <= memory;
-    let farther = z + tolerance >= memory;
-    match mode {
-        // Opaque / interpenetrating: pass when in front (within the depth
-        // delta tolerance).
-        0 | 1 => nearer,
-        // Transparent: only pixels strictly in front pass.
-        2 => front,
-        // Decal: pass only where coplanar with the existing surface.
-        _ => nearer && farther,
+    let mut memory_delta = dz_decompress(memory_dz);
+    let precision = (memory_z >> 11) & 0xF;
+    let mut coplanar = false;
+    result.blend_shift = [
+        dz_compressed.saturating_sub(memory_dz).min(4),
+        memory_dz.saturating_sub(dz_compressed).min(4),
+    ];
+    if precision < 3 {
+        if memory_delta != 0x8000 {
+            memory_delta = (memory_delta << 1).max(16 >> precision);
+        } else {
+            coplanar = true;
+            memory_delta = 0xFFFF;
+        }
     }
+    let local_delta = dz_decompress(dz_compressed);
+    let combined_delta = combine_dz(local_delta | memory_delta);
+    let combined_delta_interp = combined_delta;
+    let combined_delta = combined_delta << 3;
+    let farther = coplanar || z + combined_delta >= memory;
+    let front = z < memory;
+    let max_z = memory_z == 0x3FFF;
+    let nearer = coplanar || z - combined_delta <= memory;
+    result.blend_en = force_blend || (!overflow && aa && farther);
+    result.pass = match z_mode {
+        // Opaque / interpenetrating.
+        0 | 1 => {
+            if z_mode == 1 && front && farther && overflow {
+                let shift = dz_compress(combined_delta_interp & 0xFFFF);
+                let coefficient = ((memory >> shift) - (z >> shift)) & 0xF;
+                result.coverage = ((coefficient * i32::from(coverage)) >> 3).clamp(0, 8) as u8;
+                true
+            } else {
+                max_z || if overflow { front } else { nearer }
+            }
+        }
+        // Transparent: only strictly nearer fragments pass.
+        2 => front || max_z,
+        // Decal: coplanar fragments only.
+        _ => farther && nearer && !max_z,
+    };
+    result
 }
 
 fn read_word(rdram: &[u8], offset: usize) -> Option<u64> {
@@ -1033,19 +1132,28 @@ fn blender(
     final_cycle: bool,
     color_on_coverage: bool,
     coverage_wrap: bool,
+    blend_en: bool,
+    blend_shift: [u8; 2],
 ) -> u32 {
     let rgb1 = blend_source(modes[2], pixel, memory, blend_color, fog_color);
     if final_cycle && color_on_coverage && !coverage_wrap {
         return rgb1;
     }
     let rgb0 = blend_source(modes[0], pixel, memory, blend_color, fog_color);
-    if final_cycle && modes[1] == 0 && modes[3] == 0 && (pixel & 0xFF) == 0xFF {
+    if final_cycle && (!blend_en || modes[1] == 0 && modes[3] == 0 && (pixel & 0xFF) == 0xFF) {
         return rgb0;
     }
     let a0 = blend_alpha(modes[1], pixel, fog_color, shade_alpha);
     let a1 = blend_factor(modes[3], a0, memory);
-    let a0 = u32::from(a0 >> 3);
-    let a1 = u32::from(a1 >> 3);
+    let mut a0 = a0 >> 3;
+    let mut a1 = a1 >> 3;
+    if modes[3] == 1 {
+        // Memory-alpha blending uses the depth-delta shifters.
+        a0 = (a0 >> blend_shift[0]) & 0x3C;
+        a1 = (a1 >> blend_shift[1]) | 3;
+    }
+    let a0 = u32::from(a0);
+    let a1 = u32::from(a1);
     let mut result = 0u32;
     for channel_index in 0..3 {
         let c0 = (rgb0 >> (24 - channel_index * 8)) & 0xFF;
@@ -1071,9 +1179,15 @@ fn dither(color: u32, x: i32, y: i32, mode: usize) -> u32 {
     result | (color & 0xFF)
 }
 
-fn coverage_blend(coverage: u8, memory_coverage: u8, mode: u8) -> u8 {
+fn coverage_blend(coverage: u8, memory_coverage: u8, blend_en: bool, mode: u8) -> u8 {
     match mode {
-        0 => (coverage - 1) & 7,
+        0 => {
+            if blend_en {
+                (memory_coverage + coverage).min(7)
+            } else {
+                coverage.wrapping_sub(1) & 7
+            }
+        }
         1 => (coverage + memory_coverage) & 7,
         2 => 7,
         _ => memory_coverage,
@@ -1160,6 +1274,54 @@ mod tests {
         assert_eq!(rdp.triangles(), 1);
         // The following SET_FILL_COLOR was reached (stream stayed aligned).
         assert_eq!(rdp.fill_color, 0x0000_00FF);
+    }
+
+    #[test]
+    fn blender_depth_shifters_and_coverage_counts() {
+        // 2b = memory alpha exercises the depth-delta shifters.
+        let modes = [0, 0, 1, 1];
+        let pixel = 0xFF00_0080u32;
+        let memory = 0x0000_FF80u32;
+        assert_eq!(
+            blender(
+                modes,
+                pixel,
+                memory,
+                0,
+                0,
+                0x80,
+                true,
+                true,
+                false,
+                false,
+                true,
+                [0, 0]
+            ),
+            0x7F00_9F80
+        );
+        assert_eq!(
+            blender(
+                modes,
+                pixel,
+                memory,
+                0,
+                0,
+                0x80,
+                true,
+                true,
+                false,
+                false,
+                true,
+                [1, 2]
+            ),
+            0x3F00_3F80
+        );
+        // Coverage accumulation honours blend_en for clamp, and wrap/zap/save modes.
+        assert_eq!(coverage_blend(6, 3, true, 0), 7);
+        assert_eq!(coverage_blend(6, 3, false, 0), 5);
+        assert_eq!(coverage_blend(6, 3, true, 1), 1);
+        assert_eq!(coverage_blend(6, 3, true, 2), 7);
+        assert_eq!(coverage_blend(6, 3, true, 3), 3);
     }
 
     #[test]

@@ -375,6 +375,27 @@ mod tests {
         [(zi << 48) | (zf << 32) | (xi << 16) | xf, (yi << 16) | yf]
     }
 
+    fn frame_pixel(machine: &Machine, x: usize, y: usize) -> [u8; 4] {
+        let index = (y * WIDTH as usize + x) * 4;
+        let frame = machine.frame();
+        [
+            frame[index],
+            frame[index + 1],
+            frame[index + 2],
+            frame[index + 3],
+        ]
+    }
+
+    fn submit_rdp(machine: &mut Machine, words: &[u64]) {
+        for (index, word) in words.iter().enumerate() {
+            machine.write_u32(index as u64 * 8, (word >> 32) as u32);
+            machine.write_u32(index as u64 * 8 + 4, *word as u32);
+        }
+        let end = (words.len() * 8) as u32;
+        machine.write_u32(0x0410_0000, 0);
+        machine.write_u32(0x0410_0004, end);
+    }
+
     #[test]
     fn boots_ipl3_from_dmem() {
         let cart = cart_with(&[0x3C08_8000, 0x2409_1234, 0xAD09_0000, 0x1000_FFFF]);
@@ -638,6 +659,78 @@ mod tests {
         // Z update stored z_compress(0x10000) = 0x400 in the upper 14 bits.
         let offset = depth as usize + (9 * 32 + 5) * 2;
         assert_eq!(&machine.rdram()[offset..offset + 2], &[0x10, 0x00]);
+    }
+
+    #[test]
+    #[allow(clippy::vec_init_then_push)]
+    fn rdp_multilayer_aa_depth_blend() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        let origin = 0x2000u32;
+        let depth = 0x6000u32;
+        machine.write_register(0x0440_0004, origin);
+        machine.write_register(0x0440_0008, 32);
+        for index in 0..32 * 32 {
+            machine.write_u16(depth as u64 + index * 2, 0xFFFF);
+        }
+        let vertices = [(4.0, 4.0), (10.0, 6.0), (4.0, 12.0)];
+        let combine = (4u64 << 52) | (1u64 << 47) | (4u64 << 9) | (2u64 << 37) | (1u64 << 32) | 2;
+
+        let mut words: Vec<u64> = Vec::new();
+        words.push(
+            (0x3Fu64 << 56) | (2u64 << 53) | (2u64 << 51) | (32u64 << 32) | u64::from(origin),
+        );
+        words.push((0x3Eu64 << 56) | u64::from(depth));
+        words.push((0x37u64 << 56) | 0x0000_FFFF); // opaque blue
+        words.push((0x36u64 << 56) | (31u64 << 12) | 31);
+        // AA + z compare/update + image read + force blend, dither off,
+        // 2a = memory colour.
+        let other = (0x2Fu64 << 56)
+            | (0xCu64 << 36)
+            | (1u64 << 14)
+            | (1u64 << 6)
+            | (1u64 << 5)
+            | (1u64 << 4)
+            | (1u64 << 3)
+            | (1u64 << 22);
+        words.push(other);
+        words.push((0x3Au64 << 56) | 0xFF00_0080); // red, alpha 0x80
+        words.push((0x3Cu64 << 56) | combine);
+        words.extend(triangle_edge(0x09, vertices));
+        words.extend(z_words(24_576.0, 0.0, 0.0));
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("first layer");
+        assert_eq!(
+            frame_pixel(&machine, 5, 9),
+            [123, 0, 123, 0xFF],
+            "red AA layer over blue"
+        );
+
+        // Second, nearer green layer blends over the first.
+        let mut words: Vec<u64> = Vec::new();
+        words.push((0x3Au64 << 56) | 0x00FF_0080);
+        words.extend(triangle_edge(0x09, vertices));
+        words.extend(z_words(16_384.0, 0.0, 0.0));
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("second layer");
+        assert_eq!(
+            frame_pixel(&machine, 5, 9),
+            [57, 123, 57, 0xFF],
+            "green AA layer over red"
+        );
+
+        // A farther red layer is rejected by the depth test.
+        let mut words: Vec<u64> = Vec::new();
+        words.push((0x3Au64 << 56) | 0xFF00_0080);
+        words.extend(triangle_edge(0x09, vertices));
+        words.extend(z_words(20_480.0, 0.0, 0.0));
+        submit_rdp(&mut machine, &words);
+        machine.run_frame().expect("third layer");
+        assert_eq!(
+            frame_pixel(&machine, 5, 9),
+            [57, 123, 57, 0xFF],
+            "farther layer rejected"
+        );
     }
 
     #[test]

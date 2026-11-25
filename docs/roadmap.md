@@ -287,7 +287,8 @@ The main effort was the reference-parity accuracy core. Details in
       (1/2-cycle selectors, fog, copy cycle, coverage modes with AA subpixel
       coverage, RGB dither), a Z-buffered depth pipeline
       (`SET_MASK_IMAGE`/`SET_PRIMITIVE_DEPTH`, interpolated 16.16 Z compressed
-      to 16-bit depth + delta, z compare/update, image-read blending), with CI/TLUT
+      to 16-bit depth + delta, z compare/update, image-read blending, AA
+      coverage accumulation/overflow and memory-alpha depth-delta shifters), with CI/TLUT
       palettes (`LOAD_TLUT`, 4/8-bit CI lookup) and perspective-correct W
       interpolation; `run_frame` presents the VI framebuffer from RDRAM as
       RGBA. The AI register block queues double-buffered `AI_LEN` DMAs of
@@ -306,8 +307,7 @@ The main effort was the reference-parity accuracy core. Details in
       operation) and honors FS flush-to-zero; D-format inexact detection uses
       error-free transformations. Double-precision (`D`-format) arithmetic, compares,
       conversions and 64-bit paired FPR storage are also implemented. Exact
-      depth-blend shifters and broader GPU coverage are the next milestones;
-      no
+      broader GPU coverage is the next milestone; no
       standard N64 cartridge image was available locally to boot (only 64DD
       IPL firmware). See `docs/systems.md`.
 - [ ] Only then consider a C ABI + dynamically loaded core plugins.
