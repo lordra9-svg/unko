@@ -13997,3 +13997,25 @@ same class - DMA/refresh edges - since the DMA registers (`$4300-$4306`,
 `$420B`) and `$0609CE`/RAM copies appear at the step sites. Matching them
 requires ares-exact DMA edge timing (the 8-clock `dmaRun` granularity and
 entry point), not a single constant.
+
+## DMA start latency matches ares; the step is grid alignment (2026-11-24)
+
+ares `ARES_DMA_COST` records `seqdelta = oracleAccessSeq - oracle420bSeq` for
+every general-purpose DMA. For MMX2 all four DMAs in the first frames report
+`seqdelta=2` (`lastaddr=7e2077 pc=7e2078`), i.e. ares starts the transfer on the
+**second** bus access after the `$420B` write. Our `dma_edge_stage` (arm 1 -> 2,
+run on the second access) therefore matches ares' start latency exactly.
+
+So the +22 -> +14 step at ~23,894,6xx is not the DMA *start*, it is ares' DMA
+clock alignment:
+```
+step(counter.dma = 8 - dmaCounter());   // pre-align to the 8-clock grid
+dmaRun();                               // 8-clock units
+step(clockCount - counter.dma % clockCount);  // post-round to the access
+```
+Our equivalent lives in `access_cycles_inner` (`dma_clock`/`cost` rounding) and
+the title-specific `hdma_calibration` table, which is already known to be an
+approximation for uncalibrated titles. The 8-clock residual is in that rounding,
+not the trigger. This is the same class for the other bisected steps
+(refresh/HDMA/DMA grid alignment), so exactness requires matching that
+pre/post-rounding arithmetic per access rather than changing the trigger.
