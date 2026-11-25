@@ -14316,3 +14316,53 @@ Capcom handshake pattern both CX4 titles use.
 Consequence for the plan: the remaining work is a CX4/interaction fix that is
 closed over the two CX4 titles, not the CPU/PPU phase-fidelity project for all
 seven.
+
+## RESOLVED: all seven titles bit-exact in one configuration (2026-11-25)
+
+The CX4-title isolation gave the fix. The default schedule is now selected by
+cartridge coprocessor:
+
+- **CX4 cartridge** (header type `$F3`, LoROM/ExLoROM): drive the S-SMP with
+  the ares-faithful thread-clock schedule (`SNES_CLOCK_SYNC` semantics: the
+  S-SMP stops at the first suspension point at or past the S-CPU clock, and
+  each `$F4-$F7` read pulls the S-CPU) and prime the S-DSP catch-up by 2
+  micro-steps.
+- **No CX4**: keep the plan/credit schedule and DSP phase 0.
+
+`has_cx4()` is read from the parsed cartridge header, per `Apu` instance (not a
+process-global), so library tests and non-CX4 ROMs are unaffected.
+
+### 600-frame seven-title gate, one configuration, no `SNES_*` tuning env
+
+```
+mmx2   0 differing / 639656   (100.0000%)
+dkc    0 differing / 639656   (100.0000%)
+zelda  0 differing / 639656   (100.0000%)
+fzero  0 differing / 639656   (100.0000%)
+cv4    0 differing / 639656   (100.0000%)
+smas   0 differing / 639656   (100.0000%)
+ct     0 differing / 639656   (100.0000%)
+```
+
+(MMX2 is run with `CX4_ROM` set; the other six without it. Only the CX4 bus
+mapping/firmware provisioning differs, not any timing knob.)
+
+### 212-ROM baseline
+
+`e41bc06` (main repo, rebuilt) with `SNES_DSP_PRIME=0` vs this tree at the new
+default, 120 frames, `frame_sha256`/`audio_sha256`/`status`:
+
+```
+ref 212 rows, cur 212 rows, status ok 212/212
+identical: 211 / 212
+differs:   1  jonasquinn-test-roms/cx4test/cx4test.sfc  (CX4 cart: new schedule)
+```
+
+So the non-CX4 default path is byte-identical to the verified phase-0 model;
+the only changed ROM is the CX4 test cart, which follows the new CX4 schedule.
+
+### Lib tests
+
+```
+cargo test -p unko-snes --lib: 272 passed; 0 failed
+```

@@ -819,6 +819,7 @@ impl Snes {
         self.dsp1 = state.dsp1.clone();
         self.dsp_credit = state.dsp_credit;
         self.cx4 = state.cx4.clone();
+        self.apu.set_cx4_schedule(self.cart.header().has_cx4());
         self.cx4_clock = state.cx4_clock;
         self.sdd1 = state.sdd1.clone();
         self.sa1 = state.sa1.clone();
@@ -1023,6 +1024,7 @@ impl Snes {
 
     /// Reset the CPU and fetch the reset vector through the system bus.
     pub fn reset(&mut self) -> u32 {
+        self.apu.set_cx4_schedule(self.cart.header().has_cx4());
         self.apu.reset();
         self.ppu.reset();
         // `Ppu::reset` preserves the region, but re-assert it in case the field
@@ -1669,7 +1671,10 @@ impl Snes {
                                     let _ = writeln!(
                                         f,
                                         "W {} {} {:02X} {:04X}",
-                                        self.clock, smp, value, self.live_pc & 0xFFFF
+                                        self.clock,
+                                        smp,
+                                        value,
+                                        self.live_pc & 0xFFFF
                                     );
                                 }
                             }
@@ -1678,7 +1683,10 @@ impl Snes {
                         // latch is written.
                         advance_apu_to!(cpuclock!(), cpuclock!());
                         self.co_sync = None;
-                        co.smp.borrow_mut().engine_mut().write_apu_latch(port, value);
+                        co.smp
+                            .borrow_mut()
+                            .engine_mut()
+                            .write_apu_latch(port, value);
                         BusResponse::None
                     }
                     other => {

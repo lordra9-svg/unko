@@ -157,6 +157,17 @@ pub fn port_sync() -> bool {
     *PORT.get_or_init(|| std::env::var_os("SNES_PORT_SYNC").is_some())
 }
 
+/// Default DSP catch-up phase in micro-steps when `SNES_DSP_PRIME` is unset.
+/// The CX4 schedule lands the echo writes exactly with two micro-steps; the
+/// plan/credit model needs none.
+fn default_dsp_prime(cx4_schedule: bool) -> u128 {
+    if cx4_schedule {
+        2 * DSP_TICK
+    } else {
+        0
+    }
+}
+
 /// `SNES_CO_SCHED`: drive the APU through the cooperative three-thread scheduler
 /// (`co_scheduler` + `co_apu`) instead of the plan/credit driver.
 pub fn co_sched() -> bool {
@@ -776,6 +787,10 @@ pub struct Apu {
     master_clock_rate: u64,
     /// Whether `cpu_master_clock`/`master_clock_rate` are valid.
     master_clock_valid: bool,
+    /// Cartridge declares a CX4. The ares-faithful S-SMP-driven schedule and a
+    /// two-micro-step DSP catch-up phase are required for CX4 titles; non-CX4
+    /// titles match ares exactly on the plan/credit schedule at phase 0.
+    cx4_schedule: bool,
     /// Carried S-SMP master-clock credit: the fractional remainder of the
     /// rational conversion from master clocks to S-SMP clocks.
     apu_credit: i64,
@@ -846,6 +861,7 @@ impl Apu {
             cpu_master_clock: 0,
             master_clock_rate: 0,
             master_clock_valid: false,
+            cx4_schedule: false,
             apu_credit: 0,
             park_at: None,
             sym_pending_read: None,
@@ -1018,6 +1034,11 @@ impl Apu {
         self.debug.enabled
     }
 
+    /// Select the CX4-title schedule (S-SMP-driven pull, two-step DSP phase).
+    pub fn set_cx4_schedule(&mut self, present: bool) {
+        self.cx4_schedule = present;
+    }
+
     /// Record the S-CPU master clock for the current access. ares
     /// `SMP::readIO($F4-$F7)` calls `synchronize(cpu)`, so the port read waits
     /// until the S-CPU has reached this clock.
@@ -1183,6 +1204,7 @@ impl Apu {
             samples: &mut self.samples,
             apu_ports: &mut self.apu_ports,
             dsp_target,
+            cx4_schedule: self.cx4_schedule,
             cpu_ports: &mut self.cpu_ports,
             aux4: &mut self.aux4,
             aux5: &mut self.aux5,
@@ -1405,7 +1427,10 @@ impl Apu {
         let prime = std::env::var("SNES_DSP_PRIME")
             .ok()
             .and_then(|value| value.parse::<u128>().ok())
-            .map_or(4 * DSP_TICK, |ticks| ticks * DSP_TICK);
+            .map_or_else(
+                || default_dsp_prime(self.cx4_schedule),
+                |ticks| ticks * DSP_TICK,
+            );
         self.smp_clock
             .saturating_sub(u128::from(dsp_lag()) * DSP_TICK)
             .saturating_add(prime)
@@ -1897,6 +1922,7 @@ impl Apu {
                 samples: &mut self.samples,
                 apu_ports: &mut self.apu_ports,
                 dsp_target,
+                cx4_schedule: self.cx4_schedule,
                 cpu_ports: &mut self.cpu_ports,
                 aux4: &mut self.aux4,
                 aux5: &mut self.aux5,
@@ -2022,6 +2048,7 @@ impl Apu {
             samples: &mut self.samples,
             apu_ports: &mut self.apu_ports,
             dsp_target,
+            cx4_schedule: self.cx4_schedule,
             cpu_ports: &mut self.cpu_ports,
             aux4: &mut self.aux4,
             aux5: &mut self.aux5,
@@ -2245,6 +2272,7 @@ impl Apu {
             samples: &mut self.samples,
             apu_ports: &mut self.apu_ports,
             dsp_target,
+            cx4_schedule: self.cx4_schedule,
             cpu_ports: &mut self.cpu_ports,
             aux4: &mut self.aux4,
             aux5: &mut self.aux5,
@@ -2521,7 +2549,7 @@ impl Apu {
         if sym_driver() {
             return self.advance_symmetric(clocks, clock, rate);
         }
-        if clock_sync() {
+        if clock_sync() || self.cx4_schedule {
             // ares `Thread::synchronize(smp)` with no carried credit: run the
             // S-SMP to the first suspension point at or past the S-CPU clock.
             self.set_master_clock(clock + u64::from(clocks), rate);
@@ -2722,6 +2750,8 @@ struct ApuBus<'a> {
     apu_ports: &'a mut [u8; 4],
     /// S-CPU-derived DSP target (`SNES_DSP_CPU_PHASE`), shared base.
     dsp_target: Option<u128>,
+    /// Cartridge is a CX4 title (selects the S-SMP-driven schedule + phase).
+    cx4_schedule: bool,
     cpu_ports: &'a mut [u8; 4],
     aux4: &'a mut u8,
     aux5: &'a mut u8,
@@ -2758,16 +2788,17 @@ impl ApuBus<'_> {
             None => *self.smp_clock,
         };
         let target = target.saturating_sub(u128::from(dsp_lag()) * DSP_TICK);
-        // Diagnostic: the DSP register-write phase measured +6 micro-steps
-        // against ares; prime the DSP catch-up by that many ticks to test
-        // whether the offset is a true global phase.
-        // Default DSP catch-up is primed by 4 micro-steps: this is the
-        // configuration that makes Mega Man X2 bit-exact (the accepted
-        // MMX2-first tradeoff). `SNES_DSP_PRIME` overrides it.
+        // Default DSP catch-up phase: none for the plan/credit schedule (the
+        // six non-CX4 reference titles are bit-exact at phase 0), two
+        // micro-steps for the CX4 schedule (MMX2 is bit-exact there).
+        // `SNES_DSP_PRIME` overrides it.
         let prime = std::env::var("SNES_DSP_PRIME")
             .ok()
             .and_then(|value| value.parse::<u128>().ok())
-            .map_or(4 * DSP_TICK, |ticks| ticks * DSP_TICK);
+            .map_or_else(
+                || default_dsp_prime(self.cx4_schedule),
+                |ticks| ticks * DSP_TICK,
+            );
         drain_dsp_to(
             self.ram,
             self.dsp,
@@ -3137,6 +3168,7 @@ mod tests {
                 samples: &mut apu.samples,
                 apu_ports: &mut apu.apu_ports,
                 dsp_target: None,
+                cx4_schedule: false,
                 cpu_ports: &mut apu.cpu_ports,
                 aux4: &mut apu.aux4,
                 aux5: &mut apu.aux5,
@@ -3187,6 +3219,7 @@ mod tests {
                 samples: &mut apu.samples,
                 apu_ports: &mut apu.apu_ports,
                 dsp_target: None,
+                cx4_schedule: false,
                 cpu_ports: &mut apu.cpu_ports,
                 aux4: &mut apu.aux4,
                 aux5: &mut apu.aux5,
@@ -3218,6 +3251,7 @@ mod tests {
                 samples: &mut apu.samples,
                 apu_ports: &mut apu.apu_ports,
                 dsp_target: None,
+                cx4_schedule: false,
                 cpu_ports: &mut apu.cpu_ports,
                 aux4: &mut apu.aux4,
                 aux5: &mut apu.aux5,
@@ -3259,6 +3293,7 @@ mod tests {
             samples: &mut apu.samples,
             apu_ports: &mut apu.apu_ports,
             dsp_target: None,
+            cx4_schedule: false,
             cpu_ports: &mut apu.cpu_ports,
             aux4: &mut apu.aux4,
             aux5: &mut apu.aux5,
@@ -3298,6 +3333,7 @@ mod tests {
             samples: &mut apu.samples,
             apu_ports: &mut apu.apu_ports,
             dsp_target: None,
+            cx4_schedule: false,
             cpu_ports: &mut apu.cpu_ports,
             aux4: &mut apu.aux4,
             aux5: &mut apu.aux5,
@@ -3397,6 +3433,7 @@ mod wait_state_tests {
             samples: &mut apu.samples,
             apu_ports: &mut apu.apu_ports,
             dsp_target: None,
+            cx4_schedule: false,
             cpu_ports: &mut apu.cpu_ports,
             aux4: &mut apu.aux4,
             aux5: &mut apu.aux5,
