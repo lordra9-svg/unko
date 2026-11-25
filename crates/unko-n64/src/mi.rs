@@ -49,6 +49,9 @@ impl Mi {
                 false
             }
             0x8 => {
+                // Documented source bits are write-1-to-clear; bit 6 models the
+                // RCP NMI line (set on 1, cleared on 0).
+                self.interrupt &= !(value & 0x3F);
                 if value & NMI_BIT != 0 {
                     self.nmi = true;
                     self.interrupt |= NMI_BIT;
@@ -121,5 +124,9 @@ mod tests {
         assert_ne!(mi.read_register(0x8) & (1 << 2), 0);
         mi.clear_interrupt(2);
         assert_eq!(mi.read_register(0x8) & (1 << 2), 0);
+        // Documented source bits are write-1-to-clear.
+        mi.raise_interrupt(4);
+        mi.write_register(0x8, 1 << 4);
+        assert_eq!(mi.read_register(0x8) & (1 << 4), 0);
     }
 }

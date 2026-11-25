@@ -56,7 +56,7 @@ provide the image.
 Recent full runs:
 
 ```
-unko-n64       72 passed
+unko-n64       73 passed
 unko-n64-host   6 passed, 1 ignored (the gate above)
 unko-app       86 passed, 2 ignored
 unko-snes     272 passed
@@ -87,6 +87,7 @@ N64 coverage highlights:
 | LOD | RDP 2-cycle LOD: perspective-corrected s/w and t/w derivatives, texel-space scaling by the tile s/t shifts, an explicit level-to-tile mip descriptor table, detail/sharpen tile advancing, and LOD-fraction blending | verified by `perspective_derivatives_use_w_coefficients`, `mip_descriptor_table_maps_levels_explicitly`, `rdp_lod_uses_explicit_mip_table` (level 0->tile 2, level 1->tile 0) and `lod_tile_offsets_and_detail_sharpen`; automatic chains still register level i at base tile+i unless overridden |
 | Noise | LCG reseed over `(x, y, primitive)` identical to the reference renderer's `noise.h` | verified against reference seed vectors `(0,0,0)->0x0000`, `(5,9,3)->0xCEC4`, `(1028,16,14)->0xB1BC`; our "primitive" is the triangle counter, not a span-buffer primitive index + base |
 | CP0 Count | cycle-cost model (ALU 1, load/store/branch/COP0 2, COP1 4, mul 5, div 37) | verified by `count_advances_by_instruction_cycle_cost`; not a full pipeline/cache timing model |
+| MI interrupts | MI_INTERRUPT bits 5:0 are mirrored from AI (bit 2) and can be raised by the system layer; MI_MASK gates them and the OR is delivered to the CPU as Int0 (Cause.IP2), respecting Status.IE/IM. | verified by `machine_mi_interrupt_routes_to_cpu_ip2` through `run_frame`: a masked PI source enters the general vector, the handler clears the source and ERETs; an unmasked source sets no IP2. Bits are write-1-to-clear (scaffold for source-driven clearing). |
 | Cache/NMI | cache parity is modelled with 16-byte line metadata; an injected parity fault raises the cache-error exception on the next instruction fetch or data access. NMI is triggered at register level by the modelled MI RCP NMI bit, which asserts `Cpu::signal_nmi`. | verified by `cache_parity_error_triggers_entry_and_eret`, `machine_cache_parity_entry`, `registers_mask_and_nmi_trigger` and `machine_mi_rcp_nmi_entry_and_eret`; there is no real ECC/parity storage, cache replacement policy or PIF/reset-button model |
 | Interpenetrating Z | coverage scaled by the 4-bit coefficient of the combined depth delta | matches the reference renderer formula; verified by unit and frame tests |
 | CLI/TLUT | palette loaded from the texture image into a 256-entry table | TMEM chunk/address semantics are simplified |

@@ -137,8 +137,31 @@ impl Machine {
         self.ai.interrupt_pending()
     }
 
+    /// Mirrors RCP interrupt sources into MI and drives the CPU Int0 line
+    /// (Cause.IP2) when any source is enabled in MI_MASK.
+    pub fn update_interrupts(&mut self) {
+        if self.ai.interrupt_pending() {
+            self.mi.raise_interrupt(2);
+        } else {
+            self.mi.clear_interrupt(2);
+        }
+        let pending = (self.mi.read_register(0x08) & self.mi.read_register(0x0C) & 0x3F) != 0;
+        self.cpu.set_interrupt_line(0, pending);
+    }
+
+    /// Raises a documented MI interrupt source bit (0 = SP .. 5 = DP).
+    pub fn raise_mi_interrupt(&mut self, bit: u32) {
+        self.mi.raise_interrupt(bit);
+    }
+
+    /// Clears a documented MI interrupt source bit.
+    pub fn clear_mi_interrupt(&mut self, bit: u32) {
+        self.mi.clear_interrupt(bit);
+    }
+
     /// Executes one CPU instruction.
     pub fn step(&mut self) -> Result<(), CpuError> {
+        self.update_interrupts();
         let mut cpu = std::mem::replace(&mut self.cpu, Cpu::new(0));
         let result = cpu.step(self);
         self.cpu = cpu;
@@ -1370,6 +1393,36 @@ mod tests {
         machine.signal_cache_error();
         machine.step().expect("cache error");
         assert_eq!(machine.cpu.pc, 0xA000_0000);
+    }
+
+    #[test]
+    fn machine_mi_interrupt_routes_to_cpu_ip2() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        // Handler at 0x80000180 clears MI PI (bit 4) and returns.
+        for (index, word) in [0x3C08_0430u32, 0x2409_0010, 0xAD09_0008, 0x4200_0018]
+            .iter()
+            .enumerate()
+        {
+            machine.write_u32(0x180 + index as u64 * 4, *word);
+        }
+        machine.cpu.cp0[12] = 1 | (1 << 10); // IE + IM2
+        machine.write_u32(0x0430_000C, 1 << 9); // set PI mask
+        machine.raise_mi_interrupt(4);
+        machine.run_frame().expect("frame with interrupt");
+        assert_eq!(machine.frames, 1);
+        assert_eq!(machine.cpu.cp0[12] & 2, 0, "handler ERET cleared EXL");
+        assert_eq!(machine.mi.read_register(0x08) & (1 << 4), 0, "PI cleared");
+        assert_eq!(machine.cpu.cp0[13] & (1 << 10), 0, "IP2 deasserted");
+
+        // With the mask clear the source stays pending but is not delivered.
+        let mut machine = Machine::new(&cart);
+        machine.cpu.cp0[12] = 1 | (1 << 10);
+        machine.raise_mi_interrupt(4);
+        machine.run_frame().expect("frame without delivery");
+        assert_ne!(machine.mi.read_register(0x08) & (1 << 4), 0);
+        assert_eq!(machine.cpu.cp0[13] & (1 << 10), 0);
+        assert_eq!(machine.cpu.cp0[12] & 2, 0);
     }
 
     #[test]

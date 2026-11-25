@@ -418,6 +418,19 @@ impl Cpu {
         Ok(())
     }
 
+    /// Asserts or clears a maskable hardware interrupt line (0 = Int0/IP2 ...
+    /// 5 = Int5/IP7) in `Cause.IP`.
+    pub fn set_interrupt_line(&mut self, line: u32, asserted: bool) {
+        if line < 6 {
+            let bit = 10 + line;
+            if asserted {
+                self.cp0[13] |= 1 << bit;
+            } else {
+                self.cp0[13] &= !(1 << bit);
+            }
+        }
+    }
+
     /// Raises the external non-maskable-interrupt line.
     pub fn signal_nmi(&mut self) {
         self.pending_nmi = true;
