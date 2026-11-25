@@ -13695,3 +13695,48 @@ localised event (92.3% overall), not from a global phase offset. That makes the
 constant `prime = 4` default a stopgap masking one DSP event, and a principled
 prime-0 model that fixes that event is the plausible route to one configuration
 that is exact for all seven.
+
+## Prime-0 MMX2 divergence: echo register write lands one sample early (2026-11-24)
+
+Per-sample DSP state traces (`ARES_DSP_TRACE` vs `DSP_FULL_TRACE_OUT`, layouts
+identical) at `SNES_DSP_PRIME=0` show bit-identical `left/right` through sample
+226,559 and bit-identical voice state throughout. The first state divergence is
+`echo.page` at sample 126,623: ours already reads `240`, ares still `0`; at
+126,624 ours has `echo._offset=4, echo._length=4096, echo.delay=2`, ares still
+`0`. From then on our echo ring pointer stays 8 units (2 samples) ahead and the
+echo FIR read hits a different slot; the audio first differs at sample 226,560
+(`left 42` vs `180`, `echo.out0 0` vs `156`) when the echo finally becomes
+audible.
+
+The register-write logs (`ARES_DSP_WRITES` vs `DSP_WRITES_OUT`) are identical in
+order and values; the only difference is the DSP clock at the `$6D=0xF0` write:
+
+```
+ares  dspTick 4,051,979  (= sample 5276 + 11 ticks)  -> lands AFTER the boundary
+ours  dspTick 4,051,913  (= sample 5275 + 713 ticks) -> lands BEFORE the boundary
+```
+
+So the SMP->DSP register write lands ~66 DSP ticks (2.75 micro-steps) earlier
+relative to the DSP sample boundary than ares. That flips which of two adjacent
+per-sample trace rows first shows the new register, giving the echo ring its
+2-sample lead. It is a **sub-sample SMP/DSP phase** difference, not a DSP
+arithmetic bug.
+
+The fixed `SNES_DSP_PRIME` is a quantisation knob, not the true phase; scanning
+it for MMX2 (600 frames) gives:
+
+| prime (micro-steps) | differing | identical |
+|---|---|---|
+| 1 | 41,458 | 93.5187% |
+| 2 | 39,626 | 93.8051% |
+| 3 | 26,520 | 95.8540% |
+| 4 (default) | 0 | 100.0000% |
+| 5 | 3,092 | 99.5166% |
+| 0 | 49,253 | 92.3001% |
+
+The required value is title-dependent (six titles are exact at 0, MMX2 only at
+4), which is the signature of a per-title quantisation match rather than a real
+global phase. The principled fix is ares' per-tick DSP synchronisation
+(`DSP::tick -> synchronize(smp)`), which the cooperative driver implements but
+which still has its own audio divergences; the bulk `drain_dsp_to(target)+prime`
+model cannot express it.
