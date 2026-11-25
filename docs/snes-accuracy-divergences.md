@@ -13423,3 +13423,27 @@ and the S-SMP instruction trace first diverges at the same instruction **883082*
 is wired and running, but its switch order still differs from ares; the `$FFDC`
 offset survives the rewrite and is not the plan/replay driver. The next work is
 to correct the driver's interleaving against this trace.
+
+## Cooperative driver is exact until the `$FFDC` poll; 8-clock skew isolated (2026-11-24)
+
+Under the active `SNES_CO_SCHED` driver:
+
+* the S-SMP instruction trace matches ares **exactly** (same PCs and same absolute
+  `SmpMono` clocks) up to instruction 883,082;
+* CT's first audio difference is at sample 151,022 = **2.361 s** - the same
+  handshake as the old driver, so the DSP/sample path is correct until then;
+* at 883,082 both execute the same instruction at the same clock, but diverge:
+
+```
+idx      ares(mono,pc)      ours(clock,pc)
+883080   7946030 FFCF       7946030 FFCF
+883081   7946040 FFD2       7946040 FFD2
+883082   7946048 FFCF       7946044 FFD4   <- ours branches, ares polls
+883083   7946058 FFD2       7946052 FFEF
+```
+
+The same `CMP Y,$F4` at clock 7,946,040 takes the branch in ours (new port
+value) and not in ares (old value): our S-CPU's `$2140` byte is visible to the
+S-SMP **8 clocks (one poll) earlier**. Everything before that is bit-identical,
+so the cooperative scheduler itself is correct; only the port-write visibility
+order at this handshake remains.
