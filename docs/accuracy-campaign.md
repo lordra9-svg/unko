@@ -4,7 +4,7 @@ This is the oracle campaign that follows the smoke catalog. It is deliberately
 separate from the compatibility statuses: a game can **run** and still have a
 low oracle match.
 
-## NES stage — in progress
+## NES stage — complete (2026-11-25)
 
 Oracle: a local RustyNES trace host built against `refs/rustynes` (GPL-3.0,
 kept outside the MIT tree at `~/ai/refs/rustynes-trace-host`). Its
@@ -28,9 +28,24 @@ Audio is recorded but **not scored as exact PCM**: RustyNES exposes a
 DC-blocked frontend stream, not its mixer raw stream, so the sample stream is
 not directly comparable to our f32 output.
 
-The NES set is 7,101 headered images. At the measured ~1.2 ROMs/s, the serial
-run is about 95 minutes. Headerless NES images are not runnable without an
-iNES header and remain **Unsupported**.
+The NES set is 7,101 headered images. The serial run completed in about 6,206
+seconds (~1.14 ROMs/s): **6,726 measured**, **375 errors**, **0 skipped**.
+
+| Metric | Result |
+|---|---:|
+| Measured ROMs | 6,726 |
+| Errors | 375 |
+| Steady-state geometry 100% | 4,889 (72.7% of measured) |
+| Steady-state geometry >= 98% | 5,143 (76.5%) |
+| Steady-state geometry >= 90% | 5,553 (82.6%) |
+| Median full-run geometry | 98.3333% |
+| Median steady-state geometry | 100.0000% |
+
+The 375 errors are predominantly RustyNES unsupported mappers (336), plus 20
+truncated/iNES-invalid images and a handful of IConfig/load failures. Full-run
+geometry is never exactly 100% because the first boot frames differ; that is
+why the steady window starts at frame 30. Headerless NES images remain
+**Unsupported** because they have no iNES header to load.
 
 ## SNES stage — pending
 

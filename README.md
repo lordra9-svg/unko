@@ -104,6 +104,12 @@ Full No-Intro import (2026-11-25, 21,983 archives, 30-frame smoke):
 |---:|---:|---:|---|
 | 14,207 | 329 | 7,447 | [`Compatibility tracker`](https://lordra9-svg.github.io/unko/) |
 
+NES accuracy stage (2026-11-25): **6,726 / 7,101** headered images measured
+against RustyNES; **72.7%** of measured ROMs reach 100% steady-state video
+geometry from frame 30 (68.8% of the full set). 375 oracle/load errors are
+recorded per ROM. Details:
+[`docs/accuracy-campaign.md`](docs/accuracy-campaign.md).
+
 Details: [`docs/library-scan.md`](docs/library-scan.md).
 
 Details: [`docs/accuracy-status.md`](docs/accuracy-status.md),
