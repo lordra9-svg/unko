@@ -132,8 +132,12 @@ pub struct Rdp {
     prim_lod_frac: u8,
     min_level: u8,
     lod_fraction: u8,
-    /// Mip level registered for each tile index in the current chain.
-    mip_levels: [u8; 8],
+    /// Explicit level -> tile descriptor mapping for the current mip chain.
+    mip_tiles: [u8; 8],
+    /// Number of valid entries in `mip_tiles`.
+    mip_level_count: u8,
+    /// When set, the chain is not rebuilt from triangle draws (tests/tools).
+    mip_override: bool,
 }
 
 impl Default for Rdp {
@@ -179,7 +183,9 @@ impl Rdp {
             prim_lod_frac: 0,
             min_level: 0,
             lod_fraction: 0xFF,
-            mip_levels: [0; 8],
+            mip_tiles: [0; 8],
+            mip_level_count: 0,
+            mip_override: false,
         }
     }
 
@@ -469,8 +475,12 @@ impl Rdp {
             .unwrap_or(0);
 
         let modes = self.other_modes;
-        for level in 0..=setup.level {
-            self.mip_levels[(usize::from(setup.tile) + usize::from(level)) & 7] = level;
+        if !self.mip_override {
+            let levels = usize::from(setup.level.min(7));
+            for (level, slot) in self.mip_tiles.iter_mut().take(levels + 1).enumerate() {
+                *slot = ((usize::from(setup.tile) + level) & 7) as u8;
+            }
+            self.mip_level_count = (levels + 1) as u8;
         }
         for y in y_start.max(0)..=y_end {
             // Per-subpixel-row left/right edges in 1/8-pixel units.
@@ -565,8 +575,8 @@ impl Rdp {
             compute_lod(0, level, self.min_level, false, false, false)
         };
         self.lod_fraction = lod.frac;
-        let tile0 = self.tile_for_mip_level(base_tile, lod.level0);
-        let tile1 = self.tile_for_mip_level(base_tile, lod.level1);
+        let tile0 = self.tile_for_mip_level(lod.level0);
+        let tile1 = self.tile_for_mip_level(lod.level1);
         let texel = coords
             .and_then(|coords| {
                 let a = self.sample_texture_coords(&coords, x, y, origin, tile0, rdram);
@@ -779,20 +789,36 @@ impl Rdp {
         }
     }
 
-    fn tile_for_mip_level(&self, base_tile: usize, level: u8) -> usize {
-        for offset in 0..=usize::from(level) {
-            let tile = (base_tile + offset) & 7;
-            if self.mip_levels[tile] == level {
-                return tile;
-            }
-        }
-        (base_tile + usize::from(level)) & 7
+    fn tile_for_mip_level(&self, level: u8) -> usize {
+        let index = usize::from(level).min(usize::from(self.mip_level_count.saturating_sub(1)));
+        usize::from(self.mip_tiles[index & 7])
     }
 
-    /// Mip level registered for a tile in the current texture chain.
+    /// Tile descriptor mapped to an explicit mip level, when registered.
+    #[must_use]
+    pub fn mip_tile(&self, level: usize) -> Option<usize> {
+        (level < usize::from(self.mip_level_count)).then(|| usize::from(self.mip_tiles[level & 7]))
+    }
+
+    /// Mip level mapped to a tile descriptor in the current chain.
     #[must_use]
     pub fn tile_mip_level(&self, index: usize) -> u8 {
-        self.mip_levels[index & 7]
+        for level in 0..usize::from(self.mip_level_count) {
+            if usize::from(self.mip_tiles[level & 7]) == (index & 7) {
+                return level as u8;
+            }
+        }
+        0
+    }
+
+    /// Installs an explicit level -> tile mip mapping (disables automatic
+    /// chain registration until a new triangle would rebuild it).
+    pub fn set_mip_tiles(&mut self, tiles: &[u8]) {
+        for (level, tile) in tiles.iter().take(8).enumerate() {
+            self.mip_tiles[level] = tile & 7;
+        }
+        self.mip_level_count = tiles.len().min(8) as u8;
+        self.mip_override = true;
     }
 
     fn sample_texture_coords(
@@ -1775,6 +1801,22 @@ mod tests {
         let result = depth_test(0x1_0000, 0, 0x800, 0, 8, 7, true, 1, false, true);
         assert!(result.pass);
         assert_eq!(result.coverage, 8);
+    }
+
+    #[test]
+    fn mip_descriptor_table_maps_levels_explicitly() {
+        let mut rdp = Rdp::new();
+        rdp.set_mip_tiles(&[3, 6, 1]);
+        assert_eq!(rdp.mip_tile(0), Some(3));
+        assert_eq!(rdp.mip_tile(1), Some(6));
+        assert_eq!(rdp.mip_tile(2), Some(1));
+        assert_eq!(rdp.mip_tile(3), None);
+        assert_eq!(rdp.tile_for_mip_level(0), 3);
+        assert_eq!(rdp.tile_for_mip_level(1), 6);
+        // Levels past the chain clamp to the last registered entry.
+        assert_eq!(rdp.tile_for_mip_level(5), 1);
+        assert_eq!(rdp.tile_mip_level(6), 1);
+        assert_eq!(rdp.tile_mip_level(3), 0);
     }
 
     #[test]

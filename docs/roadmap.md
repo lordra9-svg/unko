@@ -319,8 +319,8 @@ The main effort was the reference-parity accuracy core. Details in
       operation) and honors FS flush-to-zero; D-format inexact detection uses
       error-free transformations. Double-precision (`D`-format) arithmetic, compares,
       conversions and 64-bit paired FPR storage are also implemented. Broader
-      GPU coverage (independent per-level mip metadata, cache parity) is the
-      next milestone. No standard N64 cartridge image is available
+      GPU coverage (cache parity/ECC, remaining texture formats) is the next
+      milestone. No standard N64 cartridge image is available
       locally (only 64DD IPL firmware, which is not a cartridge); an ignored
       `UNKO_N64_ROM` gate in `unko-n64-host` boots a supplied image, runs N
       frames and prints video/audio hashes. Approximation inventory and
