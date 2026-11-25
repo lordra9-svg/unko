@@ -313,14 +313,15 @@ The main effort was the reference-parity accuracy core. Details in
       and the refill/general vectors, and ERET restores execution. Error-level
       entry saves ErrorEPC, sets ERL and returns via ERET; it is driven by the
       CP0 Count/Compare watchdog (Count advances with a per-instruction cycle
-      cost model) and external NMI/cache-error lines. The FPU
+      cost model), modelled cache parity faults and external NMI lines. The FPU
       reports `fcr31` flags/causes
       (inexact, underflow, overflow, divide-by-zero, invalid, unimplemented
       operation) and honors FS flush-to-zero; D-format inexact detection uses
       error-free transformations. Double-precision (`D`-format) arithmetic, compares,
       conversions and 64-bit paired FPR storage are also implemented. Broader
-      GPU coverage (cache parity/ECC, remaining texture formats) is the next
-      milestone. No standard N64 cartridge image is available
+      GPU coverage (remaining texture formats) is the next milestone. Cache
+      parity faults are modelled with per-line metadata and trigger the
+      cache-error exception on the next access. No standard N64 cartridge image is available
       locally (only 64DD IPL firmware, which is not a cartridge); an ignored
       `UNKO_N64_ROM` gate in `unko-n64-host` boots a supplied image, runs N
       frames and prints video/audio hashes. Approximation inventory and

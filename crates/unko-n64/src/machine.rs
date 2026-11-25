@@ -117,6 +117,11 @@ impl Machine {
         self.cpu.signal_nmi();
     }
 
+    /// Injects a cache parity error for a physical address.
+    pub fn inject_cache_parity_error(&mut self, physical_address: u64) {
+        self.cpu.inject_cache_parity_error(physical_address);
+    }
+
     /// Raises the CPU external cache-error line.
     pub fn signal_cache_error(&mut self) {
         self.cpu.signal_cache_error();
@@ -1352,6 +1357,18 @@ mod tests {
         machine.signal_cache_error();
         machine.step().expect("cache error");
         assert_eq!(machine.cpu.pc, 0xA000_0000);
+    }
+
+    #[test]
+    fn machine_cache_parity_entry() {
+        let cart = cart_with(&[0x1000_FFFF, 0x0000_0000]);
+        let mut machine = Machine::new(&cart);
+        // Boot fetches 0xA4000040 -> physical 0x04000040.
+        machine.inject_cache_parity_error(0x0400_0040);
+        machine.step().expect("cache error");
+        assert_eq!(machine.cpu.pc, 0xA000_0000);
+        assert_eq!(machine.cpu.cp0[30], 0xA400_0044);
+        assert_ne!(machine.cpu.cp0[12] & 4, 0);
     }
 
     #[test]

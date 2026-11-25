@@ -99,6 +99,11 @@ pub enum CpuError {
         /// Program counter of the instruction.
         pc: u64,
     },
+    /// A data/instruction cache parity error was observed.
+    CacheError {
+        /// Physical address of the faulty line.
+        address: u64,
+    },
     /// A floating-point exception with its enable bit set.
     Fpu {
         /// Program counter of the instruction.
@@ -127,6 +132,9 @@ impl fmt::Display for CpuError {
             }
             Self::CoprocessorUnusable { coprocessor } => {
                 write!(f, "coprocessor {coprocessor} unusable")
+            }
+            Self::CacheError { address } => {
+                write!(f, "cache parity error at {address:016X}")
             }
             Self::Overflow { pc } => write!(f, "integer overflow at {pc:016X}"),
             Self::Fpu { pc } => write!(f, "floating point exception at {pc:016X}"),
@@ -180,6 +188,15 @@ pub enum ErrorSource {
     CacheError,
 }
 
+const CACHE_LINES: usize = 512;
+
+#[derive(Debug, Clone, Copy, Default)]
+struct CacheLine {
+    valid: bool,
+    tag: u64,
+    parity_ok: bool,
+}
+
 /// VR4300 architectural state.
 #[derive(Debug, Clone)]
 pub struct Cpu {
@@ -211,6 +228,8 @@ pub struct Cpu {
     pending_cache_error: bool,
     /// CP0 Count/Compare match already taken.
     compare_latched: bool,
+    /// Direct-mapped data/instruction cache line metadata (16-byte lines).
+    cache: [CacheLine; CACHE_LINES],
 }
 
 impl Cpu {
@@ -232,6 +251,7 @@ impl Cpu {
             pending_nmi: false,
             pending_cache_error: false,
             compare_latched: false,
+            cache: [CacheLine::default(); CACHE_LINES],
         }
     }
 
@@ -250,7 +270,14 @@ impl Cpu {
         self.delay_slot = false;
 
         let instruction = match self.translate(pc, false) {
-            Ok(address) => bus.read_u32(address),
+            Ok(address) => match self.cache_access(address) {
+                Ok(()) => bus.read_u32(address),
+                Err(error) => {
+                    self.deliver_error(&error, pc, delay_slot);
+                    self.advance_cycles(1);
+                    return Ok(());
+                }
+            },
             Err(error) => {
                 self.deliver_error(&error, pc, delay_slot);
                 self.advance_cycles(1);
@@ -267,6 +294,7 @@ impl Cpu {
                 | CpuError::ReservedInstruction { .. }
                 | CpuError::CoprocessorUnusable { .. }
                 | CpuError::Fpu { .. }
+                | CpuError::CacheError { .. }
                 | CpuError::Overflow { .. }),
             ) => {
                 self.deliver_error(&error, pc, delay_slot);
@@ -337,6 +365,9 @@ impl Cpu {
             CpuError::Fpu { .. } => {
                 self.deliver_exception(15, None, delay_slot, pc, false);
             }
+            CpuError::CacheError { .. } => {
+                self.take_error(ErrorSource::CacheError);
+            }
             CpuError::Overflow { .. } => {
                 self.deliver_exception(12, None, delay_slot, pc, false);
             }
@@ -395,6 +426,48 @@ impl Cpu {
     /// Raises the external cache-error line.
     pub fn signal_cache_error(&mut self) {
         self.pending_cache_error = true;
+    }
+
+    fn cache_access(&mut self, address: u64) -> Result<(), CpuError> {
+        let line_number = address / 16;
+        let index = (line_number as usize) % CACHE_LINES;
+        let tag = line_number / CACHE_LINES as u64;
+        let line = &mut self.cache[index];
+        if line.valid && line.tag == tag {
+            if !line.parity_ok {
+                return Err(CpuError::CacheError { address });
+            }
+        } else {
+            line.valid = true;
+            line.tag = tag;
+            line.parity_ok = true;
+        }
+        Ok(())
+    }
+
+    /// Marks the cache line containing `physical_address` as having a parity
+    /// error. The next access to that line raises the cache-error exception.
+    pub fn inject_cache_parity_error(&mut self, physical_address: u64) {
+        let line_number = physical_address / 16;
+        let index = (line_number as usize) % CACHE_LINES;
+        let tag = line_number / CACHE_LINES as u64;
+        self.cache[index] = CacheLine {
+            valid: true,
+            tag,
+            parity_ok: false,
+        };
+    }
+
+    /// Clears the cache line metadata/parity state.
+    pub fn clear_cache(&mut self) {
+        self.cache = [CacheLine::default(); CACHE_LINES];
+    }
+
+    /// Translates and checks the cache line for a data access.
+    fn data_access(&mut self, address: u64, store: bool) -> Result<u64, CpuError> {
+        let physical = self.translate(address, store)?;
+        self.cache_access(physical)?;
+        Ok(physical)
     }
 
     /// Services pending NMI/cache error and the CP0 Count/Compare watchdog.
@@ -1346,7 +1419,7 @@ impl Cpu {
         signed: bool,
     ) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
-        let value = bus.read_u8(self.translate(address, false)?);
+        let value = bus.read_u8(self.data_access(address, false)?);
         self.set_gpr(
             rt,
             if signed {
@@ -1373,7 +1446,7 @@ impl Cpu {
                 store: false,
             });
         }
-        let value = bus.read_u16(self.translate(address, false)?);
+        let value = bus.read_u16(self.data_access(address, false)?);
         self.set_gpr(
             rt,
             if signed {
@@ -1400,7 +1473,7 @@ impl Cpu {
                 store: false,
             });
         }
-        let value = bus.read_u32(self.translate(address, false)?);
+        let value = bus.read_u32(self.data_access(address, false)?);
         self.set_gpr(
             rt,
             if signed {
@@ -1420,14 +1493,14 @@ impl Cpu {
                 store: false,
             });
         }
-        let value = bus.read_u64(self.translate(address, false)?);
+        let value = bus.read_u64(self.data_access(address, false)?);
         self.set_gpr(rt, value);
         Ok(())
     }
 
     fn store8<B: Bus>(&mut self, bus: &mut B, rs: u32, rt: u32, simm: i64) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
-        bus.write_u8(self.translate(address, true)?, self.gpr(rt) as u8);
+        bus.write_u8(self.data_access(address, true)?, self.gpr(rt) as u8);
         Ok(())
     }
 
@@ -1445,7 +1518,7 @@ impl Cpu {
                 store: true,
             });
         }
-        bus.write_u16(self.translate(address, true)?, self.gpr(rt) as u16);
+        bus.write_u16(self.data_access(address, true)?, self.gpr(rt) as u16);
         Ok(())
     }
 
@@ -1463,7 +1536,7 @@ impl Cpu {
                 store: true,
             });
         }
-        bus.write_u32(self.translate(address, true)?, self.gpr(rt) as u32);
+        bus.write_u32(self.data_access(address, true)?, self.gpr(rt) as u32);
         Ok(())
     }
 
@@ -1481,7 +1554,7 @@ impl Cpu {
                 store: true,
             });
         }
-        bus.write_u64(self.translate(address, true)?, self.gpr(rt));
+        bus.write_u64(self.data_access(address, true)?, self.gpr(rt));
         Ok(())
     }
 
@@ -1499,7 +1572,7 @@ impl Cpu {
                 store: false,
             });
         }
-        let value = bus.read_u32(self.translate(address, false)?);
+        let value = bus.read_u32(self.data_access(address, false)?);
         self.fpr[rt as usize] = u64::from(value);
         Ok(())
     }
@@ -1518,7 +1591,10 @@ impl Cpu {
                 store: true,
             });
         }
-        bus.write_u32(self.translate(address, true)?, self.fpr[rt as usize] as u32);
+        bus.write_u32(
+            self.data_access(address, true)?,
+            self.fpr[rt as usize] as u32,
+        );
         Ok(())
     }
 
@@ -1536,7 +1612,7 @@ impl Cpu {
                 store: false,
             });
         }
-        let value = bus.read_u64(self.translate(address, false)?);
+        let value = bus.read_u64(self.data_access(address, false)?);
         self.fpr[rt as usize] = value;
         Ok(())
     }
@@ -1555,7 +1631,7 @@ impl Cpu {
                 store: true,
             });
         }
-        bus.write_u64(self.translate(address, true)?, self.fpr[rt as usize]);
+        bus.write_u64(self.data_access(address, true)?, self.fpr[rt as usize]);
         Ok(())
     }
 }
@@ -2431,5 +2507,40 @@ mod tests {
         assert_eq!(cpu.cp0[9], 5);
         assert_eq!(cpu.pc, 0xBFC0_0000);
         assert_eq!(cpu.cp0[30], 0x000C);
+    }
+    #[test]
+    fn cache_parity_error_triggers_entry_and_eret() {
+        let mut memory = Memory::new(0x3000);
+        memory.write_u32(0x180, 0x4200_0018); // eret
+
+        // Instruction-fetch parity error on the code line.
+        let mut cpu = Cpu::new(0x8000_1000);
+        cpu.inject_cache_parity_error(0x1000);
+        cpu.step(&mut memory).expect("cache error");
+        assert_eq!(cpu.pc, 0xA000_0000);
+        assert_eq!(cpu.cp0[30], 0x8000_1004);
+        assert_ne!(cpu.cp0[12] & 4, 0, "ERL set");
+        cpu.pc = 0x8000_0180;
+        cpu.next_pc = 0x8000_0184;
+        cpu.step(&mut memory).expect("eret");
+        assert_eq!(cpu.pc, 0x8000_1004);
+        assert_eq!(cpu.cp0[12] & 4, 0, "ERET clears ERL");
+
+        // Data-load parity error: the fetch succeeds, the load raises it.
+        let mut cpu = Cpu::new(0);
+        let mut memory = program(&[0x8C08_0100]); // lw t0,0x100(zero)
+        cpu.inject_cache_parity_error(0x100);
+        cpu.step(&mut memory).expect("data cache error");
+        assert_eq!(cpu.pc, 0xA000_0000);
+        assert_eq!(cpu.cp0[30], 4);
+        assert_ne!(cpu.cp0[12] & 4, 0);
+
+        // A clean access refills the line and clears the parity state.
+        let mut cpu = Cpu::new(0);
+        cpu.inject_cache_parity_error(0x100);
+        cpu.clear_cache();
+        cpu.step(&mut memory).expect("clean load");
+        assert_eq!(cpu.cp0[30], 0);
+        assert_eq!(cpu.cp0[12] & 4, 0);
     }
 }
