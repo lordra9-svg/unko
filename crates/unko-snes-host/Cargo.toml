@@ -11,3 +11,4 @@ readme = "README.md"
 [dependencies]
 unko-core.workspace = true
 unko-snes = { path = "../unko-snes" }
+unko-snes-api = { path = "../unko-snes-api" }

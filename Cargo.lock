@@ -3774,6 +3774,8 @@ dependencies = [
  "unko-netplay",
  "unko-rom",
  "unko-rom-manager",
+ "unko-snes-api",
+ "unko-snes-host",
  "wgpu",
  "winit",
 ]
@@ -3876,11 +3878,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "unko-snes-api"
+version = "0.1.1"
+dependencies = [
+ "unko-core",
+]
+
+[[package]]
 name = "unko-snes-host"
 version = "0.1.1"
 dependencies = [
  "unko-core",
  "unko-snes",
+ "unko-snes-api",
 ]
 
 [[package]]

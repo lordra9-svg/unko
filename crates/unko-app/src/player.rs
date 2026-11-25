@@ -462,7 +462,7 @@ impl Player {
             }
             apply_mapper_override(&mut rom, mapper)?;
         }
-        let mut core: Box<dyn NesCore> = Box::new(unko_nes_host::AccuracyCore::new());
+        let mut core: Box<dyn NesCore> = crate::snes::create_for_rom(&rom);
         core.set_palette(settings.palette);
         core.set_video_filter(settings.filter);
         let save_dir = settings.save_dir.clone();

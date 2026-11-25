@@ -1,0 +1,12 @@
+[package]
+name = "unko-snes-api"
+description = "SNES-specific extension surface for the generic Unko core interface"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[dependencies]
+unko-core.workspace = true

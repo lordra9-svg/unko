@@ -34,6 +34,7 @@ mod rom_manager;
 mod rom_manager_view;
 mod settings;
 mod slots;
+pub mod snes;
 mod vsconfig;
 #[cfg(feature = "vulkan")]
 pub mod vulkan;

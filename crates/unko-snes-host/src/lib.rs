@@ -277,6 +277,33 @@ impl Core for SnesCore {
     }
 }
 
+impl unko_snes_api::SnesCore for SnesCore {
+    fn as_core(&mut self) -> &mut dyn Core {
+        self
+    }
+
+    fn as_core_ref(&self) -> &dyn Core {
+        self
+    }
+
+    fn region(&self) -> unko_snes_api::Region {
+        match self.region {
+            Region::Ntsc => unko_snes_api::Region::Ntsc,
+            Region::Pal => unko_snes_api::Region::Pal,
+        }
+    }
+
+    fn frame_rate(&self) -> f64 {
+        self.region().frame_rate()
+    }
+}
+
+/// Whether `bytes` parses as an SNES cartridge image.
+#[must_use]
+pub fn is_snes_rom(bytes: &[u8]) -> bool {
+    Cartridge::from_bytes(bytes).is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
