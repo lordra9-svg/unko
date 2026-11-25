@@ -1,8 +1,8 @@
 # unko-n64
 
 Nintendo 64 system scaffold. Parses and normalises cartridge images (`.z64`,
-`.v64`, `.n64`), implements a VR4300 (MIPS III) integer interpreter, and boots a cartridge's
-IPL3 with RDRAM/RSP memory and PI/VI register stubs (PIF HLE). The RSP scaffold
+`.v64`, `.n64`), implements a VR4300 (MIPS III) interpreter with a 32-entry
+TLB and a single-precision COP1 FPU, and boots a cartridge's IPL3 with RDRAM/RSP memory and PI/VI register stubs (PIF HLE). The RSP scaffold
 covers DMEM/IMEM, DMA, a scalar interpreter and the vector subset
 (`LQV/SQV/LHV/SHV/LBV/SBV`, `VADD/VSUB`, `VMULF/VMULU`, `VMACF/VMACU`,
 `VRCP/VRCPL/VRCPH`); the RDP scaffold processes
@@ -23,5 +23,6 @@ the TLUT, and texture coordinates are perspective-corrected by the parsed W
 coefficients. `SET_MASK_IMAGE`/`SET_PRIMITIVE_DEPTH` drive a Z-buffered depth
 pipeline: interpolated 16.16 Z compressed to the RDP's 16-bit depth word with
 a 16-bit delta exponent, z compare/update for opaque/transparent/decal/
-interpenetrating modes and primitive-depth source selection. Fog-alpha edge
-cases and exact depth-blend shifters are next.
+interpenetrating modes and primitive-depth source selection. Double-precision
+FPU operations, precise exceptions, fog-alpha edge cases and exact depth-blend
+shifters are next.

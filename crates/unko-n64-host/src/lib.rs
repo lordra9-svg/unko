@@ -288,7 +288,7 @@ mod tests {
     #[test]
     fn reports_an_unimplemented_opcode() {
         let mut rom = z64();
-        // COP1 (floating point) is not implemented yet.
+        // COP1 double-precision format is still unimplemented.
         rom[0x80..0x84].copy_from_slice(&[0x46, 0x20, 0x00, 0x00]);
         let mut core = N64Core::new();
         core.load(&rom, &LoadOptions::default()).expect("load");

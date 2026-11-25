@@ -1,8 +1,9 @@
 //! Nintendo 64 cartridge parsing and system scaffold.
 //!
 //! The image layer (byte order, header, region) is complete, and the machine
-//! scaffold boots a cartridge's IPL3 on the [`cpu::Cpu`] (VR4300 integer
-//! interpreter) with RDRAM/RSP memory and PI/VI register stubs, runs RSP
+//! scaffold boots a cartridge's IPL3 on the [`cpu::Cpu`] (VR4300 interpreter
+//! with a 32-entry TLB and single-precision COP1 FPU) with RDRAM/RSP memory
+//! and PI/VI register stubs, runs RSP
 //! scalar/vector code and DMA ([`rsp::Rsp`]), applies RDP solid-fill commands
 //! and rasterises unshaded/shaded/textured triangles ([`rdp::Rdp`]) with the
 //! RDP edgewalker, two-cycle combiner and the SET_OTHER_MODES blender
@@ -11,7 +12,8 @@
 //! RDRAM and runs double-buffered AI DMA with interrupts and DAC-to-host
 //! resampling ([`ai::Ai`]). CI/TLUT palettes and
 //! perspective-correct W interpolation and the compressed Z-buffer depth
-//! pipeline are implemented; precise exceptions are the next milestone.
+//! pipeline are implemented; double-precision FPU, precise exceptions and
+//! TLB exceptions routed through CP0 are the next milestones.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

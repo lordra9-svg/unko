@@ -3,9 +3,10 @@
 //! This is the CPU foundation of the ares-derived N64 core: a big-endian,
 //! 64-bit MIPS III interpreter with architectural delay slots. It implements
 //! the integer instruction set needed by boot code (arithmetic, shifts,
-//! logical ops, branches with delay slots, jumps, loads/stores and the basic
-//! COP0 moves). Floating point, the TLB and precise exceptions are later
-//! milestones.
+//! logical ops, branches with delay slots, jumps, loads/stores, basic COP0
+//! moves and TLB management), the TLB-mapped address translation path and a
+//! single-precision COP1 FPU (arithmetic, conversions, compares and LWC1/SWC1).
+//! Precise exceptions and the FPU pipeline are later milestones.
 
 use std::fmt;
 
@@ -70,6 +71,11 @@ pub enum CpuError {
         /// Virtual address.
         address: u64,
     },
+    /// A TLB miss or invalid mapping.
+    Tlb {
+        /// Virtual address that failed translation.
+        address: u64,
+    },
     /// `SYSCALL` or `BREAK` executed.
     Trap {
         /// Program counter of the instruction.
@@ -86,12 +92,32 @@ impl fmt::Display for CpuError {
                 write!(f, "unimplemented opcode {instruction:08X} at {pc:016X}")
             }
             Self::Unaligned { address } => write!(f, "unaligned access at {address:016X}"),
+            Self::Tlb { address } => write!(f, "TLB fault at {address:016X}"),
             Self::Trap { pc, code } => write!(f, "trap {code} at {pc:016X}"),
         }
     }
 }
 
 impl std::error::Error for CpuError {}
+
+/// One TLB entry (raw CP0 EntryHi/EntryLo0/EntryLo1/PageMask values).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TlbEntry {
+    /// CP0 EntryHi: VPN2, ASID and global bit.
+    pub entry_hi: u32,
+    /// CP0 EntryLo0 (even page).
+    pub lo0: u32,
+    /// CP0 EntryLo1 (odd page).
+    pub lo1: u32,
+    /// CP0 PageMask.
+    pub page_mask: u32,
+}
+
+impl TlbEntry {
+    fn valid(&self) -> bool {
+        self.lo0 & 2 != 0 || self.lo1 & 2 != 0
+    }
+}
 
 /// VR4300 architectural state.
 #[derive(Debug, Clone)]
@@ -110,6 +136,12 @@ pub struct Cpu {
     pub instructions: u64,
     /// COP0 register file (Status, Cause, EPC, Count, ...).
     pub cp0: [u64; 32],
+    /// 32-entry TLB.
+    pub tlb: [TlbEntry; 32],
+    /// COP1 floating-point registers (32-bit floats in the low word).
+    pub fpr: [u64; 32],
+    /// COP1 control/status register (`fcr31`).
+    pub fcr31: u32,
 }
 
 impl Cpu {
@@ -124,6 +156,9 @@ impl Cpu {
             next_pc: pc.wrapping_add(4),
             instructions: 0,
             cp0: [0; 32],
+            tlb: [TlbEntry::default(); 32],
+            fpr: [0; 32],
+            fcr31: 0,
         }
     }
 
@@ -133,7 +168,7 @@ impl Cpu {
         self.pc = self.next_pc;
         self.next_pc = self.pc.wrapping_add(4);
 
-        let instruction = bus.read_u32(physical(pc));
+        let instruction = bus.read_u32(self.translate(pc)?);
         self.instructions += 1;
         self.execute(instruction, pc, bus)
     }
@@ -251,6 +286,11 @@ impl Cpu {
                 Ok(())
             }
             16 => self.cop0(instruction, pc, rs, rt, rd, funct),
+            17 => self.cop1(pc, rs, rt, rd, sa, funct),
+            49 => self.load_f32(bus, rs, rt, simm),
+            53 => self.load_f64(bus, rs, rt, simm),
+            57 => self.store_f32(bus, rs, rt, simm),
+            61 => self.store_f64(bus, rs, rt, simm),
             32 => self.load8(bus, rs, rt, simm, true),
             33 => self.load16(bus, rs, rt, simm, true),
             35 => self.load32(bus, rs, rt, simm, true),
@@ -497,14 +537,281 @@ impl Cpu {
                 self.cp0[rd as usize] = self.gpr(rt);
                 Ok(())
             }
-            0x10 if funct == 0x18 => {
-                // ERET: return to EPC.
-                self.pc = self.cp0[14];
-                self.next_pc = self.pc.wrapping_add(4);
-                Ok(())
-            }
+            0x10 => match funct {
+                0x18 => {
+                    // ERET: return to EPC.
+                    self.pc = self.cp0[14];
+                    self.next_pc = self.pc.wrapping_add(4);
+                    Ok(())
+                }
+                0x01 => {
+                    self.tlb_read();
+                    Ok(())
+                }
+                0x02 => {
+                    self.tlb_write_indexed();
+                    Ok(())
+                }
+                0x06 => {
+                    self.tlb_write_random();
+                    Ok(())
+                }
+                0x08 => {
+                    self.tlb_probe();
+                    Ok(())
+                }
+                _ => Err(CpuError::Unimplemented { pc, instruction }),
+            },
             _ => Err(CpuError::Unimplemented { pc, instruction }),
         }
+    }
+
+    fn tlb_read(&mut self) {
+        let index = (self.cp0[0] & 0x1F) as usize;
+        let entry = self.tlb[index];
+        self.cp0[5] = u64::from(entry.page_mask);
+        self.cp0[10] = u64::from(entry.entry_hi);
+        self.cp0[2] = u64::from(entry.lo0);
+        self.cp0[3] = u64::from(entry.lo1);
+    }
+
+    fn tlb_write_indexed(&mut self) {
+        let index = (self.cp0[0] & 0x1F) as usize;
+        self.tlb[index] = self.tlb_entry_from_cp0();
+    }
+
+    fn tlb_write_random(&mut self) {
+        let wired = (self.cp0[6] & 0x1F) as u8;
+        let mut random = (self.cp0[1] & 0x1F) as u8;
+        if random < wired {
+            random = 31;
+        }
+        self.tlb[usize::from(random)] = self.tlb_entry_from_cp0();
+        self.cp0[1] = if random <= wired {
+            31
+        } else {
+            u64::from(random - 1)
+        };
+    }
+
+    fn tlb_entry_from_cp0(&self) -> TlbEntry {
+        TlbEntry {
+            entry_hi: self.cp0[10] as u32,
+            lo0: self.cp0[2] as u32,
+            lo1: self.cp0[3] as u32,
+            page_mask: self.cp0[5] as u32,
+        }
+    }
+
+    fn tlb_probe(&mut self) {
+        let vpn2 = (self.cp0[10] >> 13) & 0x7FF_FFFF;
+        let asid = ((self.cp0[10] >> 8) & 0xFF) as u32;
+        let mut found = None;
+        for (index, entry) in self.tlb.iter().enumerate() {
+            if !entry.valid() {
+                continue;
+            }
+            let mask = u64::from((entry.page_mask >> 13) & 0x0FFF);
+            let entry_vpn2 = (u64::from(entry.entry_hi) >> 13) & 0x7FF_FFFF;
+            if vpn2 & !mask != entry_vpn2 & !mask {
+                continue;
+            }
+            let global = entry.entry_hi & 1 != 0 || entry.lo0 & 1 != 0 || entry.lo1 & 1 != 0;
+            if global || (entry.entry_hi >> 8) & 0xFF == asid {
+                found = Some(index as u64);
+                break;
+            }
+        }
+        self.cp0[0] = found.unwrap_or(0x8000_0000);
+    }
+
+    /// Translates a virtual address using the fixed segments and the TLB.
+    ///
+    /// Before any TLB entry is valid the interpreter falls back to identity
+    /// mapping for KUSEG so early boot code (and synthetic programs) still run.
+    fn translate(&self, address: u64) -> Result<u64, CpuError> {
+        if (0x8000_0000..0xC000_0000).contains(&address) {
+            return Ok(address & 0x1FFF_FFFF);
+        }
+        if !self.tlb.iter().any(TlbEntry::valid) {
+            return Ok(address);
+        }
+        let vpn2 = (address >> 13) & 0x7FF_FFFF;
+        // The current ASID lives in CP0 EntryHi, not in the virtual address.
+        let asid = ((self.cp0[10] >> 8) & 0xFF) as u32;
+        for entry in &self.tlb {
+            if !entry.valid() {
+                continue;
+            }
+            let mask = u64::from((entry.page_mask >> 13) & 0x0FFF);
+            let entry_vpn2 = (u64::from(entry.entry_hi) >> 13) & 0x7FF_FFFF;
+            if vpn2 & !mask != entry_vpn2 & !mask {
+                continue;
+            }
+            let global = entry.entry_hi & 1 != 0 || entry.lo0 & 1 != 0 || entry.lo1 & 1 != 0;
+            if !global && (entry.entry_hi >> 8) & 0xFF != asid {
+                continue;
+            }
+            let lo = if (address >> 12) & 1 != 0 {
+                entry.lo1
+            } else {
+                entry.lo0
+            };
+            if lo & 2 == 0 {
+                return Err(CpuError::Tlb { address });
+            }
+            let pfn = u64::from((lo >> 6) & 0x0F_FFFF);
+            return Ok((pfn << 12) | (address & 0x0FFF));
+        }
+        Err(CpuError::Tlb { address })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn cop1(
+        &mut self,
+        pc: u64,
+        format: u32,
+        ft: u32,
+        fs: u32,
+        fd: u32,
+        funct: u32,
+    ) -> Result<(), CpuError> {
+        match format {
+            0x00 => {
+                self.set_gpr(ft, sign_extend32(self.fpr[fs as usize] as u32));
+                Ok(())
+            }
+            0x01 => {
+                // DMFC1
+                self.set_gpr(ft, self.fpr[fs as usize]);
+                Ok(())
+            }
+            0x02 => {
+                // CFC1
+                self.set_gpr(ft, sign_extend32(self.cp1_control(fs)));
+                Ok(())
+            }
+            0x04 => {
+                // MTC1
+                self.fpr[fs as usize] = u64::from(self.gpr(ft) as u32);
+                Ok(())
+            }
+            0x05 => {
+                // DMTC1
+                self.fpr[fs as usize] = self.gpr(ft);
+                Ok(())
+            }
+            0x06 => {
+                // CTC1
+                self.set_cp1_control(fs, self.gpr(ft) as u32);
+                Ok(())
+            }
+            0x08 => {
+                let condition = self.fcr31 & (1 << 23) != 0;
+                let expected = ft & 1 != 0;
+                if condition == expected {
+                    self.next_pc = pc.wrapping_add(4).wrapping_add(4);
+                }
+                Ok(())
+            }
+            0x10 => self.fpu_single(fs, ft, fd, funct, pc),
+            0x14 => {
+                if funct == 0x20 {
+                    let value = self.fpr[fs as usize] as u32 as i32;
+                    self.fpr[fd as usize] = u64::from((value as f32).to_bits());
+                    Ok(())
+                } else {
+                    Err(CpuError::Unimplemented { pc, instruction: 0 })
+                }
+            }
+            0x15 => {
+                if funct == 0x20 {
+                    let value = self.fpr[fs as usize] as i64;
+                    self.fpr[fd as usize] = u64::from((value as f32).to_bits());
+                    Ok(())
+                } else {
+                    Err(CpuError::Unimplemented { pc, instruction: 0 })
+                }
+            }
+            _ => Err(CpuError::Unimplemented { pc, instruction: 0 }),
+        }
+    }
+
+    fn cp1_control(&self, register: u32) -> u32 {
+        if register == 31 {
+            self.fcr31
+        } else {
+            0
+        }
+    }
+
+    fn set_cp1_control(&mut self, register: u32, value: u32) {
+        if register == 31 {
+            self.fcr31 = value & 0x0183_FFFF;
+        }
+    }
+
+    fn fpu_single(
+        &mut self,
+        fs: u32,
+        ft: u32,
+        fd: u32,
+        funct: u32,
+        pc: u64,
+    ) -> Result<(), CpuError> {
+        let a = f32::from_bits(self.fpr[fs as usize] as u32);
+        let b = f32::from_bits(self.fpr[ft as usize] as u32);
+        let result = match funct {
+            0x00 => a + b,
+            0x01 => a - b,
+            0x02 => a * b,
+            0x03 => a / b,
+            0x04 => a.sqrt(),
+            0x05 => a.abs(),
+            0x06 => a,
+            0x07 => -a,
+            0x24 => {
+                let value = round_to_i32(a, self.fcr31 & 3);
+                self.fpr[fd as usize] = (value as i64) as u64;
+                return Ok(());
+            }
+            0x25 => {
+                let value = round_to_i64(a, self.fcr31 & 3);
+                self.fpr[fd as usize] = value as u64;
+                return Ok(());
+            }
+            0x30..=0x3F => {
+                let unordered = a.is_nan() || b.is_nan();
+                let condition = match funct {
+                    0x30 | 0x38 => false,
+                    0x31 => unordered,
+                    0x32 | 0x3A => a == b,
+                    0x33 => unordered || a == b,
+                    0x34 | 0x3C => a < b,
+                    0x35 => unordered || a < b,
+                    0x36 | 0x3E => a <= b,
+                    0x37 => unordered || a <= b,
+                    0x39 | 0x3F => unordered || a <= b,
+                    0x3B => unordered || a <= b,
+                    0x3D => !unordered && a < b,
+                    _ => false,
+                };
+                if condition {
+                    self.fcr31 |= 1 << 23;
+                } else {
+                    self.fcr31 &= !(1 << 23);
+                }
+                return Ok(());
+            }
+            _ => {
+                return Err(CpuError::Unimplemented {
+                    pc,
+                    instruction: funct,
+                })
+            }
+        };
+        self.fpr[fd as usize] = u64::from(result.to_bits());
+        Ok(())
     }
 
     fn address(&self, rs: u32, simm: i64) -> u64 {
@@ -520,7 +827,7 @@ impl Cpu {
         signed: bool,
     ) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
-        let value = bus.read_u8(physical(address));
+        let value = bus.read_u8(self.translate(address)?);
         self.set_gpr(
             rt,
             if signed {
@@ -544,7 +851,7 @@ impl Cpu {
         if address & 1 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        let value = bus.read_u16(physical(address));
+        let value = bus.read_u16(self.translate(address)?);
         self.set_gpr(
             rt,
             if signed {
@@ -568,7 +875,7 @@ impl Cpu {
         if address & 3 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        let value = bus.read_u32(physical(address));
+        let value = bus.read_u32(self.translate(address)?);
         self.set_gpr(
             rt,
             if signed {
@@ -585,14 +892,14 @@ impl Cpu {
         if address & 7 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        let value = bus.read_u64(physical(address));
+        let value = bus.read_u64(self.translate(address)?);
         self.set_gpr(rt, value);
         Ok(())
     }
 
     fn store8<B: Bus>(&mut self, bus: &mut B, rs: u32, rt: u32, simm: i64) -> Result<(), CpuError> {
         let address = self.address(rs, simm);
-        bus.write_u8(physical(address), self.gpr(rt) as u8);
+        bus.write_u8(self.translate(address)?, self.gpr(rt) as u8);
         Ok(())
     }
 
@@ -607,7 +914,7 @@ impl Cpu {
         if address & 1 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        bus.write_u16(physical(address), self.gpr(rt) as u16);
+        bus.write_u16(self.translate(address)?, self.gpr(rt) as u16);
         Ok(())
     }
 
@@ -622,7 +929,7 @@ impl Cpu {
         if address & 3 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        bus.write_u32(physical(address), self.gpr(rt) as u32);
+        bus.write_u32(self.translate(address)?, self.gpr(rt) as u32);
         Ok(())
     }
 
@@ -637,7 +944,69 @@ impl Cpu {
         if address & 7 != 0 {
             return Err(CpuError::Unaligned { address });
         }
-        bus.write_u64(physical(address), self.gpr(rt));
+        bus.write_u64(self.translate(address)?, self.gpr(rt));
+        Ok(())
+    }
+
+    fn load_f32<B: Bus>(
+        &mut self,
+        bus: &mut B,
+        rs: u32,
+        rt: u32,
+        simm: i64,
+    ) -> Result<(), CpuError> {
+        let address = self.address(rs, simm);
+        if address & 3 != 0 {
+            return Err(CpuError::Unaligned { address });
+        }
+        let value = bus.read_u32(self.translate(address)?);
+        self.fpr[rt as usize] = u64::from(value);
+        Ok(())
+    }
+
+    fn store_f32<B: Bus>(
+        &mut self,
+        bus: &mut B,
+        rs: u32,
+        rt: u32,
+        simm: i64,
+    ) -> Result<(), CpuError> {
+        let address = self.address(rs, simm);
+        if address & 3 != 0 {
+            return Err(CpuError::Unaligned { address });
+        }
+        bus.write_u32(self.translate(address)?, self.fpr[rt as usize] as u32);
+        Ok(())
+    }
+
+    fn load_f64<B: Bus>(
+        &mut self,
+        bus: &mut B,
+        rs: u32,
+        rt: u32,
+        simm: i64,
+    ) -> Result<(), CpuError> {
+        let address = self.address(rs, simm);
+        if address & 7 != 0 {
+            return Err(CpuError::Unaligned { address });
+        }
+        let value = bus.read_u64(self.translate(address)?);
+        self.fpr[rt as usize] = value;
+        Ok(())
+    }
+
+    fn store_f64<B: Bus>(
+        &mut self,
+        bus: &mut B,
+        rs: u32,
+        rt: u32,
+        simm: i64,
+    ) -> Result<(), CpuError> {
+        let address = self.address(rs, simm);
+        if address & 7 != 0 {
+            return Err(CpuError::Unaligned { address });
+        }
+        bus.write_u64(self.translate(address)?, self.fpr[rt as usize]);
         Ok(())
     }
 }
@@ -651,6 +1020,34 @@ pub const fn physical(address: u64) -> u64 {
         address & 0x1FFF_FFFF
     } else {
         address
+    }
+}
+
+fn round_to_i32(value: f32, mode: u32) -> i32 {
+    let rounded = match mode {
+        0 => value.round_ties_even(),
+        1 => value.trunc(),
+        2 => value.ceil(),
+        _ => value.floor(),
+    };
+    if rounded.is_nan() {
+        0
+    } else {
+        rounded.clamp(i32::MIN as f32, i32::MAX as f32) as i32
+    }
+}
+
+fn round_to_i64(value: f32, mode: u32) -> i64 {
+    let rounded = match mode {
+        0 => f64::from(value).round_ties_even(),
+        1 => f64::from(value).trunc(),
+        2 => f64::from(value).ceil(),
+        _ => f64::from(value).floor(),
+    };
+    if rounded.is_nan() {
+        0
+    } else {
+        rounded.clamp(i64::MIN as f64, i64::MAX as f64) as i64
     }
 }
 
@@ -816,5 +1213,98 @@ mod tests {
         let mut cpu = Cpu::new(0);
         let error = cpu.step(&mut memory).expect_err("unaligned");
         assert!(matches!(error, CpuError::Unaligned { .. }));
+    }
+    #[test]
+    fn tlb_maps_virtual_pages_to_physical_memory() {
+        let mut cpu = Cpu::new(0);
+        // VA page 0x0000-0x1FFF -> PA 0x2000 (even) / 0x3000 (odd).
+        cpu.tlb[0] = TlbEntry {
+            entry_hi: 0,
+            lo0: 2,            // even page: PFN 0 (code)
+            lo1: (2 << 6) | 2, // odd page: PFN 2 (data)
+            page_mask: 0,
+        };
+        let mut memory = Memory::new(0x4000);
+        memory.write_u32(0x2000, 0xCAFE_BABE);
+        // LW t0, 0x1000(zero) ; SW t0, 0x1000(zero) ; LW t1, 0x5000(zero)
+        let image = program(&[0x8C08_1000, 0xAC08_1000]);
+        memory.0[..image.0.len()].copy_from_slice(&image.0);
+        run(&mut cpu, &mut memory, 2);
+        assert_eq!(cpu.gpr[8], 0xFFFF_FFFF_CAFE_BABE);
+        assert_eq!(memory.read_u32(0x2000), 0xCAFE_BABE);
+        // A page outside the mapped entry now faults.
+        let mut cpu2 = Cpu::new(0);
+        cpu2.tlb[0] = cpu.tlb[0];
+        let mut memory2 = program(&[0x8C09_5000]);
+        assert!(matches!(
+            cpu2.step(&mut memory2),
+            Err(CpuError::Tlb { address: 0x5000 })
+        ));
+    }
+
+    #[test]
+    fn tlb_instructions_update_cp0_registers() {
+        let mut cpu = Cpu::new(0);
+        let mut memory = Memory::new(0x100);
+        cpu.cp0[0] = 0; // Index
+        cpu.cp0[10] = 0x2000; // EntryHi (VPN2 bit 13 set)
+        cpu.cp0[2] = (5 << 6) | 2; // EntryLo0: PFN 5, valid, global
+        cpu.cp0[3] = (6 << 6) | 2;
+        cpu.cp0[5] = 0; // PageMask
+                        // TLBWI
+        cpu.execute(0x4200_0002, 0, &mut memory).expect("tlbwi");
+        assert_eq!(cpu.tlb[0].entry_hi, 0x2000);
+        assert_eq!(cpu.tlb[0].lo0, (5 << 6) | 2);
+        // TLBP finds the entry (Index bit 31 clear).
+        cpu.cp0[10] = 0x2000;
+        cpu.execute(0x4200_0008, 0, &mut memory).expect("tlbp");
+        assert_eq!(cpu.cp0[0], 0);
+        // TLBR reloads the registers from the entry.
+        cpu.cp0[10] = 0;
+        cpu.cp0[2] = 0;
+        cpu.execute(0x4200_0001, 0, &mut memory).expect("tlbr");
+        assert_eq!(cpu.cp0[10], 0x2000);
+        assert_eq!(cpu.cp0[2], (5 << 6) | 2);
+        // A failed probe sets Index bit 31.
+        cpu.cp0[10] = 0x8000;
+        cpu.execute(0x4200_0008, 0, &mut memory).expect("tlbp miss");
+        assert_ne!(cpu.cp0[0] & 0x8000_0000, 0);
+    }
+
+    #[test]
+    fn fpu_arithmetic_and_conversions() {
+        let mut memory = Memory::new(0x1000);
+        let image = program(&[
+            0xC400_0100, // lwc1 f0, 0x100(zero)
+            0xC401_0104, // lwc1 f1, 0x104(zero)
+            0x4601_0080, // add.s f2, f0, f1
+            0x4408_1000, // mfc1 t0, f2
+            0x4600_10E4, // cvt.w.s f3, f2
+            0x4409_1800, // mfc1 t1, f3
+            0x4600_1104, // sqrt.s f4, f2
+            0x440A_2000, // mfc1 t2, f4
+        ]);
+        memory.0[..image.0.len()].copy_from_slice(&image.0);
+        memory.write_u32(0x100, 1.5f32.to_bits());
+        memory.write_u32(0x104, 2.25f32.to_bits());
+        let mut cpu = Cpu::new(0);
+        run(&mut cpu, &mut memory, 8);
+        eprintln!(
+            "fpr={:08X?} gpr8={:X}",
+            cpu.fpr.map(|v| v as u32),
+            cpu.gpr[8]
+        );
+        assert_eq!(cpu.gpr[8], u64::from(3.75f32.to_bits()));
+        // Default round-to-nearest-even converts 3.75 to 4.
+        assert_eq!(cpu.gpr[9], 4);
+        assert_eq!(cpu.gpr[10], u64::from(3.75f32.sqrt().to_bits()));
+
+        // cvt.s.w (int -> float) and cvt.s from 64-bit integer.
+        cpu.fpr[6] = 7;
+        cpu.cop1(0, 0x14, 0, 6, 7, 0x20).expect("cvt.s.w");
+        assert_eq!(cpu.fpr[7] as u32, 7.0f32.to_bits());
+        cpu.fpr[6] = (-9i64) as u64;
+        cpu.cop1(0, 0x15, 0, 6, 7, 0x20).expect("cvt.s.l");
+        assert_eq!(cpu.fpr[7] as u32, (-9.0f32).to_bits());
     }
 }
