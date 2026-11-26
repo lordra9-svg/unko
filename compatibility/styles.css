@@ -74,7 +74,7 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accen
 .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
 table { width: 100%; border-collapse: collapse; min-width: 900px; }
 th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-th { position: sticky; top: 78px; z-index: 2; background: #111621; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+th { background: #111621; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 tbody tr:hover { background: rgba(110,168,254,.05); }
 td.game { min-width: 260px; }
 td.game strong { display: block; color: var(--text); }
@@ -103,7 +103,6 @@ footer { padding: 22px 0 42px; border-top: 1px solid var(--line); color: var(--m
 @media (max-width: 680px) {
   .hero { padding-top: 42px; }
   .controls { position: static; }
-  th { top: 0; }
   .legend dl { grid-template-columns: 1fr; }
 }
 
