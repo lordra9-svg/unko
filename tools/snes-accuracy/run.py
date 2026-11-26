@@ -72,22 +72,41 @@ def main(limit=None):
             env=os.environ.copy(); env.update({'FRAMES':str(FRAMES),'FRAME_OUT':ours_frame,'AUDIO_OUT':ours_audio,'TMPDIR':TMP})
             p=subprocess.run([INFO,rom,IPL],capture_output=True,text=True,env=env)
             if p.returncode!=0: raise RuntimeError('ours: '+(p.stderr or p.stdout).strip()[:250])
-            region='PAL' if 'region:      PAL' in p.stdout else 'NTSC'
+            m=re.search(r'region:\s+(.+)', p.stdout)
+            country=m.group(1).strip() if m else ''
+            PAL_COUNTRIES={'Europe','Sweden','Finland','Denmark','France','Netherlands','Norway','Germany','Italy','China','Australia','Spain','Russia'}
+            region='PAL' if country in PAL_COUNTRIES else 'NTSC'
             rec['region']=region
+            rec['country']=country
             ares_dir=os.path.join(work,'ares'); os.makedirs(ares_dir,exist_ok=True)
             env=os.environ.copy(); env['ARES_RAW_AUDIO']=os.path.join(ares_dir,'raw.i16'); env['TMPDIR']=TMP
+            if region=='PAL': env['ARES_REGION']='PAL'
             p=subprocess.run([CAPTURE,rom,str(FRAMES+2),ares_dir],capture_output=True,text=True,env=env)
             if p.returncode!=0: raise RuntimeError('ares: '+(p.stderr or p.stdout).strip()[:250])
             ares_frame=os.path.join(ares_dir,'frame.raw')
             size=os.path.getsize(ours_frame)
-            if size==256*224*4:
-                fcmd=['python3',FRAME_DIFF,ours_frame,ares_frame]
-            elif size==256*240*4:
-                fcmd=['python3',FRAME_DIFF,ours_frame,ares_frame,'--ours-h','240','--ares-h','288','--x0','22','--y0','29']
-            elif size==512*224*4:
-                fcmd=['python3',FRAME_DIFF,ours_frame,ares_frame,'--ours-w','512','--sx','1']
+            if region=='PAL':
+                if size==256*224*4:
+                    fcmd=['python3',FRAME_DIFF,ours_frame,ares_frame,'--ares-h','288','--x0','22','--y0','29']
+                elif size==256*240*4:
+                    fcmd=['python3',FRAME_DIFF,ours_frame,ares_frame,'--ours-h','240','--ares-h','288','--x0','22','--y0','29']
+                elif size==512*224*4:
+                    fcmd=['python3',FRAME_DIFF,ours_frame,ares_frame,'--ours-w','512','--sx','1','--ares-h','288','--x0','22','--y0','29']
+                elif size==512*240*4:
+                    fcmd=['python3',FRAME_DIFF,ours_frame,ares_frame,'--ours-w','512','--ours-h','240','--sx','1','--ares-h','288','--x0','22','--y0','29']
+                else:
+                    raise RuntimeError(f'unsupported frame geometry {size} bytes')
             else:
-                raise RuntimeError(f'unsupported frame geometry {size} bytes')
+                if size==256*224*4:
+                    fcmd=['python3',FRAME_DIFF,ours_frame,ares_frame]
+                elif size==256*240*4:
+                    fcmd=['python3',FRAME_DIFF,ours_frame,ares_frame,'--ours-h','240','--ares-h','242','--y0','1']
+                elif size==512*224*4:
+                    fcmd=['python3',FRAME_DIFF,ours_frame,ares_frame,'--ours-w','512','--sx','1']
+                elif size==512*240*4:
+                    fcmd=['python3',FRAME_DIFF,ours_frame,ares_frame,'--ours-w','512','--ours-h','240','--ares-h','242','--y0','1','--sx','1']
+                else:
+                    raise RuntimeError(f'unsupported frame geometry {size} bytes')
             f=subprocess.run(fcmd,capture_output=True,text=True)
             video=parse_pct(f.stdout,r'exact:\s+\d+\s+\(([0-9.]+)%\)')
             if video is None: raise RuntimeError('frame diff: '+(f.stdout+f.stderr).strip()[:250])
