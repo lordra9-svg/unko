@@ -1,4 +1,4 @@
-import json, os, subprocess, sys, tempfile, zipfile, hashlib, time, re, glob
+import json, os, shutil, subprocess, sys, tempfile, zipfile, hashlib, time, re, glob
 ROOT=os.getcwd()
 INFO=os.path.join(ROOT,'target/release/examples/snes-info')
 CAPTURE=os.path.join(ROOT,'tools/snes-oracle/ares-capture.sh')
@@ -9,7 +9,9 @@ DEFAULT_DIR=os.environ.get('UNKO_SNES_DIR','/var/home/Lordra/ai/refs/Minerva_Myr
 IPL=os.environ.get('UNKO_SNES_IPL','/var/home/Lordra/ai/refs/ares/ares/System/Super Famicom/ipl.rom')
 LEDGER=os.path.join(ROOT,'compatibility/accuracy-snes.jsonl')
 FRAMES=int(os.environ.get('UNKO_ACC_FRAMES','120'))
-TMP=tempfile.mkdtemp(prefix='unko-snes-acc-')
+TMP_ROOT=os.environ.get('UNKO_ACC_TMP','/var/home/Lordra/.cache/unko-snes-acc')
+os.makedirs(TMP_ROOT,exist_ok=True)
+TMP=tempfile.mkdtemp(prefix='run-',dir=TMP_ROOT)
 os.makedirs(os.path.dirname(LEDGER), exist_ok=True)
 
 def extract_rom(path):
@@ -28,13 +30,16 @@ def parse_pct(text, pattern):
     m=re.search(pattern,text)
     return float(m.group(1)) if m else None
 
-def done_paths():
-    done=set()
+def done_keys():
+    paths=set(); shas=set()
     if os.path.exists(LEDGER):
         for line in open(LEDGER):
-            try: done.add(json.loads(line).get('path'))
+            try:
+                row=json.loads(line)
+                if row.get('path'): paths.add(row.get('path'))
+                if row.get('sha256'): shas.add(row.get('sha256'))
             except Exception: pass
-    return done
+    return paths, shas
 
 def rows_from_manifest():
     if os.path.exists(MANIFEST):
@@ -49,7 +54,7 @@ def rows_from_manifest():
 def main(limit=None):
     rows=rows_from_manifest()
     rows.sort(key=lambda r:r['title'].casefold())
-    done=done_paths(); ledger=open(LEDGER,'a')
+    done, done_shas=done_keys(); ledger=open(LEDGER,'a')
     started=time.time(); processed=0; ok=0; failed=0
     for r in rows:
         if limit is not None and processed>=limit: break
@@ -57,16 +62,20 @@ def main(limit=None):
         processed+=1
         rec={'system':'snes','format':'SNES','title':r['title'],'path':r['path'],'oracle':'ares','frames':FRAMES,'tested':'2026-11-25'}
         try:
-            rom,sha=extract_rom(r['path']); rec['sha256']=sha
+            rom,sha=extract_rom(r['path'])
+            if sha in done_shas:
+                processed-=1
+                continue
+            rec['sha256']=sha
             work=os.path.join(TMP,'run'); os.makedirs(work,exist_ok=True)
             ours_frame=os.path.join(work,'ours.raw'); ours_audio=os.path.join(work,'ours.f32')
-            env=os.environ.copy(); env.update({'FRAMES':str(FRAMES),'FRAME_OUT':ours_frame,'AUDIO_OUT':ours_audio})
+            env=os.environ.copy(); env.update({'FRAMES':str(FRAMES),'FRAME_OUT':ours_frame,'AUDIO_OUT':ours_audio,'TMPDIR':TMP})
             p=subprocess.run([INFO,rom,IPL],capture_output=True,text=True,env=env)
             if p.returncode!=0: raise RuntimeError('ours: '+(p.stderr or p.stdout).strip()[:250])
             region='PAL' if 'region:      PAL' in p.stdout else 'NTSC'
             rec['region']=region
             ares_dir=os.path.join(work,'ares'); os.makedirs(ares_dir,exist_ok=True)
-            env=os.environ.copy(); env['ARES_RAW_AUDIO']=os.path.join(ares_dir,'raw.i16')
+            env=os.environ.copy(); env['ARES_RAW_AUDIO']=os.path.join(ares_dir,'raw.i16'); env['TMPDIR']=TMP
             p=subprocess.run([CAPTURE,rom,str(FRAMES+2),ares_dir],capture_output=True,text=True,env=env)
             if p.returncode!=0: raise RuntimeError('ares: '+(p.stderr or p.stdout).strip()[:250])
             ares_frame=os.path.join(ares_dir,'frame.raw')
@@ -88,6 +97,7 @@ def main(limit=None):
         except Exception as e:
             rec['status']='error'; rec['error']=re.sub(r'/tmp/[^: ]+','<tmp>',str(e))[:300]; failed+=1
         ledger.write(json.dumps(rec)+'\n'); ledger.flush(); os.fsync(ledger.fileno())
+        shutil.rmtree(os.path.join(TMP,'run'), ignore_errors=True)
         if processed%5==0:
             rate=processed/(time.time()-started)
             print(f'{processed} processed, {ok} ok, {failed} failed, {rate:.2f}/s', flush=True)
