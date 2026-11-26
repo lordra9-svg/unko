@@ -19,6 +19,10 @@ const el = {
   expand: document.querySelector("#expand"),
   count: document.querySelector("#count"),
   legend: document.querySelector("#status-legend"),
+  dialog: document.querySelector("#game-dialog"),
+  detailTitle: document.querySelector("#detail-title"),
+  detailSystem: document.querySelector("#detail-system"),
+  detailBody: document.querySelector("#detail-body"),
 };
 
 function statusById(id) {
@@ -73,6 +77,173 @@ function addCell(row, text, className) {
   return cell;
 }
 
+function systemById(id) {
+  return state.data.systems.find((system) => system.id === id);
+}
+
+function oracleLabel(oracle) {
+  return {
+    rustynes: "RustyNES",
+    ares: "ares",
+    unknown: "Unknown oracle",
+  }[oracle] ?? oracle;
+}
+
+function addMetaRow(list, label, value) {
+  const term = document.createElement("dt");
+  term.textContent = label;
+  const detail = document.createElement("dd");
+  if (value instanceof Node) {
+    detail.append(value);
+  } else {
+    detail.textContent = value;
+  }
+  list.append(term, detail);
+}
+
+function accuracyMetrics(record) {
+  const rows = [];
+  if (record.geometry_pct != null) {
+    if (record.best_geometry_pct != null) {
+      rows.push(["Aligned geometry", `${record.best_geometry_pct.toFixed(2)}%`]);
+    }
+    rows.push(["Same-index geometry", `${record.geometry_pct.toFixed(2)}%`]);
+    if (record.steady_geometry_pct != null) {
+      rows.push(["Steady geometry (frame 30+)", `${record.steady_geometry_pct.toFixed(2)}%`]);
+    }
+    rows.push(["Alignment", `${record.best_shift ?? 0} frame${Math.abs(record.best_shift ?? 0) === 1 ? "" : "s"}`]);
+    rows.push(["Audio", "not scored (oracle stream is DC-blocked)"]);
+  } else if (record.video_pct != null) {
+    rows.push(["Video (final frame)", `${record.video_pct.toFixed(2)}%`]);
+    if (record.audio_pct != null) {
+      rows.push(["Audio (raw S-DSP PCM)", `${record.audio_pct.toFixed(2)}%`]);
+    }
+    if (record.region) {
+      rows.push(["Timing region", record.region]);
+    }
+  }
+  if (record.frames != null) {
+    rows.push(["Frames", String(record.frames)]);
+  }
+  if (record.tested) {
+    rows.push(["Tested", record.tested]);
+  }
+  return rows;
+}
+
+function showGameDetail(system, game) {
+  el.detailTitle.textContent = game.title;
+  el.detailSystem.textContent = [system.name, game.format].filter(Boolean).join(" · ");
+  el.detailBody.replaceChildren();
+
+  const status = statusById(game.status);
+  const statusLine = document.createElement("div");
+  statusLine.className = "detail-status";
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  badge.dataset.status = game.status;
+  badge.textContent = status.label;
+  const statusText = document.createElement("p");
+  statusText.textContent = status.description || "No status note.";
+  statusLine.append(badge, statusText);
+  el.detailBody.append(statusLine);
+
+  const meta = document.createElement("dl");
+  meta.className = "detail-meta";
+  addMetaRow(meta, "System", system.name);
+  addMetaRow(meta, "Format", game.format || "—");
+  addMetaRow(meta, "Region", game.region || "—");
+  if (game.revision) addMetaRow(meta, "Revision", game.revision);
+  if (game.mapping) addMetaRow(meta, "Mapping", game.mapping);
+  if (game.tested) addMetaRow(meta, "Status tested", game.tested);
+  if (game.sha256) {
+    const code = document.createElement("code");
+    code.textContent = game.sha256;
+    addMetaRow(meta, "SHA-256", code);
+  }
+  el.detailBody.append(meta);
+
+  const reported = document.createElement("section");
+  reported.className = "detail-section";
+  const heading = document.createElement("h3");
+  heading.textContent = "What has been reported";
+  reported.append(heading);
+
+  const evidence = document.createElement("p");
+  evidence.textContent = game.evidence || "No status evidence recorded.";
+  reported.append(evidence);
+
+  const records = game.accuracy ? Object.entries(game.accuracy) : [];
+  if (records.length === 0) {
+    const none = document.createElement("p");
+    none.className = "muted";
+    none.textContent = "No oracle accuracy report has been recorded for this entry yet.";
+    reported.append(none);
+  } else {
+    for (const [oracle, record] of records) {
+      const card = document.createElement("div");
+      card.className = "report-card";
+      const head = document.createElement("div");
+      head.className = "report-head";
+      const name = document.createElement("strong");
+      name.textContent = `${oracleLabel(oracle)} report`;
+      const stateLabel = document.createElement("span");
+      stateLabel.className = "report-status";
+      stateLabel.textContent = record.status === "ok" ? "measured" : "error";
+      if (record.status !== "ok") stateLabel.classList.add("error");
+      head.append(name, stateLabel);
+      card.append(head);
+
+      if (record.status !== "ok") {
+        const error = document.createElement("p");
+        error.className = "report-error";
+        error.textContent = record.error || "The oracle run failed.";
+        card.append(error);
+      } else {
+        const metrics = document.createElement("dl");
+        metrics.className = "report-metrics";
+        for (const [label, value] of accuracyMetrics(record)) {
+          addMetaRow(metrics, label, value);
+        }
+        card.append(metrics);
+      }
+      reported.append(card);
+    }
+  }
+  el.detailBody.append(reported);
+
+  const actions = document.createElement("div");
+  actions.className = "detail-actions";
+  const report = document.createElement("a");
+  report.className = "button primary";
+  report.href = reportUrl(system, game);
+  report.textContent = "Report a result";
+  const search = document.createElement("a");
+  search.className = "button";
+  search.href = `${REPO}/issues?q=${encodeURIComponent(`is:issue "${game.title}"`)}`;
+  search.textContent = "Search GitHub reports";
+  actions.append(report, search);
+  if (game.issue) {
+    const issue = document.createElement("a");
+    issue.className = "button";
+    issue.href = `${REPO}/issues/${game.issue}`;
+    issue.textContent = `Issue #${game.issue}`;
+    actions.append(issue);
+  }
+  el.detailBody.append(actions);
+
+  if (system.test) {
+    const command = document.createElement("div");
+    command.className = "detail-command";
+    const code = document.createElement("code");
+    code.textContent = system.test;
+    command.append(code);
+    el.detailBody.append(command);
+  }
+
+  el.dialog.showModal();
+}
+
 function renderSummary(games) {
   const verified = games.filter((game) => game.status === "verified").length;
   const statuses = new Set(games.map((game) => game.status));
@@ -125,11 +296,20 @@ function renderTable(system, games) {
   const tbody = document.createElement("tbody");
   for (const game of games) {
     const row = document.createElement("tr");
+    row.className = "game-row";
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("a,button")) return;
+      showGameDetail(system, game);
+    });
 
     const gameCell = document.createElement("td");
     gameCell.className = "game";
-    const title = document.createElement("strong");
+    const title = document.createElement("button");
+    title.type = "button";
+    title.className = "game-link";
     title.textContent = game.title;
+    title.setAttribute("aria-label", `View details for ${game.title}`);
+    title.addEventListener("click", () => showGameDetail(system, game));
     gameCell.append(title);
     const detail = document.createElement("small");
     detail.textContent = [game.revision, game.sha256 ? `sha256:${game.sha256.slice(0, 16)}…` : ""]
@@ -388,6 +568,9 @@ async function boot() {
     for (const details of el.systems.querySelectorAll("details.system")) {
       details.open = state.open;
     }
+  });
+  el.dialog.addEventListener("click", (event) => {
+    if (event.target === el.dialog) el.dialog.close();
   });
 }
 

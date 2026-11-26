@@ -77,7 +77,9 @@ or edited by hand:
   load/run smoke completed; it is not a playability claim.
 - `unsupported` means the format or required load path is not implemented yet.
 - The page renders 200 rows per system initially; use **Show next 200** to
-  reveal more, or search/status-filter to narrow the set.
+  reveal more, or search/status-filter to narrow the set. Click a game title
+  or row to open its detail panel: current status, dump identity, smoke
+  evidence, every oracle report and its metrics.
 
 ## Accuracy ledger
 
