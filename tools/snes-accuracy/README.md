@@ -16,6 +16,6 @@ Per ROM:
 - compare the final RGBA frame with `diff-frame.py` (NTSC/PAL/hires flags)
 - compare raw S-DSP PCM with `diff-audio-raw.py`
 
-The ledger is resumable by source path. The 100-ROM sample uses 120 frames;
-the full 4,642-ROM campaign should use 600 frames and is expected to take
-multiple days serially.
+The ledger is resumable by source path. The completed full pass covers 4,642
+archives at 120 frames; PAL carts set `ARES_REGION=PAL` and use the 288-line
+crop. A future 600-frame pass can deepen the same ledger.

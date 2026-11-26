@@ -69,42 +69,41 @@ full pass is deliberately deferred until after the SNES stage. At ~2.7 s/ROM,
 ares audio is not scored: its host stream is resampled/filtered differently
 from our f32 output.
 
-## SNES stage — 100-ROM sample complete (2026-11-25)
+## SNES stage — complete (2026-11-26)
 
 The SNES oracle is the calibrated ares capture pipeline in
-`tools/snes-oracle/`. The sample runner is
-`tools/snes-accuracy/run.py`:
+`tools/snes-oracle/`; the runner is `tools/snes-accuracy/run.py`.
 
-- first 100 SNES archives in title order
-- 120 frames, ares captured at 122 to match its frame counter
+- All **4,642** SNES archives in title order
+- **120 frames**, ares captured at 122 to match its frame counter
 - final RGBA frame compared at the calibrated crop/scale
 - raw S-DSP PCM compared sample-for-sample
-- records append to `compatibility/accuracy-snes.jsonl`, resumable by path
-
-The 100-ROM, 120-frame sample completed in **872 seconds**:
+- `ARES_REGION=PAL` and the 288-line crop for the 761 PAL records
+- records append to `compatibility/accuracy-snes.jsonl`, resumable
 
 | Metric | Result |
 |---|---:|
-| Processed | 100 |
-| Measured | 99 |
-| Errors | 1 (unsupported 512x240 frame geometry) |
-| Final-frame exact | 56.6% (56/99) |
-| Final-frame >= 99% | 63.6% |
+| Archives | 4,642 |
+| Measured | 4,606 |
+| Errors | 36 |
+| Final-frame exact | 3,379 / 4,606 (73.4%) |
+| Final-frame >= 99% | 78.3% |
+| Final-frame >= 95% | 84.6% |
 | Final-frame median | 100.0% |
-| Audio exact | 96.0% (95/99) |
-| Video + audio both exact | 54/99 |
+| Final-frame mean | 92.539% |
+| Audio exact | 4,315 / 4,606 (93.7%) |
+| Audio >= 99% | 95.0% |
+| Audio median | 100.0% |
+| Video + audio both exact | 3,273 / 4,606 (71.0%) |
+
+The 36 errors are 15 unsupported 512x448 interlaced images, 11 archives with
+no SNES member, 2 headerless/invalid images, 2 too-small images, 3 missing
+ares frame dumps, 2 ares capture stalls and 1 unsupported 512x480 image.
 
 Final-frame video parity is noisy on animated games and mode transitions; low
 values are not necessarily rendering errors. Audio parity is much more stable.
-This sample validates the capture/comparison pipeline and the page overlay.
-A full 4,642-ROM, 600-frame serial capture remains the multi-day stage.
-
-## SNES full stage — pending
-
-The SNES oracle is the calibrated ares capture pipeline in
-`tools/snes-oracle/`. A full 4,642-ROM, 600-frame serial capture is a
-multi-day campaign; it starts after NES. The same ledger format will carry
-per-ROM video/audio results.
+The PAL correction deliberately reran all 761 PAL records after fixing country
+detection; without it, PAL games were compared with NTSC geometry.
 
 ## Page integration
 
