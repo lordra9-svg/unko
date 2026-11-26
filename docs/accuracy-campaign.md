@@ -47,6 +47,10 @@ geometry is never exactly 100% because the first boot frames differ; that is
 why the steady window starts at frame 30. Headerless NES images remain
 **Unsupported** because they have no iNES header to load.
 
+Games below 100% steady-state geometry, plus oracle/load errors, are listed in
+[`nes-accuracy-not-100.md`](nes-accuracy-not-100.md) with the full
+[`CSV`](nes-accuracy-not-100.csv).
+
 ## Second NES oracle: ares (wired, deferred)
 
 The local ares capture build now emits a fourth trace field:
