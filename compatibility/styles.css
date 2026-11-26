@@ -138,6 +138,7 @@ footer { padding: 22px 0 42px; border-top: 1px solid var(--line); color: var(--m
 .report-metrics dt { color: var(--muted); }
 .report-metrics dd { margin: 0; }
 .report-error { margin: 0; color: var(--red); overflow-wrap: anywhere; }
+.report-note { margin: 10px 0 0; padding-top: 9px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 .detail-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); }
 .detail-command { margin: 8px 0 0; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 8px; background: var(--bg); }
 .detail-command code { color: #c9d5e8; overflow-wrap: anywhere; }

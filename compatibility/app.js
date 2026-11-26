@@ -207,6 +207,12 @@ function showGameDetail(system, game) {
           addMetaRow(metrics, label, value);
         }
         card.append(metrics);
+        if (record.note) {
+          const note = document.createElement("p");
+          note.className = "report-note";
+          note.textContent = record.note;
+          card.append(note);
+        }
       }
       reported.append(card);
     }

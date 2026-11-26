@@ -51,6 +51,15 @@ Games below 100% steady-state geometry, plus oracle/load errors, are listed in
 [`nes-accuracy-not-100.md`](nes-accuracy-not-100.md) with the full
 [`CSV`](nes-accuracy-not-100.csv).
 
+### Argus (Japan) — RustyNES oracle disagreement
+
+Argus is mapper 87. RustyNES renders a spurious tile-0 overlay on the title
+screen; Unko does not. The ares Famicom capture matches Unko at **100%
+steady-state geometry** from frame 30. An ares record for Argus is in
+`compatibility/accuracy-ares.jsonl`, and Argus is excluded from the NES
+below-100 list as a known oracle disagreement rather than an Unko rendering
+failure.
+
 ## Second NES oracle: ares (wired, deferred)
 
 The local ares capture build now emits a fourth trace field:

@@ -2,20 +2,24 @@
 
 Generated from `compatibility/accuracy.jsonl` (RustyNES NES oracle, 120 frames).
 
-**Metric note:** full-run frame-0 geometry is never exactly 100% because the oracle and Unko differ during boot. This list therefore uses the **steady-state geometry from frame 30 onward**. If “accuracy” means the displayed full-run R percentage, all 6,726 measured games are below 100%.
+**Metric note:** full-run frame-0 geometry is never exactly 100% because the oracle and Unko differ during boot. This list therefore uses the **steady-state geometry from frame 30 onward**. If “accuracy” means the displayed full-run R percentage, all measured games are below 100%.
 
 - NES archives: **7101**
 - Measured: **6726**
-- Measured but steady-state below 100%: **1837**
+- Measured but steady-state below 100%: **1835**
 - No measurement / oracle error: **375**
-- Total needing attention: **2212**
+- Total needing attention: **2210**
 
 | Steady-state band | Games |
 |---|---:|
-| 0–50% | 894 |
+| 0–50% | 892 |
 | 50–90% | 279 |
 | 90–99% | 664 |
 | 99–100% | 0 |
+
+## Known oracle disagreement
+
+`Argus (Japan)` and `Argus (Japan) (En)` are excluded from this list: RustyNES renders a spurious tile-0 overlay, while ares matches Unko at **100% steady-state geometry** from frame 30. See `compatibility/accuracy-ares.jsonl`.
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
@@ -34,8 +38,6 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 0.00% | 0.87% | Karate Kick (World) (NESDev 2016) (Aftermarket) (Unl) |
 | 0.00% | 0.87% | Legends of Owlia, The (World) (Aftermarket) (Unl) |
 | 0.00% | 0.87% | SMMM (World) (v1.01) (Music Program) (Aftermarket) (Unl) |
-| 0.00% | 1.67% | Argus (Japan) |
-| 0.00% | 1.67% | Argus (Japan) (En) |
 | 0.00% | 1.67% | Chinese Checkers (Taiwan) (En) (Unl) |
 | 0.00% | 1.67% | Chinese Checkers (Taiwan) (En) (Unl) |
 | 0.00% | 1.67% | Happy Pairs (Taiwan) (En) (Unl) |
@@ -73,6 +75,8 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 0.00% | 2.50% | Indiana Jones and the Temple of Doom (USA) (V1.1) (Unl) |
 | 0.00% | 2.50% | Indiana Jones and the Temple of Doom (USA) (V1.1) (Unl) |
 | 0.00% | 2.50% | Joshua & the Battle of Jericho (USA) (v6.0) (Unl) |
+| 0.00% | 2.50% | Sea of Dreamland (Europe, Asia) (En) (Unl) |
+| 0.00% | 2.50% | Solar Wars (World) (v1.0) (Aftermarket) (Unl) |
 
 ## No measurement / oracle errors
 
