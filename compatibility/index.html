@@ -48,10 +48,10 @@
       <h2>Status legend</h2>
       <dl id="status-legend"></dl>
       <p class="accuracy-note">
-        Accuracy is the palette-independent video geometry match over 120 frames;
-        <strong>R</strong> = RustyNES, <strong>A</strong> = ares, and “steady”
-        starts at frame 30. The oracle frontend audio streams are not scored as
-        exact PCM here.
+        <strong>R</strong> = RustyNES NES geometry, <strong>A</strong> = ares;
+        “steady” starts at frame 30. SNES rows compare the final frame and raw
+        S-DSP PCM; NES audio is not scored because those oracle streams are
+        DC-blocked.
       </p>
     </section>
   </main>

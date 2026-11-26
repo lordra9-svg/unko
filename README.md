@@ -108,7 +108,9 @@ NES accuracy stage (2026-11-25): **6,726 / 7,101** headered images measured
 against RustyNES; **72.7%** of measured ROMs reach 100% steady-state video
 geometry from frame 30 (68.8% of the full set). 375 oracle/load errors are
 recorded per ROM. A second ares NES oracle is wired and smoke-tested, with its
-full pass deferred until after SNES. Details:
+full pass deferred until after SNES. SNES sample (100 ROMs, 120 frames,
+ares): **56.6%** final-frame exact, **96.0%** raw-audio exact; the remaining
+full SNES stage is pending. Details:
 [`docs/accuracy-campaign.md`](docs/accuracy-campaign.md).
 
 Details: [`docs/library-scan.md`](docs/library-scan.md).

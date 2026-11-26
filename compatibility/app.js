@@ -1,6 +1,6 @@
 const REPO = "https://github.com/lordra9-svg/unko";
 const CATALOG_URL = "games.json";
-const ACCURACY_URLS = ["accuracy.jsonl", "accuracy-ares.jsonl"];
+const ACCURACY_URLS = ["accuracy.jsonl", "accuracy-ares.jsonl", "accuracy-snes.jsonl"];
 const PAGE_SIZE = 200;
 
 const state = {
@@ -164,13 +164,23 @@ function renderTable(system, games) {
         if (record.status !== "ok") continue;
         const line = document.createElement("div");
         const value = document.createElement("strong");
-        const match = record.best_geometry_pct ?? record.geometry_pct;
-        value.textContent = `${labels[oracle] ?? oracle} ${match.toFixed(2)}%`;
-        value.title = `${oracle}: palette-independent geometry ${match.toFixed(2)}% (shift ${record.best_shift ?? 0})`;
         const detail = document.createElement("small");
-        detail.textContent = record.steady_geometry_pct == null
-          ? "video"
-          : `steady ${record.steady_geometry_pct.toFixed(2)}%`;
+        if (record.geometry_pct != null) {
+          const match = record.best_geometry_pct ?? record.geometry_pct;
+          value.textContent = `${labels[oracle] ?? oracle} ${match.toFixed(2)}%`;
+          value.title = `${oracle}: palette-independent geometry ${match.toFixed(2)}% (shift ${record.best_shift ?? 0})`;
+          detail.textContent = record.steady_geometry_pct == null
+            ? "video"
+            : `steady ${record.steady_geometry_pct.toFixed(2)}%`;
+        } else if (record.video_pct != null) {
+          value.textContent = `${labels[oracle] ?? oracle} ${record.video_pct.toFixed(2)}%`;
+          value.title = `${oracle}: final-frame pixel match`;
+          detail.textContent = record.audio_pct == null
+            ? "video"
+            : `audio ${record.audio_pct.toFixed(2)}%`;
+        } else {
+          continue;
+        }
         line.append(value, detail);
         accuracyCell.append(line);
         shown = true;

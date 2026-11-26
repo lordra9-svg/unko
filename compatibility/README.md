@@ -81,8 +81,9 @@ or edited by hand:
 
 ## Accuracy ledger
 
-`accuracy.jsonl` (RustyNES) and `accuracy-ares.jsonl` (ares, wired and
-deferred) are append-only, resumable per-ROM oracle ledgers. The page
+`accuracy.jsonl` (RustyNES NES), `accuracy-ares.jsonl` (ares NES, wired and
+deferred) and `accuracy-snes.jsonl` (ares SNES, 100-ROM/120-frame sample) are
+append-only, resumable per-ROM oracle ledgers. The page
 loads it over `games.json` by SHA-256 and shows the NES geometry match. The
 current NES stage uses a local RustyNES trace host, 120 frames, and the
 palette-independent geometry hash; the “steady” percentage starts at frame 30.
