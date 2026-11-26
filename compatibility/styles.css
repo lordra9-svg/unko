@@ -186,3 +186,21 @@ footer { padding: 22px 0 42px; border-top: 1px solid var(--line); color: var(--m
   .detail-meta, .report-metrics { grid-template-columns: 1fr; gap: 2px 0; }
   .detail-meta dd, .report-metrics dd { margin-bottom: 7px; }
 }
+
+th .sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+th .sort-button:hover { color: var(--text); }
+th .sort-button.active { color: var(--text); }
+.sort-arrow { opacity: .5; font-size: 10px; }
+th .sort-button.active .sort-arrow { opacity: 1; color: var(--accent); }

@@ -8,6 +8,7 @@ const state = {
   status: "all",
   open: true,
   visible: {},
+  sort: { key: "title", dir: 1 },
   data: null,
 };
 
@@ -244,6 +245,45 @@ function showGameDetail(system, game) {
   el.dialog.showModal();
 }
 
+function accuracyScore(game) {
+  const records = game.accuracy ? Object.values(game.accuracy) : [];
+  let best = -1;
+  for (const record of records) {
+    if (record.status !== "ok") continue;
+    const value = record.best_geometry_pct ?? record.geometry_pct ?? record.video_pct;
+    if (typeof value === "number" && value > best) best = value;
+  }
+  return best;
+}
+
+function compareText(a, b) {
+  if (!a && b) return 1;
+  if (a && !b) return -1;
+  return String(a || "").localeCompare(String(b || ""), undefined, { numeric: true, sensitivity: "base" });
+}
+
+function compareGames(a, b, key) {
+  let result = 0;
+  if (key === "title") {
+    result = compareText(a.title, b.title);
+  } else if (key === "format") {
+    result = compareText(a.format, b.format);
+  } else if (key === "region") {
+    result = compareText(a.region, b.region);
+  } else if (key === "status") {
+    const order = new Map(state.data.statuses.map((status, index) => [status.id, index]));
+    result = (order.get(a.status) ?? 999) - (order.get(b.status) ?? 999);
+  } else if (key === "accuracy") {
+    result = accuracyScore(a) - accuracyScore(b);
+  }
+  if (result === 0) result = compareText(a.title, b.title);
+  return result;
+}
+
+function sortGames(games) {
+  return [...games].sort((a, b) => compareGames(a, b, state.sort.key) * state.sort.dir);
+}
+
 function renderSummary(games) {
   const verified = games.filter((game) => game.status === "verified").length;
   const statuses = new Set(games.map((game) => game.status));
@@ -284,10 +324,45 @@ function renderTable(system, games) {
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const headRow = document.createElement("tr");
-  for (const label of ["Game", "Format", "Region", "Mapping", "Status", "Accuracy", "Evidence", ""]) {
+  const columns = [
+    ["Game", "title"],
+    ["Format", "format"],
+    ["Region", "region"],
+    ["Mapping", null],
+    ["Status", "status"],
+    ["Accuracy", "accuracy"],
+    ["Evidence", null],
+    ["", null],
+  ];
+  for (const [label, key] of columns) {
     const th = document.createElement("th");
     th.scope = "col";
-    th.textContent = label;
+    if (!key) {
+      th.textContent = label;
+    } else {
+      const active = state.sort.key === key;
+      th.setAttribute("aria-sort", active ? (state.sort.dir > 0 ? "ascending" : "descending") : "none");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "sort-button";
+      if (active) button.classList.add("active");
+      button.textContent = label;
+      button.title = `Sort by ${label.toLowerCase()}`;
+      const arrow = document.createElement("span");
+      arrow.className = "sort-arrow";
+      arrow.textContent = active ? (state.sort.dir > 0 ? "▲" : "▼") : "↕";
+      button.append(arrow);
+      button.addEventListener("click", () => {
+        if (state.sort.key === key) {
+          state.sort.dir *= -1;
+        } else {
+          state.sort = { key, dir: key === "accuracy" ? -1 : 1 };
+        }
+        state.visible = {};
+        render();
+      });
+      th.append(button);
+    }
     headRow.append(th);
   }
   thead.append(headRow);
@@ -459,8 +534,9 @@ function renderSystems() {
         "No per-game reports yet. Use “Report a game” to add the first one, or run the test command above.";
       body.append(empty);
     } else {
+      const ordered = sortGames(systemGames);
       const visible = state.visible[system.id] ?? PAGE_SIZE;
-      body.append(renderTable(system, systemGames.slice(0, visible)));
+      body.append(renderTable(system, ordered.slice(0, visible)));
       if (systemGames.length > visible) {
         const more = document.createElement("button");
         more.type = "button";

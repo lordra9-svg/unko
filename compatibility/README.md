@@ -79,7 +79,8 @@ or edited by hand:
 - The page renders 200 rows per system initially; use **Show next 200** to
   reveal more, or search/status-filter to narrow the set. Click a game title
   or row to open its detail panel: current status, dump identity, smoke
-  evidence, every oracle report and its metrics.
+  evidence, every oracle report and its metrics. The Game, Format, Region,
+  Status and Accuracy headers sort the table; click again to reverse.
 
 ## Accuracy ledger
 
