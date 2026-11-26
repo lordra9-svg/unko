@@ -13,3 +13,6 @@ rom dat/
 build*/
 .deps/
 *.exe
+
+__pycache__/
+*.pyc

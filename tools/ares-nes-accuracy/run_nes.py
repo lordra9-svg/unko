@@ -1,4 +1,4 @@
-import json, os, subprocess, sys, tempfile, zipfile, hashlib, time, re
+import json, os, shutil, subprocess, sys, tempfile, zipfile, hashlib, time, re
 ROOT=os.getcwd()
 UNKO=os.path.join(ROOT,'target/release/unko')
 CAPTURE=os.path.join(ROOT,'tools/snes-oracle/ares-capture.sh')
@@ -6,7 +6,9 @@ MANIFEST=os.environ.get('UNKO_MANIFEST','/tmp/opencode/compat-manifest.jsonl')
 DEFAULT_DIR=os.environ.get('UNKO_NES_DIR','/var/home/Lordra/ai/refs/Minerva_Myrient/No-Intro/Nintendo - Nintendo Entertainment System (Headered)')
 LEDGER=os.path.join(ROOT,'compatibility/accuracy-ares.jsonl')
 FRAMES=int(os.environ.get('UNKO_ACC_FRAMES','120'))
-TMP=tempfile.mkdtemp(prefix='unko-ares-acc-')
+TMP_ROOT=os.environ.get('UNKO_ACC_TMP','/var/home/Lordra/.cache/unko-nes-ares')
+os.makedirs(TMP_ROOT,exist_ok=True)
+TMP=tempfile.mkdtemp(prefix='run-',dir=TMP_ROOT)
 os.makedirs(os.path.dirname(LEDGER), exist_ok=True)
 
 def parse_trace(path):
@@ -59,13 +61,16 @@ def metrics(ours, ref):
         'steady_geometry_pct':round(steady*100,4) if steady is not None else None,
     }
 
-def done_paths():
-    done=set()
+def done_keys():
+    paths=set(); shas=set()
     if os.path.exists(LEDGER):
         for line in open(LEDGER):
-            try: done.add(json.loads(line).get('path'))
+            try:
+                row=json.loads(line)
+                if row.get('path'): paths.add(row.get('path'))
+                if row.get('sha256'): shas.add(row.get('sha256'))
             except Exception: pass
-    return done
+    return paths, shas
 
 def main(limit=None):
     if os.path.exists(MANIFEST):
@@ -77,16 +82,19 @@ def main(limit=None):
             if name.lower().endswith('.zip'):
                 rows.append({'system':'nes','format':'Headered','title':os.path.splitext(name)[0],'path':os.path.join(DEFAULT_DIR,name)})
     rows.sort(key=lambda r:r['title'].casefold())
-    done=done_paths()
+    done, done_shas=done_keys()
     ledger=open(LEDGER,'a')
     started=time.time(); processed=0; ok=0; failed=0
     for r in rows:
         if limit is not None and processed>=limit: break
         if r['path'] in done: continue
         processed+=1
-        rec={'system':'nes','format':'Headered','title':r['title'],'path':r['path'],'oracle':'ares','frames':FRAMES,'tested':'2026-11-25'}
+        rec={'system':'nes','format':'Headered','title':r['title'],'path':r['path'],'oracle':'ares','frames':FRAMES,'tested':'2026-11-26'}
         try:
             rom,sha=extract_nes(r['path'])
+            if sha in done_shas:
+                processed-=1
+                continue
             rec['sha256']=sha
             ours=os.path.join(TMP,'ours.trace'); refdir=os.path.join(TMP,'ares')
             os.makedirs(refdir,exist_ok=True)
@@ -95,6 +103,7 @@ def main(limit=None):
             env=os.environ.copy()
             env['ARES_SYSTEM']='Famicom'
             env['ARES_AUDIO_RATE']='44100'
+            env['TMPDIR']=TMP
             p=subprocess.run([CAPTURE,rom,str(FRAMES),refdir],capture_output=True,text=True,env=env)
             if p.returncode!=0: raise RuntimeError('ares: '+(p.stderr or p.stdout).strip()[:200])
             m=metrics(parse_trace(ours), parse_trace(os.path.join(refdir,'trace.txt')))
@@ -103,6 +112,9 @@ def main(limit=None):
         except Exception as e:
             rec['status']='error'; rec['error']=re.sub(r'/tmp/[^: ]+','<tmp>',str(e))[:300]; failed+=1
         ledger.write(json.dumps(rec)+'\n'); ledger.flush(); os.fsync(ledger.fileno())
+        try: os.remove(os.path.join(TMP,'ours.trace'))
+        except OSError: pass
+        shutil.rmtree(os.path.join(TMP,'ares'), ignore_errors=True)
         if processed%5==0:
             rate=processed/(time.time()-started)
             print(f'{processed} processed, {ok} ok, {failed} failed, {rate:.2f}/s', flush=True)

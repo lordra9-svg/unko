@@ -1,6 +1,8 @@
 # NES games not at 100% accuracy
 
-Generated from `compatibility/accuracy.jsonl` (RustyNES NES oracle, 120 frames).
+Generated from `compatibility/accuracy.jsonl` (the earlier **RustyNES** NES
+pass, 120 frames). The **ares primary NES pass is in progress**; this list will
+be regenerated from ares when it completes.
 
 **Metric note:** full-run frame-0 geometry is never exactly 100% because the oracle and Unko differ during boot. This list therefore uses the **steady-state geometry from frame 30 onward**. If “accuracy” means the displayed full-run R percentage, all measured games are below 100%.
 

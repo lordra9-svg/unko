@@ -104,12 +104,12 @@ Full No-Intro import (2026-11-25, 21,983 archives, 30-frame smoke):
 |---:|---:|---:|---|
 | 14,207 | 329 | 7,447 | [`Compatibility tracker`](https://lordra9-svg.github.io/unko/) |
 
-NES accuracy stage (2026-11-25): **6,726 / 7,101** headered images measured
-against RustyNES; **72.7%** of measured ROMs reach 100% steady-state video
-geometry from frame 30 (68.8% of the full set). 375 oracle/load errors are
-recorded per ROM. A second ares NES oracle is wired and smoke-tested, with its
-full pass deferred until after SNES. Full SNES stage (4,642 ROMs, 120 frames,
-ares): **4,606 measured / 36 errors**, **73.4%** final-frame exact, **93.7%**
+Accuracy uses **ares as the primary oracle**; RustyNES remains a secondary NES
+cross-check. A full ares NES pass over 7,101 headered images is in progress.
+The earlier RustyNES pass measured 6,726 / 7,101 with 72.7% at 100%
+steady-state geometry; Argus exposed a RustyNES mapper-87 rendering defect
+while ares matched Unko. Full SNES stage (4,642 ROMs, 120 frames, ares):
+**4,606 measured / 36 errors**, **73.4%** final-frame exact, **93.7%**
 raw-audio exact, **71.0%** both exact. Details:
 [`docs/accuracy-campaign.md`](docs/accuracy-campaign.md).
 

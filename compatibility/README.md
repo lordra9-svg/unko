@@ -84,10 +84,11 @@ or edited by hand:
 
 ## Accuracy ledger
 
-`accuracy.jsonl` (RustyNES NES), `accuracy-ares.jsonl` (ares NES; currently the
-Argus mapper-87 cross-check, full pass deferred) and `accuracy-snes.jsonl`
+`accuracy-ares.jsonl` (**primary** ares NES, full pass in progress),
+`accuracy.jsonl` (secondary RustyNES NES) and `accuracy-snes.jsonl`
 (ares SNES, full 4,642-ROM/120-frame pass) are append-only, resumable per-ROM
-oracle ledgers. The page
+oracle ledgers. The page shows **A** first and sorts by the ares score when
+available. The page
 loads it over `games.json` by SHA-256 and shows the NES geometry match. The
 current NES stage uses a local RustyNES trace host, 120 frames, and the
 palette-independent geometry hash; the “steady” percentage starts at frame 30.

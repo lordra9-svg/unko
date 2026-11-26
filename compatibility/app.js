@@ -174,7 +174,7 @@ function showGameDetail(system, game) {
   evidence.textContent = game.evidence || "No status evidence recorded.";
   reported.append(evidence);
 
-  const records = game.accuracy ? Object.entries(game.accuracy) : [];
+  const records = accuracyEntries(game);
   if (records.length === 0) {
     const none = document.createElement("p");
     none.className = "muted";
@@ -252,14 +252,20 @@ function showGameDetail(system, game) {
 }
 
 function accuracyScore(game) {
-  const records = game.accuracy ? Object.values(game.accuracy) : [];
-  let best = -1;
-  for (const record of records) {
-    if (record.status !== "ok") continue;
-    const value = record.best_geometry_pct ?? record.geometry_pct ?? record.video_pct;
-    if (typeof value === "number" && value > best) best = value;
-  }
-  return best;
+  if (!game.accuracy) return -1;
+  const record = game.accuracy.ares ?? game.accuracy.rustynes ?? Object.values(game.accuracy)[0];
+  if (!record || record.status !== "ok") return -1;
+  return record.best_geometry_pct ?? record.geometry_pct ?? record.video_pct ?? -1;
+}
+
+function accuracyEntries(game) {
+  if (!game.accuracy) return [];
+  return Object.entries(game.accuracy).sort(([a], [b]) => {
+    if (a === b) return 0;
+    if (a === "ares") return -1;
+    if (b === "ares") return 1;
+    return a.localeCompare(b);
+  });
 }
 
 function compareText(a, b) {
@@ -414,7 +420,7 @@ function renderTable(system, games) {
     row.append(statusCell);
 
     const accuracyCell = document.createElement("td");
-    const records = game.accuracy ? Object.entries(game.accuracy) : [];
+    const records = accuracyEntries(game);
     if (records.length === 0) {
       accuracyCell.className = "muted";
       accuracyCell.textContent = "—";

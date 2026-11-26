@@ -4,7 +4,11 @@ This is the oracle campaign that follows the smoke catalog. It is deliberately
 separate from the compatibility statuses: a game can **run** and still have a
 low oracle match.
 
-## NES stage — complete (2026-11-25)
+## NES stage — RustyNES historical pass (2026-11-25)
+
+**Primary NES oracle is now ares.** A full 7,101-ROM ares pass is running;
+this section records the earlier RustyNES pass and remains as secondary
+evidence.
 
 Oracle: a local RustyNES trace host built against `refs/rustynes` (GPL-3.0,
 kept outside the MIT tree at `~/ai/refs/rustynes-trace-host`). Its
@@ -60,7 +64,7 @@ steady-state geometry** from frame 30. An ares record for Argus is in
 below-100 list as a known oracle disagreement rather than an Unko rendering
 failure.
 
-## Second NES oracle: ares (wired, deferred)
+## Primary NES oracle: ares
 
 The local ares capture build now emits a fourth trace field:
 `frame N <rgba> <audio> <geometry>`. The geometry hash is the same
@@ -75,9 +79,10 @@ python3 tools/ares-nes-accuracy/run_nes.py [limit]
 
 It uses `ARES_SYSTEM=Famicom`, `ARES_AUDIO_RATE=44100`, 120 frames and a
 -3..3 frame alignment search; records append to
-`compatibility/accuracy-ares.jsonl`. It is smoke-tested on three ROMs but the
-full pass is deliberately deferred until after the SNES stage. At ~2.7 s/ROM,
-7,101 headered NES images are roughly six hours.
+`compatibility/accuracy-ares.jsonl`. The full 7,101-ROM ares pass is running
+under systemd after the SNES stage. At roughly 2.5–3 s/ROM it is expected to
+take around six hours. ares is the **primary** NES oracle; RustyNES remains a
+secondary cross-check and its records are still shown as **R**.
 
 ares audio is not scored: its host stream is resampled/filtered differently
 from our f32 output.
