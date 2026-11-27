@@ -120,6 +120,15 @@ def frame_sequence_pct(ours_trace, ref_trace, shift):
     return round(matches / (count - 30) * 100, 4)
 
 
+def mapper_of(data):
+    if len(data) < 16 or data[:4] != b'NES\x1a':
+        return None
+    mapper = (data[6] >> 4) | (data[7] & 0xF0)
+    if data[7] & 0x08:
+        mapper |= (data[8] & 0x0F) << 8
+    return mapper
+
+
 def detect_region(data):
     if len(data) < 16 or data[:4] != b'NES\x1a':
         return 'NTSC'
@@ -172,8 +181,26 @@ def process(title, rom, sha, region, tmp):
     return metrics
 
 
-def target_titles(letter, all_games, explicit):
+def target_titles(letter, all_games, explicit, mappers=None):
     ledger = [json.loads(line) for line in open(LEDGER)]
+    if mappers:
+        wanted = []
+        for entry in ledger:
+            if entry.get('system') != 'nes' or BAD.search(entry['title']):
+                continue
+            path = os.path.join(NES_DIR, entry['title'] + '.zip')
+            if not os.path.exists(path):
+                continue
+            try:
+                with zipfile.ZipFile(path) as archive:
+                    member = [name for name in archive.namelist()
+                              if name.lower().endswith(('.nes', '.unh'))][0]
+                    header = archive.read(member)[:16]
+            except Exception:
+                continue
+            if mapper_of(header) in mappers:
+                wanted.append(entry['title'])
+        return wanted
     if explicit:
         return [entry['title'] for entry in ledger if any(x.lower() in entry['title'].lower() for x in explicit)]
     if all_games:
@@ -191,7 +218,11 @@ def main():
     flags = {arg for arg in sys.argv[1:] if arg.startswith('--')}
     explicit = None if args and len(args[0]) == 1 else args
     letter = args[0] if args and len(args[0]) == 1 else ''
-    titles = target_titles(letter, '--all' in flags, explicit)
+    mapper_flag = next((arg for arg in sys.argv[1:] if arg.startswith('--mappers=')), None)
+    mappers = None
+    if mapper_flag:
+        mappers = {int(value, 0) for value in mapper_flag.split('=', 1)[1].split(',') if value}
+    titles = target_titles(letter, '--all' in flags, explicit, mappers)
 
     rows = [json.loads(line) for line in open(LEDGER)]
     by_sha = {row.get('sha256'): row for row in rows}

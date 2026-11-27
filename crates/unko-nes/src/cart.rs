@@ -21471,12 +21471,14 @@ pub struct AxRom {
 
 impl AxRom {
     fn new(prg: Vec<u8>, chr: Vec<u8>, header: Header) -> Self {
+        // HVC-ANROM powers on with the last 32 KiB bank selected.
+        let last = (prg.len() / 0x8000).max(1) - 1;
         Self {
             prg,
             chr,
             prg_outer: 0,
             prg_mask: usize::MAX,
-            bank: 0,
+            bank: last,
             mirroring: if header.four_screen {
                 Mirroring::FourScreen
             } else {
@@ -21509,12 +21511,9 @@ impl Mapper for AxRom {
 
     fn prg_write(&mut self, address: u16, value: u8) {
         if address >= 0x8000 {
-            // AxROM boards have bus conflicts: the value is ANDed with the ROM
-            // byte currently visible at the write address.
-            let offset = self.bank * 0x8000 + usize::from(address - 0x8000);
-            let visible = self.prg.get(offset).copied().unwrap_or(0xFF);
-            let value = value & visible;
-            self.bank = usize::from(value & 0x07) % self.banks();
+            // HVC-AxROM has no bus conflict; the low nibble selects the
+            // 32 KiB bank and bit 4 the one-screen nametable.
+            self.bank = usize::from(value & 0x0F) % self.banks();
             self.mirroring = if value & 0x10 != 0 {
                 Mirroring::SingleUpper
             } else {
@@ -23784,6 +23783,12 @@ pub struct Vrc {
     irq_counter: u8,
     irq_enabled: bool,
     irq_pending: bool,
+    /// VRC4 IRQ mode: false = scanline prescaler (341/3), true = CPU cycles.
+    irq_mode: bool,
+    /// Prescaler counter for the scanline mode.
+    irq_scalar: i16,
+    /// Value latched from `$F002` bit 0 and applied by `$F003`.
+    irq_ack: bool,
     number: u16,
 }
 
@@ -23831,6 +23836,9 @@ impl Vrc {
             irq_counter: 0,
             irq_enabled: false,
             irq_pending: false,
+            irq_mode: false,
+            irq_scalar: 0,
+            irq_ack: false,
             number: header.mapper,
         }
     }
@@ -23974,10 +23982,21 @@ impl Mapper for Vrc {
             0xF => match reg {
                 0 => self.irq_latch = (self.irq_latch & 0xF0) | (value & 0x0F),
                 1 => self.irq_latch = (self.irq_latch & 0x0F) | ((value & 0x0F) << 4),
-                2 => self.irq_enabled = value & 0x02 != 0,
-                3 => {
+                2 => {
+                    // bit 0 is stored for $F003, bit 1 enables, bit 2 selects
+                    // CPU-cycle mode instead of the 341/3 scanline prescaler.
+                    self.irq_ack = value & 0x01 != 0;
+                    self.irq_enabled = value & 0x02 != 0;
+                    self.irq_mode = value & 0x04 != 0;
+                    if self.irq_enabled {
+                        self.irq_counter = self.irq_latch;
+                        self.irq_scalar = 341;
+                    }
                     self.irq_pending = false;
-                    self.irq_enabled = value & 0x01 != 0;
+                }
+                3 => {
+                    self.irq_enabled = self.irq_ack;
+                    self.irq_pending = false;
                 }
                 _ => {}
             },
@@ -24022,16 +24041,21 @@ impl Mapper for Vrc {
     }
 
     fn clock_cpu(&mut self) {
-        if self.irq_pending {
+        if !self.irq_enabled {
             return;
         }
-        if self.irq_counter == 0 {
-            self.irq_counter = self.irq_latch;
-            if self.irq_enabled {
-                self.irq_pending = true;
+        if !self.irq_mode {
+            self.irq_scalar -= 3;
+            if self.irq_scalar > 0 {
+                return;
             }
+            self.irq_scalar += 341;
+        }
+        if self.irq_counter == 0xFF {
+            self.irq_counter = self.irq_latch;
+            self.irq_pending = true;
         } else {
-            self.irq_counter -= 1;
+            self.irq_counter = self.irq_counter.wrapping_add(1);
         }
     }
 
@@ -28436,6 +28460,9 @@ pub struct BandaiFcg {
     wram_enabled: bool,
     /// Datach barcode scanner state (mapper 157).
     datach: Option<Datach>,
+    /// Mapper 16 submapper 5 uses the LZ93D50 register window at `$8000`,
+    /// while submapper 4 (FCG) puts the same registers at `$6000`.
+    lz93d50: bool,
 }
 
 impl BandaiFcg {
@@ -28468,6 +28495,7 @@ impl BandaiFcg {
             } else {
                 None
             },
+            lz93d50: number == 16 && header.submapper == 5,
         }
     }
 
@@ -28491,6 +28519,29 @@ impl Mapper for BandaiFcg {
 
     fn prg_read(&self, address: u16) -> u8 {
         if self.number == 16 {
+            if self.lz93d50 {
+                // LZ93D50: registers live at $8000-$800F and $6000-$7FFF is
+                // ordinary save RAM.
+                return match address {
+                    0x6000..=0x7FFF => {
+                        if self.wram_enabled && !self.prg_ram.is_empty() {
+                            self.prg_ram[usize::from(address - 0x6000) % self.prg_ram.len()]
+                        } else {
+                            0
+                        }
+                    }
+                    0x8000..=0xBFFF => {
+                        let banks = self.prg_bank_count();
+                        let bank = usize::from(self.prg_bank) % banks;
+                        self.prg[bank * 0x4000 + usize::from(address & 0x3FFF)]
+                    }
+                    0xC000..=0xFFFF => {
+                        let bank = self.prg_bank_count() - 1;
+                        self.prg[bank * 0x4000 + usize::from(address & 0x3FFF)]
+                    }
+                    _ => 0,
+                };
+            }
             // Bandai FCG: $6000-$7FFF is the register window, not PRG RAM;
             // $8000-$BFFF uses the selected 16 KiB bank and $C000-$FFFF is
             // fixed to the last bank.
@@ -28563,6 +28614,46 @@ impl Mapper for BandaiFcg {
     }
 
     fn prg_write(&mut self, address: u16, value: u8) {
+        if self.number == 16 && self.lz93d50 {
+            if (0x6000..=0x7FFF).contains(&address) {
+                if self.wram_enabled && !self.prg_ram.is_empty() {
+                    let index = usize::from(address - 0x6000) % self.prg_ram.len();
+                    self.prg_ram[index] = value;
+                }
+                return;
+            }
+            if address < 0x8000 {
+                return;
+            }
+            match address & 0x0F {
+                0x00..=0x07 => self.chr_banks[usize::from(address & 0x07)] = value,
+                0x08 => self.prg_bank = value & 0x0F,
+                0x09 => {
+                    self.mirroring = match value & 0x03 {
+                        0 => Mirroring::Vertical,
+                        1 => Mirroring::Horizontal,
+                        2 => Mirroring::SingleLower,
+                        _ => Mirroring::SingleUpper,
+                    };
+                }
+                0x0A => {
+                    self.irq_enabled = value & 0x01 != 0;
+                    self.irq_pending = false;
+                    self.irq_counter = self.irq_latch;
+                }
+                0x0B => {
+                    self.irq_latch = (self.irq_latch & 0xFF00) | u16::from(value);
+                    self.irq_counter = self.irq_latch;
+                }
+                0x0C => {
+                    self.irq_latch = (self.irq_latch & 0x00FF) | (u16::from(value) << 8);
+                    self.irq_counter = self.irq_latch;
+                }
+                0x0D => self.wram_enabled = value & 0x20 != 0,
+                _ => {}
+            }
+            return;
+        }
         if self.number == 16 {
             if !(0x6000..=0x7FFF).contains(&address) {
                 return;
@@ -28763,6 +28854,7 @@ impl Mapper for BandaiFcg {
 
     fn chr_mapping_write(&self, address: u16) -> bool {
         match self.number {
+            16 if self.lz93d50 => address >= 0x8000 && (address & 0x0F) <= 7,
             16 => (0x6000..=0x7FFF).contains(&address) && (address & 0x0F) <= 7,
             153 | 157 => address >= 0x8000,
             _ => false,
@@ -28801,7 +28893,9 @@ impl Mapper for BandaiFcg {
             return;
         }
         if self.irq_counter == 0 {
+            // The Bandai counter wraps to $FFFF and disables itself.
             self.irq_pending = true;
+            self.irq_enabled = false;
         } else {
             self.irq_counter -= 1;
             if self.irq_counter == 0 {
@@ -44750,14 +44844,13 @@ pub(crate) mod tests {
 
     #[test]
     fn axrom_switches_32k_bank_and_mirroring() {
-        let mut rom = synth_banked(7, 64, 8);
-        // AxROM has bus conflicts; make one write address readable as $FF so the
-        // value passes through.
-        rom[16 + 0x100] = 0xFF;
+        let rom = synth_banked(7, 64, 8);
         let mut cart = Cartridge::from_ines(&rom).expect("cart");
-        assert_eq!(cart.cpu_read(0x8000), 0);
-        cart.cpu_write(0x8100, 0x11);
+        // 64 KiB PRG = two 32 KiB banks; HVC-ANROM powers on the last one
+        // (8 KiB bank 4), and has no bus conflict on the latch write.
         assert_eq!(cart.cpu_read(0x8000), 4);
+        cart.cpu_write(0x8100, 0x10);
+        assert_eq!(cart.cpu_read(0x8000), 0);
         assert_eq!(cart.mirroring(), Mirroring::SingleUpper);
     }
 
@@ -45024,11 +45117,59 @@ pub(crate) mod tests {
         let mut cart = Cartridge::from_ines(&rom).expect("cart");
         cart.cpu_write(0xF000, 2); // latch low nibble.
         cart.cpu_write(0xF004, 0); // latch high nibble.
-        cart.cpu_write(0xF008, 2); // enable.
-        cart.clock_cpu();
-        assert!(cart.irq_line());
+        cart.cpu_write(0xF008, 2); // enable, scanline mode.
+                                   // The counter starts at the latch (2) and fires when it wraps past
+                                   // $FF; the 341-dot prescaler steps once per ~114 CPU cycles.
+        let mut cycles = 0;
+        while !cart.irq_line() {
+            cart.clock_cpu();
+            cycles += 1;
+            assert!(cycles < 60_000, "VRC4 IRQ did not fire");
+        }
+        assert!((28_000..=30_000).contains(&cycles), "fired after {cycles}");
         cart.acknowledge_irq();
         assert!(!cart.irq_line());
+    }
+
+    #[test]
+    fn axrom_powers_on_in_last_bank_and_ignores_bus_conflicts() {
+        // 128 KiB PRG = four 32 KiB banks; synth_banked fills each 8 KiB
+        // bank with its index, so the last 32 KiB bank starts at 12.
+        let rom = synth_banked(7, 128, 0);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        assert_eq!(cart.mapper(), 7);
+        assert_eq!(
+            cart.cpu_read(0x8000),
+            12,
+            "HVC-ANROM powers on in the last bank"
+        );
+
+        // The ROM byte at $8000 is 12; a bus conflict would turn 1 & 12 into
+        // bank 0. HVC-AxROM has no conflict, so bank 1 (byte 4) is selected.
+        cart.cpu_write(0x8000, 1);
+        assert_eq!(cart.cpu_read(0x8000), 4);
+
+        cart.cpu_write(0x8000, 0x10 | 2);
+        assert_eq!(cart.cpu_read(0x8000), 8);
+        assert_eq!(cart.mirroring(), Mirroring::SingleUpper);
+    }
+
+    #[test]
+    fn mapper16_submapper5_uses_the_lz93d50_register_window() {
+        let mut rom = synth_banked(16, 128, 128);
+        // NES 2.0, mapper 16 (bits 8-11 zero), submapper 5.
+        rom[7] |= 0x08;
+        rom[8] = 0x50;
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        assert_eq!(cart.mapper(), 16);
+        assert_eq!(cart.ppu_read(0), 0x80);
+        // LZ93D50 registers live at $8000, not the FCG's $6000 window.
+        cart.cpu_write(0x8000, 2);
+        assert_eq!(cart.ppu_read(0), 0x82);
+        cart.cpu_write(0x8000, 3);
+        assert_eq!(cart.ppu_read(0), 0x83);
+        assert!(cart.chr_mapping_write(0x8000));
+        assert!(!cart.chr_mapping_write(0x6000));
     }
 
     #[test]

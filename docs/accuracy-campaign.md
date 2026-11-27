@@ -94,6 +94,22 @@ frame` covers the 8 KiB and 4 KiB modes. The corrected screen matches RustyNES
 Bayou records now carry calibrated pixel values (79.6-79.8% exact, 83.7%
 palette-normalized).
 
+### Crisis Force / Cobra Triangle / Crayon Shin-chan — mapper fixes
+
+Three mapper defects surfaced while re-measuring the C list:
+
+- **VRC4 IRQ (mappers 21/23/25/27/183/308).** The counter was decremented every
+  CPU cycle. VRC4 has a scanline mode (341/3 prescaler) and a CPU-cycle mode;
+  `$F002` bit 2 selects one and `$F003` re-applies the stored acknowledge bit.
+  Crisis Force hung before palette initialisation and now boots.
+- **HVC-AxROM (mapper 7).** The board powers on with the last 32 KiB bank and
+  has no bus conflict. Starting in bank 0 (and ANDing writes with the ROM)
+  left Cobra Triangle in a reset loop. Both are fixed and covered by
+  `axrom_powers_on_in_last_bank_and_ignores_bus_conflicts`.
+- **Mapper 16 submapper 5.** LZ93D50 boards keep their CHR/PRG/mirroring
+  registers at `$8000-$800F`; submapper 4 (FCG) uses `$6000-$7FFF`. Crayon
+  Shin-chan now matches ares; the FCG path (Akuma-kun) is unchanged.
+
 ### Air Fortress (Japan) — PPU register writes during warm-up
 
 The core used to drop `$2000`/`$2001`/`$2005` writes during the ~29,658-cycle
