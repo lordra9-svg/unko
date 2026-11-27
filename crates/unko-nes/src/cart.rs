@@ -29214,22 +29214,61 @@ impl Mapper for Multicart58 {
     }
 }
 
-/// CNROM with the 8 KiB CHR configuration (mapper 185). Bus conflicts apply
-/// because the latch is written through the PRG window.
+/// CNROM with the security chip (mapper 185, HVC-CNROM-SEC). CHR is fixed
+/// 8 KiB and reads as `$FF` until the protection key is written; the latch
+/// is written through the PRG window with a bus conflict.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct CnRom185 {
     prg: Vec<u8>,
     chr: Vec<u8>,
     chr_bank: u8,
+    /// CHR reads return `$FF` until the key byte has been written.
+    unlocked: bool,
+    /// Per-board security key. The iNES header does not carry it, so the
+    /// shipping HVC-CNROM-SEC images are identified by a hash of their
+    /// PRG+CHR data.
+    key: u8,
     mirroring: Mirroring,
+}
+
+/// Security keys for the HVC-CNROM-SEC (mapper 185) images.
+const CNROM_SEC_KEYS: &[(u64, u8)] = &[
+    (0x1566_87cd_2897_30dd, 0x22), // Othello (Rev 1 / Possible Proto)
+    (0x3520_d185_0fe0_e4f0, 0x21), // Spy vs Spy (Japan)
+    (0x4a74_cade_8fc6_13a9, 0x33), // B-Wings (Japan)
+    (0x6459_9906_9173_e47a, 0x0F), // Bird Week (Japan)
+    (0x9ffe_4646_4385_e8fa, 0x2A), // Sansuu 3 Nen
+    (0xadce_2e65_2e78_db26, 0x11), // Mighty Bomb Jack (Japan)
+    (0xc83e_76fe_fb82_fe8b, 0x20), // Seicross (Japan) (En/Rev 1)
+    (0xde98_d75c_1432_e337, 0x11), // Mighty Bomb Jack (En) (Rev 1)
+    (0xed06_054f_db58_8419, 0x22), // Sansuu 1 Nen
+    (0xeeae_1dae_a572_b7c5, 0x22), // Sansuu 2 Nen
+    (0xfba0_4ae5_e4dd_bca4, 0x22), // Othello (Japan)
+];
+
+/// FNV-1a over the cartridge data (header excluded).
+fn cart_hash(prg: &[u8], chr: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in prg.iter().chain(chr) {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 impl CnRom185 {
     fn new(prg: Vec<u8>, chr: Vec<u8>, header: Header) -> Self {
+        let hash = cart_hash(&prg, &chr);
+        let key = CNROM_SEC_KEYS
+            .iter()
+            .find_map(|(known, key)| (*known == hash).then_some(*key))
+            .unwrap_or(0x20);
         Self {
             prg,
             chr,
             chr_bank: 0,
+            unlocked: false,
+            key,
             mirroring: header.mirroring,
         }
     }
@@ -29254,12 +29293,20 @@ impl Mapper for CnRom185 {
             .copied()
             .unwrap_or(0xFF);
         self.chr_bank = value & visible & 0x03;
+        // The security compare uses the raw bus value, not the ANDed one.
+        self.unlocked = value == self.key;
     }
 
     fn chr_read(&self, address: u16) -> u8 {
-        let banks = (self.chr.len() / 0x2000).max(1);
-        let offset = (usize::from(self.chr_bank) % banks) * 0x2000 + usize::from(address & 0x1FFF);
-        self.chr.get(offset).copied().unwrap_or(0)
+        if !self.unlocked {
+            return 0xFF;
+        }
+        // CNROM-SEC boards mount a single fixed 8 KiB CHR ROM; the latch is a
+        // security register, not a CHR bank.
+        self.chr
+            .get(usize::from(address & 0x1FFF))
+            .copied()
+            .unwrap_or(0)
     }
 
     fn chr_write(&mut self, _address: u16, _value: u8) {}
@@ -38094,12 +38141,18 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn cnrom185_has_bus_conflicts() {
-        let mut rom = synth_banked(185, 128, 32);
-        rom[16] = 0xFF;
+    fn cnrom185_security_unlocks_chr_only_with_the_key() {
+        let rom = synth_banked(185, 128, 8);
         let mut cart = Cartridge::from_ines(&rom).expect("cart");
-        cart.cpu_write(0x8000, 2);
-        assert_eq!(cart.ppu_read(0x0000), 0x90);
+        // Locked: CHR reads float high so the protection check sees $FF.
+        assert_eq!(cart.ppu_read(0x0000), 0xFF);
+        cart.cpu_write(0x8000, 0x20);
+        assert_eq!(cart.ppu_read(0x0000), 0x80);
+        // Any other write re-locks the chip.
+        cart.cpu_write(0x8000, 0x00);
+        assert_eq!(cart.ppu_read(0x0000), 0xFF);
+        cart.cpu_write(0x8000, 0x20);
+        assert_eq!(cart.ppu_read(0x1FFF), 0x87);
     }
 
     #[test]

@@ -109,6 +109,11 @@ Three mapper defects surfaced while re-measuring the C list:
 - **Mapper 16 submapper 5.** LZ93D50 boards keep their CHR/PRG/mirroring
   registers at `$8000-$800F`; submapper 4 (FCG) uses `$6000-$7FFF`. Crayon
   Shin-chan now matches ares; the FCG path (Akuma-kun) is unchanged.
+- **Mapper 185 (HVC-CNROM-SEC).** Seicross, Mighty Bomb Jack, Spy vs Spy,
+  B-Wings, Bird Week, Othello and the Sansuu games gate CHR behind a security
+  key and read `$FF` until it is written. The key is not in the iNES header,
+  so the core identifies the 16 known images by an FNV hash of PRG+CHR and
+  unlocks on the matching write. All 16 now measure 100%.
 
 ### Air Fortress (Japan) — PPU register writes during warm-up
 

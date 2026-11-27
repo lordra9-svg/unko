@@ -5,20 +5,20 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 **Metric:** newly re-run letters use the NES palette-index agreement over frames 30+ (`video_pct`); records not yet revisited keep their historical steady-geometry or final-frame value.
 
 - NES archives: **7101**
-- Measured: **7031**
-- Measured with the palette-index metric: **893**
-- Below 100% by the relevant ares metric: **537**
-- Ignored tagged dumps below 100%: **1853**
-- No measurement / oracle error: **47**
+- Measured: **7037**
+- Measured with the palette-index metric: **905**
+- Below 100% by the relevant ares metric: **531**
+- Ignored tagged dumps below 100%: **1852**
+- No measurement / oracle error: **41**
 - Ignored tagged dumps with errors: **23**
-- Total needing attention: **584**
+- Total needing attention: **572**
 
 | Band | Games |
 |---|---:|
-| 0-50% | 19 |
-| 50-90% | 63 |
+| 0-50% | 17 |
+| 50-90% | 58 |
 | 90-99% | 110 |
-| 99-100% | 345 |
+| 99-100% | 346 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
@@ -31,8 +31,6 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 0.00% | index | Mighty Final Fight (USA) (Capcom Classics Mini Mix) |
 | 0.00% | index | Star Wars (USA) (Limited Run Games) |
 | 0.00% | index | Strider (USA) (Capcom Classics Mini Mix) |
-| 1.52% | index | Seicross (Japan) (En) |
-| 1.52% | index | Seicross (Japan) (Rev 1) |
 | 10.00% | index | Kaguya Hime Densetsu (Japan) |
 | 26.63% | index | Racer Mini Yonku - Japan Cup (Japan) |
 | 27.69% | index | Devil Man (Japan) |
@@ -59,9 +57,6 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 61.11% | index | Swords and Serpents (USA) |
 | 62.34% | index | Oeka Kids - Anpanman no Hiragana Daisuki (Japan) |
 | 62.92% | index | Swords and Serpents (France) |
-| 64.84% | index | Othello (Japan) |
-| 64.84% | index | Othello (Japan) (En) (HAL Laboratory) |
-| 64.84% | index | Othello (Japan) (Rev 1) (Possible Proto) |
 | 64.88% | index | Ganbare Goemon Gaiden - Kieta Ougon Kiseru (Japan) |
 | 65.22% | index | Jajamaru Gekimaden - Maboroshi no Kinmajou (Japan) |
 | 65.56% | index | Major League Baseball (USA) |
@@ -76,6 +71,11 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 75.88% | index | Terminator 2 (Japan) |
 | 75.91% | index | Terminator 2 - Judgment Day (USA) |
 | 76.64% | index | Dai-2-ji Super Robot Taisen (Japan) |
+| 76.67% | index | Zelda no Densetsu 1 - The Hyrule Fantasy (Japan) |
+| 76.71% | index | Oeka Kids - Anpanman to Oekaki Shiyou!! (Japan) |
+| 77.45% | index | Nintendo NTF2 System Cartridge (USA) (v1.1) (Test Program) |
+| 77.48% | index | Moero!! Pro Yakyuu (Japan) |
+| 77.48% | index | Moero!! Pro Yakyuu (Japan) (Rev 1) |
 
 ## No measurement / oracle errors
 
@@ -101,8 +101,6 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | Kyuukyoku Harikiri Stadium - Heisei Gannen Ban (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Kyuukyoku Harikiri Stadium III (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Maniac Mansion (USA) (Limited Run Games) | ares capture is a uniform blank frame (board unsupported by the oracle) |
-| Mighty Bomb Jack (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
-| Mighty Bomb Jack (Japan) (En) (Rev 1) | core renders a blank frame (mapper not implemented or boot failure) |
 | Mouryou Senki Madara (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
 | NHK Gakuen - Space School - Sansu 5 Nen (Jou) (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | NHK Gakuen - Space School - Sansu 6 Nen (Ge) (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
@@ -118,11 +116,7 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | Rod Land (World) (Retro-Bit) (512KiB) | core renders a blank frame (mapper not implemented or boot failure) |
 | S.C.A.T. - Special Cybernetic Attack Team (USA) (Limited Run Games) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | SD Keiji - Blader (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
-| Sansuu 1 Nen - Keisan Game (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
-| Sansuu 2 Nen - Keisan Game (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
-| Sansuu 3 Nen - Keisan Game (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
 | Shadow of the Ninja (USA) (Limited Run Games) | ares capture is a uniform blank frame (board unsupported by the oracle) |
-| Spy vs Spy (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
 | Target - Renegade (USA) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Target - Renegade (World) (Evercade) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Thunderbolt Fighting Plane (World) (QUByte Classics) | ares capture is a uniform blank frame (board unsupported by the oracle) |
