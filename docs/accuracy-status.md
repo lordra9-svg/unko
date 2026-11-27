@@ -20,7 +20,7 @@ against public test ROMs placed in `test-roms/` (gitignored).
 | `ppu_vbl_nmi` | **12 / 12** |
 | `ppu_sprites` | **19 / 19** |
 | AccuracyCoin v3.1.0 isolated | **146 / 146 non-DRAW** (146/151 total, 0 failed, 5 DRAW skips, 0 unrun, 199,320 frames) |
-| Test suite | **1,169 workspace tests**, 0 failed (6 ignored), plus the ROM-backed suites |
+| Test suite | **1,175 workspace tests**, 0 failed (6 ignored), plus the ROM-backed suites |
 
 Compatibility, local licensed 7,101-image NES library:
 
@@ -33,6 +33,34 @@ Compatibility, local licensed 7,101-image NES library:
 | Rendering at 20 frames | 3,897 | 54.9% of scanned |
 | Rendering at 120 frames | 6,503 | 91.6% of scanned |
 | Rendering at 240 frames | 6,427 | 90.5% of scanned |
+
+Only mapper 308 (NTDEC Batman) does not draw headless at 120 or 240 frames
+without Start input.
+
+## Compatibility accuracy campaign (2026-11-27)
+
+The NES accuracy walk-through now compares the PPU's native 9-bit colour
+indices (emphasis and greyscale included) over frames 30-119, instead of
+sorted-RGB geometry. Evidence and per-title records are in
+`compatibility/accuracy-ares.jsonl`; the actionable list is 527 below 100%
+plus 27 oracle/load errors.
+
+Core fixes landed during the A-Z pass, each with a regression test:
+
+- MMC1 mid-frame CHR refresh (Bayou Billy) and Bandai FCG mapper-16 banking
+  (Akuma-kun).
+- PPU warm-up no longer swallows `$2000`/`$2001`/`$2005` (Air Fortress).
+- VRC4 IRQ modes (Crisis Force); HVC-AxROM power-on/bus conflicts (Cobra
+  Triangle); mapper 16 submapper 5 LZ93D50 window (Crayon Shin-chan).
+- CNROM-SEC mapper 185 keys (Seicross and friends).
+- VRC2 save RAM and raster CHR refresh (Ganbare Goemon Gaiden).
+- Jaleco SS88006 (mapper 18) and JF-13 (mapper 86) banking/IRQ.
+- VRC2A CHR resolution (TwinBee 3); CNROM bus conflicts (mapper 3).
+- NMI asserted two dots after the `$2002` vblank flag, fixing tight polling
+  races (Tokoro-san and others).
+
+The headless performance benchmark now enables rendering after vblank, so it
+measures the real renderer (CI budget 200 fps).
 
 Only mapper 308 (NTDEC Batman) does not draw headless at 120 or 240 frames
 without Start input. The 240-frame count is lower than 120 because the exact
@@ -186,7 +214,7 @@ Implemented so far:
 
 Validation so far:
 
-- **1,169 workspace tests**, 0 failed (6 ignored)
+- **1,175 workspace tests**, 0 failed (6 ignored)
 - **18 65C816 differential tests** against the MIT `w65c816` crate, including
   all 15 read addressing modes across 7 ALU operations (105 opcode cases), all
   24 write modes, all 35 modify modes, branches, jumps, calls, BRK/COP/RTI,

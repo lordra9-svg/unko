@@ -43324,6 +43324,24 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn vrc2a_chr_banks_resolve_at_half_the_written_value() {
+        let rom = synth_banked(22, 128, 32);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        assert_eq!(cart.mapper(), 22);
+        // VRC2A register 0 low nibble: value 4 selects CHR bank 2.
+        cart.cpu_write(0xB000, 4);
+        assert_eq!(cart.ppu_read(0x0000), 0x82);
+    }
+
+    #[test]
+    fn vrc2_maps_save_ram_at_6000() {
+        let rom = synth_banked(22, 128, 32);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        cart.cpu_write(0x6000, 0x5A);
+        assert_eq!(cart.cpu_read(0x6000), 0x5A);
+    }
+
+    #[test]
     fn vrc4_mapper_27_decodes_registers() {
         // 128 KiB PRG (16 x 8 KiB), 128 KiB CHR (128 x 1 KiB).
         let rom = synth_banked(27, 128, 128);
