@@ -55,7 +55,10 @@ stalled=0
 while :; do
   if grep -q "^frame $last " "$trace" 2>/dev/null; then
     cur=$(stat -c %s "$frame" 2>/dev/null || echo 0)
-    if [ "$cur" -gt 0 ] && [ "$cur" -eq "$prev" ]; then break; fi
+    # captureFinish writes the RGBA frame first and the index dumps after it;
+    # wait for both so a stop between the writes cannot leave an empty sequence.
+    curidx=$(stat -c %s "$frame.idxseq" 2>/dev/null || echo 0)
+    if [ "$cur" -gt 0 ] && [ "$cur" -eq "$prev" ] && [ "$curidx" -gt 0 ]; then break; fi
     prev=$cur
   fi
   if ! kill -0 "$pid" 2>/dev/null; then break; fi

@@ -46,7 +46,7 @@ PIXELS = WIDTH * HEIGHT
 # its canvas is the fixed black backdrop. Mask those columns/rows so the
 # comparison covers the area both cores actually render.
 PAL_MASK = [y * WIDTH + x for y in range(1, HEIGHT) for x in range(2, 254)]
-BAD = re.compile(r'\((?:Unl|Pirate|Beta|Bios|Aftermarket|Proto)[^)]*\)', re.I)
+BAD = re.compile(r'(\((?:Unl|Pirate|Beta|Bios|Aftermarket|Proto)[^)]*\)|\[(?:BIOS|Bios)\])', re.I)
 
 
 def strip_article(title):
@@ -160,6 +160,11 @@ def process(title, rom, sha, region, tmp):
                    capture_output=True, env=env)
     ours = load_seq(ours_seq)
     ref = load_seq(os.path.join(ref_dir, 'frame.raw.idxseq'))
+    expected = FRAMES * PIXELS
+    if len(ours) != expected or len(ref) != expected:
+        raise RuntimeError(
+            f'index sequences are incomplete ({len(ours)} / {len(ref)} of {expected})'
+        )
     metrics = index_metrics(ours, ref, PAL_MASK if region == 'PAL' else None)
     last = ref[(FRAMES - 1) * PIXELS:FRAMES * PIXELS]
     ours_last = ours[(FRAMES - 1) * PIXELS:FRAMES * PIXELS]
@@ -167,6 +172,11 @@ def process(title, rom, sha, region, tmp):
         metrics.update({
             'status': 'error',
             'error': 'ares capture is a uniform blank frame (board unsupported by the oracle)',
+        })
+    elif len(set(ours_last)) == 1 and len(set(last)) > 1:
+        metrics.update({
+            'status': 'error',
+            'error': 'core renders a blank frame (mapper not implemented or boot failure)',
         })
     if region != 'PAL':
         # PAL hashes still contain ares' clipped border pixels, so the strict
@@ -181,8 +191,18 @@ def process(title, rom, sha, region, tmp):
     return metrics
 
 
-def target_titles(letter, all_games, explicit, mappers=None):
+def target_titles(letter, all_games, explicit, mappers=None, zero=False):
     ledger = [json.loads(line) for line in open(LEDGER)]
+    if '--errors' in sys.argv[1:]:
+        return [entry['title'] for entry in ledger
+                if entry.get('metric') == 'nes-index'
+                and entry.get('status') == 'error'
+                and not BAD.search(entry['title'])]
+    if zero:
+        return [entry['title'] for entry in ledger
+                if entry.get('metric') == 'nes-index'
+                and entry.get('status') == 'ok'
+                and entry.get('video_pct') == 0.0]
     if mappers:
         wanted = []
         for entry in ledger:
@@ -222,7 +242,7 @@ def main():
     mappers = None
     if mapper_flag:
         mappers = {int(value, 0) for value in mapper_flag.split('=', 1)[1].split(',') if value}
-    titles = target_titles(letter, '--all' in flags, explicit, mappers)
+    titles = target_titles(letter, '--all' in flags, explicit, mappers, '--zero' in flags)
 
     rows = [json.loads(line) for line in open(LEDGER)]
     by_sha = {row.get('sha256'): row for row in rows}

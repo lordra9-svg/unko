@@ -77,7 +77,7 @@ Reference gates:
 - mapper matrix (Holy Mapperel, blargg MMC3, MMC5, VRC2a, MMC1-A12):
   **65/65**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW**, 0 failed, 5 DRAW skips
-- `cargo test --workspace`: **1,167 passed, 0 failed** (6 ignored); clippy/fmt clean
+- `cargo test --workspace`: **1,169 passed, 0 failed** (6 ignored); clippy/fmt clean
 - VS. System: mapper 99, cabinet input, UniSystem/DualSystem parsing,
   2C03/2C04/2C05 palettes and 2C05 security; 13 repaired local images boot
   (including Gumshoe's outer bank)
@@ -108,6 +108,8 @@ Accuracy uses **ares as the primary oracle**; RustyNES remains a secondary NES
 cross-check. Re-runs now compare the PPU's native **NES palette indices** over
 frames 30+ (`video_pct`), which removes per-emulator RGB palette differences;
 records not yet revisited keep their historical steady-geometry values. The
+A-Z walk-through re-measured 893 games: 669 are at >=99% index agreement (324
+exactly 100%), and the actionable below-100 list fell from 2,699 to 537. The
 first full ares NES pass (7,101 headered images) measured 7,069 with 32 errors
 and 61.8% at 100% on the older metric. The RustyNES pass measured 6,726 / 7,101
 with 72.7% steady-state; Argus exposed a RustyNES mapper-87 rendering defect
@@ -151,7 +153,7 @@ and run-ahead. The legacy input-framing session remains for tests and
 |---|---:|
 | Workspace crates | 11 |
 | First-party Rust lines | ~129,200 |
-| Workspace tests | 1,167 pass, 0 failed |
+| Workspace tests | 1,169 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images | 7,101 |
 

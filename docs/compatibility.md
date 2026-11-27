@@ -130,7 +130,7 @@ Public mapper-specific status:
 | RustyNES test tree | 159 pass / 11 fail / 171 visual/audio/input-only; 166 / 4 with PAL APU in PAL mode, 1 with the alternate MMC3 selector too |
 | SNES audio (600 frames) | seven reference titles bit-exact, 0 differing samples over 639,656 interleaved i16 |
 | SNES library sweep | 500/500 No-Intro images completed 300 frames, 0 failures (370 LoROM, 125 HiROM, 5 ExHiROM; 381 NTSC / 119 PAL) |
-| Workspace tests | 1,167 pass, 0 failed |
+| Workspace tests | 1,169 pass, 0 failed |
 
 The actionable accuracy failures are tracked in
 [`accuracy-divergences.md`](accuracy-divergences.md); the ROM/BIOS inventory is
