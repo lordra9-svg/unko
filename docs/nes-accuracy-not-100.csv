@@ -1,4 +1,7 @@
 title,status,accuracy_pct,metric,steady_geometry_pct,video_pct,final_video_pct,frame_seq_pct,palette_pct,best_geometry_pct,same_index_geometry_pct,frames,error,sha256
+Athena (Japan),ok,0.0,index,,0.0,0.0,0.0,,,,120,,3b2d17ae03bd4d45f22511eb3ce3a7d89ea5436a7975a77baaf3453fce8f1dac
+Athena (Japan) (En),ok,0.0,index,,0.0,0.0,0.0,,,,120,,3b2d17ae03bd4d45f22511eb3ce3a7d89ea5436a7975a77baaf3453fce8f1dac
+Athena (USA),ok,0.0,index,,0.0,0.0,0.0,,,,120,,89403bdb6a6adca1d6335f946f486a03f3bb41f9550be196de51c7da344b0911
 Ganbare Goemon Gaiden - Kieta Ougon Kiseru (Japan) (Rev 1) (Virtual Console) [b],ok,0.0,index,,0.0,0.0,0.0,,,,120,,0f40e32f44976a6075b6e18859ed250f100df09ee2edb5801fe7d1d3d10180bd
 Mighty Final Fight (USA) (Capcom Classics Mini Mix),ok,0.0,index,,0.0,0.0,0.0,,,,120,,9434bc1353a42e34582af71987e07d0b497e5b7ef68bfa97f1b24ae76726df7a
 Star Wars (USA) (Limited Run Games),ok,0.0,index,,0.0,0.0,0.0,,,,120,,7dcf778d2efd8ac9ecb4995d865d39051ed0091257b902a2120d73aedf89ddef
@@ -28,6 +31,7 @@ Swords and Serpents (France),ok,62.9213,index,,62.9213,0.0,,,,,120,,3edf7ea2f37d
 Major League Baseball (USA),ok,65.5556,index,,65.5556,100.0,65.5556,,,,120,,e2430911b3a18a4b0a4cc846709b90f8213e5689e7c66e02c970368deda5d9d2
 Major League Baseball (USA) (Rev 1),ok,65.5556,index,,65.5556,100.0,65.5556,,,,120,,fabc7b9e293d1a6572259f17f4dae533fbbd103daca12d11ec7e106e76fd5fc7
 Bikkuriman World - Gekitou Sei Senshi (Japan),ok,68.7662,index,,68.7662,0.0,47.7778,,,,120,,abf562d0ce0b8445a57fd4f2b82c030ae790b8046babd6a600c113c25826c272
+Family Quiz - 4-nin wa Rival (Japan),ok,70.0,index,,70.0,100.0,70.0,,,,120,,cd913bac31bf1c884507cd021698161c333ffa3842cb7100d7017fc18a560343
 "8 Eyes (USA, Europe) (Pixel Heart)",ok,71.2644,steady geometry,71.2644,,,,,76.9231,75.0,120,,40e0f9d259804661d56a8523c2b66e965dcf5e2d54952fa7f25374e8164aa434
 Arkanoid II (Japan) (En),ok,71.875,index,,71.875,71.875,0.0,,,,120,,1db1d607aacbc998e51939dcbe510d141bd7b64f6e5116f6ec964c5544f4fb92
 Total Recall (USA),ok,72.2222,index,,72.2222,100.0,72.2222,,,,120,,3c264fc64be9b677c6bdf14ad023c1caebf617b91785f3a8c50c51caad5d5ecb
@@ -36,6 +40,7 @@ Terminator 2 - Judgment Day (Europe),ok,75.5103,index,,75.5103,0.0,,,,,120,,1e99
 Terminator 2 (Japan),ok,75.8835,index,,75.8835,77.3258,0.0,,,,120,,d551c7134546b7818b61a4a567c823bff726f9d9c1ae87d4125473edf523e01e
 Terminator 2 - Judgment Day (USA),ok,75.9118,index,,75.9118,77.4268,0.0,,,,120,,a2f813d566ddfbb773a479703b6eebcb13a6e228f878fefedf7f85ea5e87ecec
 Dai-2-ji Super Robot Taisen (Japan),ok,76.6388,index,,76.6388,100.0,68.8889,,,,120,,f82518acfba7856e3772c5016e2a99e975f65cc2cfd452827445b8605d0c4893
+Ninja-kun - Ashura no Shou (Japan),ok,76.6667,index,,76.6667,100.0,76.6667,,,,120,,ad037315548420ed463d271ae08225fa8b04f1861d8070201d1e4cc5def103e5
 Zelda no Densetsu 1 - The Hyrule Fantasy (Japan),ok,76.6667,index,,76.6667,100.0,76.6667,,,,120,,94524acec59350a0581c151c04c64c3897cfd8025ba33333b0e14d2e4602e29b
 Oeka Kids - Anpanman to Oekaki Shiyou!! (Japan),ok,76.7099,index,,76.7099,87.391,0.0,,,,120,,cd19662aed67d1e3cb75aa20bdd3f3749fafb4fc55c19283ce07d741dbf99e58
 Nintendo NTF2 System Cartridge (USA) (v1.1) (Test Program),ok,77.4463,index,,77.4463,0.0,0.0,,,,120,,2f1ce98ab59a9b6075183375742b2a45b5a42aea389f4698f4bb7567ff9374a5
@@ -44,6 +49,9 @@ Ghostbusters II (USA),ok,79.983,index,,79.983,100.0,77.7778,,,,120,,bea3e8e38431
 Tecmo Super Bowl (Japan),ok,81.1111,index,,81.1111,100.0,81.1111,,,,120,,69cb9f5b35088fd1b2b2e9d9d37fc391c9e840412978fd7347c5d03da6ddeda0
 Tecmo Super Bowl (USA),ok,81.1111,index,,81.1111,100.0,81.1111,,,,120,,ddb5fb280e0887bf57744ac76bae60d44ce6b7ce381b18a183a751bbeca84036
 Mickey Mousecapade (USA),ok,81.5056,index,,81.5056,0.0,0.0,,,,120,,9fd557ada52750339c10c47347bb8a2d460efa1a4fd724ae08707275808883c5
+Rambo (Japan),ok,83.3333,index,,83.3333,100.0,83.3333,,,,120,,7b24026b087d6da3989110e17c4e9700449e6b8cd1fcfcd22b2fcfcbb5c5af1e
+Rambo (USA),ok,83.3333,index,,83.3333,100.0,83.3333,,,,120,,05496335bf125221d0107203eb902bdd53c5cacefb2f56d871baa9dec5049f4b
+Rambo (USA) (Rev 1),ok,83.3333,index,,83.3333,100.0,83.3333,,,,120,,d998ea91f8ba1b0ef88eaa3902010a5f2b02be6a09cadc5f83f6d0c4ad86b9e9
 Super Turrican (Europe),ok,84.0823,index,,84.0823,81.8929,0.0,,,,120,,2c7d648bebb4fbebe77cee9b50a9c1a7dbf024f2d7b85bf769bc3e94d82ac773
 Fantasy Zone (Japan) (En) (Sunsoft),ok,84.4268,index,,84.4268,100.0,54.4444,,,,120,,0d74632b64868d3d95519da3087fc3307253a18cb50387f7e9de613441947936
 Fantasy Zone (Japan) (Sunsoft),ok,84.4268,index,,84.4268,100.0,54.4444,,,,120,,0d74632b64868d3d95519da3087fc3307253a18cb50387f7e9de613441947936
@@ -462,6 +470,8 @@ Adventures of Lolo (USA) (Virtual Console),ok,99.9999,index,,99.9999,100.0,97.77
 Akira (Japan),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,260be27c2d7a5f1669e46a8c95a6fb01974c82451aef6fdfe2f9a1ba697bc662
 Baseball Simulator 1.000 (USA),ok,99.9999,index,,99.9999,100.0,96.6667,,,,120,,9a7968574b765065279806507a98575f865d0011792293588a0f7791f6736f54
 Baseball Simulator 1.000 (USA) (Virtual Console),ok,99.9999,index,,99.9999,100.0,96.6667,,,,120,,f6473457f47608e128260a8430395be7cf72346445379dcc89d5b0c0c9befec7
+"Black Bass II, The (Japan)",ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,41987dc4b4cd950c4a423802e889a0058f4cd07d7c0b495de3eb24d4401e19a8
+"Black Bass, The (USA)",ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,5d41545ea3953706989b4f4ded3fd81954ce189b8b2a6111e7aab56b5fe90190
 Bomberman II (Japan),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,9bc9051b174ec4743df78a3086df6577c55258d705c9c9c451be63152c9badf1
 Bomberman II (Japan) (En),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,9bc9051b174ec4743df78a3086df6577c55258d705c9c9c451be63152c9badf1
 Bomberman II (USA),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,637e4ca30e929858c34b20b8538d081b6261feede8273d2d7df3790983f93a7d
@@ -469,6 +479,7 @@ Bubble Bobble 2 (Japan),ok,99.9999,index,,99.9999,100.0,96.6667,,,,120,,f19ef05e
 Bubble Bobble 2 (Japan) (En),ok,99.9999,index,,99.9999,100.0,96.6667,,,,120,,f19ef05e74e31b62c70e73d5806d7e3563d4732fedcec6365f796a40b080ac5f
 Choujin - Ultra Baseball (Japan),ok,99.9999,index,,99.9999,100.0,94.4444,,,,120,,958e2579b434e1b8432a98689d904a7b28dd37d151c9d65115b812f9a8e548b8
 Choujin - Ultra Baseball (Japan) (Virtual Console),ok,99.9999,index,,99.9999,100.0,94.4444,,,,120,,9c87c78835ea2783c3f4478fefc15313b3e01588dc7e6742e9b44c9f1f17255f
+Classic Concentration (USA),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,37f6292f579356df4fd32a86bb7c755202da3febb66572c466e22bd925f58042
 Dragon Ball Z Gaiden - Saiya Jin Zetsumetsu Keikaku (Japan),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,a6216f54d95dd5536183def1f6de5d3aa0f9b7106f924cf0b28a9aaa74c3f6ad
 Dragon Quest (Japan),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,f3973016ecc113ec89b8b20f49072a2ff677d6b581920683d9c72acc4b667a3e
 Family School (Japan),ok,99.9999,index,,99.9999,100.0,97.7778,,,,120,,e4719770512143191f934493c5d79dd40d134ddfaf65d09b6453948b6fc91d4c
@@ -494,6 +505,7 @@ Magic Johnson's Fast Break (USA),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,
 Maison Ikkoku (Japan),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,4a6ab2343cd607f8dec0104244861157cf229b0dbdf26d78ac25dbbe6d1d248a
 Mario's Time Machine (USA),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,2963af6d5d794b37e140691701d30c5b39fc98bc94d35e8aee8dacbda9e7199f
 Mezase! Top Pro - Green ni Kakeru Yume (Japan),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,69a16e9406a1b315af5ea4c77afdbeab95245bd0bb650d233f02a2db28cbbff9
+Momotarou Dentetsu (Japan),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,f06cacedb7552b25197ba49761b1359aa1e35726f620bd601216e4a9c8c20f13
 Nakajima Satoru Kanshuu - F-1 Hero 2 (Japan),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,293c433a6bffe2ce8ac0e935339c86a423b96fc2a8a007e976dd8253e4938a8b
 Napoleon Senki (Japan),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,4ba4001607c1fec4d0206309602733fa134614d2a34c886280ef166bc4095cb6
 Nintendo World Class Service - Port Test Cartridge (USA) (Test Program),ok,99.9999,index,,99.9999,100.0,97.7778,,,,120,,4ea3a16ed3d60caca2fc8e0fa2d3b12bc6a99bc678c32a4b6d70046183679a0f
@@ -508,6 +520,7 @@ Tamura Koushou Mahjong Seminar (Japan),ok,99.9999,index,,99.9999,0.0,97.7778,,,,
 Tanigawa Kouji no Shougi Shinan III (Japan),ok,99.9999,index,,99.9999,100.0,97.7778,,,,120,,3c9476a4d3fbd93a4422457df7a3720b2f70996e5377fdb220e71cbfdc56980e
 Teenage Mutant Ninja Turtles 2 - The Manhattan Project (Japan) (The Cowabunga Collection),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,core renders a blank frame (mapper not implemented or boot failure),a385990c223b1290d1a509631893b79dc18eab0ad0e105af6730f50be52dd964
 Wanpaku Duck Yume Bouken (Japan),ok,99.9999,index,,99.9999,100.0,97.7778,,,,120,,b4c13a81711a35416a9d2dd71194a627e73816cad8bf07f7ad9cbcdb7a984502
+Yousei Monogatari - Rod Land (Japan),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,12f7f325339c67006cf4d6b773f56771a8417fb040d566510996a1668a0e3360
 Zoids - Chuuou Tairiku no Tatakai (Japan),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,2bc33775d37ba4c83fbd9eedc6747972b0f43da196a43c35f767d7e669dd8f18
 Zoids - Chuuou Tairiku no Tatakai (Japan) (Rev 1),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,141e75aa110476695745c516b8b7c4040b270c4ff10557f98d5a5f4cc01080a0
 "Battletoads-Double Dragon (USA, Europe) (Retro-Bit)",error,0.0,index,,0.0,0.0,0.0,,,,120,ares capture is a uniform blank frame (board unsupported by the oracle),4e44e123136a5ea8146b21804558a9a6413e384df879c3ec90f9120430a418d0
@@ -550,4 +563,5 @@ Target - Renegade (USA),error,87.0083,index,,87.0083,0.0,7.7778,,,,120,ares capt
 Target - Renegade (World) (Evercade),error,87.0083,index,,87.0083,0.0,7.7778,,,,120,ares capture is a uniform blank frame (board unsupported by the oracle),13f2485d5f4331e416471b73fab9a3a8c14e9b19b046b2295bc0a92874401544
 Thunderbolt Fighting Plane (World) (QUByte Classics),error,0.0,index,,0.0,0.0,0.0,,,,120,ares capture is a uniform blank frame (board unsupported by the oracle),e9fa5846aab0fcdc30595c88071c09893dfa33c62d19483fba796e59a5e97ef9
 Total Recall (Europe),error,91.3626,index,,91.3626,0.0,,,,,120,ares capture is a uniform blank frame (board unsupported by the oracle),8b4b709a8a3040907c19847b96578e562bb3b2328faeb406dfc688bcd7554677
+Trog! (Europe),error,100.0,index,,100.0,100.0,,,,,120,core renders a blank frame (mapper not implemented or boot failure),3e2c2d197556663b1c93da8ac368d2c44b51e3e20e85acc9cc65a82d3582cb1e
 Ultima - Warriors of Destiny (USA),error,96.0938,index,,96.0938,96.0938,0.0,,,,120,ares capture is a uniform blank frame (board unsupported by the oracle),43bc37291f55ab612cdbd3ed8917aa40913b38e7e4f6ceffe3366e968cbeb9ab

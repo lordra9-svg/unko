@@ -5,20 +5,20 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 **Metric:** newly re-run letters use the NES palette-index agreement over frames 30+ (`video_pct`); records not yet revisited keep their historical steady-geometry or final-frame value.
 
 - NES archives: **7101**
-- Measured: **7037**
-- Measured with the palette-index metric: **911**
-- Below 100% by the relevant ares metric: **511**
+- Measured: **7036**
+- Measured with the palette-index metric: **1146**
+- Below 100% by the relevant ares metric: **524**
 - Ignored tagged dumps below 100%: **1854**
-- No measurement / oracle error: **41**
+- No measurement / oracle error: **42**
 - Ignored tagged dumps with errors: **23**
-- Total needing attention: **552**
+- Total needing attention: **566**
 
 | Band | Games |
 |---|---:|
-| 0-50% | 15 |
-| 50-90% | 42 |
+| 0-50% | 18 |
+| 50-90% | 47 |
 | 90-99% | 106 |
-| 99-100% | 348 |
+| 99-100% | 353 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
@@ -26,6 +26,9 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
 | Accuracy | Metric | Game |
 |---:|---|---|
+| 0.00% | index | Athena (Japan) |
+| 0.00% | index | Athena (Japan) (En) |
+| 0.00% | index | Athena (USA) |
 | 0.00% | index | Ganbare Goemon Gaiden - Kieta Ougon Kiseru (Japan) (Rev 1) (Virtual Console) [b] |
 | 0.00% | index | Mighty Final Fight (USA) (Capcom Classics Mini Mix) |
 | 0.00% | index | Star Wars (USA) (Limited Run Games) |
@@ -55,6 +58,7 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 65.56% | index | Major League Baseball (USA) |
 | 65.56% | index | Major League Baseball (USA) (Rev 1) |
 | 68.77% | index | Bikkuriman World - Gekitou Sei Senshi (Japan) |
+| 70.00% | index | Family Quiz - 4-nin wa Rival (Japan) |
 | 71.26% | steady | 8 Eyes (USA, Europe) (Pixel Heart) |
 | 71.88% | index | Arkanoid II (Japan) (En) |
 | 72.22% | index | Total Recall (USA) |
@@ -63,6 +67,7 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 75.88% | index | Terminator 2 (Japan) |
 | 75.91% | index | Terminator 2 - Judgment Day (USA) |
 | 76.64% | index | Dai-2-ji Super Robot Taisen (Japan) |
+| 76.67% | index | Ninja-kun - Ashura no Shou (Japan) |
 | 76.67% | index | Zelda no Densetsu 1 - The Hyrule Fantasy (Japan) |
 | 76.71% | index | Oeka Kids - Anpanman to Oekaki Shiyou!! (Japan) |
 | 77.45% | index | Nintendo NTF2 System Cartridge (USA) (v1.1) (Test Program) |
@@ -71,11 +76,6 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 81.11% | index | Tecmo Super Bowl (Japan) |
 | 81.11% | index | Tecmo Super Bowl (USA) |
 | 81.51% | index | Mickey Mousecapade (USA) |
-| 84.08% | index | Super Turrican (Europe) |
-| 84.43% | index | Fantasy Zone (Japan) (En) (Sunsoft) |
-| 84.43% | index | Fantasy Zone (Japan) (Sunsoft) |
-| 85.10% | index | Battle Stadium - Senbatsu Pro Yakyuu (Japan) |
-| 86.67% | index | Gambler Jiko Chuushinha (Japan) |
 
 ## No measurement / oracle errors
 
@@ -121,5 +121,6 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | Target - Renegade (World) (Evercade) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Thunderbolt Fighting Plane (World) (QUByte Classics) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Total Recall (Europe) | ares capture is a uniform blank frame (board unsupported by the oracle) |
+| Trog! (Europe) | core renders a blank frame (mapper not implemented or boot failure) |
 | Ultima - Warriors of Destiny (USA) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 
