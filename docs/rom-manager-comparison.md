@@ -1,7 +1,7 @@
 # ROM manager comparison
 
 Comparison of the ROM managers supplied in
-`multiemu-local/rom dat/`, plus what Unko's new `unko-rom-manager` core covers.
+`rom dat/`, plus what Unko's new `unko-rom-manager` core covers.
 
 Versions inspected:
 
