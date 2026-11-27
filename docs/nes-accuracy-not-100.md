@@ -5,20 +5,20 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 **Metric:** newly re-run letters use the NES palette-index agreement over frames 30+ (`video_pct`); records not yet revisited keep their historical steady-geometry or final-frame value.
 
 - NES archives: **7101**
-- Measured: **7036**
-- Measured with the palette-index metric: **1146**
-- Below 100% by the relevant ares metric: **524**
+- Measured: **7051**
+- Measured with the palette-index metric: **1308**
+- Below 100% by the relevant ares metric: **527**
 - Ignored tagged dumps below 100%: **1854**
-- No measurement / oracle error: **42**
+- No measurement / oracle error: **27**
 - Ignored tagged dumps with errors: **23**
-- Total needing attention: **566**
+- Total needing attention: **554**
 
 | Band | Games |
 |---|---:|
-| 0-50% | 18 |
+| 0-50% | 30 |
 | 50-90% | 47 |
-| 90-99% | 106 |
-| 99-100% | 353 |
+| 90-99% | 102 |
+| 99-100% | 348 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
@@ -29,14 +29,26 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 0.00% | index | Athena (Japan) |
 | 0.00% | index | Athena (Japan) (En) |
 | 0.00% | index | Athena (USA) |
+| 0.00% | index | Bionic Commando (USA) (Capcom Classics Mini Mix) |
+| 0.00% | index | Bionic Commando (USA) (Capcom Classics Mini Mix) [b] |
+| 0.00% | index | Esper Dream 2 - Aratanaru Tatakai (Japan) |
+| 0.00% | index | Fleet Commander (Japan) |
 | 0.00% | index | Ganbare Goemon Gaiden - Kieta Ougon Kiseru (Japan) (Rev 1) (Virtual Console) [b] |
+| 0.00% | index | Gegege no Kitarou 2 - Youkai Gundan no Chousen (Japan) |
+| 0.00% | index | Kid Dracula (World) (Castlevania Anniversary Collection) |
 | 0.00% | index | Mighty Final Fight (USA) (Capcom Classics Mini Mix) |
+| 0.00% | index | Minna no Taabou no Nakayoshi Daisakusen (Japan) |
+| 0.00% | index | Mouryou Senki Madara (Japan) |
+| 0.00% | index | Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - '91 Kaimaku Hen (Japan) |
+| 0.00% | index | Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - OB All Star Hen (Japan) |
+| 0.00% | index | Pocket Zaurus - Juu Ouken no Nazo (Japan) |
+| 0.00% | index | Rod Land (World) (Retro-Bit) (256KiB) |
+| 0.00% | index | Rod Land (World) (Retro-Bit) (512KiB) |
 | 0.00% | index | Star Wars (USA) (Limited Run Games) |
 | 0.00% | index | Strider (USA) (Capcom Classics Mini Mix) |
 | 10.00% | index | Kaguya Hime Densetsu (Japan) |
 | 26.63% | index | Racer Mini Yonku - Japan Cup (Japan) |
 | 27.69% | index | Devil Man (Japan) |
-| 35.77% | index | Tokoro-san no Mamoru mo Semeru mo (Japan) |
 | 36.67% | index | Lagrange Point (Japan) |
 | 37.78% | index | Future Wars - Mirai Senshi Lios (Japan) |
 | 38.89% | index | Suikoden - Tenmei no Chikai (Japan) |
@@ -64,56 +76,30 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 72.22% | index | Total Recall (USA) |
 | 73.10% | index | Treasure Master (USA) |
 | 75.51% | index | Terminator 2 - Judgment Day (Europe) |
-| 75.88% | index | Terminator 2 (Japan) |
-| 75.91% | index | Terminator 2 - Judgment Day (USA) |
-| 76.64% | index | Dai-2-ji Super Robot Taisen (Japan) |
-| 76.67% | index | Ninja-kun - Ashura no Shou (Japan) |
-| 76.67% | index | Zelda no Densetsu 1 - The Hyrule Fantasy (Japan) |
-| 76.71% | index | Oeka Kids - Anpanman to Oekaki Shiyou!! (Japan) |
-| 77.45% | index | Nintendo NTF2 System Cartridge (USA) (v1.1) (Test Program) |
-| 79.63% | index | Castelian (Europe) |
-| 79.98% | index | Ghostbusters II (USA) |
-| 81.11% | index | Tecmo Super Bowl (Japan) |
-| 81.11% | index | Tecmo Super Bowl (USA) |
-| 81.51% | index | Mickey Mousecapade (USA) |
 
 ## No measurement / oracle errors
 
 | Game | Error |
 |---|---|
 | Battletoads-Double Dragon (USA, Europe) (Retro-Bit) | ares capture is a uniform blank frame (board unsupported by the oracle) |
-| Bionic Commando (USA) (Capcom Classics Mini Mix) | ares capture is a uniform blank frame (board unsupported by the oracle) |
-| Bionic Commando (USA) (Capcom Classics Mini Mix) [b] | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Controller Test Program (Japan) (En) (Test Program) | ours: unko: invalid ROM: image truncated: expected 40976 bytes, got 16400 |
 | David Crane's A Boy and His Blob - Trouble on Blobolonia (USA) (Limited Run Games) | ares capture is a uniform blank frame (board unsupported by the oracle) |
-| Esper Dream 2 - Aratanaru Tatakai (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
 | Galaxian (Japan) | ours: unko: invalid ROM: image truncated: expected 40976 bytes, got 16400 |
 | Galaxian (Japan) (En) | ours: unko: invalid ROM: image truncated: expected 40976 bytes, got 16400 |
 | Galaxian (Japan) (En) (Rev 1) | ours: unko: invalid ROM: image truncated: expected 40976 bytes, got 16400 |
 | Galaxian (Japan) (Rev 1) | ours: unko: invalid ROM: image truncated: expected 40976 bytes, got 16400 |
 | Galaxian (World) (Namcot Collection, Namco Museum Archives Vol 1) | ours: unko: invalid ROM: image truncated: expected 40976 bytes, got 16400 |
 | Galaxian (World) (Rev 1) (Evercade) | ours: unko: invalid ROM: image truncated: expected 40976 bytes, got 16400 |
-| Gegege no Kitarou 2 - Youkai Gundan no Chousen (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
-| Gradius II (Japan) (En) | core renders a blank frame (mapper not implemented or boot failure) |
-| Gradius II (Japan) (En) (Virtual Console) | core renders a blank frame (mapper not implemented or boot failure) |
 | Idemitsu - Space College - Kikenbutsu no Yasashii Butsuri to Kagaku (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
-| Kid Dracula (World) (Castlevania Anniversary Collection) | core renders a blank frame (mapper not implemented or boot failure) |
 | Kyuukyoku Harikiri Koushien (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Kyuukyoku Harikiri Stadium - Heisei Gannen Ban (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Kyuukyoku Harikiri Stadium III (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Maniac Mansion (USA) (Limited Run Games) | ares capture is a uniform blank frame (board unsupported by the oracle) |
-| Mouryou Senki Madara (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
 | NHK Gakuen - Space School - Sansu 5 Nen (Jou) (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | NHK Gakuen - Space School - Sansu 6 Nen (Ge) (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | NHK Gakuen - Space School - Sansu 6 Nen (Jou) (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
-| Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - '91 Kaimaku Hen (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
-| Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - OB All Star Hen (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
-| Ninja JaJaMaru's Big Adventure (USA) (Retro-Bit Generations) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Nintendo Campus Challenge 1991 (USA) (Competition Cart) [b] | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Nintendo World Championships 1990 (USA) (Competition Cart) | ares capture is a uniform blank frame (board unsupported by the oracle) |
-| Pocket Zaurus - Juu Ouken no Nazo (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
-| Rod Land (World) (Retro-Bit) (256KiB) | core renders a blank frame (mapper not implemented or boot failure) |
-| Rod Land (World) (Retro-Bit) (512KiB) | core renders a blank frame (mapper not implemented or boot failure) |
 | S.C.A.T. - Special Cybernetic Attack Team (USA) (Limited Run Games) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | SD Keiji - Blader (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Shadow of the Ninja (USA) (Limited Run Games) | ares capture is a uniform blank frame (board unsupported by the oracle) |
@@ -121,6 +107,5 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | Target - Renegade (World) (Evercade) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Thunderbolt Fighting Plane (World) (QUByte Classics) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Total Recall (Europe) | ares capture is a uniform blank frame (board unsupported by the oracle) |
-| Trog! (Europe) | core renders a blank frame (mapper not implemented or boot failure) |
 | Ultima - Warriors of Destiny (USA) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 

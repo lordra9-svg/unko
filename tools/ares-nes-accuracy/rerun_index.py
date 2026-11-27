@@ -173,11 +173,6 @@ def process(title, rom, sha, region, tmp):
             'status': 'error',
             'error': 'ares capture is a uniform blank frame (board unsupported by the oracle)',
         })
-    elif len(set(ours_last)) == 1 and len(set(last)) > 1:
-        metrics.update({
-            'status': 'error',
-            'error': 'core renders a blank frame (mapper not implemented or boot failure)',
-        })
     if region != 'PAL':
         # PAL hashes still contain ares' clipped border pixels, so the strict
         # frame-sequence diagnostic is only meaningful for NTSC.
@@ -193,6 +188,9 @@ def process(title, rom, sha, region, tmp):
 
 def target_titles(letter, all_games, explicit, mappers=None, zero=False):
     ledger = [json.loads(line) for line in open(LEDGER)]
+    if '--index' in sys.argv[1:]:
+        return [entry['title'] for entry in ledger
+                if entry.get('metric') == 'nes-index' and not BAD.search(entry['title'])]
     if '--errors' in sys.argv[1:]:
         return [entry['title'] for entry in ledger
                 if entry.get('metric') == 'nes-index'

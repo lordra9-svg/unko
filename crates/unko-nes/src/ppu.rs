@@ -912,15 +912,19 @@ impl Ppu {
             }
         }
 
-        // Vblank starts at (241, 1) and ends at (261, 1).
-        if self.scanline == 241 && self.dot == self.vblank_set_dot {
-            if !self.vblank_suppressed {
-                self.status |= STATUS_VBLANK;
-            }
-            if self.ctrl & 0x80 != 0 && !self.nmi_suppressed {
-                self.nmi_line = true;
-                self.nmi_pending = true;
-            }
+        // Vblank starts at (241, 1) and ends at (261, 1). The status flag
+        // rises first; the NMI line follows two dots later, which matters to
+        // games that poll $2002 in a tight loop while NMI is enabled.
+        if self.scanline == 241 && self.dot == self.vblank_set_dot && !self.vblank_suppressed {
+            self.status |= STATUS_VBLANK;
+        }
+        if self.scanline == 241
+            && self.dot == self.vblank_set_dot + 2
+            && self.ctrl & 0x80 != 0
+            && !self.nmi_suppressed
+        {
+            self.nmi_line = true;
+            self.nmi_pending = true;
         }
         if self.scanline == self.pre_render_line() && self.dot == self.vblank_clear_dot {
             self.status &= !(STATUS_VBLANK | STATUS_SPRITE0 | STATUS_OVERFLOW);
@@ -3285,6 +3289,8 @@ mod tests {
         assert_eq!(ppu.status & STATUS_VBLANK, 0);
         ppu.step_dot();
         assert_ne!(ppu.status & STATUS_VBLANK, 0);
+        // The NMI line follows the status flag by two dots.
+        ppu.step_dots(2);
         assert!(ppu.nmi_line);
         let value = ppu.read_register(2);
         assert_ne!(value & STATUS_VBLANK, 0);

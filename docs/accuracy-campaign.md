@@ -114,6 +114,13 @@ Three mapper defects surfaced while re-measuring the C list:
   key and read `$FF` until it is written. The key is not in the iNES header,
   so the core identifies the 16 known images by an FNV hash of PRG+CHR and
   unlocks on the matching write. All 16 now measure 100%.
+- **CNROM (mapper 3).** The latch now applies the board's bus conflict and
+  refreshes the PPU CHR window immediately. Tokoro-san, Major League Baseball
+  and Mickey Mousecapade reach 100% final frames.
+- **NMI timing.** The NMI line now rises two dots after the `$2002` vblank
+  flag, matching ares. Games that poll `$2002` in a tight loop while NMI is
+  enabled were losing the race and taking tens of extra frames to boot;
+  Tokoro-san's title now appears at the same frame as ares.
 - **VRC2A (mapper 22).** VRC2A resolves CHR registers at half their written
   value; TwinBee 3 and Ganbare Pennant Race went to 100%.
 - **Jaleco SS88006 (mapper 18) and JF-13 (mapper 86).** SS88006 bank

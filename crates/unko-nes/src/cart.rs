@@ -21432,13 +21432,27 @@ impl Mapper for CnRom {
 
     fn prg_write(&mut self, address: u16, value: u8) {
         if address >= 0x8000 {
-            self.bank = usize::from(value) % self.chr_banks();
+            // HVC-CNROM has a bus conflict: AND with the PRG byte visible
+            // at the write address before latching the CHR bank.
+            let prg_banks = (self.prg.len() / 0x2000).max(1);
+            let slot = usize::from((address - 0x8000) / 0x2000);
+            let prg_bank = ((slot & self.prg_mask) | self.prg_outer) % prg_banks;
+            let visible = self
+                .prg
+                .get(prg_bank * 0x2000 + usize::from(address & 0x1FFF))
+                .copied()
+                .unwrap_or(0xFF);
+            self.bank = usize::from(value & visible) % self.chr_banks();
         }
     }
 
     fn chr_read(&self, address: u16) -> u8 {
         let offset = self.bank * 0x2000 + usize::from(address & 0x1FFF);
         self.chr.get(offset).copied().unwrap_or(0)
+    }
+
+    fn chr_mapping_write(&self, address: u16) -> bool {
+        address >= 0x8000
     }
 
     fn chr_write(&mut self, address: u16, value: u8) {
@@ -44820,10 +44834,12 @@ pub(crate) mod tests {
 
     #[test]
     fn cnrom_switches_chr_bank() {
-        let rom = synth_banked(3, 32, 24);
+        let mut rom = synth_banked(3, 32, 24);
+        // CNROM has a bus conflict; make the write address read as $FF.
+        rom[16 + 0x100] = 0xFF;
         let mut cart = Cartridge::from_ines(&rom).expect("cart");
         assert_eq!(cart.ppu_read(0x0000), 0x80);
-        cart.cpu_write(0x8000, 2);
+        cart.cpu_write(0x8100, 2);
         assert_eq!(cart.ppu_read(0x0000), 0x90);
     }
 
