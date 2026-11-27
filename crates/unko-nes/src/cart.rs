@@ -28483,6 +28483,23 @@ impl Mapper for BandaiFcg {
     }
 
     fn prg_read(&self, address: u16) -> u8 {
+        if self.number == 16 {
+            // Bandai FCG: $6000-$7FFF is the register window, not PRG RAM;
+            // $8000-$BFFF uses the selected 16 KiB bank and $C000-$FFFF is
+            // fixed to the last bank.
+            return match address {
+                0x8000..=0xBFFF => {
+                    let banks = self.prg_bank_count();
+                    let bank = usize::from(self.prg_bank) % banks;
+                    self.prg[bank * 0x4000 + usize::from(address & 0x3FFF)]
+                }
+                0xC000..=0xFFFF => {
+                    let bank = self.prg_bank_count() - 1;
+                    self.prg[bank * 0x4000 + usize::from(address & 0x3FFF)]
+                }
+                _ => 0,
+            };
+        }
         if self.number == 153 {
             let banks = self.prg_bank_count();
             let outer = self
@@ -28539,6 +28556,37 @@ impl Mapper for BandaiFcg {
     }
 
     fn prg_write(&mut self, address: u16, value: u8) {
+        if self.number == 16 {
+            if !(0x6000..=0x7FFF).contains(&address) {
+                return;
+            }
+            match address & 0x0F {
+                0x00..=0x07 => self.chr_banks[usize::from(address & 0x07)] = value,
+                0x08 => self.prg_bank = value & 0x0F,
+                0x09 => {
+                    self.mirroring = match value & 0x03 {
+                        0 => Mirroring::Vertical,
+                        1 => Mirroring::Horizontal,
+                        2 => Mirroring::SingleLower,
+                        _ => Mirroring::SingleUpper,
+                    };
+                }
+                0x0A => {
+                    self.irq_enabled = value & 0x01 != 0;
+                    self.irq_pending = false;
+                }
+                0x0B => {
+                    self.irq_latch = (self.irq_latch & 0xFF00) | u16::from(value);
+                    self.irq_counter = self.irq_latch;
+                }
+                0x0C => {
+                    self.irq_latch = (self.irq_latch & 0x00FF) | (u16::from(value) << 8);
+                    self.irq_counter = self.irq_latch;
+                }
+                _ => {}
+            }
+            return;
+        }
         if self.number == 153 {
             if (0x6000..=0x7FFF).contains(&address) {
                 if self.wram_enabled {
@@ -28703,6 +28751,14 @@ impl Mapper for BandaiFcg {
         let index = bank * 0x400 + usize::from(address & 0x3FF);
         if let Some(byte) = self.chr.get_mut(index) {
             *byte = value;
+        }
+    }
+
+    fn chr_mapping_write(&self, address: u16) -> bool {
+        match self.number {
+            16 => (0x6000..=0x7FFF).contains(&address) && (address & 0x0F) <= 7,
+            153 | 157 => address >= 0x8000,
+            _ => false,
         }
     }
 
@@ -45365,5 +45421,44 @@ impl MapperState for Inner446 {
             Self::Skrom(inner) => inner.load_state(data),
             Self::Board(inner) => inner.load_state(data),
         }
+    }
+}
+
+#[cfg(test)]
+mod bandai_fcg_tests {
+    use super::*;
+
+    #[test]
+    fn mapper16_chr_registers_are_at_the_6000_window_and_refresh_the_ppu_copy() {
+        let mut chr = vec![0u8; 0x400 * 4];
+        for bank in 0..4 {
+            chr[bank * 0x400] = bank as u8;
+        }
+        let header = Header {
+            mapper: 16,
+            submapper: 4,
+            prg_size: 0x8000,
+            chr_size: chr.len(),
+            battery: false,
+            four_screen: false,
+            nes2: true,
+            prg_ram_size: 0,
+            prg_nvram_size: 0,
+            mirroring: Mirroring::Vertical,
+            raw_flags6: 0,
+            console_type: 0,
+            vs_ppu: 0,
+            vs_system: 0,
+        };
+        let mut mapper = BandaiFcg::new(vec![0u8; 0x8000], chr, Vec::new(), header, 16);
+        mapper.prg_write(0x7FF0, 2);
+        assert_eq!(mapper.chr_read(0), 2);
+        mapper.prg_write(0x7FF1, 3);
+        assert_eq!(mapper.chr_read(0x400), 3);
+        assert!(mapper.chr_mapping_write(0x7FF0));
+        assert!(!mapper.chr_mapping_write(0x8000));
+        // The FCG register window is $6000-$7FFF; $8000 writes are not CHR banks.
+        mapper.prg_write(0x8000, 1);
+        assert_eq!(mapper.chr_read(0), 2);
     }
 }

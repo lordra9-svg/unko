@@ -2,7 +2,7 @@
 
 Generated from `compatibility/accuracy-ares.jsonl` — **ares** primary, 120 frames. RustyNES remains secondary.
 
-**Metric:** NTSC uses palette-independent steady-state geometry from frame 30; PAL uses the calibrated final-frame exact-pixel comparison (`ARES_REGION=PAL`, 288-line canvas cropped to 256x240).
+**Metric:** NTSC uses palette-independent steady-state geometry from frame 30; PAL and mapper-16 exceptions use the calibrated final-frame exact-pixel comparison.
 
 - NES archives: **7101**
 - Measured: **7069**
@@ -12,8 +12,8 @@ Generated from `compatibility/accuracy-ares.jsonl` — **ares** primary, 120 fra
 
 | Band | Games |
 |---|---:|
-| 0–50% | 1727 |
-| 50–90% | 308 |
+| 0–50% | 1726 |
+| 50–90% | 309 |
 | 90–99% | 644 |
 | 99–100% | 20 |
 

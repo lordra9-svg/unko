@@ -64,6 +64,21 @@ steady-state geometry** from frame 30. An ares record for Argus is in
 below-100 list as a known oracle disagreement rather than an Unko rendering
 failure.
 
+### Akuma-kun - Makai no Wana (Japan) — mapper 16 CHR refresh
+
+Akuma-kun is a Bandai FCG mapper-16 title (NES 2.0 submapper 4). Two defects
+made the title screen corrupt:
+
+- FCG registers live in `$6000-$7FFF`, but the mapper also accepted the same
+  register writes at `$8000-$FFFF`.
+- CHR-bank writes did not refresh the PPU's CHR-ROM copy, so the tile bank
+  selected by the game was not visible to rendering.
+
+Both are fixed and covered by `mapper16_chr_registers_are_at_the_6000_window
+_and_refresh_the_ppu_copy`. The corrected frame matches RustyNES exactly; ares
+reports 83.73% exact pixels and 99.71% palette-normalized on the final frame.
+The ares record now carries those calibrated values.
+
 ## Primary NES oracle: ares
 
 The local ares capture build now emits a fourth trace field:
