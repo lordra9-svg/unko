@@ -7,18 +7,18 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 - NES archives: **7101**
 - Measured: **7037**
 - Measured with the palette-index metric: **905**
-- Below 100% by the relevant ares metric: **531**
-- Ignored tagged dumps below 100%: **1852**
+- Below 100% by the relevant ares metric: **529**
+- Ignored tagged dumps below 100%: **1854**
 - No measurement / oracle error: **41**
 - Ignored tagged dumps with errors: **23**
-- Total needing attention: **572**
+- Total needing attention: **570**
 
 | Band | Games |
 |---|---:|
-| 0-50% | 17 |
+| 0-50% | 16 |
 | 50-90% | 58 |
 | 90-99% | 110 |
-| 99-100% | 346 |
+| 99-100% | 345 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
@@ -26,7 +26,6 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
 | Accuracy | Metric | Game |
 |---:|---|---|
-| 0.00% | index | Fester's Quest (USA) (Demo) |
 | 0.00% | index | Ganbare Goemon Gaiden - Kieta Ougon Kiseru (Japan) (Rev 1) (Virtual Console) [b] |
 | 0.00% | index | Mighty Final Fight (USA) (Capcom Classics Mini Mix) |
 | 0.00% | index | Star Wars (USA) (Limited Run Games) |
@@ -76,6 +75,7 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 77.45% | index | Nintendo NTF2 System Cartridge (USA) (v1.1) (Test Program) |
 | 77.48% | index | Moero!! Pro Yakyuu (Japan) |
 | 77.48% | index | Moero!! Pro Yakyuu (Japan) (Rev 1) |
+| 77.48% | index | Moero!! Pro Yakyuu (Japan) (Rev 2) |
 
 ## No measurement / oracle errors
 

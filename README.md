@@ -109,7 +109,7 @@ cross-check. Re-runs now compare the PPU's native **NES palette indices** over
 frames 30+ (`video_pct`), which removes per-emulator RGB palette differences;
 records not yet revisited keep their historical steady-geometry values. The
 A-Z walk-through re-measured 893 games: 669 are at >=99% index agreement (324
-exactly 100%), and the actionable below-100 list fell from 2,699 to 537. The
+exactly 100%), and the actionable below-100 list fell from 2,699 to 529. The
 first full ares NES pass (7,101 headered images) measured 7,069 with 32 errors
 and 61.8% at 100% on the older metric. The RustyNES pass measured 6,726 / 7,101
 with 72.7% steady-state; Argus exposed a RustyNES mapper-87 rendering defect

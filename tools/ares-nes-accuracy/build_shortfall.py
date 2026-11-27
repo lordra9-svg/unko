@@ -12,7 +12,7 @@ OUT_MD = os.path.join(ROOT, 'docs/nes-accuracy-not-100.md')
 OUT_CSV = os.path.join(ROOT, 'docs/nes-accuracy-not-100.csv')
 # Campaign policy: unlicensed/pirate/beta/bios/aftermarket/prototype dumps are
 # not part of the walk-through.
-IGNORED = re.compile(r'(\((?:Unl|Pirate|Beta|Bios|Aftermarket|Proto)[^)]*\)|\[(?:BIOS|Bios)\])', re.I)
+IGNORED = re.compile(r'(\((?:Unl|Pirate|Beta|Bios|Aftermarket|Proto|Demo)[^)]*\)|\[(?:BIOS|Bios)\])', re.I)
 
 
 def score(record):

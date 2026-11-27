@@ -1,5 +1,4 @@
 title,status,accuracy_pct,metric,steady_geometry_pct,video_pct,final_video_pct,frame_seq_pct,palette_pct,best_geometry_pct,same_index_geometry_pct,frames,error,sha256
-Fester's Quest (USA) (Demo),ok,0.0,index,,0.0,0.0,0.0,,,,120,,c57e993153fffe9ea69b99fa52392f1763030c26a3d0c4d9d897e88b235e383c
 Ganbare Goemon Gaiden - Kieta Ougon Kiseru (Japan) (Rev 1) (Virtual Console) [b],ok,0.0,index,,0.0,0.0,0.0,,,,120,,0f40e32f44976a6075b6e18859ed250f100df09ee2edb5801fe7d1d3d10180bd
 Mighty Final Fight (USA) (Capcom Classics Mini Mix),ok,0.0,index,,0.0,0.0,0.0,,,,120,,9434bc1353a42e34582af71987e07d0b497e5b7ef68bfa97f1b24ae76726df7a
 Star Wars (USA) (Limited Run Games),ok,0.0,index,,0.0,0.0,0.0,,,,120,,7dcf778d2efd8ac9ecb4995d865d39051ed0091257b902a2120d73aedf89ddef
@@ -276,7 +275,6 @@ Mighty Bomb Jack (Europe),ok,99.7277,index,,99.7277,99.7277,,,,,120,,8f83c71d30c
 "Adventures of Bayou Billy, The (USA)",ok,99.7314,index,,99.7314,99.6419,0.0,,,,120,,3ea11f1d4df0ed63aabec579c01b5e9cb12cfe7c3b40028cab317cbf23567ca5
 "Adventures of Bayou Billy, The (USA) (Virtual Console)",ok,99.7314,index,,99.7314,99.6419,0.0,,,,120,,4174612b9a01a65811cb081d530f3acff7529347595464dbfec18838d5fc92dc
 Mario & Yoshi (Europe),ok,99.7446,index,,99.7446,0.0,,,,,120,,eaa0f715696fe3767ceb7a18a6772af0a4a8883663c24f2108b66c67c20f800f
-Cygnus Force (USA) (Demo),ok,99.7503,index,,99.7503,99.7591,0.0,,,,120,,3e5c6955e8fa8b7733697940401a9fbb0c9cf67cd4cc585e751c4cd76f63c3dc
 Double Dragon II - The Revenge (Europe),ok,99.755,index,,99.755,99.1001,,,,,120,,e2b6c1cbd8d9fd0318c76cacbda1b47fce1e4cade38ab775df62810f1eeaa57f
 Bakushou!! Jinsei Gekijou (Japan),ok,99.7828,index,,99.7828,0.0,82.2222,,,,120,,014e6e20385eae9479a3d3a5f35c1bc81a85a75b491bd0dc1563112743cd41bc
 Overlord (USA),ok,99.7964,index,,99.7964,100.0,98.8889,,,,120,,e531bb2f88870c328708decc2eb687ff064a44749208767bbf3bdab8363bccf9
