@@ -241,9 +241,23 @@ fn parse_revision(token: &str) -> Option<i64> {
         }
     }
     if let Some(rest) = token.strip_prefix('v') {
-        if let Ok(number) = rest.replace('_', ".").parse::<f64>() {
-            return Some((number * 100.0) as i64);
+        // `vX.Y` (or the `_`-separated `vX_Y` form) is packed as
+        // `(major << 32) | minor`, so integer ordering follows the components:
+        // `v1.2 < v1.10 < v2.0`. `vX` and `vX.` mean a zero minor. The major
+        // component is limited to 31 bits so the packed value stays
+        // non-negative; anything larger is not a real revision tag.
+        let rest = rest.replace('_', ".");
+        let (major, minor) = rest.split_once('.').unwrap_or((rest.as_str(), "0"));
+        let major = major.parse::<u32>().ok()?;
+        if major > i32::MAX as u32 {
+            return None;
         }
+        let minor = if minor.is_empty() {
+            0
+        } else {
+            minor.parse::<u32>().ok()?
+        };
+        return Some((i64::from(major) << 32) | i64::from(minor));
     }
     None
 }
@@ -289,5 +303,83 @@ mod tests {
         assert_eq!(tags.revision, 2);
         assert!(tags.retail);
         assert!(!parse_tags("Game (USA) (Proto)").retail);
+    }
+
+    #[test]
+    fn v_revision_tags_order_numerically_by_component() {
+        let revision = |name: &str| parse_tags(name).revision;
+        assert!(revision("Game (v1.0)") < revision("Game (v1.1)"));
+        assert!(revision("Game (v1.1)") < revision("Game (v1.2)"));
+        assert!(revision("Game (v1.2)") < revision("Game (v1.10)"));
+        assert!(revision("Game (v1.10)") < revision("Game (v2.0)"));
+    }
+
+    #[test]
+    fn v_revision_forms_and_rejections() {
+        assert_eq!(parse_revision("v1"), Some(1 << 32));
+        assert_eq!(parse_revision("v1.0"), Some(1 << 32));
+        assert_eq!(parse_revision("v1_10"), Some((1 << 32) | 10));
+        assert_eq!(parse_revision("v1."), Some(1 << 32));
+        for malformed in [
+            "v1.2.3",
+            "v",
+            "v.",
+            "vx",
+            "v1.x",
+            "v-1",
+            "v4294967296.0",
+            "",
+        ] {
+            assert_eq!(parse_revision(malformed), None, "{malformed}");
+        }
+        assert_eq!(parse_revision("Rev 3"), Some(3));
+        assert_eq!(parse_revision("Rev A"), Some(1));
+        assert_eq!(parse_revision("Rev Z"), Some(26));
+    }
+
+    const V_REVISION_CLONES: &str = r#"<datafile><header><name>T</name></header>
+      <game name="Game (USA) (v1.2)" id="2" cloneofid="1"><rom name="a.nes" size="1"/></game>
+      <game name="Game (USA) (v1.10)" id="3" cloneofid="1"><rom name="b.nes" size="1"/></game>
+    </datafile>"#;
+
+    #[test]
+    fn v_revision_prefers_numerically_newer_clone() {
+        let dat = parse_dat_str(V_REVISION_CLONES).expect("dat");
+        let options = OneGameOneRom {
+            prefer_parent: false,
+            prefer_newer: true,
+            ..OneGameOneRom::default()
+        };
+        let selected = options.select(&dat);
+        assert_eq!(selected, vec![1]);
+        assert_eq!(dat.games[1].name, "Game (USA) (v1.10)");
+    }
+
+    const V_REVISION_RANGE: &str = r#"<datafile><header><name>T</name></header>
+      <game name="Game (USA) (v1.0)" id="2" cloneofid="1"><rom name="a.nes" size="1"/></game>
+      <game name="Game (USA) (v1.1)" id="3" cloneofid="1"><rom name="b.nes" size="1"/></game>
+      <game name="Game (USA) (v1.2)" id="4" cloneofid="1"><rom name="c.nes" size="1"/></game>
+      <game name="Game (USA) (v1.10)" id="5" cloneofid="1"><rom name="d.nes" size="1"/></game>
+      <game name="Game (USA) (v2.0)" id="6" cloneofid="1"><rom name="e.nes" size="1"/></game>
+    </datafile>"#;
+
+    #[test]
+    fn v_revision_selects_expected_extreme() {
+        let dat = parse_dat_str(V_REVISION_RANGE).expect("dat");
+        let newest = OneGameOneRom {
+            prefer_parent: false,
+            prefer_newer: true,
+            ..OneGameOneRom::default()
+        };
+        assert_eq!(newest.select(&dat), vec![4]);
+        assert_eq!(dat.games[4].name, "Game (USA) (v2.0)");
+
+        let oldest = OneGameOneRom {
+            prefer_parent: false,
+            prefer_newer: false,
+            ..OneGameOneRom::default()
+        };
+        assert_eq!(oldest.select(&dat), vec![0]);
+        assert_eq!(dat.games[0].name, "Game (USA) (v1.0)");
     }
 }
