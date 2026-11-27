@@ -72,6 +72,9 @@ pub trait Core {
         None
     }
 
+    /// Enables per-pixel native-colour-index recording for tracing.
+    fn set_index_recording(&mut self, _enabled: bool) {}
+
     /// Audio produced by the most recent [`Core::run_frame`].
     fn audio(&self) -> AudioBuffer<'_>;
 

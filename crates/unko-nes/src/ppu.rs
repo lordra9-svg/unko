@@ -267,6 +267,9 @@ pub struct Ppu {
     /// the PPU's actual output before the RGB palette lookup, so two cores can
     /// be compared without their differing palettes getting in the way.
     frame_indices: Vec<u16>,
+    /// Whether to maintain [`frame_indices`]. Tracing enables it; normal
+    /// emulation does not pay the per-pixel cost.
+    record_indices: bool,
     /// Background shift registers (MSB is the next pixel).
     bg_lo: u16,
     bg_hi: u16,
@@ -428,6 +431,7 @@ impl Ppu {
             custom_palette: Vec::new(),
             frame: vec![0; 256 * 240 * 4],
             frame_indices: vec![0; 256 * 240],
+            record_indices: false,
             bg_lo: 0,
             bg_hi: 0,
             bg_attr_lo: 0,
@@ -2316,7 +2320,9 @@ impl Ppu {
                     } else {
                         self.palette_rgb[usize::from(color_index & 0x1F)]
                     };
-                    self.span_id[j] = self.output_index(color_index);
+                    if self.record_indices {
+                        self.span_id[j] = self.output_index(color_index);
+                    }
                 }
                 self.span_len = 8;
             } else {
@@ -2333,7 +2339,9 @@ impl Ppu {
             self.frame[i + 1] = g;
             self.frame[i + 2] = b;
             self.frame[i + 3] = 255;
-            self.frame_indices[p] = self.span_id[slot];
+            if self.record_indices {
+                self.frame_indices[p] = self.span_id[slot];
+            }
             self.span_len -= 1;
         } else {
             self.render_pixel_dot(x);
@@ -2361,7 +2369,9 @@ impl Ppu {
         self.frame[i + 1] = g;
         self.frame[i + 2] = b;
         self.frame[i + 3] = 255;
-        self.frame_indices[p] = self.output_index(0);
+        if self.record_indices {
+            self.frame_indices[p] = self.output_index(0);
+        }
     }
 
     fn render_pixel_dot(&mut self, x: u16) {
@@ -2424,7 +2434,9 @@ impl Ppu {
         self.frame[i + 1] = g;
         self.frame[i + 2] = b;
         self.frame[i + 3] = 255;
-        self.frame_indices[p] = self.output_index(color_index);
+        if self.record_indices {
+            self.frame_indices[p] = self.output_index(color_index);
+        }
     }
 
     fn increment_coarse_x(&mut self) {
@@ -2493,6 +2505,11 @@ impl Ppu {
     #[must_use]
     pub fn video_indices(&self) -> &[u16] {
         &self.frame_indices
+    }
+
+    /// Enables or disables per-pixel NES colour-index recording.
+    pub fn set_index_recording(&mut self, enabled: bool) {
+        self.record_indices = enabled;
     }
 
     /// Resolves a palette-RAM index to the PPU's 9-bit output colour, keeping

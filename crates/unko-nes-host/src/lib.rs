@@ -386,6 +386,12 @@ impl Core for AccuracyCore {
             .map(|system| system.ppu.video_indices())
     }
 
+    fn set_index_recording(&mut self, enabled: bool) {
+        if let Some(system) = &mut self.system {
+            system.ppu.set_index_recording(enabled);
+        }
+    }
+
     fn audio(&self) -> AudioBuffer<'_> {
         AudioBuffer {
             samples: &self.audio,

@@ -806,6 +806,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 let bios = fs::read(&bios)?;
                 let mut system =
                     unko_nes::System::from_fds(&disk, &bios).map_err(|e| e.to_string())?;
+                system.ppu.set_index_recording(true);
                 let mut text = String::from("# unko trace v1\n");
                 text.push_str("core nes_accuracy_core\n");
                 text.push_str(&format!("frames {frames}\n"));
@@ -853,6 +854,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 ..LoadOptions::default()
             };
             core.load(&rom, &options)?;
+            core.set_index_recording(true);
             let info = core.info();
             let mut indices_seq_file = match &indices_seq {
                 Some(path) => Some(std::io::BufWriter::new(fs::File::create(path)?)),
