@@ -87,16 +87,20 @@ about **5h 03m**.
 | Archives | 7,101 |
 | Measured | 7,069 |
 | Errors | 32 |
-| Steady geometry 100% | 4,317 / 7,069 (61.1%) |
-| Steady geometry >= 95% | 4,733 (67.0%) |
-| Steady geometry >= 90% | 4,794 (67.8%) |
+| 100% by the relevant metric | 4,370 / 7,069 (61.8%) |
 | Best full-run median | 98.3193% |
-| Steady median | 100.0% |
+| Steady median (NTSC) | 100.0% |
+
+PAL was calibrated after the first ares pass. The initial ares geometry hash was
+sensitive to colour ordering and reported many PAL titles as 0%. The corrected
+PAL runner sets `ARES_REGION=PAL`, uses the 283x288 PAL canvas cropped to
+256x240, and records the final-frame exact-pixel percentage (plus a sorted
+palette-normalized percentage). NTSC keeps the steady-state geometry metric.
 
 ares is the **primary** NES oracle; RustyNES remains a secondary cross-check
 and its records are still shown as **R**. The ares pass has fewer unloadable
-images (32 errors vs 375) but a lower steady-state match than the earlier
-RustyNES pass; the Argus case showed that RustyNES can also render incorrectly.
+images (32 errors vs 375). Argus showed that RustyNES can also render
+incorrectly; PAL needed a separate calibrated frame metric.
 
 ares audio is not scored: its host stream is resampled/filtered differently
 from our f32 output.

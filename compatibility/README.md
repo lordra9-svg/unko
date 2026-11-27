@@ -91,8 +91,8 @@ oracle ledgers. The page shows **A** first and sorts by the ares score when
 available. The NES geometry metric is palette-independent; the “steady”
 percentage starts at frame 30. Audio is not scored for NES because ares and
 RustyNES expose differently filtered host streams. Ares NES completed with
-7,069 measured / 32 errors; 4,317 measured ROMs (61.1%) reach 100%
-steady-state geometry. See
+7,069 measured / 32 errors; 4,370 measured ROMs (61.8%) reach 100% by the
+relevant metric (NTSC steady geometry; calibrated PAL final-frame pixel). See
 [`docs/accuracy-campaign.md`](../docs/accuracy-campaign.md).
 
 ## How to test a game

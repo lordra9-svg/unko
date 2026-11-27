@@ -106,10 +106,10 @@ Full No-Intro import (2026-11-25, 21,983 archives, 30-frame smoke):
 
 Accuracy uses **ares as the primary oracle**; RustyNES remains a secondary NES
 cross-check. Full ares NES pass (7,101 headered images): **7,069 measured /
-32 errors**, **61.1%** at 100% steady-state geometry. The earlier RustyNES
-pass measured 6,726 / 7,101 with 72.7% steady-state; Argus exposed a RustyNES
-mapper-87 rendering defect while ares matched Unko. Full SNES stage (4,642
-ROMs, 120 frames, ares):
+32 errors**, **61.8%** at 100% by the relevant metric (NTSC steady geometry,
+calibrated PAL final-frame pixel). The earlier RustyNES pass measured 6,726 /
+7,101 with 72.7% steady-state; Argus exposed a RustyNES mapper-87 rendering
+defect while ares matched Unko. Full SNES stage (4,642 ROMs, 120 frames, ares):
 **4,606 measured / 36 errors**, **73.4%** final-frame exact, **93.7%**
 raw-audio exact, **71.0%** both exact. Details:
 [`docs/accuracy-campaign.md`](docs/accuracy-campaign.md).

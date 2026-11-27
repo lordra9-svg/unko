@@ -1,78 +1,78 @@
 # NES games not at 100% accuracy (ares primary)
 
-Generated from `compatibility/accuracy-ares.jsonl` — the **ares** NES oracle, 120 frames. RustyNES remains a secondary historical cross-check.
+Generated from `compatibility/accuracy-ares.jsonl` — **ares** primary, 120 frames. RustyNES remains secondary.
 
-**Metric note:** full-run frame-0 geometry is not the stable metric because ares and Unko differ during boot. This list uses **steady-state geometry from frame 30 onward**.
+**Metric:** NTSC uses palette-independent steady-state geometry from frame 30; PAL uses the calibrated final-frame exact-pixel comparison (`ARES_REGION=PAL`, 288-line canvas cropped to 256x240).
 
 - NES archives: **7101**
 - Measured: **7069**
-- Measured but steady-state below 100%: **2752**
+- Below 100% by the relevant ares metric: **2699**
 - No measurement / oracle error: **32**
-- Total needing attention: **2784**
+- Total needing attention: **2731**
 
-| Steady-state band | Games |
+| Band | Games |
 |---|---:|
-| 0–50% | 2096 |
-| 50–90% | 179 |
-| 90–99% | 477 |
-| 99–100% | 0 |
+| 0–50% | 1727 |
+| 50–90% | 308 |
+| 90–99% | 644 |
+| 99–100% | 20 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
 ## Worst 50 measured games
 
-| Steady | Best full-run | Game |
-|---:|---:|---|
-| 0.00% | 0.00% | 117-in-1 (Asia) (En) (WQ1708 D) (Pirate) |
-| 0.00% | 0.00% | 3-in-1 - Spartan Super 1998 (Asia) (En) (Pirate) |
-| 0.00% | 0.00% | 77-in-1 (Asia) (En) (WQ1806 E) (Pirate) |
-| 0.00% | 0.00% | Action in New York (Europe) |
-| 0.00% | 0.00% | Addams Family, The (Europe) (En,Fr,De) |
-| 0.00% | 0.00% | Addams Family, The - Pugsley's Scavenger Hunt (Europe) |
-| 0.00% | 0.00% | Addams Family, The - Pugsley's Scavenger Hunt (Europe) (Beta 1) |
-| 0.00% | 0.00% | Addams Family, The - Pugsley's Scavenger Hunt (Europe) (Beta 2) |
-| 0.00% | 0.00% | Addams Family, The - Pugsley's Scavenger Hunt (Europe) (Beta 3) |
-| 0.00% | 0.00% | Addams Family, The - Pugsley's Scavenger Hunt (Europe) (Beta 4) |
-| 0.00% | 0.00% | Addams Family, The - Pugsley's Scavenger Hunt (Europe) (Beta) |
-| 0.00% | 0.00% | Adventure Island Classic (Europe) |
-| 0.00% | 0.00% | Adventure Island III (Europe) (Proto) |
-| 0.00% | 0.00% | Adventure Island Part II, The (Europe) |
-| 0.00% | 0.00% | Adventures in the Magic Kingdom (Europe) |
-| 0.00% | 0.00% | Adventures of Bayou Billy, The (Europe) |
-| 0.00% | 0.00% | Adventures of Lex and Grim, The (World) (Aftermarket) (Unl) |
-| 0.00% | 0.00% | Adventures of Lolo (Europe) |
-| 0.00% | 0.00% | Adventures of Lolo (Europe) (Virtual Console) |
-| 0.00% | 0.00% | Adventures of Lolo 2 (Europe) |
-| 0.00% | 0.00% | Adventures of Lolo 2 (Europe) (Virtual Console) |
-| 0.00% | 0.00% | Adventures of Lolo 3 (Europe) |
-| 0.00% | 0.00% | Adventures of Rad Gravity, The (Europe) |
-| 0.00% | 0.00% | Air Fortress (Europe) |
-| 0.00% | 0.00% | Airwolf (Europe) (Acclaim) |
-| 0.00% | 0.00% | Aladdin (Europe) |
-| 0.00% | 0.00% | Alfred Chicken (Europe) |
-| 0.00% | 0.00% | Alien 3 (Europe) |
-| 0.00% | 0.00% | Alpha Mission (Europe) |
-| 0.00% | 0.00% | Anticipation (Europe) |
-| 0.00% | 0.00% | Arch Rivals - A Basketbrawl! (Europe) |
-| 0.00% | 0.00% | Asterix (Europe) (En,Fr,De,Es,It) |
-| 0.00% | 0.00% | Astyanax (Europe) |
-| 0.00% | 0.00% | Athletic World (Europe) |
-| 0.00% | 0.00% | Attack of the Killer Tomatoes (Europe) |
-| 0.00% | 0.00% | Aussie Rules Footy (Australia) |
-| 0.00% | 0.00% | Bad Dudes vs. Dragon Ninja (Europe) |
-| 0.00% | 0.00% | Balloon Fight (Europe) |
-| 0.00% | 0.00% | Banana Prince (Germany) |
-| 0.00% | 0.00% | Barbie (Europe) |
-| 0.00% | 0.00% | Barker Bill's Trick Shooting (Europe) |
-| 0.00% | 0.00% | Batman - Return of the Joker (Europe) |
-| 0.00% | 0.00% | Batman - The Video Game (Europe) |
-| 0.00% | 0.00% | Batman Returns (Europe) |
-| 0.00% | 0.00% | Batman Returns (Europe) (Beta) |
-| 0.00% | 0.00% | Battle of Olympus, The (Europe) |
-| 0.00% | 0.00% | Battleship (Europe) (En,Fr,De,Es) |
-| 0.00% | 0.00% | Battletoads (Europe) |
-| 0.00% | 0.00% | Battletoads-Double Dragon (Europe) |
-| 0.00% | 0.00% | Beauty and the Beast (Europe) |
+| Accuracy | Metric | Game |
+|---:|---|---|
+| 0.00% | steady | '93 Zuixin Yizhi Chaoji Jinka 4-in-1 (China) (Unl) |
+| 0.00% | steady | 100-in-1 (Asia) (En) (Pirate) |
+| 0.00% | steady | 100-in-1 Contra Function 16 (Asia) (En) (Pirate) |
+| 0.00% | steady | 100-in-1 Real Game (China) (En,Ja) (Pirate) |
+| 0.00% | steady | 10000000-in-1 Unchained Melody 95 (Asia) (En) (Pirate) |
+| 0.00% | steady | 117-in-1 (Asia) (En) (WQ1708 D) (Pirate) |
+| 0.00% | steady | 1200-in-1 (Asia) (En) (Pirate) |
+| 0.00% | steady | 150-in-1 Golden 1992 (Asia) (En) (Pirate) |
+| 0.00% | steady | 16-in-1 Cassetta Videogame (Italy) (En) (Pirate) |
+| 0.00% | steady | 168-in-1 (Asia) (En,Ja) (ABCARD-15) (Pirate) |
+| 0.00% | steady | 168-in-1 New Contra Function 16 (Asia) (En) (Pirate) |
+| 0.00% | steady | 18-in-1 - Videogame Super 8 Bit - Cassetta 18 Giochi (Italy) (En) (Aftermarket) (Pirate) |
+| 0.00% | steady | 1992 Super HiK 3-in-1 (Asia) (En,Ja) (Pirate) |
+| 0.00% | steady | 1995 Super Value Collection 2-in-1 (Asia) (En) (Pirate) |
+| 0.00% | steady | 1997 Super HIK 16-in-1 (Asia) (En) (Pirate) |
+| 0.00% | steady | 2-in-1 - Conan & Rygar (Asia) (En) (Pirate) |
+| 0.00% | steady | 2-in-1 - Conan & Rygar (Asia) (En) (RC58) (Pirate) |
+| 0.00% | steady | 2-in-1 - Shuang Wang Ji (Asia) (Pirate) |
+| 0.00% | steady | 2-in-1 - Street Dance + Hit Mouse (China) (En) (Aftermarket) (Unl) |
+| 0.00% | steady | 2002 121-in-1 (Asia) (En) (Pirate) |
+| 0.00% | steady | 2002 61-in-1 (Asia) (En) (Pirate) |
+| 0.00% | steady | 22 Games (China) (En) (Pirate) |
+| 0.00% | steady | 22 Games (China) (En) (Tsang Hai) (Pirate) |
+| 0.00% | steady | 23+222-in-1 (245-in-1 Real Game) (China) (Aftermarket) (Pirate) |
+| 0.00% | steady | 23-in-1 Super Game (Europe) (En,Ja) (Pirate) |
+| 0.00% | steady | 23-in-1 Super Game (Europe) (K23-001) (Pirate) |
+| 0.00% | steady | 24K 4-in-1 Baozheng Zhen Ka Quanji (Asia) (En) (Pirate) |
+| 0.00% | steady | 29~10MG-in-1 (Asia) (En,Ja) (Pirate) |
+| 0.00% | steady | 3-in-1 - Spartan Super 1998 (Asia) (En) (Pirate) |
+| 0.00% | steady | 30 Games (Brazil) (En) (Pirate) |
+| 0.00% | steady | 32-in-1 Speech Educational Software (Asia) (En) (Pirate) |
+| 0.00% | steady | 3D Block (Asia) (En) (Hwang Shinwei) (Unl) |
+| 0.00% | steady | 3D Block (Taiwan) (En) (Hwang Shinwei) (Pirate) |
+| 0.00% | steady | 4-in-1 (AP009) (Asia) (En) (Pirate) |
+| 0.00% | steady | 4-in-1 (Asia) (En) (AP009) (Pirate) |
+| 0.00% | steady | 4-in-1 (CK-001) (Asia) (En) (Pirate) |
+| 0.00% | steady | 4-in-1 (CK-001) (Taiwan) (En) (Pirate) |
+| 0.00% | steady | 4-in-1 (SN 406) (Asia) (En) (Pirate) |
+| 0.00% | steady | 4-in-1 - BattleCity - Pac-Man - Galaga - Ice Climber (Asia) (En) (Pirate) |
+| 0.00% | steady | 400-in-1 (Asia) (En) (NTDEC) (Pirate) |
+| 0.00% | steady | 42 Games (China) (En) (Pirate) |
+| 0.00% | steady | 42 Games (China) (En) (Tsang Hai) (Pirate) |
+| 0.00% | steady | 42-in-1 (Asia) (En) (Pirate) |
+| 0.00% | steady | 45-in-1 Educational Computer (Asia) (En) (Pirate) |
+| 0.00% | steady | 48-in-1 Educational Computer (Spain) (Pirate) |
+| 0.00% | steady | 48-in-1 Educational Computer 2000 (Asia) (En) (Pirate) |
+| 0.00% | steady | 5-in-1 (1993) (Asia) (En) (Unl) |
+| 0.00% | steady | 500-in-1 - Unchained Melody (Asia) (En) (Pirate) |
+| 0.00% | steady | 52-in-1 (Asia) (En) (VT302) (Pirate) |
+| 0.00% | steady | 52-in-1 (VT302) (Asia) (En) (Pirate) |
 
 ## No measurement / oracle errors
 

@@ -1359,13 +1359,25 @@ fn hash_frame(hash: u64, core: &dyn Core) -> u64 {
 /// tile, attribute and emphasis differences.
 fn hash_geometry(data: &[u8]) -> u64 {
     use std::collections::HashMap;
-    let mut colours: HashMap<[u8; 4], u32> = HashMap::with_capacity(64);
+    // Canonical colour order: assign indices by sorted RGB rather than by
+    // first appearance. This is stable when two emulators use different
+    // palette values but render the same colour-index pattern.
+    let mut palette: Vec<[u8; 3]> = data
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| [pixel[0], pixel[1], pixel[2]])
+        .collect();
+    palette.sort_unstable();
+    palette.dedup();
+    let colours: HashMap<[u8; 3], u32> = palette
+        .iter()
+        .enumerate()
+        .map(|(index, colour)| (*colour, index as u32))
+        .collect();
     let mut indices = Vec::with_capacity(data.len());
     for pixel in data.as_chunks::<4>().0 {
-        let next = colours.len() as u32;
-        let index = *colours
-            .entry([pixel[0], pixel[1], pixel[2], pixel[3]])
-            .or_insert(next);
+        let index = colours[&[pixel[0], pixel[1], pixel[2]]];
         indices.extend_from_slice(&index.to_le_bytes());
     }
     fnv1a(FNV_OFFSET, &indices)

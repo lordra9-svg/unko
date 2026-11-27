@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Unko compatibility</title>
   <meta name="description" content="Per-game compatibility tracker for the Unko NES, SNES and N64 cores.">
-  <link rel="stylesheet" href="styles.css?v=20261126e">
+  <link rel="stylesheet" href="styles.css?v=20261127a">
 </head>
 <body>
   <header class="hero">
@@ -49,9 +49,10 @@
       <dl id="status-legend"></dl>
       <p class="accuracy-note">
         <strong>A</strong> = ares (primary oracle), <strong>R</strong> = RustyNES
-        (secondary). “Steady” starts at frame 30. SNES rows compare the final
-        frame and raw S-DSP PCM; NES audio is not scored because those oracle
-        streams are DC-blocked.
+        (secondary). NES NTSC uses steady-state geometry from frame 30; NES PAL
+        uses calibrated final-frame pixels. SNES rows compare the final frame
+        and raw S-DSP PCM. Audio is not scored for NES because the oracle streams
+        are differently filtered.
       </p>
     </section>
   </main>
@@ -77,6 +78,6 @@
     </p>
   </footer>
 
-  <script src="app.js?v=20261126e"></script>
+  <script src="app.js?v=20261127a"></script>
 </body>
 </html>
