@@ -5,20 +5,20 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 **Metric:** newly re-run letters use the NES palette-index agreement over frames 30+ (`video_pct`); records not yet revisited keep their historical steady-geometry or final-frame value.
 
 - NES archives: **7101**
-- Measured: **7037**
-- Measured with the palette-index metric: **905**
-- Below 100% by the relevant ares metric: **529**
+- Measured: **7036**
+- Measured with the palette-index metric: **906**
+- Below 100% by the relevant ares metric: **527**
 - Ignored tagged dumps below 100%: **1854**
-- No measurement / oracle error: **41**
+- No measurement / oracle error: **42**
 - Ignored tagged dumps with errors: **23**
-- Total needing attention: **570**
+- Total needing attention: **569**
 
 | Band | Games |
 |---|---:|
 | 0-50% | 16 |
-| 50-90% | 58 |
-| 90-99% | 110 |
-| 99-100% | 345 |
+| 50-90% | 56 |
+| 90-99% | 107 |
+| 99-100% | 348 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
@@ -56,7 +56,6 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 61.11% | index | Swords and Serpents (USA) |
 | 62.34% | index | Oeka Kids - Anpanman no Hiragana Daisuki (Japan) |
 | 62.92% | index | Swords and Serpents (France) |
-| 64.88% | index | Ganbare Goemon Gaiden - Kieta Ougon Kiseru (Japan) |
 | 65.22% | index | Jajamaru Gekimaden - Maboroshi no Kinmajou (Japan) |
 | 65.56% | index | Major League Baseball (USA) |
 | 65.56% | index | Major League Baseball (USA) (Rev 1) |
@@ -76,6 +75,7 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 77.48% | index | Moero!! Pro Yakyuu (Japan) |
 | 77.48% | index | Moero!! Pro Yakyuu (Japan) (Rev 1) |
 | 77.48% | index | Moero!! Pro Yakyuu (Japan) (Rev 2) |
+| 77.48% | index | Moero!! Pro Yakyuu (Japan) (Rev 3) |
 
 ## No measurement / oracle errors
 
@@ -93,8 +93,9 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | Galaxian (Japan) (Rev 1) | ours: unko: invalid ROM: image truncated: expected 40976 bytes, got 16400 |
 | Galaxian (World) (Namcot Collection, Namco Museum Archives Vol 1) | ours: unko: invalid ROM: image truncated: expected 40976 bytes, got 16400 |
 | Galaxian (World) (Rev 1) (Evercade) | ours: unko: invalid ROM: image truncated: expected 40976 bytes, got 16400 |
-| Ganbare Goemon Gaiden - Kieta Ougon Kiseru (Japan) (Rev 1) | core renders a blank frame (mapper not implemented or boot failure) |
 | Gegege no Kitarou 2 - Youkai Gundan no Chousen (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
+| Gradius II (Japan) (En) | core renders a blank frame (mapper not implemented or boot failure) |
+| Gradius II (Japan) (En) (Virtual Console) | core renders a blank frame (mapper not implemented or boot failure) |
 | Idemitsu - Space College - Kikenbutsu no Yasashii Butsuri to Kagaku (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Kid Dracula (World) (Castlevania Anniversary Collection) | core renders a blank frame (mapper not implemented or boot failure) |
 | Kyuukyoku Harikiri Koushien (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |

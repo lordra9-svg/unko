@@ -135,4 +135,4 @@ jobs:
       - name: Build release CLI
         run: cargo build --release -p unko-cli
       - name: Performance budget
-        run: ./target/release/unko bench --synthetic 3000 --min-fps 300
+        run: ./target/release/unko bench --synthetic 3000 --min-fps 200

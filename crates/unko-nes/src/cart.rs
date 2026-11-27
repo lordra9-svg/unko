@@ -23895,7 +23895,12 @@ impl Mapper for Vrc {
                 let offset = usize::from(address - 0x6000) % self.prg_ram.len();
                 return self.prg_ram[offset];
             }
-            // VRC2 exposes a one-bit latch in $6000-$6FFF and open bus above.
+            // VRC2 boards with save RAM map it at $6000-$7FFF; without RAM
+            // they expose a one-bit latch in $6000-$6FFF and open bus above.
+            if !self.prg_ram.is_empty() {
+                let offset = usize::from(address - 0x6000) % self.prg_ram.len();
+                return self.prg_ram[offset];
+            }
             if address < 0x7000 {
                 return 0x60 | self.vrc2_latch;
             }
@@ -23934,7 +23939,10 @@ impl Mapper for Vrc {
         }
         if address < 0x8000 {
             if !self.variant.is_vrc4() {
-                if address < 0x7000 {
+                if !self.prg_ram.is_empty() {
+                    let offset = usize::from(address - 0x6000) % self.prg_ram.len();
+                    self.prg_ram[offset] = value;
+                } else if address < 0x7000 {
                     self.vrc2_latch = value & 1;
                 }
                 return;
@@ -24022,6 +24030,12 @@ impl Mapper for Vrc {
         if let Some(byte) = self.chr.get_mut(index) {
             *byte = value;
         }
+    }
+
+    /// VRC2/VRC4 CHR registers take effect immediately; Konami games switch
+    /// banks at raster splits.
+    fn chr_mapping_write(&self, address: u16) -> bool {
+        address >= 0x8000
     }
 
     fn mirroring(&self) -> Mirroring {

@@ -1204,20 +1204,30 @@ fn synthetic_benchmark_rom() -> Vec<u8> {
     for byte in &mut rom[16..16 + prg_len] {
         *byte = 0xEA;
     }
-    let code: [u8; 18] = [
+    let code: [u8; 13] = [
         0x78, // SEI
         0xD8, // CLD
         0xA2, 0xFF, // LDX #$FF
         0x9A, // TXS
         0xA9, 0x00, // LDA #$00
         0x8D, 0x00, 0x20, // STA $2000
-        0xA9, 0x1E, // LDA #$1E
-        0x8D, 0x01, 0x20, // STA $2001
         0x4C, 0x20, 0x80, // JMP $8020
     ];
     rom[16..16 + code.len()].copy_from_slice(&code);
-    // $8020: INC $00 / JMP $8020
-    rom[16 + 0x20..16 + 0x25].copy_from_slice(&[0xE6, 0x00, 0x4C, 0x20, 0x80]);
+    // $8020: wait for vblank then enable rendering. The delay puts the $2001
+    // write outside the PPU warm-up window, so the benchmark always measures
+    // the real background renderer rather than the backdrop fast path.
+    let enable: [u8; 20] = [
+        0xAD, 0x02, 0x20, // LDA $2002
+        0x10, 0xFB, // BPL $8020
+        0xAD, 0x02, 0x20, // LDA $2002
+        0x30, 0xFB, // BMI $8025
+        0xA9, 0x1E, // LDA #$1E
+        0x8D, 0x01, 0x20, // STA $2001
+        0xE6, 0x00, // INC $00
+        0x4C, 0x2F, 0x80, // JMP $802F
+    ];
+    rom[16 + 0x20..16 + 0x20 + enable.len()].copy_from_slice(&enable);
     let vector = 16 + prg_len - 4;
     rom[vector] = 0x00;
     rom[vector + 1] = 0x80;

@@ -114,6 +114,11 @@ Three mapper defects surfaced while re-measuring the C list:
   key and read `$FF` until it is written. The key is not in the iNES header,
   so the core identifies the 16 known images by an FNV hash of PRG+CHR and
   unlocks on the matching write. All 16 now measure 100%.
+- **VRC2 raster CHR and save RAM.** VRC2/4 CHR registers now refresh the PPU
+  window immediately (Konami games switch banks at raster splits), and VRC2
+  boards with 8 KiB WRAM map it at `$6000-$7FFF` instead of returning the
+  open-bus latch. Ganbare Goemon Gaiden and its revision went from 65% / 0%
+  to 100% / 99.999%, and Gaiden 2 to 100%.
 
 ### Air Fortress (Japan) — PPU register writes during warm-up
 
@@ -150,6 +155,11 @@ The walk-through skips dumps tagged `(Unl)`, `(Pirate)`, `(Beta)`, `(Bios)`,
 `(Aftermarket)`, `(Proto)` or `(Demo)`, plus `[BIOS]` images;
 `build_shortfall.py` keeps them out of the actionable list but still reports
 how many were ignored.
+
+The headless performance benchmark now waits for vblank before enabling
+rendering, so it measures the real background renderer. (Previously the PPU
+warm-up window swallowed the single `$2001` write, making the benchmark a
+backdrop-only fast path.) The CI budget is 200 fps accordingly.
 
 ## Primary NES oracle: ares
 
