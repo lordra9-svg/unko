@@ -79,10 +79,24 @@ python3 tools/ares-nes-accuracy/run_nes.py [limit]
 
 It uses `ARES_SYSTEM=Famicom`, `ARES_AUDIO_RATE=44100`, 120 frames and a
 -3..3 frame alignment search; records append to
-`compatibility/accuracy-ares.jsonl`. The full 7,101-ROM ares pass is running
-under systemd after the SNES stage. At roughly 2.5–3 s/ROM it is expected to
-take around six hours. ares is the **primary** NES oracle; RustyNES remains a
-secondary cross-check and its records are still shown as **R**.
+`compatibility/accuracy-ares.jsonl`. The full 7,101-ROM pass completed in
+about **5h 03m**.
+
+| Metric | Result |
+|---|---:|
+| Archives | 7,101 |
+| Measured | 7,069 |
+| Errors | 32 |
+| Steady geometry 100% | 4,317 / 7,069 (61.1%) |
+| Steady geometry >= 95% | 4,733 (67.0%) |
+| Steady geometry >= 90% | 4,794 (67.8%) |
+| Best full-run median | 98.3193% |
+| Steady median | 100.0% |
+
+ares is the **primary** NES oracle; RustyNES remains a secondary cross-check
+and its records are still shown as **R**. The ares pass has fewer unloadable
+images (32 errors vs 375) but a lower steady-state match than the earlier
+RustyNES pass; the Argus case showed that RustyNES can also render incorrectly.
 
 ares audio is not scored: its host stream is resampled/filtered differently
 from our f32 output.

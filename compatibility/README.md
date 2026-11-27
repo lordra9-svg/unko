@@ -84,19 +84,15 @@ or edited by hand:
 
 ## Accuracy ledger
 
-`accuracy-ares.jsonl` (**primary** ares NES, full pass in progress),
+`accuracy-ares.jsonl` (**primary** ares NES, full 7,101-ROM pass),
 `accuracy.jsonl` (secondary RustyNES NES) and `accuracy-snes.jsonl`
 (ares SNES, full 4,642-ROM/120-frame pass) are append-only, resumable per-ROM
 oracle ledgers. The page shows **A** first and sorts by the ares score when
-available. The page
-loads it over `games.json` by SHA-256 and shows the NES geometry match. The
-current NES stage uses a local RustyNES trace host, 120 frames, and the
-palette-independent geometry hash; the “steady” percentage starts at frame 30.
-Audio is recorded but not scored as exact PCM because RustyNES exposes a
-DC-blocked frontend stream. ares uses the calibrated local capture patch,
-`ARES_SYSTEM=Famicom`, and the same geometry metric; its full pass is deferred
-until after SNES. NES RustyNES completed with 6,726 measured / 375 error;
-4,889 measured ROMs (72.7%) reach 100% steady-state geometry. See
+available. The NES geometry metric is palette-independent; the “steady”
+percentage starts at frame 30. Audio is not scored for NES because ares and
+RustyNES expose differently filtered host streams. Ares NES completed with
+7,069 measured / 32 errors; 4,317 measured ROMs (61.1%) reach 100%
+steady-state geometry. See
 [`docs/accuracy-campaign.md`](../docs/accuracy-campaign.md).
 
 ## How to test a game
