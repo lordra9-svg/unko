@@ -46,7 +46,7 @@ PIXELS = WIDTH * HEIGHT
 # its canvas is the fixed black backdrop. Mask those columns/rows so the
 # comparison covers the area both cores actually render.
 PAL_MASK = [y * WIDTH + x for y in range(1, HEIGHT) for x in range(2, 254)]
-BAD = re.compile(r'\((?:Unl|Pirate|Beta|Bios|Aftermarket)[^)]*\)', re.I)
+BAD = re.compile(r'\((?:Unl|Pirate|Beta|Bios|Aftermarket|Proto)[^)]*\)', re.I)
 
 
 def strip_article(title):

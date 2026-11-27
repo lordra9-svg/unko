@@ -141,6 +141,10 @@ every tile, attribute, emphasis, scroll and sprite difference. Re-runs use
 `tools/ares-nes-accuracy/rerun_index.py <letter>`; the older `run_nes.py` and
 `run_pal.py` records remain in the ledger until their letter is revisited.
 
+The walk-through skips dumps tagged `(Unl)`, `(Pirate)`, `(Beta)`, `(Bios)`,
+`(Aftermarket)` or `(Proto)`; `build_shortfall.py` keeps them out of the
+actionable list but still reports how many were ignored.
+
 ## Primary NES oracle: ares
 
 The local ares capture build now emits a fourth trace field:

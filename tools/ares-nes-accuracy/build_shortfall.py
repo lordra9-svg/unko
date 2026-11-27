@@ -4,11 +4,15 @@
 import csv
 import json
 import os
+import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LEDGER = os.path.join(ROOT, 'compatibility/accuracy-ares.jsonl')
 OUT_MD = os.path.join(ROOT, 'docs/nes-accuracy-not-100.md')
 OUT_CSV = os.path.join(ROOT, 'docs/nes-accuracy-not-100.csv')
+# Campaign policy: unlicensed/pirate/beta/bios/aftermarket/prototype dumps are
+# not part of the walk-through.
+IGNORED = re.compile(r'\((?:Unl|Pirate|Beta|Bios|Aftermarket|Proto)[^)]*\)', re.I)
 
 
 def score(record):
@@ -25,7 +29,12 @@ def main():
     rows = [json.loads(line) for line in open(LEDGER)]
     measured = [row for row in rows if row.get('status') == 'ok']
     errors = [row for row in rows if row.get('status') != 'ok']
-    below = [row for row in measured if score(row) is not None and score(row) < 100]
+    below_all = [row for row in measured if score(row) is not None and score(row) < 100]
+    below = [row for row in below_all if not IGNORED.search(row['title'])]
+    ignored = [row for row in below_all if IGNORED.search(row['title'])]
+    errors_all = [row for row in errors if not IGNORED.search(row['title'])]
+    ignored_errors = [row for row in errors if IGNORED.search(row['title'])]
+    errors = errors_all
     below.sort(key=lambda row: (score(row), row['title']))
     errors.sort(key=lambda row: row['title'])
 
@@ -64,7 +73,9 @@ def main():
         f'- Measured: **{len(measured)}**',
         f'- Measured with the palette-index metric: **{len(index_measured)}**',
         f'- Below 100% by the relevant ares metric: **{len(below)}**',
+        f'- Ignored tagged dumps below 100%: **{len(ignored)}**',
         f'- No measurement / oracle error: **{len(errors)}**',
+        f'- Ignored tagged dumps with errors: **{len(ignored_errors)}**',
         f'- Total needing attention: **{len(below) + len(errors)}**',
         '',
         '| Band | Games |',
