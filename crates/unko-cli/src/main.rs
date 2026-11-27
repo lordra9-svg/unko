@@ -763,10 +763,18 @@ fn run() -> Result<(), Box<dyn Error>> {
             let mut bios: Option<String> = None;
             let mut press_start: Option<u32> = None;
             let mut audio_dir: Option<String> = None;
+            let mut indices_out: Option<String> = None;
+            let mut indices_seq: Option<String> = None;
             while let Some(flag) = args.next() {
                 match flag.as_str() {
                     "--audio-dir" => {
                         audio_dir = Some(args.next().ok_or("--audio-dir needs a path")?);
+                    }
+                    "--indices-out" => {
+                        indices_out = Some(args.next().ok_or("--indices-out needs a path")?);
+                    }
+                    "--indices-seq" => {
+                        indices_seq = Some(args.next().ok_or("--indices-seq needs a path")?);
                     }
                     "--frames" => {
                         frames = args
@@ -846,20 +854,42 @@ fn run() -> Result<(), Box<dyn Error>> {
             };
             core.load(&rom, &options)?;
             let info = core.info();
+            let mut indices_seq_file = match &indices_seq {
+                Some(path) => Some(std::io::BufWriter::new(fs::File::create(path)?)),
+                None => None,
+            };
             let mut text = String::from("# unko trace v1\n");
             text.push_str(&format!("core {}\n", info.id));
             text.push_str(&format!("frames {frames}\n"));
             for frame in 0..frames {
                 core.run_frame()?;
+                if let (Some(file), Some(indices)) = (&mut indices_seq_file, core.video_indices()) {
+                    use std::io::Write;
+                    for index in indices {
+                        file.write_all(&index.to_le_bytes())?;
+                    }
+                }
                 let video = hash_video(FNV_OFFSET, core.as_core_ref());
                 let audio = hash_audio(FNV_OFFSET, core.as_core_ref());
-                let geometry = hash_geometry(core.video().data);
+                let geometry = match core.video_indices() {
+                    Some(indices) => hash_indices(indices),
+                    None => hash_geometry(core.video().data),
+                };
                 if let Some(dir) = &audio_dir {
                     write_audio_dump(dir, frame, core.audio().samples)?;
                 }
                 text.push_str(&format!(
                     "frame {frame} {video:016x} {audio:016x} {geometry:016x}\n"
                 ));
+            }
+            if let Some(path) = &indices_out {
+                let mut bytes = Vec::new();
+                if let Some(indices) = core.video_indices() {
+                    for index in indices {
+                        bytes.extend_from_slice(&index.to_le_bytes());
+                    }
+                }
+                fs::write(path, &bytes)?;
             }
             if with_state {
                 let mut state = Vec::new();
@@ -1355,6 +1385,16 @@ fn hash_frame(hash: u64, core: &dyn Core) -> u64 {
 /// two cores can disagree on every frame while rendering identical geometry
 /// and identical NES colour indices. Re-map each distinct RGBA colour to the
 /// index of its first appearance (scanline order) and hash those indices:
+/// FNV-1a over native colour indices (two little-endian bytes each). Unlike
+/// the RGB hash this is exact: no palette normalisation is needed.
+fn hash_indices(indices: &[u16]) -> u64 {
+    let mut hash = FNV_OFFSET;
+    for index in indices {
+        hash = fnv1a(hash, &index.to_le_bytes());
+    }
+    hash
+}
+
 /// the result is identical for any bijective palette, and still catches real
 /// tile, attribute and emphasis differences.
 fn hash_geometry(data: &[u8]) -> u64 {

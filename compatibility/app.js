@@ -115,7 +115,17 @@ function accuracyMetrics(record) {
     rows.push(["Alignment", `${record.best_shift ?? 0} frame${Math.abs(record.best_shift ?? 0) === 1 ? "" : "s"}`]);
     rows.push(["Audio", "not scored (oracle stream is DC-blocked)"]);
   } else if (record.video_pct != null) {
-    rows.push(["Video (final frame)", `${record.video_pct.toFixed(2)}%`]);
+    const indexMetric = record.metric === "nes-index" || record.final_video_pct != null;
+    rows.push([indexMetric ? "Video (index, steady 30+)" : "Video (final frame)", `${record.video_pct.toFixed(2)}%`]);
+    if (record.final_video_pct != null) {
+      rows.push(["Final frame (index)", `${record.final_video_pct.toFixed(2)}%`]);
+    }
+    if (record.frame_seq_pct != null) {
+      rows.push(["Identical frame hashes (30+)", `${record.frame_seq_pct.toFixed(2)}%`]);
+    }
+    if (record.index_shift != null) {
+      rows.push(["Alignment", `${record.index_shift} frame${Math.abs(record.index_shift) === 1 ? "" : "s"}`]);
+    }
     if (record.audio_pct != null) {
       rows.push(["Audio (raw S-DSP PCM)", `${record.audio_pct.toFixed(2)}%`]);
     }
@@ -441,10 +451,15 @@ function renderTable(system, games) {
             : `steady ${record.steady_geometry_pct.toFixed(2)}%`;
         } else if (record.video_pct != null) {
           value.textContent = `${labels[oracle] ?? oracle} ${record.video_pct.toFixed(2)}%`;
-          value.title = `${oracle}: final-frame pixel match`;
-          detail.textContent = record.audio_pct == null
-            ? "video"
-            : `audio ${record.audio_pct.toFixed(2)}%`;
+          if (record.final_video_pct != null) {
+            value.title = `${oracle}: NES palette-index match, frames 30+ (shift ${record.index_shift ?? 0})`;
+            detail.textContent = `final ${record.final_video_pct.toFixed(2)}%`;
+          } else {
+            value.title = `${oracle}: final-frame pixel match`;
+            detail.textContent = record.audio_pct == null
+              ? "video"
+              : `audio ${record.audio_pct.toFixed(2)}%`;
+          }
         } else {
           continue;
         }

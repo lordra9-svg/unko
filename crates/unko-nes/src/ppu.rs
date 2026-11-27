@@ -263,6 +263,10 @@ pub struct Ppu {
     custom_palette: Vec<[u8; 3]>,
     /// Accumulated RGBA frame (256x240).
     frame: Vec<u8>,
+    /// NES colour index per pixel (`emphasis << 6 | colour`), 256x240. This is
+    /// the PPU's actual output before the RGB palette lookup, so two cores can
+    /// be compared without their differing palettes getting in the way.
+    frame_indices: Vec<u16>,
     /// Background shift registers (MSB is the next pixel).
     bg_lo: u16,
     bg_hi: u16,
@@ -279,6 +283,8 @@ pub struct Ppu {
     spr_active: u8,
     /// Precomputed RGB for the rest of the current background span.
     span_px: [[u8; 3]; 8],
+    /// NES colour index for each pixel of the precomputed span.
+    span_id: [u16; 8],
     /// Dots remaining in the precomputed span (0 = use the per-dot path).
     span_len: u8,
     spr_x: [u8; 8],
@@ -421,6 +427,7 @@ impl Ppu {
             ppu_model: PpuModel::Ppu2C02,
             custom_palette: Vec::new(),
             frame: vec![0; 256 * 240 * 4],
+            frame_indices: vec![0; 256 * 240],
             bg_lo: 0,
             bg_hi: 0,
             bg_attr_lo: 0,
@@ -432,6 +439,7 @@ impl Ppu {
             spr_id: [64; 8],
             spr_active: 0,
             span_px: [[0; 3]; 8],
+            span_id: [0; 8],
             span_len: 0,
             spr_x: [0; 8],
             spr_counting: [false; 8],
@@ -1109,10 +1117,9 @@ impl Ppu {
         }
         self.io_bus = value;
         self.io_bus_age = 0;
-        // The 2C02 ignores these writes for about one frame after reset.
-        if self.warmup_dots > 0 && matches!(index & 7, 0 | 1 | 5) {
-            return;
-        }
+        // The 2C02's output is unstable for about one frame after reset, but
+        // its registers still latch writes; games such as Air Fortress enable
+        // NMI in that window and expect it to stay enabled.
         match index & 7 {
             0 => {
                 let was_enabled = self.ctrl & 0x80 != 0;
@@ -2292,7 +2299,7 @@ impl Ppu {
             if self.spr_active == 0 && dot + 7 <= 256 && self.mask & 0x08 != 0 {
                 let base_x = dot - 1;
                 let shift0 = 15 - u16::from(self.fine_x);
-                for (j, px) in self.span_px.iter_mut().enumerate() {
+                for j in 0..8 {
                     let shift = shift0 - j as u16;
                     let bit = ((self.bg_lo >> shift) & 1) | (((self.bg_hi >> shift) & 1) << 1);
                     let pal =
@@ -2302,13 +2309,14 @@ impl Ppu {
                     if bit as u8 != 0 && !(x < 8 && self.mask & 0x02 == 0) {
                         color_index = (pal as u8) * 4 + bit as u8;
                     }
-                    *px = if color_index == 0 {
+                    self.span_px[j] = if color_index == 0 {
                         // Backdrop is palette RAM index 0; palette[0] holds a
                         // NES colour index, not a palette RAM index.
                         self.palette_rgb[0]
                     } else {
                         self.palette_rgb[usize::from(color_index & 0x1F)]
                     };
+                    self.span_id[j] = self.output_index(color_index);
                 }
                 self.span_len = 8;
             } else {
@@ -2317,12 +2325,15 @@ impl Ppu {
         }
         let x = dot - 1;
         if self.span_len > 0 {
-            let [r, g, b] = self.span_px[(x & 7) as usize];
-            let i = (usize::from(self.scanline) * 256 + usize::from(x)) * 4;
+            let slot = (x & 7) as usize;
+            let [r, g, b] = self.span_px[slot];
+            let p = usize::from(self.scanline) * 256 + usize::from(x);
+            let i = p * 4;
             self.frame[i] = r;
             self.frame[i + 1] = g;
             self.frame[i + 2] = b;
             self.frame[i + 3] = 255;
+            self.frame_indices[p] = self.span_id[slot];
             self.span_len -= 1;
         } else {
             self.render_pixel_dot(x);
@@ -2344,11 +2355,13 @@ impl Ppu {
             }
         }
         let [r, g, b] = self.palette_rgb[0];
-        let i = (usize::from(self.scanline) * 256 + usize::from(x)) * 4;
+        let p = usize::from(self.scanline) * 256 + usize::from(x);
+        let i = p * 4;
         self.frame[i] = r;
         self.frame[i + 1] = g;
         self.frame[i + 2] = b;
         self.frame[i + 3] = 255;
+        self.frame_indices[p] = self.output_index(0);
     }
 
     fn render_pixel_dot(&mut self, x: u16) {
@@ -2405,11 +2418,13 @@ impl Ppu {
             color_index = 0;
         }
         let [r, g, b] = self.palette_rgb[usize::from(color_index & 0x1F)];
-        let i = (usize::from(self.scanline) * 256 + usize::from(x)) * 4;
+        let p = usize::from(self.scanline) * 256 + usize::from(x);
+        let i = p * 4;
         self.frame[i] = r;
         self.frame[i + 1] = g;
         self.frame[i + 2] = b;
         self.frame[i + 3] = 255;
+        self.frame_indices[p] = self.output_index(color_index);
     }
 
     fn increment_coarse_x(&mut self) {
@@ -2471,6 +2486,23 @@ impl Ppu {
     #[must_use]
     pub fn video(&self) -> &[u8] {
         &self.frame
+    }
+
+    /// The most recently presented frame as NES colour indices, one per pixel
+    /// (`emphasis << 6 | colour`, 256x240).
+    #[must_use]
+    pub fn video_indices(&self) -> &[u16] {
+        &self.frame_indices
+    }
+
+    /// Resolves a palette-RAM index to the PPU's 9-bit output colour, keeping
+    /// emphasis and greyscale so comparisons match the reference core.
+    fn output_index(&self, palette_index: u8) -> u16 {
+        let emph = u16::from((self.mask >> 5) & 0x07);
+        let greyscale = self.mask & 0x01 != 0;
+        let colour =
+            self.palette[usize::from(palette_index & 0x1F)] & if greyscale { 0x30 } else { 0x3F };
+        (emph << 6) | u16::from(colour)
     }
 
     /// Renders one frame of the UM6578 enhanced video mode: word name tables,
@@ -2955,19 +2987,19 @@ mod tests {
     }
 
     #[test]
-    fn warmup_masks_control_and_scroll_but_not_address() {
+    fn warmup_does_not_swallow_register_writes() {
+        // Air Fortress' reset code enables NMI before the PPU warm-up window
+        // ends and never writes $2000 again; the write must latch.
         let mut ppu = Ppu::new(Timing::NTSC, vec![0; 0x2000], true, false);
         assert!(ppu.warmup_dots > 0);
         ppu.write_register(0x2000, 0x80);
         ppu.write_register(0x2001, 0x1E);
-        assert_eq!(ppu.ctrl, 0);
-        assert_eq!(ppu.mask, 0);
+        assert_eq!(ppu.ctrl, 0x80);
+        // $2001 has a two-dot register latency (three dot ticks to apply).
+        ppu.step_dots(3);
+        assert_eq!(ppu.mask, 0x1E);
         ppu.write_register(0x2005, 0x12);
-        assert!(!ppu.write_latch, "the $2005 latch must not toggle");
-        // $2006 is not masked: games that probe CHR early rely on it.
-        ppu.write_register(0x2006, 0x20);
-        ppu.write_register(0x2006, 0x40);
-        assert_eq!(ppu.v, 0x2040);
+        assert!(ppu.write_latch, "the $2005 latch must toggle");
         ppu.end_warmup();
         ppu.write_register(0x2000, 0x80);
         assert_eq!(ppu.ctrl, 0x80);

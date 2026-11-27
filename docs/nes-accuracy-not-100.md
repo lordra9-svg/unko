@@ -1,21 +1,22 @@
 # NES games not at 100% accuracy (ares primary)
 
-Generated from `compatibility/accuracy-ares.jsonl` — **ares** primary, 120 frames. RustyNES remains secondary.
+Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frames. RustyNES remains secondary.
 
-**Metric:** NTSC uses palette-independent steady-state geometry from frame 30; PAL and mapper-16 exceptions use the calibrated final-frame exact-pixel comparison.
+**Metric:** newly re-run letters use the NES palette-index agreement over frames 30+ (`video_pct`); records not yet revisited keep their historical steady-geometry or final-frame value.
 
 - NES archives: **7101**
 - Measured: **7069**
-- Below 100% by the relevant ares metric: **2699**
+- Measured with the palette-index metric: **49**
+- Below 100% by the relevant ares metric: **2680**
 - No measurement / oracle error: **32**
-- Total needing attention: **2731**
+- Total needing attention: **2712**
 
 | Band | Games |
 |---|---:|
-| 0–50% | 1724 |
-| 50–90% | 311 |
-| 90–99% | 644 |
-| 99–100% | 20 |
+| 0-50% | 1708 |
+| 50-90% | 307 |
+| 90-99% | 626 |
+| 99-100% | 39 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 

@@ -380,6 +380,12 @@ impl Core for AccuracyCore {
         }
     }
 
+    fn video_indices(&self) -> Option<&[u16]> {
+        self.system
+            .as_ref()
+            .map(|system| system.ppu.video_indices())
+    }
+
     fn audio(&self) -> AudioBuffer<'_> {
         AudioBuffer {
             samples: &self.audio,

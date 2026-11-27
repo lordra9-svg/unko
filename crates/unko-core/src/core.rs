@@ -63,6 +63,15 @@ pub trait Core {
     /// The most recently completed frame.
     fn video(&self) -> FrameBuffer<'_>;
 
+    /// The most recently completed frame as the system's native colour
+    /// indices, when the system exposes them (currently NES).
+    ///
+    /// Indices are palette-independent, so accuracy comparisons can ignore
+    /// per-emulator RGB palette differences.
+    fn video_indices(&self) -> Option<&[u16]> {
+        None
+    }
+
     /// Audio produced by the most recent [`Core::run_frame`].
     fn audio(&self) -> AudioBuffer<'_>;
 

@@ -94,6 +94,37 @@ frame` covers the 8 KiB and 4 KiB modes. The corrected screen matches RustyNES
 Bayou records now carry calibrated pixel values (79.6-79.8% exact, 83.7%
 palette-normalized).
 
+### Air Fortress (Japan) — PPU register writes during warm-up
+
+The core used to drop `$2000`/`$2001`/`$2005` writes during the ~29,658-cycle
+post-reset PPU warm-up window. Air Fortress enables NMI in that window and
+never writes `$2000` again, so it hung in its frame-wait loop with rendering
+off. The registers now latch writes immediately; the warm-up only describes
+the unstable output, not ignored registers. The regression test became
+`warmup_does_not_swallow_register_writes`, and Air Fortress now matches ares.
+
+### Palette-index metric (2026-11-27)
+
+Sorted-RGB "geometry" still scored visually identical frames near zero when
+the two emulators' palettes ordered the same NES colours differently (for
+example Adventures of Lolo 3 and Alfred Chicken during fades). The campaign is
+being re-run letter by letter with a stricter, palette-independent metric:
+
+- Both cores dump the PPU's **native 9-bit colour index** per pixel
+  (`emphasis << 6 | CGRAM colour`, greyscale applied), before either RGB
+  palette. Unko exposes it as `unko trace --indices-seq`; the ares capture
+  writes `frame.raw.idxseq`.
+- `video_pct` is the mean per-pixel index agreement over frames 30-119 using
+  the best +/-3 frame alignment.
+- `final_video_pct` is the last frame's agreement, and `frame_seq_pct` is the
+  fraction of frames whose index hashes are byte-identical (a strict
+  diagnostic).
+
+This removes per-emulator RGB differences from the score while still catching
+every tile, attribute, emphasis, scroll and sprite difference. Re-runs use
+`tools/ares-nes-accuracy/rerun_index.py <letter>`; the older `run_nes.py` and
+`run_pal.py` records remain in the ledger until their letter is revisited.
+
 ## Primary NES oracle: ares
 
 The local ares capture build now emits a fourth trace field:

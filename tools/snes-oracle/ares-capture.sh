@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # ares headless capture: ares-capture.sh <rom> <frames> <outdir>
 #
-# Writes <outdir>/frame.raw   last captured RGBA8 frame (564x242 for NTSC)
-#        <outdir>/audio.f32   whole run, interleaved stereo f32 at $ARES_AUDIO_RATE
+# Writes <outdir>/frame.raw        last captured RGBA8 frame (256x240)
+#        <outdir>/frame.raw.idx    last frame as u16 NES colour indices
+#        <outdir>/frame.raw.idxseq all frames as u16 NES colour indices
+#        <outdir>/audio.f32        whole run, interleaved stereo f32 at $ARES_AUDIO_RATE
 #
 # Set ARES_RAW_AUDIO=<path> to also capture the S-DSP's pre-resampler i16
 # output (see README.md); the local ares build must include that hook.
