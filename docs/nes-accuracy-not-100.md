@@ -5,18 +5,18 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 **Metric:** newly re-run letters use the NES palette-index agreement over frames 30+ (`video_pct`); records not yet revisited keep their historical steady-geometry or final-frame value.
 
 - NES archives: **7101**
-- Measured: **7069**
-- Measured with the palette-index metric: **49**
-- Below 100% by the relevant ares metric: **2680**
-- No measurement / oracle error: **32**
-- Total needing attention: **2712**
+- Measured: **7066**
+- Measured with the palette-index metric: **112**
+- Below 100% by the relevant ares metric: **2664**
+- No measurement / oracle error: **35**
+- Total needing attention: **2699**
 
 | Band | Games |
 |---|---:|
-| 0-50% | 1708 |
-| 50-90% | 307 |
-| 90-99% | 626 |
-| 99-100% | 39 |
+| 0-50% | 1693 |
+| 50-90% | 305 |
+| 90-99% | 598 |
+| 99-100% | 68 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
@@ -79,8 +79,11 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
 | Game | Error |
 |---|---|
+| Battletoads-Double Dragon (USA, Europe) (Retro-Bit) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Bingo (Asia) (TXC) (Unl) | ours: unko: invalid ROM: image truncated: expected 40976 bytes, got 16400 |
 | Bingo (Taiwan) (En) (Unl) | ours: unko: invalid ROM: image truncated: expected 40976 bytes, got 16400 |
+| Bionic Commando (USA) (Capcom Classics Mini Mix) | ares capture is a uniform blank frame (board unsupported by the oracle) |
+| Bionic Commando (USA) (Capcom Classics Mini Mix) [b] | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Controller Test Program (Japan) (En) (Test Program) | ours: unko: invalid ROM: image truncated: expected 40976 bytes, got 16400 |
 | Fuzhou Coolboy 400-in-1 Real Game (World) (Aftermarket) (Pirate) | ours: unko: ROM is larger than the 67108864-byte limit |
 | Galaxian (Japan) | ours: unko: invalid ROM: image truncated: expected 40976 bytes, got 16400 |

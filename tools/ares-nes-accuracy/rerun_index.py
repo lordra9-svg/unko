@@ -149,18 +149,24 @@ def process(title, rom, sha, region, tmp):
         env['ARES_REGION'] = 'PAL'
     subprocess.run([CAPTURE, rom, str(FRAMES), ref_dir], check=True,
                    capture_output=True, env=env)
-    metrics = index_metrics(
-        load_seq(ours_seq),
-        load_seq(os.path.join(ref_dir, 'frame.raw.idxseq')),
-        PAL_MASK if region == 'PAL' else None,
-    )
+    ours = load_seq(ours_seq)
+    ref = load_seq(os.path.join(ref_dir, 'frame.raw.idxseq'))
+    metrics = index_metrics(ours, ref, PAL_MASK if region == 'PAL' else None)
+    last = ref[(FRAMES - 1) * PIXELS:FRAMES * PIXELS]
+    ours_last = ours[(FRAMES - 1) * PIXELS:FRAMES * PIXELS]
+    if len(set(last)) == 1 and len(set(ours_last)) > 1:
+        metrics.update({
+            'status': 'error',
+            'error': 'ares capture is a uniform blank frame (board unsupported by the oracle)',
+        })
     if region != 'PAL':
         # PAL hashes still contain ares' clipped border pixels, so the strict
         # frame-sequence diagnostic is only meaningful for NTSC.
         metrics['frame_seq_pct'] = frame_sequence_pct(
             ours_trace, os.path.join(ref_dir, 'trace.txt'), metrics['index_shift']
         )
-    metrics.update({'tested': '2026-11-27', 'status': 'ok', 'metric': 'nes-index'})
+    metrics.setdefault('status', 'ok')
+    metrics.update({'tested': '2026-11-27', 'metric': 'nes-index'})
     if region != 'NTSC':
         metrics['region'] = region
     return metrics
