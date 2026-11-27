@@ -91,8 +91,6 @@ AV Mei Shaonu Zhanshi (Asia) (Unl),ok,0.0,steady geometry,0.0,,,14.5299,14.1667,
 AV Super Real Pachinko (Japan) (Unl),ok,0.0,steady geometry,0.0,,,5.1282,4.1667,120,,76d902fca25a74db94661fe491501155c1231441b34b09484345b266f59e9344
 "Addams Family, The - Pugsley's Scavenger Hunt (USA) (Beta 1)",ok,0.0,steady geometry,0.0,,,16.2393,15.8333,120,,c6041dd6a580d7c005c3ec775c0c2adfb1d451fbca385b967916b299a6f798d0
 "Addams Family, The - Uncle Fester's Quest (USA) (Beta)",ok,0.0,steady geometry,0.0,,,2.521,1.6667,120,,8611fd8d091d0d60a71a40710049944cba32a0a2016ba569e64374f9341b1ffd
-"Adventures of Bayou Billy, The (USA)",ok,0.0,steady geometry,0.0,,,10.9244,10.0,120,,3ea11f1d4df0ed63aabec579c01b5e9cb12cfe7c3b40028cab317cbf23567ca5
-"Adventures of Bayou Billy, The (USA) (Virtual Console)",ok,0.0,steady geometry,0.0,,,10.9244,10.0,120,,4174612b9a01a65811cb081d530f3acff7529347595464dbfec18838d5fc92dc
 "Adventures of Lex and Grim, The (World) (Aftermarket) (Unl)",ok,0.0,steady geometry,0.0,,,0.0,0.0,120,,52b27c8fbca4f0911821bf89f0c8360c3bdce27446ff24751cabbf34f6c9ea23
 Ai Senshi Nicol (Asia) (Ja) (Kaiser) (Pirate),ok,0.0,steady geometry,0.0,,,7.6923,7.5,120,,9d7e3702c142ebe8fc465456bd9efc52b07d8208072f3135f2aa36e97a9ab64a
 Ai Senshi Nicol (Asia) (Ja) (Whirlwind Manu) (LH51) (Pirate),ok,0.0,steady geometry,0.0,,,15.3846,15.0,120,,3174c766193936a8bb9c52b97fc7f7ecf667d9c651f3ac2b73f201ed662182c9
@@ -1856,7 +1854,6 @@ Go! Benny! (Taiwan) (En) (Unl),ok,75.5556,steady geometry,75.5556,,,74.5763,73.3
 Kuku-Ruku (World) (Demo 3) (Aftermarket) (Unl),ok,75.5556,steady geometry,75.5556,,,79.8319,16.6667,120,,07ffb4b1b7b37c905fb70ea5f0cd4932bdfceffdfa2d813a61bb1a2e7143083a
 Spartan X 2 (Japan) (Retro-Bit Generations),ok,75.5556,steady geometry,75.5556,,,80.6723,68.3333,120,,abd12150c76d384008ee5a70c1b84735b50e4f63e10c619781f11e7681dbdc5d
 Tasac (Asia) (En) (Unl),ok,75.5556,steady geometry,75.5556,,,65.5462,57.5,120,,7db8ade874bb45c046b167ade46af44fa4784c686f38c1b9f028ebf0d1ca81e6
-"Adventures of Bayou Billy, The (Europe)",ok,75.9294,final-frame pixel,,75.9294,79.8958,,,120,,a3dadb1422e2a8fa242b977678287ac043fff7cd9c51eaab11725bec4f3db74a
 Nangoku Shirei!! - Spy vs Spy (Japan),ok,76.1364,steady geometry,76.1364,,,63.5593,55.0,120,,b4fd0445870cffd33d8899a4debd8772f1c01e3881af141f26fc1a3772f5f3fa
 Spy vs Spy II - The Island Caper (USA) (Proto),ok,76.1364,steady geometry,76.1364,,,63.5593,55.0,120,,b200626cb69f3c0a4b8d038549f77880dbb2ad6c42d62746da4fbe754abaed6d
 "Adventures of Rad Gravity, The (Europe)",ok,76.2077,final-frame pixel,,76.2077,76.5104,,,120,,fb5d43cd7d89e710b3d6fdf2c2837c9b24cad55da7dbf85c1a1ba367ac3b182a
@@ -1892,6 +1889,9 @@ Over Horizon (Europe),ok,79.113,final-frame pixel,,79.113,91.7269,,,120,,63591a2
 Double Dragon (Europe),ok,79.266,final-frame pixel,,79.266,86.2386,,,120,,d2984563d7c75b1f7ef77f4a18642ae86a66af47ef9e4d4635514c30c095060e
 Maniac Mansion (USA) (Limited Run Games),ok,79.3103,steady geometry,79.3103,,,82.0513,80.0,120,,3465bdbc3541c7223df074ac27558eaa8ac730925e6f2b4bd393a3de1a89ca8c
 Captain Comic - The Adventure (Europe) (Unl),ok,79.3229,final-frame pixel,,79.3229,91.8148,,,120,,29519bea3ea87db6dbfdc43f8cf2184a37f174353fe122e523de1317272d1e6e
+"Adventures of Bayou Billy, The (Europe)",ok,79.5898,final-frame pixel,,79.5898,83.6849,,,120,,a3dadb1422e2a8fa242b977678287ac043fff7cd9c51eaab11725bec4f3db74a
+"Adventures of Bayou Billy, The (USA)",ok,79.8145,final-frame pixel,,79.8145,83.8623,,,120,,3ea11f1d4df0ed63aabec579c01b5e9cb12cfe7c3b40028cab317cbf23567ca5
+"Adventures of Bayou Billy, The (USA) (Virtual Console)",ok,79.8145,final-frame pixel,,79.8145,83.8623,,,120,,4174612b9a01a65811cb081d530f3acff7529347595464dbfec18838d5fc92dc
 Lupin Sansei - Pandora no Isan (Japan),ok,80.0,steady geometry,80.0,,,84.0336,83.3333,120,,bbedc7b8735c8cdbb6f313011df7ca87d520dcedd21a252131641cf4bf77171a
 Saturn Smash (World) (Aftermarket) (Unl),ok,80.0,steady geometry,80.0,,,83.1933,81.6667,120,,e6e0ced18d3bb809dc5900da5370aab3a5b9352b949118fdff8f71d08eb9784e
 Goal! (Europe),ok,80.0602,final-frame pixel,,80.0602,86.8245,,,120,,6999cc314c73647580151afbdac7060c12034f1a7e091f59ed252e21aee118f4

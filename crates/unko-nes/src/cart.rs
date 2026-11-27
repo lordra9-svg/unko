@@ -2323,6 +2323,13 @@ impl Mapper for Mmc1 {
         }
     }
 
+    /// MMC1 latches a CHR bank as soon as the fifth serial write lands, so
+    /// mid-frame CHR splits (e.g. Bayou Billy's title screen) need the PPU
+    /// copy refreshed immediately rather than once per frame.
+    fn chr_mapping_write(&self, address: u16) -> bool {
+        address >= 0x8000
+    }
+
     fn chr_ram_map(&self) -> Option<[u8; 8]> {
         if !self.chr_ram || self.chr.len() != 0x2000 {
             return None;

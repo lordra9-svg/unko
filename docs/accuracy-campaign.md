@@ -79,6 +79,21 @@ _and_refresh_the_ppu_copy`. The corrected frame matches RustyNES exactly; ares
 reports 83.73% exact pixels and 99.71% palette-normalized on the final frame.
 The ares record now carries those calibrated values.
 
+### Adventures of Bayou Billy, The (USA/Europe) — MMC1 mid-frame CHR split
+
+Bayou Billy's title screen writes a new CHR bank at scanline ~146 so the logo
+and the menu/copyright text use different tile sets. MMC1 latches the bank on
+the fifth serial write, but the PPU's CHR copy was only synchronised once per
+frame, so the lower half of the screen rendered from the logo bank and came
+out blank.
+
+`Mmc1::chr_mapping_write` now reports `$8000-$FFFF` writes, which refreshes the
+PPU window immediately; `mmc1_chr_bank_write_refreshes_the_pattern_window_mid_
+frame` covers the 8 KiB and 4 KiB modes. The corrected screen matches RustyNES
+(99.5% exact); ares renders the scanline-skewed logo differently, so the three
+Bayou records now carry calibrated pixel values (79.6-79.8% exact, 83.7%
+palette-normalized).
+
 ## Primary NES oracle: ares
 
 The local ares capture build now emits a fourth trace field:

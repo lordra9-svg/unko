@@ -3526,6 +3526,44 @@ mod tests {
     }
 
     #[test]
+    fn mmc1_chr_bank_write_refreshes_the_pattern_window_mid_frame() {
+        // Bayou Billy's title screen switches CHR banks at scanline ~146 so
+        // the logo and the menu/copyright text use different tile sets. The
+        // mapper latches the bank on the fifth serial write, and the renderer
+        // reads its own `ppu.chr` copy, so that copy must refresh right away.
+        let rom = crate::cart::tests::synth_banked(1, 128, 128);
+        let mut system = System::from_ines(&rom).expect("load");
+        assert_eq!(system.cart.mapper(), 1);
+        assert_eq!(system.ppu.chr[0], 0x80);
+
+        // 8 KiB mode (control bit 4 clear): bank number is chr0 bits 4-1,
+        // so value 4 selects the 8 KiB bank starting at 16 KiB.
+        for bit in 0..5 {
+            system.cycle_count += 2;
+            CpuBus::write(&mut system, 0xA000, (4 >> bit) & 1);
+        }
+        assert_eq!(system.ppu.chr[0], 0x90);
+
+        // 4 KiB mode: the two halves select independent banks immediately.
+        for bit in 0..5 {
+            system.cycle_count += 2;
+            CpuBus::write(&mut system, 0x8000, (0x10 >> bit) & 1);
+        }
+        for bit in 0..5 {
+            system.cycle_count += 2;
+            CpuBus::write(&mut system, 0xA000, (5 >> bit) & 1);
+        }
+        // 4 KiB bank 5 starts at 1 KiB bank 20 (0x94).
+        assert_eq!(system.ppu.chr[0], 0x94);
+        for bit in 0..5 {
+            system.cycle_count += 2;
+            CpuBus::write(&mut system, 0xC000, (6 >> bit) & 1);
+        }
+        // The upper half then uses 4 KiB bank 6 = 1 KiB bank 24 (0x98).
+        assert_eq!(system.ppu.chr[0x1000], 0x98);
+    }
+
+    #[test]
     fn namco163_nametable_pages_select_ciram_and_chr_rom() {
         // 128 KiB PRG, 128 KiB CHR (128 x 1 KiB banks).
         let prg_len = 128 * 1024;

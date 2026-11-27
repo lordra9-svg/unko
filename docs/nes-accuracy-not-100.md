@@ -12,8 +12,8 @@ Generated from `compatibility/accuracy-ares.jsonl` — **ares** primary, 120 fra
 
 | Band | Games |
 |---|---:|
-| 0–50% | 1726 |
-| 50–90% | 309 |
+| 0–50% | 1724 |
+| 50–90% | 311 |
 | 90–99% | 644 |
 | 99–100% | 20 |
 

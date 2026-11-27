@@ -77,7 +77,7 @@ Reference gates:
 - mapper matrix (Holy Mapperel, blargg MMC3, MMC5, VRC2a, MMC1-A12):
   **65/65**
 - AccuracyCoin v3.1.0 isolated: **146/146 non-DRAW**, 0 failed, 5 DRAW skips
-- `cargo test --workspace`: **1,166 passed, 0 failed** (6 ignored); clippy/fmt clean
+- `cargo test --workspace`: **1,167 passed, 0 failed** (6 ignored); clippy/fmt clean
 - VS. System: mapper 99, cabinet input, UniSystem/DualSystem parsing,
   2C03/2C04/2C05 palettes and 2C05 security; 13 repaired local images boot
   (including Gumshoe's outer bank)
@@ -149,7 +149,7 @@ and run-ahead. The legacy input-framing session remains for tests and
 |---|---:|
 | Workspace crates | 11 |
 | First-party Rust lines | ~129,200 |
-| Workspace tests | 1,166 pass, 0 failed |
+| Workspace tests | 1,167 pass, 0 failed |
 | AccuracyCoin non-DRAW rows | 146 / 146 |
 | Licensed library images | 7,101 |
 
