@@ -114,6 +114,8 @@ Three mapper defects surfaced while re-measuring the C list:
   key and read `$FF` until it is written. The key is not in the iNES header,
   so the core identifies the 16 known images by an FNV hash of PRG+CHR and
   unlocks on the matching write. All 16 now measure 100%.
+- **VRC2A (mapper 22).** VRC2A resolves CHR registers at half their written
+  value; TwinBee 3 and Ganbare Pennant Race went to 100%.
 - **Jaleco SS88006 (mapper 18) and JF-13 (mapper 86).** SS88006 bank
   registers now power on as banks 0,1,2 and CHR 0..7, mirroring uses the
   JF-24A encoding (0=horizontal, 1=vertical), the IRQ supports all four

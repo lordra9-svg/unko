@@ -7,16 +7,16 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 - NES archives: **7101**
 - Measured: **7037**
 - Measured with the palette-index metric: **911**
-- Below 100% by the relevant ares metric: **513**
+- Below 100% by the relevant ares metric: **511**
 - Ignored tagged dumps below 100%: **1854**
 - No measurement / oracle error: **41**
 - Ignored tagged dumps with errors: **23**
-- Total needing attention: **554**
+- Total needing attention: **552**
 
 | Band | Games |
 |---|---:|
-| 0-50% | 16 |
-| 50-90% | 43 |
+| 0-50% | 15 |
+| 50-90% | 42 |
 | 90-99% | 106 |
 | 99-100% | 348 |
 
@@ -33,7 +33,6 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 10.00% | index | Kaguya Hime Densetsu (Japan) |
 | 26.63% | index | Racer Mini Yonku - Japan Cup (Japan) |
 | 27.69% | index | Devil Man (Japan) |
-| 33.59% | index | TwinBee 3 - Poko Poko Daimaou (Japan) |
 | 35.77% | index | Tokoro-san no Mamoru mo Semeru mo (Japan) |
 | 36.67% | index | Lagrange Point (Japan) |
 | 37.78% | index | Future Wars - Mirai Senshi Lios (Japan) |
@@ -72,10 +71,11 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 81.11% | index | Tecmo Super Bowl (Japan) |
 | 81.11% | index | Tecmo Super Bowl (USA) |
 | 81.51% | index | Mickey Mousecapade (USA) |
-| 83.52% | index | Ganbare Pennant Race! (Japan) |
 | 84.08% | index | Super Turrican (Europe) |
 | 84.43% | index | Fantasy Zone (Japan) (En) (Sunsoft) |
 | 84.43% | index | Fantasy Zone (Japan) (Sunsoft) |
+| 85.10% | index | Battle Stadium - Senbatsu Pro Yakyuu (Japan) |
+| 86.67% | index | Gambler Jiko Chuushinha (Japan) |
 
 ## No measurement / oracle errors
 

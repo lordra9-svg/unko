@@ -24015,7 +24015,13 @@ impl Mapper for Vrc {
     fn chr_read(&self, address: u16) -> u8 {
         let banks = self.chr_bank_count();
         let slot = usize::from(address) / 0x400;
-        let bank = usize::from(self.chr_banks[slot]) % banks;
+        let mut bank = usize::from(self.chr_banks[slot]);
+        // VRC2A ('mapper 22) resolves its CHR registers at half the written
+        // value; VRC2B/C use the value directly.
+        if self.variant == VrcVariant::Vrc2a {
+            bank >>= 1;
+        }
+        let bank = bank % banks;
         self.chr
             .get(bank * 0x400 + usize::from(address & 0x3FF))
             .copied()
@@ -24025,7 +24031,11 @@ impl Mapper for Vrc {
     fn chr_write(&mut self, address: u16, value: u8) {
         let banks = self.chr_bank_count();
         let slot = usize::from(address) / 0x400;
-        let bank = usize::from(self.chr_banks[slot]) % banks;
+        let mut bank = usize::from(self.chr_banks[slot]);
+        if self.variant == VrcVariant::Vrc2a {
+            bank >>= 1;
+        }
+        let bank = bank % banks;
         let index = bank * 0x400 + usize::from(address & 0x3FF);
         if let Some(byte) = self.chr.get_mut(index) {
             *byte = value;
