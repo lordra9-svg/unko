@@ -26357,10 +26357,10 @@ pub struct Ss88006 {
     chr_banks: [u8; 8],
     irq_reload: u16,
     irq_counter: u16,
-    irq_size_16: bool,
+    /// Reload width selected by `$F001` bits 1-3 (0=16, 1=12, 2=8, 3=4 bits).
+    irq_mode: u8,
     irq_enabled: bool,
     irq_pending: bool,
-    ram_enabled: bool,
     mirroring: Mirroring,
 }
 
@@ -26370,14 +26370,14 @@ impl Ss88006 {
             prg,
             chr,
             prg_ram: vec![0; header.prg_ram_size.max(0x2000)],
-            prg_banks: [0; 3],
-            chr_banks: [0; 8],
+            // JF-24A/SS88006 powers on with PRG banks 0,1,2 and CHR 0..7.
+            prg_banks: [0, 1, 2],
+            chr_banks: [0, 1, 2, 3, 4, 5, 6, 7],
             irq_reload: 0,
             irq_counter: 0,
-            irq_size_16: true,
+            irq_mode: 0,
             irq_enabled: false,
             irq_pending: false,
-            ram_enabled: true,
             mirroring: header.mirroring,
         }
     }
@@ -26423,7 +26423,7 @@ impl Mapper for Ss88006 {
 
     fn prg_write(&mut self, address: u16, value: u8) {
         if address < 0x8000 {
-            if address >= 0x6000 && self.ram_enabled {
+            if address >= 0x6000 {
                 let index = usize::from(address - 0x6000) % self.prg_ram.len();
                 self.prg_ram[index] = value;
             }
@@ -26433,14 +26433,11 @@ impl Mapper for Ss88006 {
         let high = value & 0x0F;
         match address & 0xF003 {
             0x8000 => self.prg_banks[0] = (self.prg_banks[0] & 0x30) | low,
-            0x8001 => self.prg_banks[0] = (self.prg_banks[0] & 0x0F) | (high << 4),
+            0x8001 => self.prg_banks[0] = (self.prg_banks[0] & 0x0F) | ((value & 0x03) << 4),
             0x8002 => self.prg_banks[1] = (self.prg_banks[1] & 0x30) | low,
-            0x8003 => self.prg_banks[1] = (self.prg_banks[1] & 0x0F) | (high << 4),
+            0x8003 => self.prg_banks[1] = (self.prg_banks[1] & 0x0F) | ((value & 0x03) << 4),
             0x9000 => self.prg_banks[2] = (self.prg_banks[2] & 0x30) | low,
-            0x9001 => self.prg_banks[2] = (self.prg_banks[2] & 0x0F) | (high << 4),
-            0x9002 => {
-                self.ram_enabled = value & 0x01 != 0;
-            }
+            0x9001 => self.prg_banks[2] = (self.prg_banks[2] & 0x0F) | ((value & 0x03) << 4),
             0xA000 => self.chr_banks[0] = (self.chr_banks[0] & 0xF0) | low,
             0xA001 => self.chr_banks[0] = (self.chr_banks[0] & 0x0F) | (high << 4),
             0xA002 => self.chr_banks[1] = (self.chr_banks[1] & 0xF0) | low,
@@ -26464,16 +26461,20 @@ impl Mapper for Ss88006 {
             0xF000 => {
                 self.irq_counter = self.irq_reload;
                 self.irq_pending = false;
-                self.irq_enabled = true;
             }
-            0xF001 => self.irq_size_16 = value & 0x08 == 0,
+            0xF001 => {
+                self.irq_enabled = value & 0x01 != 0;
+                self.irq_mode = (value >> 1) & 0x07;
+                self.irq_pending = false;
+            }
             0xF002 => {
+                // JF-24A wiring: 0 = horizontal, 1 = vertical.
                 self.mirroring = match value & 0x03 {
-                    0 => Mirroring::Vertical,
-                    1 => Mirroring::Horizontal,
+                    0 => Mirroring::Horizontal,
+                    1 => Mirroring::Vertical,
                     2 => Mirroring::SingleLower,
                     _ => Mirroring::SingleUpper,
-                }
+                };
             }
             _ => {}
         }
@@ -26494,6 +26495,10 @@ impl Mapper for Ss88006 {
         if let Some(byte) = self.chr.get_mut(index) {
             *byte = value;
         }
+    }
+
+    fn chr_mapping_write(&self, address: u16) -> bool {
+        address >= 0x8000
     }
 
     fn mirroring(&self) -> Mirroring {
@@ -26517,10 +26522,11 @@ impl Mapper for Ss88006 {
             return;
         }
         if self.irq_counter == 0 {
-            self.irq_counter = if self.irq_size_16 {
-                self.irq_reload
-            } else {
-                self.irq_reload & 0xFF
+            self.irq_counter = match self.irq_mode {
+                0 => self.irq_reload,
+                1 => self.irq_reload & 0x0FFF,
+                2 => self.irq_reload & 0x00FF,
+                _ => self.irq_reload & 0x000F,
             };
             self.irq_pending = true;
         } else {
@@ -35245,7 +35251,8 @@ impl Mapper for Jf13 {
             return 0;
         }
         let banks = (self.prg.len() / 0x8000).max(1);
-        let bank = usize::from((self.bank >> 4) & 0x07) % banks;
+        // JF-13 uses bits 4-5 for PRG and bit 6 as CHR A12.
+        let bank = usize::from((self.bank >> 4) & 0x03) % banks;
         self.prg[(bank * 0x8000 + usize::from(address & 0x7FFF)) % self.prg.len()]
     }
 
@@ -35269,17 +35276,22 @@ impl Mapper for Jf13 {
 
     fn chr_read(&self, address: u16) -> u8 {
         let banks = (self.chr.len() / 0x2000).max(1);
-        let bank = usize::from(self.bank & 0x03) % banks;
+        // CHR bank = bit 6 << 2 | bits 0-1 (8 KiB banks).
+        let bank = usize::from(((self.bank >> 6) & 0x01) << 2 | (self.bank & 0x03)) % banks;
         self.chr[bank * 0x2000 + usize::from(address & 0x1FFF)]
     }
 
     fn chr_write(&mut self, address: u16, value: u8) {
         let banks = (self.chr.len() / 0x2000).max(1);
-        let bank = usize::from(self.bank & 0x03) % banks;
+        let bank = usize::from(((self.bank >> 6) & 0x01) << 2 | (self.bank & 0x03)) % banks;
         let index = bank * 0x2000 + usize::from(address & 0x1FFF);
         if let Some(byte) = self.chr.get_mut(index) {
             *byte = value;
         }
+    }
+
+    fn chr_mapping_write(&self, address: u16) -> bool {
+        (0x6000..=0x6FFF).contains(&address)
     }
 
     fn mirroring(&self) -> Mirroring {

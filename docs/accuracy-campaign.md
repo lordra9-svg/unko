@@ -114,6 +114,13 @@ Three mapper defects surfaced while re-measuring the C list:
   key and read `$FF` until it is written. The key is not in the iNES header,
   so the core identifies the 16 known images by an FNV hash of PRG+CHR and
   unlocks on the matching write. All 16 now measure 100%.
+- **Jaleco SS88006 (mapper 18) and JF-13 (mapper 86).** SS88006 bank
+  registers now power on as banks 0,1,2 and CHR 0..7, mirroring uses the
+  JF-24A encoding (0=horizontal, 1=vertical), the IRQ supports all four
+  reload widths with the correct `$F000`/`$F001` semantics, and CHR writes
+  refresh the PPU immediately. JF-13 treats bit 6 as CHR A12 and uses only
+  PRG bits 4-5. Terao, Pizza Pop, Toukon Club, Magic John, Plasma Ball and
+  Moero!! Pro Yakyuu went from 26-84% to 100%.
 - **VRC2 raster CHR and save RAM.** VRC2/4 CHR registers now refresh the PPU
   window immediately (Konami games switch banks at raster splits), and VRC2
   boards with 8 KiB WRAM map it at `$6000-$7FFF` instead of returning the

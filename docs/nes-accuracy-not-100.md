@@ -5,19 +5,19 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 **Metric:** newly re-run letters use the NES palette-index agreement over frames 30+ (`video_pct`); records not yet revisited keep their historical steady-geometry or final-frame value.
 
 - NES archives: **7101**
-- Measured: **7036**
-- Measured with the palette-index metric: **906**
-- Below 100% by the relevant ares metric: **527**
+- Measured: **7037**
+- Measured with the palette-index metric: **911**
+- Below 100% by the relevant ares metric: **513**
 - Ignored tagged dumps below 100%: **1854**
-- No measurement / oracle error: **42**
+- No measurement / oracle error: **41**
 - Ignored tagged dumps with errors: **23**
-- Total needing attention: **569**
+- Total needing attention: **554**
 
 | Band | Games |
 |---|---:|
 | 0-50% | 16 |
-| 50-90% | 56 |
-| 90-99% | 107 |
+| 50-90% | 43 |
+| 90-99% | 106 |
 | 99-100% | 348 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
@@ -44,9 +44,6 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 45.36% | index | Digital Devil Story - Megami Tensei II (Japan) (Rev 1) |
 | 50.00% | index | Murder Club - Honkaku Mystery Adventure (Japan) |
 | 52.87% | index | Ninjara Hoi! (Japan) |
-| 53.82% | index | Terao no Dosukoi Oozumou (Japan) |
-| 54.20% | index | Pizza Pop! (USA, Europe) (Broke Studio) |
-| 55.94% | index | Pizza Pop! (Japan) |
 | 56.67% | index | Twin Cobra (USA) |
 | 56.67% | index | Kyuukyoku Tiger (Japan) |
 | 58.89% | steady | 100 Man Dollar Kid - Maboroshi no Teiou Hen (Japan) |
@@ -56,10 +53,8 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 61.11% | index | Swords and Serpents (USA) |
 | 62.34% | index | Oeka Kids - Anpanman no Hiragana Daisuki (Japan) |
 | 62.92% | index | Swords and Serpents (France) |
-| 65.22% | index | Jajamaru Gekimaden - Maboroshi no Kinmajou (Japan) |
 | 65.56% | index | Major League Baseball (USA) |
 | 65.56% | index | Major League Baseball (USA) (Rev 1) |
-| 66.93% | index | Ninja JaJaMaru - The Legend of the Golden Castle (USA, Europe) (Ninja JaJaMaru Retro Collection) (Switch) |
 | 68.77% | index | Bikkuriman World - Gekitou Sei Senshi (Japan) |
 | 71.26% | steady | 8 Eyes (USA, Europe) (Pixel Heart) |
 | 71.88% | index | Arkanoid II (Japan) (En) |
@@ -72,10 +67,15 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 76.67% | index | Zelda no Densetsu 1 - The Hyrule Fantasy (Japan) |
 | 76.71% | index | Oeka Kids - Anpanman to Oekaki Shiyou!! (Japan) |
 | 77.45% | index | Nintendo NTF2 System Cartridge (USA) (v1.1) (Test Program) |
-| 77.48% | index | Moero!! Pro Yakyuu (Japan) |
-| 77.48% | index | Moero!! Pro Yakyuu (Japan) (Rev 1) |
-| 77.48% | index | Moero!! Pro Yakyuu (Japan) (Rev 2) |
-| 77.48% | index | Moero!! Pro Yakyuu (Japan) (Rev 3) |
+| 79.63% | index | Castelian (Europe) |
+| 79.98% | index | Ghostbusters II (USA) |
+| 81.11% | index | Tecmo Super Bowl (Japan) |
+| 81.11% | index | Tecmo Super Bowl (USA) |
+| 81.51% | index | Mickey Mousecapade (USA) |
+| 83.52% | index | Ganbare Pennant Race! (Japan) |
+| 84.08% | index | Super Turrican (Europe) |
+| 84.43% | index | Fantasy Zone (Japan) (En) (Sunsoft) |
+| 84.43% | index | Fantasy Zone (Japan) (Sunsoft) |
 
 ## No measurement / oracle errors
 
@@ -111,7 +111,6 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | Ninja JaJaMaru's Big Adventure (USA) (Retro-Bit Generations) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Nintendo Campus Challenge 1991 (USA) (Competition Cart) [b] | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Nintendo World Championships 1990 (USA) (Competition Cart) | ares capture is a uniform blank frame (board unsupported by the oracle) |
-| Plasma Ball (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
 | Pocket Zaurus - Juu Ouken no Nazo (Japan) | core renders a blank frame (mapper not implemented or boot failure) |
 | Rod Land (World) (Retro-Bit) (256KiB) | core renders a blank frame (mapper not implemented or boot failure) |
 | Rod Land (World) (Retro-Bit) (512KiB) | core renders a blank frame (mapper not implemented or boot failure) |
