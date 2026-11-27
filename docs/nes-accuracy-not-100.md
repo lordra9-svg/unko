@@ -6,17 +6,17 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 
 - NES archives: **7101**
 - Measured: **7066**
-- Measured with the palette-index metric: **112**
-- Below 100% by the relevant ares metric: **2664**
+- Measured with the palette-index metric: **156**
+- Below 100% by the relevant ares metric: **2652**
 - No measurement / oracle error: **35**
-- Total needing attention: **2699**
+- Total needing attention: **2687**
 
 | Band | Games |
 |---|---:|
-| 0-50% | 1693 |
-| 50-90% | 305 |
-| 90-99% | 598 |
-| 99-100% | 68 |
+| 0-50% | 1683 |
+| 50-90% | 295 |
+| 90-99% | 591 |
+| 99-100% | 83 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
