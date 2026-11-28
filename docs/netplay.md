@@ -30,10 +30,11 @@ reports the active engine, frame, confirmed frame, rollbacks, predicted
 port-frames, deepest rollback, ping/frames-behind and desync reports. GGRS cannot repair a desync:
 the session pauses and must be restarted.
 
-Relay sessions use the player slot as a stable member id. The relay server
-prepends the sender's id to forwarded frames, and the client adapter maps that
-id to `GgrsAddress::Relay(id)`, so GGRS needs no public peer addresses. Hole
-punching maps the confirmed peer address to `GgrsAddress::Direct(addr)`.
+Relay sessions use the player slot as a stable member id (a 16-bit id on the
+wire). The relay server prepends the sender's id to forwarded frames, and the
+client adapter maps that id to `GgrsAddress::Relay(id)`, so GGRS needs no
+public peer addresses. Hole punching maps the confirmed peer address to
+`GgrsAddress::Direct(addr)`.
 
 The legacy engine remains as a library fallback and for
 `netplay_harness --engine legacy`:
@@ -55,10 +56,15 @@ The legacy engine remains as a library fallback and for
 
 ## Trust boundary
 
-GGRS traffic is plaintext UDP and the relay room token is not a secret. Use
-netplay with trusted peers or a private relay; the NetPlay window shows the
-same warning. Optional pre-shared-key authentication/AEAD is a future
-transport layer, not part of the current session.
+GGRS traffic is plaintext UDP. Relay rooms are password-protected: the first
+successful `JOIN` pins a room to a proof derived from the room name and
+password, and later joins with a different proof are rejected. This closes the
+old hole where anyone who knew the room name could join or inject datagrams.
+It is **not** a defence against an on-path observer or an active network
+attacker: the proof crosses the wire in the clear and can be replayed, and the
+DATA bodies are neither authenticated nor encrypted. Use netplay with trusted
+peers or a private relay. Optional pre-shared-key authentication/AEAD is a
+future transport layer, not part of the current session.
 
 ## Transports
 
@@ -66,14 +72,14 @@ transport layer, not part of the current session.
 |---|---|
 | GGRS UDP socket | Direct UDP to one peer per player (LAN or forwarded port) |
 | `HolePunchTransport` + adapter | Hole-punched direct UDP; exchange `PUNCH`/`PONG` and start only after bidirectional traffic |
-| `RelayTransport` + adapter | Directed relay room (`unko-relay`), member ids = player slots |
+| `RelayTransport` + adapter | Password-protected relay room (`unko-relay`), member ids = player slots |
 | `UdpMesh` | Legacy direct/mesh transport used by the legacy engine and tests |
 | UPnP-IGD | Ask the router to open the UDP port and report the public endpoint |
 | STUN (RFC 5389) | Discover the external IP when UPnP is unavailable |
 | Manual endpoint | User-supplied public `ip:port` |
 
 The window is **Tools → NetPlay…**: role, players, slot, ports, peers, public
-endpoint, UPnP/STUN detection, hole punch, relay server/room, prediction and
+endpoint, UPnP/STUN detection, hole punch, relay server/room/password, prediction and
 input delay. Direct UDP starts GGRS and resets the core; the console is paused
 during a hole-punch handshake so both peers start from the same frame.
 
@@ -108,9 +114,9 @@ netplay_harness --role join --engine ggrs --transport punch \
 # Relay with GGRS (run unko-relay first)
 unko-relay --bind 192.168.12.252:7900
 netplay_harness --role host --engine ggrs --transport relay \
-    --relay 192.168.12.252:7900 --room demo --bind 192.168.12.252:7901 --frames 240
+    --relay 192.168.12.252:7900 --room demo --room-password secret --bind 192.168.12.252:7901 --frames 240
 netplay_harness --role join --engine ggrs --transport relay \
-    --relay 192.168.12.252:7900 --room demo --bind 192.168.12.252:7902 --frames 240
+    --relay 192.168.12.252:7900 --room demo --room-password secret --bind 192.168.12.252:7902 --frames 240
 
 # Direct UDP with the legacy engine (the default)
 netplay_harness --role host --bind 192.168.12.252:7901 \
@@ -127,9 +133,9 @@ netplay_harness --role join --transport punch --bind 192.168.12.252:7912 \
 # Relay
 unko-relay --bind 192.168.12.252:7900
 netplay_harness --role host --transport relay --relay 192.168.12.252:7900 \
-    --room demo --bind 192.168.12.252:7901 --frames 240
+    --room demo --room-password secret --bind 192.168.12.252:7901 --frames 240
 netplay_harness --role join --transport relay --relay 192.168.12.252:7900 \
-    --room demo --bind 192.168.12.252:7902 --frames 240
+    --room demo --room-password secret --bind 192.168.12.252:7902 --frames 240
 ```
 
 Start both sides within about a second. A two-phase `SYNC`/`READY` handshake
@@ -191,8 +197,10 @@ reproducible procedure.
 ## Limitations
 
 - The relay is deliberately simpler than RFC 5766 TURN: one shared relay
-  endpoint, room membership by source address, no permissions, channels,
-  authentication or encryption.
+  endpoint, room membership by source address, no permissions, channels or
+  encryption. Rooms now require a password, but the proof is sent in cleartext
+  and can be replayed by an on-path observer; this stops room-name guessing,
+  not an active attacker.
 - Hole punching cannot traverse symmetric NATs; use the relay there.
 - Live Internet latency/loss has not been measured from two networks yet.
 - State hashing reuses the rollback save states, but it still hashes the full

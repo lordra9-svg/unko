@@ -82,12 +82,16 @@ credential handling.
 
 ### 7. Netplay / relay trust boundary (accepted, documented)
 
-GGRS runs over plaintext UDP with no peer authentication. The relay room token
-is a deterministic hash of the room name, not a secret: anyone who knows the
-endpoint and room can join or inject datagrams. Relay resources are bounded
-(datagram 2048 bytes, 256 queued per client, 64 rooms × 16 members). The UI
-warns to use trusted peers or a private relay; see `docs/netplay.md`.
-Pre-shared-key/AEAD authentication remains a recommended follow-up.
+GGRS runs over plaintext UDP without peer authentication. Relay rooms require
+a password: the first successful JOIN pins a room to a proof derived from the
+room name and password, and later joins with a different proof are rejected, so
+knowing the room name alone is no longer enough to join or inject datagrams.
+The proof itself crosses the wire in the clear, though: an on-path observer can
+read and replay it, and DATA bodies are still unauthenticated and unencrypted.
+This closes room-name guessing, not an active network attacker. Relay resources
+are bounded (datagram 2048 bytes, 256 queued per client, 64 rooms × 16 members).
+The UI warns to use trusted peers or a private relay; see `docs/netplay.md`.
+End-to-end pre-shared-key/AEAD authentication remains a recommended follow-up.
 
 ### 8. `unsafe` surface
 

@@ -25,7 +25,7 @@ pub mod upnp;
 pub use ggrs_session::{GgrsConfig, GgrsNetplay};
 pub use holepunch::{HolePunchTransport, PunchPeer};
 pub use input::{InputFrame, INPUT_MESSAGE_LEN};
-pub use relay::{room_token, RelayServer, RelayTransport};
+pub use relay::{room_key, room_proof, room_token, RelayServer, RelayTransport};
 pub use rollback::{RollbackBuffer, StoredFrame};
 pub use session::{PredictionMode, RollbackSession, SessionConfig, SessionStats};
 pub use stun::{public_address as stun_public_address, StunError};

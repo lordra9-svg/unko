@@ -30,7 +30,7 @@ pub enum GgrsAddress {
     /// Direct UDP or hole-punched peer address.
     Direct(SocketAddr),
     /// Relay room member id (the player slot).
-    Relay(u8),
+    Relay(u16),
 }
 
 impl std::fmt::Display for GgrsAddress {
@@ -171,7 +171,7 @@ impl GgrsNetplay {
         let local = usize::from(config.local_player);
         let addresses: Vec<GgrsAddress> = (0..players)
             .filter(|handle| *handle != local)
-            .map(|handle| GgrsAddress::Relay(handle as u8))
+            .map(|handle| GgrsAddress::Relay(handle as u16))
             .collect();
         Self::start_with_socket(RelaySocket { transport }, addresses, config, lockstep, fps)
     }
@@ -792,8 +792,10 @@ mod tests {
     fn relay_ggrs_sessions_reach_the_same_state() {
         let relay = RelayServer::spawn("127.0.0.1:0").expect("relay");
         let endpoint = relay.local_addr().to_string();
-        let mut a = RelayTransport::bind("127.0.0.1:0", &endpoint, "ggrs", 0).expect("relay a");
-        let mut b = RelayTransport::bind("127.0.0.1:0", &endpoint, "ggrs", 1).expect("relay b");
+        let mut a =
+            RelayTransport::bind("127.0.0.1:0", &endpoint, "ggrs", "secret", 0).expect("relay a");
+        let mut b =
+            RelayTransport::bind("127.0.0.1:0", &endpoint, "ggrs", "secret", 1).expect("relay b");
         for _ in 0..100 {
             a.pump();
             b.pump();

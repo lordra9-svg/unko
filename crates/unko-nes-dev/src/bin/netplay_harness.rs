@@ -95,6 +95,7 @@ struct Args {
     transport: String,
     relay: Option<String>,
     room: String,
+    room_password: String,
     delay: u32,
     prediction: PredictionMode,
     hash_interval: u32,
@@ -111,6 +112,7 @@ fn parse_args() -> Result<Args, String> {
     let mut transport = "mesh".to_string();
     let mut relay = None;
     let mut room = "unko".to_string();
+    let mut room_password = String::new();
     let mut delay = 0;
     let mut prediction = PredictionMode::LastInput;
     let mut hash_interval = 30;
@@ -141,6 +143,9 @@ fn parse_args() -> Result<Args, String> {
             "--transport" => transport = args.next().ok_or("--transport needs a value")?,
             "--relay" => relay = Some(args.next().ok_or("--relay needs an address")?),
             "--room" => room = args.next().ok_or("--room needs a name")?,
+            "--room-password" => {
+                room_password = args.next().ok_or("--room-password needs a value")?
+            }
             "--delay" => {
                 delay = args
                     .next()
@@ -185,7 +190,8 @@ fn parse_args() -> Result<Args, String> {
                 println!(
                     "usage: netplay_harness --role host|join --frames N [--bind ADDR] \
                      [--peer ADDR] [--engine legacy|ggrs] [--transport mesh|punch|relay] \
-                     [--relay ADDR] [--room NAME] [--delay N] [--prediction last|neutral] \
+                     [--relay ADDR] [--room NAME] [--room-password VALUE] [--delay N] \
+                     [--prediction last|neutral] \
                      [--hash-interval N] [--inject-desync N] [--recover-frames N]"
                 );
                 std::process::exit(0);
@@ -201,6 +207,7 @@ fn parse_args() -> Result<Args, String> {
         transport,
         relay,
         room,
+        room_password,
         delay,
         prediction,
         hash_interval,
@@ -239,8 +246,14 @@ fn build_transport(args: &Args) -> Result<Box<dyn Transport>, String> {
         }
         "relay" => {
             let relay = args.relay.as_ref().ok_or("relay needs --relay")?;
-            let mut transport = RelayTransport::bind(&args.bind, relay, &args.room, args.role)
-                .map_err(|err| err.to_string())?;
+            let mut transport = RelayTransport::bind(
+                &args.bind,
+                relay,
+                &args.room,
+                &args.room_password,
+                u16::from(args.role),
+            )
+            .map_err(|err| err.to_string())?;
             let deadline = Instant::now() + Duration::from_secs(10);
             while !transport.joined() {
                 if Instant::now() >= deadline {
@@ -460,8 +473,14 @@ fn run_ggrs(args: &Args) -> Result<(), String> {
         }
         "relay" => {
             let relay = args.relay.clone().ok_or("relay needs --relay")?;
-            let mut transport = RelayTransport::bind(&args.bind, &relay, &args.room, args.role)
-                .map_err(|err| err.to_string())?;
+            let mut transport = RelayTransport::bind(
+                &args.bind,
+                &relay,
+                &args.room,
+                &args.room_password,
+                u16::from(args.role),
+            )
+            .map_err(|err| err.to_string())?;
             let deadline = Instant::now() + Duration::from_secs(10);
             while !transport.joined() {
                 if Instant::now() >= deadline {

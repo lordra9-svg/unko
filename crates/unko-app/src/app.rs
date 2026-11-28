@@ -244,6 +244,7 @@ pub struct App {
     netplay_hole_punch: bool,
     netplay_relay_server: String,
     netplay_room: String,
+    netplay_password: String,
     netplay_punch_deadline: Option<Instant>,
     netplay_pending_punch: Option<(HolePunchTransport, SessionConfig, u16)>,
     /// The game was running when the handshake started and should resume.
@@ -410,6 +411,7 @@ impl App {
             netplay_hole_punch: false,
             netplay_relay_server: String::new(),
             netplay_room: "unko".into(),
+            netplay_password: String::new(),
             netplay_punch_deadline: None,
             netplay_pending_punch: None,
             netplay_resume_after_punch: false,
@@ -3024,12 +3026,23 @@ impl App {
         };
         let relay = self.netplay_relay_server.trim().to_string();
         let room = self.netplay_room.trim().to_string();
+        let password = self.netplay_password.trim().to_string();
         if !self.netplay_hole_punch && !relay.is_empty() {
             if room.is_empty() {
                 self.netplay_status = "Relay rooms need a name.".into();
                 return;
             }
-            match RelayTransport::bind(&format!("0.0.0.0:{port}"), &relay, &room, slot) {
+            if password.is_empty() {
+                self.netplay_status = "Relay rooms need a password.".into();
+                return;
+            }
+            match RelayTransport::bind(
+                &format!("0.0.0.0:{port}"),
+                &relay,
+                &room,
+                &password,
+                u16::from(slot),
+            ) {
                 Ok(transport) => match player.start_ggrs_relay(transport, config) {
                     Ok(()) => {
                         self.netplay_status = format!(
@@ -3167,6 +3180,7 @@ impl App {
         };
         let relay = self.netplay_relay_server.trim().to_string();
         let room = self.netplay_room.trim().to_string();
+        let password = self.netplay_password.trim().to_string();
         let expired = self
             .netplay_punch_deadline
             .is_some_and(|deadline| Instant::now() >= deadline);
@@ -3176,11 +3190,16 @@ impl App {
                 .take()
                 .expect("pending hole punch");
             self.netplay_punch_deadline = None;
+            if password.is_empty() {
+                self.netplay_status = "Hole punch failed; the relay needs a room password.".into();
+                return;
+            }
             match RelayTransport::bind(
                 &format!("0.0.0.0:{port}"),
                 &relay,
                 &room,
-                config.local_player,
+                &password,
+                u16::from(config.local_player),
             ) {
                 Ok(relay_transport) => {
                     if let Some(player) = &mut self.player {
@@ -3396,6 +3415,13 @@ impl App {
                     ui.add_enabled(
                         !active && self.netplay_pending_punch.is_none(),
                         egui::TextEdit::singleline(&mut self.netplay_room).desired_width(100.0),
+                    );
+                    ui.label("Password");
+                    ui.add_enabled(
+                        !active && self.netplay_pending_punch.is_none(),
+                        egui::TextEdit::singleline(&mut self.netplay_password)
+                            .password(true)
+                            .desired_width(100.0),
                     );
                 });
                 if !self.netplay_upnp_status.is_empty() {
