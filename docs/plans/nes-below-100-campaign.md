@@ -86,22 +86,29 @@ uniform-vs-content frame is still scored as 0, so real divergence cannot be hidd
 
 Every remaining hard row resolves to a zip under the No-Intro tree; headers read directly.
 
+> **Correction (2026-11-28):** an earlier version of this table decoded the iNES
+> mapper as `(flags6>>4) | (flags7 & 0xF0)` and mislabelled four NES 2.0 titles as
+> mapper 12. NES 2.0 adds `(byte8 & 0x0F) << 8`. Those four are **mapper 268
+> (Coolboy)**; mapper 12 has **no** rows below 95%. Re-derived with the correct
+> decode.
+
 | mapper | sub | rows | titles |
 |---|---|---|---|
-| 1 | 0 | 12 | 100 Man Dollar Kid, Bikkuriman World, Treasure Master, NTF2 System Cart, Prince Valiant, Battle Stadium, … |
-| 3 | 2 | 8 | Minna no Taabou (0.00), Tokoro-san (38.33), Mickey Mouse ×2, Dynamite Bowl ×4 |
+| 1 | 0 | 12 | 100 Man Dollar Kid (58.9), Bikkuriman World (69.6), Treasure Master (73.1), NTF2 System Cart (77.5), Prince Valiant (89.9), Battle Stadium (90.3), … |
+| 3 | 2 | 8 | Minna no Taabou (0.00), Tokoro-san (38.3), Mickey Mouse ×2, Dynamite Bowl ×4 |
 | 2 | 2 | 5 | Super Pitfall ×2 (41.5), Swords and Serpents ×3 (61–63), Castelian (79.6) |
-| 0 | 0 | 4 | Ice Hockey VC, Thexder ×2, NTF2 Test |
-| 152 | 0 | 3 | Gegege no Kitarou 2 (0.00), Pocket Zaurus (0.00), Arkanoid II (71.9) |
-| 4 | 0/3 | 3 | Terminator 2 ×3 (75.5–75.9) |
+| 0 | 0 | 4 | Ice Hockey VC (90.7), Thexder ×2 (93.7), NTF2 Test (94.2) |
+| 4 | 0/3 | 4 | Terminator 2 ×3 (75.5–75.9), Super Turrican (84.1) |
+| 268 | 0/1/8 | 4 | Rod Land ×2 (0.00), Star Wars LRG (0.00), 8 Eyes (71.3) — **no ares oracle** |
 | 19 | 3 | 2 | Digital Devil Story II ×2 (45.4) |
-| 26 | 0 | 2 | Esper Dream 2 (0.00), Mouryou Senki Madara (0.00) — **in flight** |
 | 69 | 0 | 2 | Hebereke ×2 (90.3) |
 | 68 | 1 | 2 | Nantettatte!! Baseball ×2 (0.00) |
 | 96 | 0 | 2 | Oeka Kids ×2 (86–88) |
 | 66 | 0 | 2 | Super Mario Bros. + Duck Hunt ×2 (92.6) |
-| 12 | 1 / 0 / 8 | 4 | Rod Land ×2 (0.00), 8 Eyes (71.3), Star Wars LRG (0.00) |
 | 154, 48, 23/2, 80, 25/1, 5 | | 6 | Devil Man (27.7), Flintstones (90.4), Kid Dracula (0.00), Kyonshiizu 2 (94.9), Racer Mini Yonku (26.6), Suikoden (38.9) |
+
+Mapper 26 (Esper Dream 2, Mouryou Senki Madara) and mapper 152 (Gegege no Kitarou 2,
+Pocket Zaurus, Arkanoid II) are no longer in this table: both were fixed and measure 100.000.
 
 **Rejected hypothesis (do not re-run):** the mapper-2/2 cluster is *not* a missing bus
 conflict. ares maps mapper 2 to `HVC-UOROM` and `hvc-uxrom.cpp::writePRG` assigns
