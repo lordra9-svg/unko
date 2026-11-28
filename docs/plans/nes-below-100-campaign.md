@@ -213,6 +213,26 @@ The open question is therefore why **ares** shows the title at frame 12 — it m
 this script far more often or take a different boot branch. Settling that requires ares-side
 RAM (`$030D`, `$030B`, `$030E` per frame), i.e. a gated dump in the local ares build.
 
+**Decisive ares measurement (2026-11-28):** added an env-gated per-frame dump to the local
+ares build (`PPU::frame` prints `cpu.ram[$030D/$030B/$030E]`) and ran DDS II for 130 frames:
+
+```
+ARESNES f=0..4   n030D=FF n030B=FF n030E=FF
+ARESNES f=5      n030D=00 n030B=00 n030E=00
+ARESNES f=8..130 n030D=00 n030B=00 n030E=01
+```
+
+ares' `$030D` is **never 0x80** — it goes from the power-on `FF` straight to `00` when the game
+clears RAM at frame 5, and stays `00` for the whole run. So ares **never enters the 128-tick
+sleep at all**; it takes a different boot path and runs the RLE loader almost immediately.
+The "ares ticks the script ~10× faster" idea is therefore refuted, as is any dropped-NMI
+explanation on the unko side.
+
+The remaining question is narrower and single: why the script command at `$DC27` is taken by
+unko and skipped by ares. That is a boot-branch difference before `$DC2B`, not a timing or
+interrupt question. ares' source patch has been reverted and rebuilt; the oracle binary is
+back to stock (env-gated dump removed).
+
 Unresolved: why ares reaches the same task ~10× sooner. Either ares ticks the scheduler
 more than once per frame, or the engines diverge in a boot branch/PPU timing before
 `$DC2B`, or unko is dropping NMIs early (which would also bear on the open `$2002` poll
