@@ -14,11 +14,9 @@ Super Pitfall (USA),ok,41.4903,index,,41.4903,0.0,30.0,,,,120,,e76fbb3c60152d45c
 Super Pitfall (Japan),ok,41.5467,index,,41.5467,0.0,30.0,,,,120,,a84b17bd8f6648da1e119bcff245caaa5a31a87f79eb3e6de7dad44caccb9845
 Digital Devil Story - Megami Tensei II (Japan),ok,45.3596,index,,45.3596,45.3027,0.0,,,,120,,fdbe04275a6e34a05a39d75d32041faf4d9cc4e6203916533a4a33ab9b248da8
 Digital Devil Story - Megami Tensei II (Japan) (Rev 1),ok,45.3596,index,,45.3596,45.3027,0.0,,,,120,,0df2aa1e2434e4ba4ea68e0b051ff1873255eba7bc03196fb575e4658e2b2f81
-100 Man Dollar Kid - Maboroshi no Teiou Hen (Japan),ok,58.8889,steady geometry,58.8889,,,,,68.0672,63.3333,120,,8a506e04eceea3e7cd36f925c6116b05454224dfc35d6f18a5f64fc536d1f789
 Swords and Serpents (Europe),ok,61.1111,index,,61.1111,100.0,,,,,120,,f01289d89f6b149a1adb131bd7cc65102a34d814b39c64e33b52fcbd2b4d3bce
 Swords and Serpents (France),ok,62.9213,index,,62.9213,0.0,,,,,120,,3edf7ea2f37d52152ba8dafda3243bf171b0b13242ffb84cb9078c68ec23e21f
 Bikkuriman World - Gekitou Sei Senshi (Japan),ok,69.5658,index,,69.5658,0.0,47.7778,,,,120,,abf562d0ce0b8445a57fd4f2b82c030ae790b8046babd6a600c113c25826c272
-"8 Eyes (USA, Europe) (Pixel Heart)",ok,71.2644,steady geometry,71.2644,,,,,76.9231,75.0,120,,40e0f9d259804661d56a8523c2b66e965dcf5e2d54952fa7f25374e8164aa434
 Treasure Master (USA),ok,73.1038,index,,73.1038,72.9622,0.0,,,,120,,68c39ee4f38ff3948c2c5a189edbae978b8e30336aa6cac9bc6e61ac09a04b16
 Terminator 2 - Judgment Day (Europe),ok,75.5103,index,,75.5103,0.0,,,,,120,,1e9998561e147def72147abb2bfb77a83c4c82d03f0ebd0feab49d20ace611a9
 Terminator 2 (Japan),ok,75.8835,index,,75.8835,77.3258,0.0,,,,120,,d551c7134546b7818b61a4a567c823bff726f9d9c1ae87d4125473edf523e01e
@@ -343,6 +341,7 @@ Ghost'n Goblins (Europe),ok,99.9843,index,,99.9843,99.917,,,,,120,,124bd02d60e60
 Taito Chase H.Q. (Japan),ok,99.9854,index,,99.9854,100.0,97.7778,,,,120,,c66b675d30d9f81f3678d1170898c0c7292ea5bcd693741568991649e3c07206
 SD Gundam Gaiden - Knight Gundam Monogatari (Japan),ok,99.9874,index,,99.9874,100.0,91.1111,,,,120,,7323fc708fb1b51754d6af110a5622a8c68a174dc9ebe0a70ea58815fb23d355
 SD Gundam Gaiden - Knight Gundam Monogatari (Japan) (Rev 1),ok,99.9874,index,,99.9874,100.0,91.1111,,,,120,,4cad3c9b8b56597dd093094b08ee30a834d7392de50f4585e7f3d0da05bd01ff
+100 Man Dollar Kid - Maboroshi no Teiou Hen (Japan),ok,99.9906,index,,99.9906,99.9984,58.8889,,,,120,,8a506e04eceea3e7cd36f925c6116b05454224dfc35d6f18a5f64fc536d1f789
 Bananan Ouji no Daibouken (Japan),ok,99.9911,index,,99.9911,99.9902,34.4444,,,,120,,72262fa2e5664069a00a7303efc5e1e732ee6ba19eaec692af2f38d1b1104544
 Blades of Steel (Europe),ok,99.9919,index,,99.9919,100.0,,,,,120,,93b539995c47d18174affa5525a93b2917527d63f536a33a63102b1832a4df23
 Blades of Steel (Europe) (Virtual Console),ok,99.9919,index,,99.9919,100.0,,,,,120,,dd7a0911674deb89c8b59549ec777035b8d061405916939b4a732bd5634f1c69
@@ -513,6 +512,7 @@ Wanpaku Duck Yume Bouken (Japan),ok,99.9999,index,,99.9999,100.0,97.7778,,,,120,
 Yousei Monogatari - Rod Land (Japan),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,12f7f325339c67006cf4d6b773f56771a8417fb040d566510996a1668a0e3360
 Zoids - Chuuou Tairiku no Tatakai (Japan),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,2bc33775d37ba4c83fbd9eedc6747972b0f43da196a43c35f767d7e669dd8f18
 Zoids - Chuuou Tairiku no Tatakai (Japan) (Rev 1),ok,99.9999,index,,99.9999,100.0,98.8889,,,,120,,141e75aa110476695745c516b8b7c4040b270c4ff10557f98d5a5f4cc01080a0
+"8 Eyes (USA, Europe) (Pixel Heart)",error,0.0,index,,0.0,0.0,0.0,,,,120,ares capture is a uniform blank frame (board unsupported by the oracle),40e0f9d259804661d56a8523c2b66e965dcf5e2d54952fa7f25374e8164aa434
 Athena (Japan),unmeasured,,index,,,0.0,0.0,,,,120,no scored frames (all frames excluded),3b2d17ae03bd4d45f22511eb3ce3a7d89ea5436a7975a77baaf3453fce8f1dac
 Athena (Japan) (En),unmeasured,,index,,,0.0,0.0,,,,120,no scored frames (all frames excluded),3b2d17ae03bd4d45f22511eb3ce3a7d89ea5436a7975a77baaf3453fce8f1dac
 Athena (USA),unmeasured,,index,,,0.0,0.0,,,,120,no scored frames (all frames excluded),89403bdb6a6adca1d6335f946f486a03f3bb41f9550be196de51c7da344b0911

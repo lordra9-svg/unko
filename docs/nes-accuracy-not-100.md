@@ -5,20 +5,20 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 **Metric:** newly re-run letters use the NES palette-index agreement over frames 30+ (`video_pct`); records not yet revisited keep their historical steady-geometry or final-frame value.
 
 - NES archives: **7101**
-- Measured: **7048**
-- Measured with the palette-index metric: **1315**
-- Below 100% by the relevant ares metric: **514**
+- Measured: **7047**
+- Measured with the palette-index metric: **1316**
+- Below 100% by the relevant ares metric: **513**
 - Ignored tagged dumps below 100%: **1847**
-- No measurement / oracle error: **36**
+- No measurement / oracle error: **37**
 - Ignored tagged dumps with errors: **26**
 - Total needing attention: **550**
 
 | Band | Games |
 |---|---:|
 | 0-50% | 15 |
-| 50-90% | 17 |
+| 50-90% | 15 |
 | 90-99% | 125 |
-| 99-100% | 357 |
+| 99-100% | 358 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
@@ -41,11 +41,9 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 41.55% | index | Super Pitfall (Japan) |
 | 45.36% | index | Digital Devil Story - Megami Tensei II (Japan) |
 | 45.36% | index | Digital Devil Story - Megami Tensei II (Japan) (Rev 1) |
-| 58.89% | steady | 100 Man Dollar Kid - Maboroshi no Teiou Hen (Japan) |
 | 61.11% | index | Swords and Serpents (Europe) |
 | 62.92% | index | Swords and Serpents (France) |
 | 69.57% | index | Bikkuriman World - Gekitou Sei Senshi (Japan) |
-| 71.26% | steady | 8 Eyes (USA, Europe) (Pixel Heart) |
 | 73.10% | index | Treasure Master (USA) |
 | 75.51% | index | Terminator 2 - Judgment Day (Europe) |
 | 75.88% | index | Terminator 2 (Japan) |
@@ -76,11 +74,14 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 93.96% | index | Iron Tank - The Invasion of Normandy (USA) |
 | 94.15% | index | Nintendo NTF2 Test Cartridge (USA) (Test Program) |
 | 94.23% | index | Ghostbusters II (Europe) |
+| 94.51% | index | Dynamite Bowl (Japan) |
+| 94.51% | index | Dynamite Bowl (Japan) (En) |
 
 ## No measurement / oracle errors
 
 | Game | Error |
 |---|---|
+| 8 Eyes (USA, Europe) (Pixel Heart) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Athena (Japan) | no scored frames (all frames excluded) |
 | Athena (Japan) (En) | no scored frames (all frames excluded) |
 | Athena (USA) | no scored frames (all frames excluded) |
