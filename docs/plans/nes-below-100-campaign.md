@@ -200,6 +200,19 @@ Both titles sit at 45.36%. The boot/draw pipeline is now mapped:
   frame-6 clear; `$0460` is set deterministically at `$F9C0`), mapper IRQ (never enabled),
   N163 chip RAM (never read during boot), and the old "operand bytes" note.
 
+**Measured (2026-11-28), refuting the dropped-NMI hypothesis:** with a temporary counter in
+the NMI path and a per-frame dump of `$030D`/`$030B`/`$030E`, unko takes **exactly one NMI per
+frame** from the first one at frame 12 (`nmi_total` 1 at f12, 2 at f13, 118 at f129, 119 at
+f130), and `$030D` decrements **exactly once per frame** (0x80 at f13 → 0x0B at f130). The
+earlier "≈0.66/frame" figure was a measurement artifact (the counter is zero before the NMI
+starts, then set to 0x80).
+
+So unko is internally consistent: one NMI, one decrement, sleep expires around frame 141 and
+the loader runs then. Nothing is dropped, and there is no local defect to fix in the NMI path.
+The open question is therefore why **ares** shows the title at frame 12 — it must either tick
+this script far more often or take a different boot branch. Settling that requires ares-side
+RAM (`$030D`, `$030B`, `$030E` per frame), i.e. a gated dump in the local ares build.
+
 Unresolved: why ares reaches the same task ~10× sooner. Either ares ticks the scheduler
 more than once per frame, or the engines diverge in a boot branch/PPU timing before
 `$DC2B`, or unko is dropping NMIs early (which would also bear on the open `$2002` poll
