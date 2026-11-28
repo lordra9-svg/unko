@@ -7,7 +7,7 @@ The local Myrient No-Intro tree was copied from
 ## DAT audit
 
 Every system folder was audited against the No-Intro DAT in
-`~/ai/projects/multiemu-local/rom dat` with `unko-rom-manager`:
+`rom dat/` with `unko-rom-manager`:
 
 ```sh
 unko-rom-manager --dat DAT --input FOLDER --csv AUDIT.csv
