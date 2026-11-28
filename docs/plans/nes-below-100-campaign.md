@@ -233,6 +233,10 @@ Decision unchanged: `RamClear::Zero` stays. This is the **fourth** cluster in th
 (Minna no Taabou, Super Pitfall ×2, Mickey Mouse ×2, Terminator 2 ×3) — about 8 campaign rows
 that are measured against an oracle convention rather than a hardware-defined value.
 
+**Update 2026-11-28:** superseded by the `RamClear::Random` power-on default. The nonzero fill
+restores the retail intros (Terminator 2 75.5-75.9 -> 99.99-100; Minna no Taabou 0 -> 100;
+Mickey Mousecapade/Fushigi 87.2-87.5 -> 100) while the Super Pitfall rows stay at 41.5.
+
 ## Phase B attempt — rejected (2026-11-28)
 
 A builder proposed consuming a deferred NMI latch inside `Cpu::sample_cycle`

@@ -129,7 +129,7 @@ pub trait NesCore: Core {
     /// Selects which audio sources reach the mixer.
     fn set_audio_source(&mut self, _source: AudioSource) {}
 
-    /// Selects the work-RAM fill applied by the next soft reset.
+    /// Selects the work-RAM fill policy used at power-on and on a soft reset.
     fn set_ram_clear(&mut self, _mode: RamClear) {}
 
     /// Selects the PPU register behaviour on a soft reset.

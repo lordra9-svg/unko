@@ -58,6 +58,11 @@ Core fixes landed during the A-Z pass, each with a regression test:
 - VRC2A CHR resolution (TwinBee 3); CNROM bus conflicts (mapper 3).
 - NMI asserted two dots after the `$2002` vblank flag, fixing tight polling
   races (Tokoro-san and others).
+- Power-on work RAM defaults to `RamClear::Random` (deterministic per ROM)
+  instead of `$00`, matching NESdev's unreliable power-up state; the reset
+  options now also apply at power-on. Re-measured: Terminator 2 USA/Japan/
+  Europe 75.5-75.9 -> 99.99-100, Minna no Taabou 0.000 -> 100.000, Mickey
+  Mousecapade/Fushigi 87.2-87.5 -> 100.000; 20 sampled 100.000 controls held.
 
 The headless performance benchmark now enables rendering after vblank, so it
 measures the real renderer (CI budget 200 fps).

@@ -204,12 +204,12 @@ impl AudioFilterModel {
 pub enum RamClear {
     /// Keep the current contents (a soft reset does not clear work RAM).
     Keep,
-    /// Fill with `$00` (the previous emulator default).
-    #[default]
+    /// Fill with `$00`.
     Zero,
     /// Fill with `$FF`.
     Fill,
     /// Fill with a deterministic pseudo-random pattern.
+    #[default]
     Random,
 }
 

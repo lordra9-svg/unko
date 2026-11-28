@@ -102,7 +102,7 @@ impl AccuracyCore {
             channel_gains: [1.0; 6],
             palette_table: None,
             audio_source: NesAudioSource::Both,
-            ram_clear: NesRamClear::Zero,
+            ram_clear: NesRamClear::Random,
             ppu_reset: NesPpuResetBehavior::Famicom,
             mmc3_alternate: false,
             stereo_glasses: false,
@@ -152,6 +152,7 @@ impl AccuracyCore {
         system.set_channel_gains(self.channel_gains);
         system.set_audio_source(self.audio_source);
         system.set_ram_clear(self.ram_clear);
+        system.reload_work_ram();
         system.set_ppu_reset_behavior(self.ppu_reset);
         system.set_cheats(&self.cheats);
         self.sample_rate = rate;
@@ -800,6 +801,12 @@ mod tests {
     }
 
     #[test]
+    fn default_work_ram_fill_is_random() {
+        let core = AccuracyCore::new();
+        assert_eq!(core.ram_clear, NesRamClear::Random);
+    }
+
+    #[test]
     fn rejects_missing_rom() {
         let mut core = AccuracyCore::new();
         assert!(core.load(b"not a rom", &LoadOptions::default()).is_err());
@@ -811,9 +818,9 @@ mod tests {
         rom[0..4].copy_from_slice(b"NES\x1a");
         rom[4] = 1;
         rom[5] = 1;
-        // LDA #$10 / STA $00 / JMP $8005
+        // LDA #$10 / STA $00 / JMP $8000
         rom[16..21].copy_from_slice(&[0xA9, 0x10, 0x85, 0x00, 0x4C]);
-        rom[21..23].copy_from_slice(&[0x05, 0x80]);
+        rom[21..23].copy_from_slice(&[0x00, 0x80]);
         let vector = 16 + prg - 4;
         rom[vector] = 0x00;
         rom[vector + 1] = 0x80;

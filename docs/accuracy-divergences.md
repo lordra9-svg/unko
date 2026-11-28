@@ -157,10 +157,14 @@ evidence and the decisions.
   visible on **`Minna no Taabou no Nakayoshi Daisakusen (Japan)`**: the game
   scans work RAM for a `$FF` terminator, finds none under the `$00` fill, stays
   in its PPU-stream loop, never enables rendering, and scores **0.000** at 120
-  frames. Its **`(Rev 1)`** release scores **100.000**. **Decision
-  (2026-11-28): keep `$00`; do not adopt ares' `$FF` constant.** This title
-  depends on uninitialised RAM being `$FF`; that is a game behaviour, not an
-  emulator defect, and no fix is claimed here.
+  frames. Its **`(Rev 1)`** release scores **100.000**. **Superseded
+  (2026-11-28): the power-on default is now `RamClear::Random`,** a
+  deterministic-per-ROM LCG fill. NESdev documents the power-on state as
+  unreliable and recommends a random start state, so Unko no longer commits to
+  `$00`. Re-measured with the branch CLI: Terminator 2 USA/Japan/Europe
+  75.5-75.9 -> 99.99-100, Minna no Taabou 0.000 -> 100.000, Mickey Mousecapade
+  and Fushigi no Kuni 87.2-87.5 -> 100.000, and 20 sampled 100.000 controls
+  stayed at 100.000. See `compatibility/accuracy-ares.jsonl` for the rows.
 
 - **Mapper 3 submapper 2 is already correct — no divergence.** Per the NES 2.0
   mapper 003 definition, submapper 1 has no bus conflicts and submapper 2 has

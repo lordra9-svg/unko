@@ -58,11 +58,11 @@ pub enum RamClear {
     /// Keep the current contents (a soft reset does not clear work RAM).
     Keep,
     /// Fill with `$00`.
-    #[default]
     Zero,
     /// Fill with `$FF`.
     Fill,
     /// Fill with a deterministic pseudo-random pattern.
+    #[default]
     Random,
 }
 

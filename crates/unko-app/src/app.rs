@@ -6627,8 +6627,8 @@ fn advanced_tab(ui: &mut egui::Ui, settings: &mut Settings) {
     });
     ui.label(
         RichText::new(
-            "These apply on the next Emulation -> Reset (or the reset hotkey), matching the \
-             MiSTer options. A power-on load starts from zeroed work RAM.",
+            "These apply at power-on and on the next Emulation -> Reset (or the reset hotkey), \
+             matching the MiSTer options.",
         )
         .weak()
         .small(),

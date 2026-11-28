@@ -442,7 +442,7 @@ pub struct Settings {
     pub overscan: Overscan,
     /// Display mask over the left/right software-mask columns.
     pub mask_edges: MaskEdges,
-    /// Work-RAM fill applied by the next soft reset.
+    /// Work-RAM fill policy used at power-on and by the next soft reset.
     pub ram_clear: RamClear,
     /// PPU register behaviour on a soft reset.
     pub ppu_reset: PpuResetBehavior,
@@ -577,7 +577,7 @@ impl Default for Settings {
             audio_source: AudioSource::Both,
             overscan: Overscan::Normal,
             mask_edges: MaskEdges::Off,
-            ram_clear: RamClear::Zero,
+            ram_clear: RamClear::Random,
             ppu_reset: PpuResetBehavior::Famicom,
             mmc3_alternate: false,
             integer_scale: true,

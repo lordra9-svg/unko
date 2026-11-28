@@ -898,7 +898,7 @@ impl System {
             audio_filters: AudioFilterModel::NesRf,
             channel_gains: [1.0; 6],
             audio_source: AudioSource::Both,
-            ram_clear: RamClear::Zero,
+            ram_clear: RamClear::Random,
             ppu_reset: PpuResetBehavior::Famicom,
             #[cfg(feature = "cheats")]
             cheats: Vec::new(),
@@ -915,6 +915,9 @@ impl System {
             cycle_count: 0,
             dma: None,
         };
+        // Power-on work RAM is undefined on real hardware; apply the
+        // configured fill so the boot state matches the reset policy.
+        system.apply_ram_clear();
         let header = system.cart.header();
         system.ppu.set_ppu_model(if system.is_vs_system() {
             PpuModel::from_vs_nibble(header.vs_ppu)
@@ -947,6 +950,26 @@ impl System {
         system
     }
 
+    /// Applies the configured work-RAM fill policy.
+    fn apply_ram_clear(&mut self) {
+        match self.ram_clear {
+            RamClear::Keep => {}
+            RamClear::Zero => self.ram = [0; 0x800],
+            RamClear::Fill => self.ram = [0xFF; 0x800],
+            RamClear::Random => {
+                // Seed from the cartridge fingerprint so each image gets a
+                // different pattern while a recorded run stays reproducible.
+                let mut state = self.cart.fingerprint() ^ 0x5EED_1234_ABCD_EF01;
+                for byte in &mut self.ram {
+                    state = state
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    *byte = (state >> 33) as u8;
+                }
+            }
+        }
+    }
+
     /// Resets the CPU and PPU without reloading the cartridge.
     pub fn reset(&mut self) {
         self.cart.soft_reset();
@@ -956,21 +979,7 @@ impl System {
         self.apu = Apu::new();
         self.apu.set_channel_gains(self.channel_gains);
         self.resampler.reset();
-        match self.ram_clear {
-            RamClear::Keep => {}
-            RamClear::Zero => self.ram = [0; 0x800],
-            RamClear::Fill => self.ram = [0xFF; 0x800],
-            RamClear::Random => {
-                // Deterministic per ROM so a recorded run is reproducible.
-                let mut state = 0x5EED_1234_ABCD_EF01u64;
-                for byte in &mut self.ram {
-                    state = state
-                        .wrapping_mul(6364136223846793005)
-                        .wrapping_add(1442695040888963407);
-                    *byte = (state >> 33) as u8;
-                }
-            }
-        }
+        self.apply_ram_clear();
         if self.ppu_reset == PpuResetBehavior::Nes {
             self.ppu.soft_reset_registers();
         }
@@ -1253,9 +1262,17 @@ impl System {
         self.audio_source = source;
     }
 
-    /// Selects the work-RAM fill applied by the next soft reset.
+    /// Selects the work-RAM fill policy used at power-on and on a soft reset.
     pub fn set_ram_clear(&mut self, mode: RamClear) {
         self.ram_clear = mode;
+    }
+
+    /// Applies the current work-RAM fill policy to memory immediately.
+    ///
+    /// Used while configuring a freshly built system so the selected power-on
+    /// fill takes effect without running a full reset.
+    pub fn reload_work_ram(&mut self) {
+        self.apply_ram_clear();
     }
 
     /// Selects the PPU register behaviour on a soft reset.
@@ -3192,6 +3209,37 @@ mod tests {
         system.reset();
         assert_eq!(system.ppu.ctrl, 0);
         assert_eq!(system.ppu.mask, 0);
+    }
+
+    #[test]
+    fn default_work_ram_fill_is_random_at_power_on() {
+        let system = System::from_ines(&synthetic_nrom(0)).expect("load");
+        assert_eq!(system.ram_clear, RamClear::Random);
+        assert!(
+            system.ram.iter().any(|byte| *byte != 0),
+            "power-on work RAM should not be zeroed"
+        );
+    }
+
+    #[test]
+    fn random_work_ram_is_deterministic_per_rom() {
+        let rom = synthetic_nrom(0);
+        let mut first = System::from_ines(&rom).expect("load");
+        let mut second = System::from_ines(&rom).expect("load");
+        first.set_ram_clear(RamClear::Random);
+        second.set_ram_clear(RamClear::Random);
+        first.reset();
+        second.reset();
+        assert_eq!(first.ram, second.ram, "same ROM must replay the same fill");
+        assert!(first.ram.iter().any(|byte| *byte != 0));
+
+        let mut other = System::from_ines(&synthetic_nrom(1)).expect("load");
+        other.set_ram_clear(RamClear::Random);
+        other.reset();
+        assert_ne!(
+            first.ram, other.ram,
+            "different ROMs must not share the same fill"
+        );
     }
 
     #[test]
