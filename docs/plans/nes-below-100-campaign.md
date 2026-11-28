@@ -204,9 +204,31 @@ Built the observation tool the remaining clusters need, instead of more per-titl
 - The `$EFEE` loop is `STA $2007; INY; BNE` inner / `DEX; BNE` outer (2 KiB clear), so aligning
   on it mid-loop produces false divergences — this cost one wrong reading.
 
-**Limit found:** the ares trace has no cycle counter, so a true cycle-aligned diff needs
-`Thread::clock()` logged alongside the PC. Until then, comparisons are instruction-indexed and
-split at frame boundaries.
+**Cycle stamps added** (`frame clock pc`), and the diff now works by aligning on a shared
+program point rather than frame number. Comparing ares' frame 7 against unko's frame 13 —
+both the NMI immediately after the nametable clear — gives **31 identical instructions**, then
+a real split:
+
+```
+F90F  AD D7 03   LDA $03D7
+F912  F0 03      BEQ -> $F917
+F914  20 F3 F9   JSR $F9F3     <- unko takes this
+F917  20 70 F9   JSR $F970     <- ares takes this
+F91A  EE 01 03   INC $0301
+F91D  20 A8 FC   JSR $FCA8
+```
+
+So the two engines disagree on **`$03D7`** at the same program point: nonzero in ares (falls
+through to `$F970`, the draw path), zero in unko (branches to `$F9F3`, the script/sleep path
+that ends up setting `$030D = 0x80`). That is the DDS II divergence at instruction level, and
+it explains why unko sleeps while ares draws.
+
+Not yet determined: **what sets `$03D7`**. The ROM has 38 `STA $03D7` sites plus 7 indexed
+writes, so the next step is logging writes to `$03D7` in both engines from the clear onward and
+finding the first one whose value differs. That is a targeted follow-up, not another hunt.
+
+Note on method: aligning `F8BC` by *frame number* rather than program point would compare
+different points and is invalid (ares runs this sequence around frames 7-9, unko around 13).
 
 ### Dot-257 open-bus quirk — implemented, measured, rejected (2026-11-28)
 
