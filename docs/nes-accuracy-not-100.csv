@@ -1,6 +1,6 @@
 title,status,accuracy_pct,metric,steady_geometry_pct,video_pct,final_video_pct,frame_seq_pct,palette_pct,best_geometry_pct,same_index_geometry_pct,frames,error,sha256
+Doraemon (Japan) (Rev 1),ok,0.0,index,,0.0,0.0,0.0,,,,120,,842318dbe28483982f6a67fad66cc3d82c7eaea517d37a1e7ef4501a80f0b7e5
 Kid Dracula (World) (Castlevania Anniversary Collection),ok,0.0,index,,0.0,0.0,0.0,,,,120,,da3981562721db98dbb306ccb9d22b49ce5f3be75f6a9be629298ef23f29df37
-Minna no Taabou no Nakayoshi Daisakusen (Japan),ok,0.0,index,,0.0,0.0,0.0,,,,120,,03a98632b67bf10c93bf1349d19c4ea7a4f3bb9348c4c7e4693258946615ceb4
 Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - '91 Kaimaku Hen (Japan),ok,0.0,index,,0.0,0.0,0.0,,,,120,,280ef7ef79eb30ce9c259e91c441c43244daf5f76d42d24669ac5c8937d67b91
 Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - OB All Star Hen (Japan),ok,0.0,index,,0.0,0.0,0.0,,,,120,,afbf83ba8d57dab24c47bbac639e70062b3d5ac391b7ceb812838b2f5d3a356b
 Star Wars (USA) (Limited Run Games),ok,0.0,index,,0.0,0.0,0.0,,,,120,,7dcf778d2efd8ac9ecb4995d865d39051ed0091257b902a2120d73aedf89ddef
@@ -8,25 +8,21 @@ Tokoro-san no Mamoru mo Semeru mo (Japan),ok,38.3271,index,,38.3271,100.0,33.333
 Suikoden - Tenmei no Chikai (Japan),ok,38.8892,index,,38.8892,0.0,38.8889,,,,120,,55637dfb9a260e506218a18b4c8ff9d4f68e1108963a568c2ec39a01e1ef3774
 Super Pitfall (USA),ok,41.4903,index,,41.4903,0.0,30.0,,,,120,,e76fbb3c60152d45c734ddb81648ac328dd7783d18e2d308945db542f4881ca5
 Super Pitfall (Japan),ok,41.5467,index,,41.5467,0.0,30.0,,,,120,,a84b17bd8f6648da1e119bcff245caaa5a31a87f79eb3e6de7dad44caccb9845
+Doraemon (Japan),ok,42.4878,index,,42.4878,42.5228,0.0,,,,120,,b8680e8e6e99bdbbad92ee6e40b667fddc5a42fc39a1a75742472610071b4ac9
 Digital Devil Story - Megami Tensei II (Japan),ok,45.3596,index,,45.3596,45.3027,0.0,,,,120,,fdbe04275a6e34a05a39d75d32041faf4d9cc4e6203916533a4a33ab9b248da8
 Digital Devil Story - Megami Tensei II (Japan) (Rev 1),ok,45.3596,index,,45.3596,45.3027,0.0,,,,120,,0df2aa1e2434e4ba4ea68e0b051ff1873255eba7bc03196fb575e4658e2b2f81
-Bikkuriman World - Gekitou Sei Senshi (Japan),ok,69.5658,index,,69.5658,0.0,47.7778,,,,120,,abf562d0ce0b8445a57fd4f2b82c030ae790b8046babd6a600c113c25826c272
-Treasure Master (USA),ok,73.1038,index,,73.1038,72.9622,0.0,,,,120,,68c39ee4f38ff3948c2c5a189edbae978b8e30336aa6cac9bc6e61ac09a04b16
-Terminator 2 - Judgment Day (Europe),ok,75.5103,index,,75.5103,0.0,,,,,120,,1e9998561e147def72147abb2bfb77a83c4c82d03f0ebd0feab49d20ace611a9
-Terminator 2 (Japan),ok,75.8835,index,,75.8835,77.3258,0.0,,,,120,,d551c7134546b7818b61a4a567c823bff726f9d9c1ae87d4125473edf523e01e
-Terminator 2 - Judgment Day (USA),ok,75.9118,index,,75.9118,77.4268,0.0,,,,120,,a2f813d566ddfbb773a479703b6eebcb13a6e228f878fefedf7f85ea5e87ecec
-Nintendo NTF2 System Cartridge (USA) (v1.1) (Test Program),ok,77.4463,index,,77.4463,0.0,0.0,,,,120,,2f1ce98ab59a9b6075183375742b2a45b5a42aea389f4698f4bb7567ff9374a5
+Nintendo NTF2 System Cartridge (USA) (v1.1) (Test Program),ok,77.9748,index,,77.9748,0.0,0.0,,,,120,,2f1ce98ab59a9b6075183375742b2a45b5a42aea389f4698f4bb7567ff9374a5
 Castelian (Europe),ok,79.6291,index,,79.6291,79.6291,,,,,120,,697a5fde60965cd1d8e14f503a753eec23eeb0021d3f9e6b8f698e2a6b4970fd
+Bikkuriman World - Gekitou Sei Senshi (Japan),ok,83.0925,index,,83.0925,0.0,47.7778,,,,120,,abf562d0ce0b8445a57fd4f2b82c030ae790b8046babd6a600c113c25826c272
 Super Turrican (Europe),ok,84.0823,index,,84.0823,81.8929,0.0,,,,120,,2c7d648bebb4fbebe77cee9b50a9c1a7dbf024f2d7b85bf769bc3e94d82ac773
-Oeka Kids - Anpanman to Oekaki Shiyou!! (Japan),ok,86.2987,index,,86.2987,87.391,0.0,,,,120,,cd19662aed67d1e3cb75aa20bdd3f3749fafb4fc55c19283ce07d741dbf99e58
-Mickey Mouse - Fushigi no Kuni no Daibouken (Japan) (En),ok,87.2221,index,,87.2221,0.0,73.3333,,,,120,,cb048cb34ff75ad0884d7e096162be332282d9aba21aa80ad2619054de88d3bd
-Mickey Mousecapade (USA),ok,87.5419,index,,87.5419,0.0,73.3333,,,,120,,9fd557ada52750339c10c47347bb8a2d460efa1a4fd724ae08707275808883c5
-Oeka Kids - Anpanman no Hiragana Daisuki (Japan),ok,87.6726,index,,87.6726,89.0641,0.0,,,,120,,e8e5e63f592b7b59eda7d4bfe322a3a9860a3be97a0dfbcfeba728221fe69e21
+Oeka Kids - Anpanman to Oekaki Shiyou!! (Japan),ok,87.2607,index,,87.2607,87.2607,0.0,,,,120,,cd19662aed67d1e3cb75aa20bdd3f3749fafb4fc55c19283ce07d741dbf99e58
+Oeka Kids - Anpanman no Hiragana Daisuki (Japan),ok,89.0641,index,,89.0641,89.0641,0.0,,,,120,,e8e5e63f592b7b59eda7d4bfe322a3a9860a3be97a0dfbcfeba728221fe69e21
 Battle Stadium - Senbatsu Pro Yakyuu (Japan),ok,90.2915,index,,90.2915,0.0,21.1111,,,,120,,b128a0da96175885fd6a5dd115fa7b7fb9c41af8de91d63c07a0ca99ca744437
 Hebereke (Japan),ok,90.3044,index,,90.3044,90.3044,0.0,,,,120,,46ec8f3f0c392d70fcdfa376ba3c385dd60e3eab3f10cd8c8ef9345ffb1f54f5
 Hebereke (Japan) (Virtual Console),ok,90.3044,index,,90.3044,90.3044,0.0,,,,120,,7dfa6f6d682094f83ba26977f59557a8dcf8c58acec7ef1a17601103e63a05a9
-"Flintstones, The - The Rescue of Dino & Hoppy (Japan)",ok,90.4214,index,,90.4214,89.9105,0.0,,,,120,,d247db8fab4dc4841e62e3f6c716fba49434e6be1750e5e46536850e9757992d
+"Flintstones, The - The Rescue of Dino & Hoppy (Japan)",ok,90.4215,index,,90.4215,89.9105,0.0,,,,120,,d247db8fab4dc4841e62e3f6c716fba49434e6be1750e5e46536850e9757992d
 Ice Hockey (Europe) (Virtual Console),ok,90.6672,index,,90.6672,90.2458,0.0,,,,120,,8adbdd972a2662d8253b32a0384934c71781641f347fda2022514993e42261c1
+Xenophobe (USA),ok,91.977,index,,91.977,0.0,44.4444,,,,120,,397cc33da1e4a55933fea97a06baea0e6caa6f52dab5af2a24d8ed20d0835302
 "Super Mario Bros. + Duck Hunt (Europe, Asia) (En)",ok,92.5869,index,,92.5869,85.872,,,,,120,,f9c263815ea90e629242f93746f26cbe13e42a553d03c9cc204e492a8a91b619
 Super Mario Bros. + Duck Hunt (USA),ok,92.7331,index,,92.7331,86.1507,0.0,,,,120,,ded208cee37d9a0b48fd7bf41930c6d115e13bead5b07aa1a0a2ec02f7d430ca
 "Elite (Europe) (En,Fr,De)",ok,93.1133,index,,93.1133,0.0,,,,,120,,20be710443dab4417bc8a30b920064ed3c36b19a17cfe14bac88d136a9424627
@@ -34,30 +30,28 @@ Dynamite Bowl (Japan) (En) (Rev 1),ok,93.1655,index,,93.1655,0.0,31.1111,,,,120,
 Dynamite Bowl (Japan) (Rev 1),ok,93.1655,index,,93.1655,0.0,31.1111,,,,120,,2dc804b9b89a9ec35748eae109205fdccd485319ff73d7ecf7d62c9423f26f0d
 Thexder (Japan),ok,93.6513,index,,93.6513,0.0,36.6667,,,,120,,d047d6bd011eb1868190660955451f5f6cec7a14271024a2123b14a8504abcf9
 Thexder (Japan) (En),ok,93.6513,index,,93.6513,0.0,36.6667,,,,120,ares: ares: frame dump missing (<tmp>,d047d6bd011eb1868190660955451f5f6cec7a14271024a2123b14a8504abcf9
-Iron Tank - The Invasion of Normandy (USA),ok,93.9561,index,,93.9561,0.0,83.3333,,,,120,,e219538626a929b5b6c570b9b2d9843afba171d3032de0bd3122f38077a71184
-Nintendo NTF2 Test Cartridge (USA) (Test Program),ok,94.1544,index,,94.1544,75.0,65.5556,,,,120,,e50f12a062613bc288a648c451ea80e5af0ff0c547cdf856ba705a82e711fd9b
+Iron Tank - The Invasion of Normandy (USA),ok,93.9564,index,,93.9564,0.0,87.7778,,,,120,,e219538626a929b5b6c570b9b2d9843afba171d3032de0bd3122f38077a71184
+Nintendo NTF2 Test Cartridge (USA) (Test Program),ok,94.1546,index,,94.1546,75.0,67.7778,,,,120,,e50f12a062613bc288a648c451ea80e5af0ff0c547cdf856ba705a82e711fd9b
 Dynamite Bowl (Japan),ok,94.5078,index,,94.5078,0.0,31.1111,,,,120,,4d62414bdac00f86b6ca4809ae3ef896f3a4003c1f39342217a9ce503b67341e
 Dynamite Bowl (Japan) (En),ok,94.5078,index,,94.5078,0.0,31.1111,,,,120,,4d62414bdac00f86b6ca4809ae3ef896f3a4003c1f39342217a9ce503b67341e
 Kyonshiizu 2 (Japan) (Sample),ok,94.8613,index,,94.8613,91.18,0.0,,,,120,,5f8f1ac289e538883c45708e70b8cbd71a11782f84ffb01bf6bb295f70a6c768
 Kyonshiizu 2 (Japan),ok,95.0414,index,,95.0414,91.377,0.0,,,,120,,4fbf02411b66f8e4cdff16219612fc8aa804ec12f2e2ce19235afbccdaeaf4a2
-Bakushou!! Jinsei Gekijou 2 (Japan),ok,95.1032,index,,95.1032,0.0,0.0,,,,120,,33c362c20980c3d9546ca13efec57e1327c5b18d66af91a7848174ec821aed45
+Bakushou!! Jinsei Gekijou 2 (Japan),ok,95.1033,index,,95.1033,0.0,0.0,,,,120,,33c362c20980c3d9546ca13efec57e1327c5b18d66af91a7848174ec821aed45
 Back to the Future Part II & III (USA),ok,95.2743,index,,95.2743,100.0,90.0,,,,120,,53f77cd22fa8b3951ca6235c027a6185079a6541dc39437f44499b5dd5abf32f
-Famicom Jump II - Saikyou no 7 Nin (Japan),ok,95.3899,index,,95.3899,95.2637,7.7778,,,,120,,e8914e73c2c2e6ddc2bd4021eaf215e446fba70e5561021cb83250adcfa949fe
-Rodland (Europe),ok,95.5556,index,,95.5556,100.0,,,,,120,,ad39fd373ab58a2e4786a1cbbfe5275843508e3c0eb6e1b3700571465f95862a
 Yoshi no Tamago (Japan) (En),ok,95.6965,index,,95.6965,0.0,90.0,,,,120,,193a62f1da8f974e340dbe01fb95125c09a428fe3a0649a27d7692129886d4a6
 Yoshi (USA),ok,95.8079,index,,95.8079,0.0,87.7778,,,,120,,da1aac1a8360162cc80073d167a348606931368135d26243c1499a182f25b8e5
 America Daitouryou Senkyo (Japan),ok,95.8328,index,,95.8328,0.0,85.5556,,,,120,,14a99c1af0cd463e32619f2b44ac914f9c3c64f47dcafb5eb7848e29c9bdf5ab
+Famicom Jump II - Saikyou no 7 Nin (Japan),ok,96.5392,index,,96.5392,95.2637,8.8889,,,,120,,e8914e73c2c2e6ddc2bd4021eaf215e446fba70e5561021cb83250adcfa949fe
 Daikoukai Jidai (Japan),ok,96.548,index,,96.548,95.9131,10.0,,,,120,,75a518f0499c75c3843f5b32e67e6509090ba225818e90d15bf2a429d82f48e1
 Sangokushi II (Japan),ok,96.6577,index,,96.6577,96.0449,13.3333,,,,120,,016e3922595c54298e539de70bdef4c3c6095aca5f88304d3c71ceae40f6e9a2
-Famicom Wars (Japan),ok,96.7408,index,,96.7408,100.0,93.3333,,,,120,,4d7f0449361fd8a0f3337a2e70de76445a75326316e2702126de89927bdef3e6
 Sangokushi II (Japan) (Rev 1),ok,96.8335,index,,96.8335,96.0449,17.7778,,,,120,,5c6221dae58de508bb05b7180feee12297936705f4a52f53194e35f2b1faa784
 NES Open Tournament Golf (Europe),ok,96.8586,index,,96.8586,95.9952,,,,,120,,c56cac5728c7a4cbbc35476b9832752e3fa28b62cc94df622d2e6b02e86520d1
 Uncharted Waters (USA),ok,97.0014,index,,97.0014,95.9131,10.0,,,,120,,8534d65168c926deb601f12df524b686c77efb63b9c9ab01485ed1db91894a6f
-Lagrange Point (Japan),ok,97.0588,index,,97.0588,100.0,36.6667,,,,120,,843cfa8d691879dee4436dd57494bdc0e583fa93f79a806a1891042a91ed69c1
-Future Wars - Mirai Senshi Lios (Japan),ok,97.1429,index,,97.1429,100.0,37.7778,,,,120,,4c7d9abde582f1130304372cd41fb5bbda31bce6af797dd94b42a299e82e9af6
 Bubble Bobble (Europe),ok,97.3523,index,,97.3523,97.2886,,,,,120,,5e7e049beb5c8404819c7ed270b9d6d217cfe390cfceb0236f35babca307bb36
 Bubble Bobble (Europe) (Virtual Console),ok,97.3523,index,,97.3523,97.2886,,,,,120,,640519eb068e6d1339cbf7b1d0703fd7160b843e0a4272a9140a2db96dc014b4
 Tenka no Goikenban - Mito Koumon (Japan),ok,97.4068,index,,97.4068,99.987,23.3333,,,,120,,23e7a9317f3ca6ab5de26972c6d96e8c4e26539ae888320ab3368316a08d3d99
+Fantasy Zone (Japan) (En) (Sunsoft),ok,97.4273,index,,97.4273,100.0,56.6667,,,,120,,0d74632b64868d3d95519da3087fc3307253a18cb50387f7e9de613441947936
+Fantasy Zone (Japan) (Sunsoft),ok,97.4273,index,,97.4273,100.0,56.6667,,,,120,,0d74632b64868d3d95519da3087fc3307253a18cb50387f7e9de613441947936
 Romance of the Three Kingdoms II (USA),ok,97.4327,index,,97.4327,96.0921,31.1111,,,,120,,df344ed5f74e858daab37847bda5d44411e09947ecf1c16b6142d1869cf7b39a
 "Legend of Zelda, The (Europe)",ok,97.4443,index,,97.4443,97.4098,,,,,120,,9aef6eb9b2c807ef1cdde4a83f89b62bb649e721393059b22f4c8b5d9192302d
 "Legend of Zelda, The (Europe) (Rev 1)",ok,97.4443,index,,97.4443,97.4098,,,,,120,,84cca1f7a23d86f4bdcbaa78f717e8523fa11f81c09dff0e351bd8364f27705d
@@ -70,84 +64,55 @@ Zelda II - The Adventure of Link (Europe),ok,97.6639,index,,97.6639,97.6639,,,,,
 Zelda II - The Adventure of Link (Europe) (Rev 1),ok,97.6639,index,,97.6639,97.6639,,,,,120,,ba79b612e2528a63f2c07ab7f806fbd8e3d133d8db9d97ee131176fccdee3290
 Zelda II - The Adventure of Link (Europe) (Rev 2),ok,97.6639,index,,97.6639,97.6639,,,,,120,,78721457d16befd928ab87859618f5e20d3d95655aabd1e5be159c81761537ad
 Isolated Warrior (Europe),ok,97.7333,index,,97.7333,98.2334,,,,,120,,f01fb570f6c7203ee7bf0b53ff15cafb3f5f73764a80daf651474ceb52843407
-"Pizza Pop! (USA, Europe) (Broke Studio)",ok,97.7528,index,,97.7528,100.0,95.5556,,,,120,,1c6d68d74274bfe89eb78c4a5a1ac1a7fcdc4f1236c98f7d621795a2d7bb68c3
-Murder Club - Honkaku Mystery Adventure (Japan),ok,97.8263,index,,97.8263,100.0,50.0,,,,120,,f663106edbf968b78d704960cc7d7a57bb66040eee8b48a0d4655c2341389fe8
 Wrath of the Black Manta (Europe),ok,97.8379,index,,97.8379,97.8332,,,,,120,,1910121b491fbb21ade677d2318c41d08fcba11011198e63729ff15887e5525d
 Kick Off (Europe),ok,97.8581,index,,97.8581,97.8581,,,,,120,,b262b1ec1bd108fc796360dcbb90103e89e45f8d47d44d1fdd707c8fbbb6d1dc
 "Kick Off (Europe) (En,Fr,De,It,Nl)",ok,97.8581,index,,97.8581,97.8581,,,,,120,,b262b1ec1bd108fc796360dcbb90103e89e45f8d47d44d1fdd707c8fbbb6d1dc
-Ninjara Hoi! (Japan),ok,97.8723,index,,97.8723,0.0,51.1111,,,,120,,a3b27a790e98aa22000242d93e08f9d22b03bb268672566ec37df5ef7affb2f3
 Spy vs Spy (Europe),ok,97.9324,index,,97.9324,97.8,,,,,120,,4f28a7cedfbf831299103f45cbf165e548eb3248b2789b9789e461363b881757
 Dragon Ball - Le Secret du Dragon (France),ok,97.981,index,,97.981,97.981,,,,,120,,f28bd54108c7f1d1d3e37fbb6d51ce8f2e470bc6e7ec6f65e2acc4cf0e854f6b
 Dragon Ball - Le Secret du Dragon (France) (Rev 1),ok,97.981,index,,97.981,97.981,,,,,120,,d1c009eea42ba4f568bb936e340eca37e8de99baa1d88abce723295792981a99
-Kyuukyoku Tiger (Japan),ok,98.0769,index,,98.0769,100.0,56.6667,,,,120,,0e3be51eda002aaaaf8232eedfcf74022fc9c22482712a7635b5d84352a2f015
-Twin Cobra (USA),ok,98.0769,index,,98.0769,100.0,55.5556,,,,120,,95f560d1bf887f6e3b33d5e7b00f1b795a1fb09b39a8166bb86faf076e4ca68f
-Racket Attack (Europe),ok,98.0772,index,,98.0772,98.5123,,,,,120,,5946ef4bfbb57a7a2a660698fae46d3f22baa51104107108fe01f966da211096
-Hydlide 3 - Yami kara no Houmonsha (Japan),ok,98.1481,index,,98.1481,100.0,58.8889,,,,120,,0c1ca79da880eeee44db44ed6dd34e22de6e182dd12e58703a013f745196764d
-Otaku no Seiza - An Adventure in the Otaku Galaxy (Japan),ok,98.1818,index,,98.1818,100.0,60.0,,,,120,,bc2a7767750fce2ac15bb37423fa482e84c4d5b39cab5d622d8a254238b5e3fb
-Swords and Serpents (USA),ok,98.2143,index,,98.2143,100.0,61.1111,,,,120,,9e808bd88abfef9634d6d6734ea2a64b6edfcd8a08d2feede048c382f0af0c15
 Anticipation (Europe),ok,98.2184,index,,98.2184,98.2184,0.0,,,,120,,a582daed8f4a0db90bfc7d184a92822fc42c5997512e4a32f63abc1f342f403e
 Aoki Ookami to Shiroki Mejika - Genchou Hishi (Japan),ok,98.2233,index,,98.2233,96.7708,44.4444,,,,120,,0869c82467f00daa0d6fea48406bb41818ae42b06273409fdee214609ccb60ee
 Castlevania (Europe),ok,98.2252,index,,98.2252,98.2118,,,,,120,,13c76943c2732a1d4855c166e6f8e162f1531b022cf23c05e599044580055402
 Eric Cantona Football Challenge - Goal! 2 (Europe),ok,98.3297,index,,98.3297,98.3297,,,,,120,,777d61300c709facf11bc0bc8f67320713c2c9effbd84e1707edfae48791de2d
-Major League Baseball (USA),ok,98.3333,index,,98.3333,100.0,65.5556,,,,120,,e2430911b3a18a4b0a4cc846709b90f8213e5689e7c66e02c970368deda5d9d2
-Major League Baseball (USA) (Rev 1),ok,98.3333,index,,98.3333,100.0,65.5556,,,,120,,fabc7b9e293d1a6572259f17f4dae533fbbd103daca12d11ec7e106e76fd5fc7
 "Empereur, L' (Japan)",ok,98.4106,index,,98.4106,95.9131,61.1111,,,,120,,820b2d02fae66f9a3cae5782c294c3e698d9c9145e1c6d4e02d9f5a7e4f75261
 "Empereur, L' (USA)",ok,98.4106,index,,98.4106,95.9131,61.1111,,,,120,,4a08faf6db996c4235add5b7db3024c7757514377b0c52ed5a55a557c670e458
-Family Quiz - 4-nin wa Rival (Japan),ok,98.4375,index,,98.4375,100.0,70.0,,,,120,,cd913bac31bf1c884507cd021698161c333ffa3842cb7100d7017fc18a560343
-Total Recall (USA),ok,98.4848,index,,98.4848,100.0,72.2222,,,,120,,3c264fc64be9b677c6bdf14ad023c1caebf617b91785f3a8c50c51caad5d5ecb
-Zelda no Densetsu 1 - The Hyrule Fantasy (Japan),ok,98.5714,index,,98.5714,100.0,76.6667,,,,120,,94524acec59350a0581c151c04c64c3897cfd8025ba33333b0e14d2e4602e29b
+Racket Attack (Europe),ok,98.5454,index,,98.5454,98.5123,,,,,120,,5946ef4bfbb57a7a2a660698fae46d3f22baa51104107108fe01f966da211096
+Moero!! Pro Tennis (Japan),ok,98.5548,index,,98.5548,97.443,43.3333,,,,120,,7295ce40e8c1b917e38e142019dac3b77fbfa3b53ac39a4dad9f1c8a22c5cd17
+Metroid (Europe) (Virtual Console),ok,98.5787,index,,98.5787,86.2207,,,,,120,,b4783dbb2aeaefdb998f4ac232102b9d7f759f521a6e6c40e346e311403e0323
 Castlevania III - Dracula's Curse (Europe),ok,98.5839,index,,98.5839,98.4193,,,,,120,,cc6688cf1a79eadb9758458f83c7e38d5d8f9faa20a8d3ff66e21f74abb51016
 Castlevania III - Dracula's Curse (Europe) (Wii Virtual Console),ok,98.5839,index,,98.5839,98.4193,,,,,120,,a9b5467c4350e4123f98b76b26e2121af3b7e116062e051eb94983a501650a72
 Dragon Ball Z - Kyoushuu! Saiya Jin (Japan),ok,98.6024,index,,98.6024,99.987,0.0,,,,120,,02ef93c157c226101bf0790639845bdfa8173df894e095e687f396bbddf583ce
-Ghostbusters II (USA),ok,98.6091,index,,98.6091,100.0,77.7778,,,,120,,bea3e8e3843181a79e951cf83dd909ba1f819b2c8b2742743d2ce1eb4e978748
 Banana Prince (Germany),ok,98.6188,index,,98.6188,98.5024,,,,,120,,0291e06cac89568e933d52be141549272cd35555e19f0bb525173a413fdd82fd
-Tecmo Super Bowl (Japan),ok,98.6486,index,,98.6486,100.0,81.1111,,,,120,,69cb9f5b35088fd1b2b2e9d9d37fc391c9e840412978fd7347c5d03da6ddeda0
-Tecmo Super Bowl (USA),ok,98.6486,index,,98.6486,100.0,81.1111,,,,120,,ddb5fb280e0887bf57744ac76bae60d44ce6b7ce381b18a183a751bbeca84036
 Goal! (Europe),ok,98.6487,index,,98.6487,98.6551,,,,,120,,6999cc314c73647580151afbdac7060c12034f1a7e091f59ed252e21aee118f4
 Double Dribble (Europe),ok,98.6501,index,,98.6501,98.6501,,,,,120,,c0bcbb5ab074d2575c35af8ee6230607fd609c86e8814bc1d71252ef9261ea84
 Alfred Chicken (Europe),ok,98.6737,index,,98.6737,98.3911,0.0,,,,120,,bd18176f18dc7c864a36669b2bfbafde83a7b82522f18113c1a9311c88e08c66
-Fantasy Zone (Japan) (En) (Sunsoft),ok,98.6807,index,,98.6807,100.0,54.4444,,,,120,,0d74632b64868d3d95519da3087fc3307253a18cb50387f7e9de613441947936
-Fantasy Zone (Japan) (Sunsoft),ok,98.6807,index,,98.6807,100.0,54.4444,,,,120,,0d74632b64868d3d95519da3087fc3307253a18cb50387f7e9de613441947936
 "Adventure Island Part II, The (Europe)",ok,98.7059,index,,98.7059,0.0,0.0,,,,120,,f3d3890ea595155e038bace7aebd141c452aacb38fe246440bfd3265301f4fe0
 NES Open Tournament Golf (Europe) (Virtual Console),ok,98.7087,index,,98.7087,98.343,,,,,120,,bcf6159166e8e9f97e32044e78fe4329ad8d521dc4ad0fa124aad111e5581406
 Ishin no Arashi (Japan),ok,98.7269,index,,98.7269,97.889,32.2222,,,,120,,fddda5efb007e29c2defe8004b13817c53db5fd8fde61d3e40570e94ae44e9d5
-Gambler Jiko Chuushinha (Japan),ok,98.7342,index,,98.7342,100.0,86.6667,,,,120,,2b1e0b8b8268e2edfde9c94eb2572f55c9d7c4170d540cda5bb717fc64296571
 Flying Hero (Japan),ok,98.7566,index,,98.7566,99.4482,77.7778,,,,120,,9381c36b68b5fef106358bb8912510f09988c55a61029981f8246ceed5fcf689
 Flying Hero (Japan) (En),ok,98.7566,index,,98.7566,99.4482,77.7778,,,,120,,9381c36b68b5fef106358bb8912510f09988c55a61029981f8246ceed5fcf689
-Hiryuu no Ken II - Dragon no Tsubasa (Japan),ok,98.7654,index,,98.7654,100.0,88.8889,,,,120,,686e8f6bd393424614b341d030bc7acd81564a8f85ff4d77b70ef730556f34cd
-Hiryuu no Ken II - Dragon no Tsubasa (Japan) (Virtual Console),ok,98.7654,index,,98.7654,100.0,88.8889,,,,120,,946007aff41bec0bb8247592dd3b04b2aea51ca5c4b9156cf2746be2cc4d1c6e
-"Adventures of Rad Gravity, The (USA)",ok,98.7656,index,,98.7656,100.0,88.8889,,,,120,,50ede7c02c77753233f1729b20e12cf2829576be709e360feba6b344d00fa5f2
-"Adventures of Rad Gravity, The (World) (Evercade)",ok,98.7656,index,,98.7656,100.0,88.8889,,,,120,,8b87f66e760db9f7494f6f390cdcd33880147b7cfaea39b950f070747b203619
-Mottomo Abunai Deka (Japan),ok,98.7805,index,,98.7805,100.0,90.0,,,,120,,a14002b5e3dd47b4eb46a2d0df58f96354e0fbd0caf2a09e8233ea5d490d1b89
-Thundercade (USA),ok,98.7952,index,,98.7952,100.0,91.1111,,,,120,,83c9e83933c88d079801b00253d3fc7e612e9806e2ae6257955b6d5c0783dfb2
+Nangoku Shirei!! - Spy vs Spy (Japan),ok,98.7979,index,,98.7979,0.0,8.8889,,,,120,,b4fd0445870cffd33d8899a4debd8772f1c01e3881af141f26fc1a3772f5f3fa
 Snow Brothers (Europe),ok,98.8062,index,,98.8062,98.8062,,,,,120,,19ce3b13988736b650a9fbd74e6ded0467f3322bc247849583a8d5f4f6169b0a
-Hudson Hawk (USA),ok,98.8095,index,,98.8095,100.0,92.2222,,,,120,,f61fbefd4bde16f1c9fd3660374f1e06b6426990590b198c3de27fa03a95266e
-Faria - Fuuin no Tsurugi (Japan),ok,98.8235,index,,98.8235,100.0,93.3333,,,,120,,aebd819fdcac309f3bc220fd8973a422d6ebc4af23baa921b1a7cb44fe64ff99
-Winter Games (USA),ok,98.8506,index,,98.8506,100.0,95.5556,,,,120,,00755760399f974887b3af828af396b4135418c0159eb09ac1b883df791dabfa
-World Games (USA),ok,98.8506,index,,98.8506,100.0,95.5556,,,,120,,59d4e475832f5abb59ce74b3fa25973fa88a1069d40bc14a864a8be67a1b5a37
 Side Pocket (Europe),ok,98.863,index,,98.863,98.0375,,,,,120,,06e17801d41f6f452001d97c61c519fbfbf533f080b7bdef3f4e7d40800b90e2
-Time Lord (USA),ok,98.8636,index,,98.8636,100.0,96.6667,,,,120,,d8ac2828118c8375de841e20a5384b7bdaa9184bb668bc3a2625f0d638f4d8ff
+Metroid (USA),ok,98.8798,index,,98.8798,90.2311,0.0,,,,120,,88ad02b0b53012712f3c773a62073847551cec191aeda5d3ec19b22b594640eb
 Kyuukyoku Harikiri Stadium (Japan),ok,98.8855,index,,98.8855,98.8704,0.0,,,,120,,02054ad883d7ae0879790d1f9d17233b69b713f186f44afbe7a36efd1b990ced
 Kyuukyoku Harikiri Stadium - '88 Senshu Shin Data Version (Japan),ok,98.8855,index,,98.8855,98.8704,0.0,,,,120,,5d85562d2b0d26b0ce158cb41d5f7bb2697527d956d62aac0a18c186c608005f
-Radia Senki - Reimei Hen (Japan),ok,98.889,index,,98.889,100.0,98.8889,,,,120,,401072e2bfbe45f89885f307da52861006ee23c1eaa996cde9fe592dc4ef034a
 Stadium Events (Europe),ok,98.8953,index,,98.8953,98.8975,,,,,120,,4b6876b04b5609402576aff52a83a430a52e4b4cd74238fd9c949cfd2f766f34
 "Kung Fu (Europe, Hong Kong) (En)",ok,98.9108,index,,98.9108,98.9108,,,,,120,,c0f77647578744c44f9d511520f3beaad233edf024b657694e6e769c3605f3eb
 Adventures in the Magic Kingdom (Europe),ok,98.9174,index,,98.9174,98.9174,0.0,,,,120,,97b83e9ca58cb3cd3b4abf85c95621e8d5b46301089a8ce42888b06af20b4e1a
 Parodius (Europe),ok,98.9747,index,,98.9747,98.9573,,,,,120,,880af8fe0591a8382e62f4c6ae29aa31a3013a499fc25ba811b613eb0f5fd44f
-Racket Attack (USA),ok,98.9766,index,,98.9766,100.0,60.0,,,,120,,b7f82a5dea336fac0103cd7591c1d19096b8f95a0a8e8d8f99e2a8848f70d388
 Life Force - Salamander (Europe),ok,99.0071,index,,99.0071,99.0071,,,,,120,,16bdfa6c54a00485a99be32018d18b36acac51060532b2d8049342a479b38670
 Life Force - Salamander (Europe) (Virtual Console),ok,99.0071,index,,99.0071,99.0071,,,,,120,,48baa544a203d862303ad9a4e0c3c998572d6de32f1ae4324c9dc6816cf0824e
 Gremlins 2 - The New Batch (Europe),ok,99.0152,index,,99.0152,98.8128,,,,,120,,9f1da01fcf2de1b29cc2db6b165b880014296475c9ffd5b222389704da222151
+Metroid (Europe),ok,99.0189,index,,99.0189,89.812,,,,,120,,ae8018ea3b9a65adf8c6c504cffa2fbeb10e213da3e4100078e2fc6974f85076
 City Connection (Europe),ok,99.0204,index,,99.0204,99.0204,,,,,120,,954cd7566e5b67918f7a8412d82fc187cfbe1708b05f0ca78ac3f26202c65d76
 Dr. Mario (Europe),ok,99.0322,index,,99.0322,99.0021,,,,,120,,4cbeff53601ab83d60fa6dad3f535ca4de3c0e8cb923a7b7235a3e39b5d41719
 Jackie Chan's Action Kung Fu (Europe),ok,99.0802,index,,99.0802,99.0802,,,,,120,,73f4f9922f55b63156c5a937784c6944a884597391b0f70e862f81052ed7e023
 Silent Service (Europe),ok,99.0918,index,,99.0918,99.0918,,,,,120,,ebe7a2e038595e9f060d34921f1bc3894e4bfda221322dbdb89ddb3666973825
-Rad Racer (Europe),ok,99.096,index,,99.096,97.7153,,,,,120,,f325fb281d998e08c45537b04b2ddc649c6d93f662c13403dd5d5878c9be26ed
-Knight Rider (Europe),ok,99.105,index,,99.105,100.0,,,,,120,,e546ffb2b722696acb43575546c0363b5db199840a5570699e49162354ec28d6
+Hokuto no Ken 2 (Japan),ok,99.0975,index,,99.0975,96.3525,44.4444,,,,120,,d797076997e62ea5126bf01574a0720adef1264207eb918b1ea67c4facb1a094
 DuckTales (Europe),ok,99.1145,index,,99.1145,98.9374,,,,,120,,e17b84e66ebaf8650a9fe9e8460528e0c5ce20cc0f9ee7842c73374c1c8ceb00
+Knight Rider (Europe),ok,99.1164,index,,99.1164,100.0,,,,,120,,e546ffb2b722696acb43575546c0363b5db199840a5570699e49162354ec28d6
 "Jetsons, The - Cogswell's Caper (Europe)",ok,99.1326,index,,99.1326,99.4454,,,,,120,,4f760248ff200f3d0f1cf49bb9b291171098af7da3400efb822d05919c86bbfb
-Doraemon (Japan),ok,99.149,index,,99.149,0.0,28.8889,,,,120,,b8680e8e6e99bdbbad92ee6e40b667fddc5a42fc39a1a75742472610071b4ac9
-Doraemon (Japan) (Rev 1),ok,99.149,index,,99.149,0.0,28.8889,,,,120,,842318dbe28483982f6a67fad66cc3d82c7eaea517d37a1e7ef4501a80f0b7e5
 Ninja JaJaMaru's Big Adventure (USA) (Retro-Bit Generations),ok,99.1623,index,,99.1623,100.0,85.5556,,,,120,ares capture is a uniform blank frame (board unsupported by the oracle),0bceeb5089ca2ed1ba1f100604bfae08c863544acfc43f653304c03bbba82350
 Athletic World (Europe),ok,99.1661,index,,99.1661,99.1731,0.0,,,,120,,0b5a88527665e7c29f343952ea045daea2e4fa7c86080d8976c3b8eb230650a9
 Digital Devil Story - Megami Tensei (Japan),ok,99.1881,index,,99.1881,0.0,0.0,,,,120,,d4b66d1130f8f3a6eeb1e6a17854dc1e5975f6ce52a6e84adee6438b9d813e41
@@ -164,6 +129,7 @@ Ufouria - The Saga (Europe),ok,99.2611,index,,99.2611,99.2611,,,,,120,,dc1bb738e
 Ufouria - The Saga (World) (Evercade),ok,99.2611,index,,99.2611,99.2611,,,,,120,,f2c4ec7f2be77ab68bcf66186757b73f91be381ab578f1387310d5ae30ce35f2
 Captain Planet and the Planeteers (Europe),ok,99.2737,index,,99.2737,99.1399,,,,,120,,3e16153015c58217ca2c8abccb1ffff698643deaea6364433800c481ed341a2c
 Bandit Kings of Ancient China (USA),ok,99.2744,index,,99.2744,98.7679,41.1111,,,,120,,2959b80b3f8197186a4865178c25839c98cb7afe87d46f8ad723228b8b130dfd
+Metroid (USA) (Virtual Console),ok,99.2774,index,,99.2774,90.2311,7.7778,,,,120,,44fc300fd8ba55411f1f4daaac375ea74a8bb4f5e6ac1f8b2d69974b83374ec4
 Wario's Woods (Europe),ok,99.2787,index,,99.2787,0.0,,,,,120,,7d871db14dfcfc3ad1d4dbd39b4828a41c5a832ff2b663db48c703a6a2bcd8b9
 Burai Fighter (Europe),ok,99.2805,index,,99.2805,99.2694,,,,,120,,6a32dc009a0b01ea614837f6384be95fde40ec4f359a6cad84e08e9dd5b8aacd
 Robin Hood - Prince of Thieves (USA),ok,99.2834,index,,99.2834,100.0,98.8889,,,,120,,6ba2f690f13a6622bc9fcf960b1a03c389dc25957aa87ef1865d938289565d30
@@ -172,12 +138,13 @@ Solomon's Key 2 (Europe),ok,99.2935,index,,99.2935,98.8294,,,,,120,,767ef3a5a9c7
 Shadow Warriors - Ninja Gaiden (Europe),ok,99.297,index,,99.297,99.2728,,,,,120,,45e88423cdb8135a8dcb9d370b77e85d8006fe324732d2740664f7fff127665b
 Felix the Cat (Europe) (Hudson),ok,99.3162,index,,99.3162,99.3525,,,,,120,,711795468f8fd2e59dc570fecdcd24a122549fd05e70c5208624e4723917ab79
 Track & Field II (Europe),ok,99.3226,index,,99.3226,99.3226,,,,,120,,79395706376ca037c9d92fe02950a73400d0d46da2ce2b13152138f96711b34c
+Ghostbusters (Japan),ok,99.3493,index,,99.3493,100.0,97.7778,,,,120,,23b5922f4482de4d73bc153f44e13000f6a45c4b455afcdb9f5a49b4edac3e21
 Star Force (Europe),ok,99.3773,index,,99.3773,99.374,,,,,120,,c95fa8014be8c760fc8fe551ee1c74d706c7bbb1f9994cb650d61003ad364153
 Dragon Spirit - Aratanaru Densetsu (Japan),ok,99.3869,index,,99.3869,98.8737,12.2222,,,,120,,9df890deed926182791305b131e76e55d22611e431b0c5469a2aa3a1f446d0d5
 Dragon Spirit - Aratanaru Densetsu (Japan) (Namcot Collection),ok,99.3869,index,,99.3869,98.8737,12.2222,,,,120,,b0c6e5637930112fd4e68e2ffa3384d4d12fca471bb7eb3117ade8250bdf64a0
+Rad Racer (Europe),ok,99.4039,index,,99.4039,100.0,,,,,120,,f325fb281d998e08c45537b04b2ddc649c6d93f662c13403dd5d5878c9be26ed
 Ice Hockey (Europe),ok,99.4188,index,,99.4188,99.4205,,,,,120,,4ec65853d42b1daff9a471f02e53199762abfb1c574cd888658b0f11de214c01
 Journey to Silius (Europe),ok,99.4418,index,,99.4418,100.0,,,,,120,,5c3b6c3d009e6c755a0e263f3c9ade169f42e01e87bbdec823dae1b3c5ba3165
-Hokuto no Ken 2 (Japan),ok,99.449,index,,99.449,100.0,64.4444,,,,120,,d797076997e62ea5126bf01574a0720adef1264207eb918b1ea67c4facb1a094
 Hyper Olympic (Japan) (En) (Genteiban!),ok,99.4633,index,,99.4633,99.4124,0.0,,,,120,,ccaadd061c7ea81e37d068a55f783463874550ab3fdd72b6d13a207aa9fc7bbd
 Hyper Olympic (Japan) (Genteiban!),ok,99.4633,index,,99.4633,99.4124,0.0,,,,120,,ccaadd061c7ea81e37d068a55f783463874550ab3fdd72b6d13a207aa9fc7bbd
 Super Spy Hunter (USA),ok,99.4634,index,,99.4634,0.0,0.0,,,,120,,f01d6e59d07b5426965d79eb6dc356c3b2ce3f0d6ec7319a1431dd219f99e265
@@ -198,6 +165,7 @@ Digger T. Rock - The Legend of the Lost City (Europe),ok,99.565,index,,99.565,99
 Nobunaga's Ambition II (USA),ok,99.5751,index,,99.5751,99.3831,31.1111,,,,120,,1497c5f4524964d2a068ce71718b89bc181b0ffc6e05aa8c9187c6b08eef6651
 Yoshi's Cookie (Europe),ok,99.5799,index,,99.5799,99.5799,,,,,120,,e1fe66869a52cdb4c45f475727df1801197363a29495c4908c162675d145ad30
 Yoshi's Cookie (Europe) (Virtual Console),ok,99.5799,index,,99.5799,99.5799,,,,,120,,d9cc255b6d0cbed1db6d7a1815c474fb99e14c0d77c15d100ea07690f70178cd
+Tanigawa Kouji no Shougi Shinan II (Japan),ok,99.5877,index,,99.5877,99.5052,16.6667,,,,120,,d9d6b0dee96454914373dcb5eb6dfb15569f06402b23f167d21c778d1c0e5374
 Pinball Quest (Australia),ok,99.5915,index,,99.5915,99.7842,,,,,120,,6953fcd9d8346703ea858f79f3fc6e96c2f34f05fd2d04d17f20ccb60ec48e99
 Super Mario Bros. + Tetris + Nintendo World Cup (Europe),ok,99.5916,index,,99.5916,99.5916,,,,,120,,e40bb274defe03e20947436794449624b6e0a875313abd627d614c4e253666f9
 Super Mario Bros. + Tetris + Nintendo World Cup (Europe) (Rev 1),ok,99.5916,index,,99.5916,99.5916,,,,,120,,8784d2ed0fff1b4b2005c9a9ac9d92eecaa0fbcb8842a59baad78d42c9616937
@@ -207,20 +175,19 @@ Air Fortress (Europe),ok,99.641,index,,99.641,99.6546,0.0,,,,120,,9d3a81e0cba674
 Kirby's Adventure (Europe),ok,99.6443,index,,99.6443,99.7078,,,,,120,,4a640801e31fa9e71129bd80a2a86ee7e6d33e642e6c544c7c74c9b6731d4af6
 Kirby's Adventure (France),ok,99.6443,index,,99.6443,99.7078,,,,,120,,2b54f8cf590f4924b8e9326496c77a4a1a9080cc607311af5edfd3eea9f1e534
 Kirby's Adventure (Germany),ok,99.6443,index,,99.6443,99.7078,,,,,120,,37ef7df4f5962dbde4a57a6401cbc153a04a609fa0715bdb5b3c45901e6933a3
-"Win, Lose or Draw (USA)",ok,99.6514,index,,99.6514,100.0,98.8889,,,,120,,58dc31354eac101359b5ddc5afc96d8c0fe89ca43488c599d40fcf28a6387ad9
 To the Earth (Europe),ok,99.6562,index,,99.6562,98.9523,,,,,120,,246437916059621deb399cf957745783c6737d364dfcfdadad167639c7e42598
 Adventure Island Classic (Europe),ok,99.6609,index,,99.6609,99.6181,0.0,,,,120,,8b25fa8283a926647baad1048a47967821b797873903731177ec507002d93a42
-Final Fantasy (Japan),ok,99.6684,index,,99.6684,0.0,50.0,,,,120,,e65972d957da55514419e2e54a1edb14c9ed680ffa56bd0d5d34e40940e0b2bf
+Ghostbusters (USA),ok,99.6643,index,,99.6643,100.0,97.7778,,,,120,,6c553820bd9b56b60362564257336e09896bd9a76c62f6e1aed75500874ab58a
 Final Fantasy (Japan) (Rev 1),ok,99.6684,index,,99.6684,0.0,50.0,,,,120,,3991995d99ada6bd2f9a9c9abf522d1d890c5f1df55b051c90f1e71e2fd5b5af
-Final Fantasy (Japan) (Rev 1) (3DS Virtual Console),ok,99.6684,index,,99.6684,0.0,50.0,,,,120,,0748c00f31adfbc334ad8154b8c446fbf75749719e3c7b7907967885eba5ec88
-Final Fantasy (Japan) (Rev 1) (Wii and Wii U Virtual Console),ok,99.6684,index,,99.6684,0.0,50.0,,,,120,,97920aef123d062e13dbef60deca8765610c28d0bf3b451f7e3638e6fad869af
 McDonaldland (Europe),ok,99.6804,index,,99.6804,99.5119,,,,,120,,cf5618a66ccf284300612a07ca080e12a7b6c659eb3d7ae1779d5d4ec72cae6f
 McDonaldland (France),ok,99.6804,index,,99.6804,99.5119,,,,,120,,9b398beca28bf383002abe101b6f6d65da2a22a351f1a3d7e01796e31aef8c8e
 "Addams Family, The (Europe) (En,Fr,De)",ok,99.6812,index,,99.6812,99.6812,0.0,,,,120,,1f1670efd0a7b13166fe311fcf001c12491ecdeaaa7afd445ed75876e3c562cf
-Nangoku Shirei!! - Spy vs Spy (Japan),ok,99.6982,index,,99.6982,0.0,74.4444,,,,120,,b4fd0445870cffd33d8899a4debd8772f1c01e3881af141f26fc1a3772f5f3fa
 Konami Hyper Soccer (Europe),ok,99.7048,index,,99.7048,99.6712,,,,,120,,c2fb895ccbea21097522eb74b30258c292fce2c111ffa1d0ccd16f3d15dbead6
 Dragon Ball Z - Kyoushuu! Saiya Jin (Japan) (Rev 1),ok,99.7101,index,,99.7101,99.987,0.0,,,,120,,55fee2fb27bb5e2fc7d549b9c65acb0b6bb68876eb91622b5f4e2a42d7186dae
+Final Fantasy (Japan),ok,99.7145,index,,99.7145,100.0,48.8889,,,,120,,e65972d957da55514419e2e54a1edb14c9ed680ffa56bd0d5d34e40940e0b2bf
+Final Fantasy (Japan) (Rev 1) (3DS Virtual Console),ok,99.7145,index,,99.7145,100.0,48.8889,,,,120,,0748c00f31adfbc334ad8154b8c446fbf75749719e3c7b7907967885eba5ec88
 "Simpsons, The - Bartman Meets Radioactive Man (Europe)",ok,99.7161,index,,99.7161,99.7161,,,,,120,,1dd79d047d06b38c94fb52078bae497cba11b49cd66eefb6dfa95dca0537b141
+Shin Moero!! Pro Yakyuu (Japan),ok,99.7174,index,,99.7174,99.5345,33.3333,,,,120,,85b517abb2c584555b6289df5b350d3877c3d2bd8e4b6410363873e4cb151f74
 SD Gundam Gaiden - Knight Gundam Monogatari 2 - Hikari no Knight (Japan),ok,99.7192,index,,99.7192,0.0,60.0,,,,120,,7b01e9f433e47f82fdc1aca41c9e3e192ba2c28366d165010fdde6c5a739674b
 Eliminator Boat Duel (USA),ok,99.7201,index,,99.7201,100.0,95.5556,,,,120,,64eb235324a3ea404eee3260f4f8bc7e8e7ba48cd3e1e0d88befc5c2cbf6edc5
 Mirai Shinwa Jarvas (Japan),ok,99.7257,index,,99.7257,87.6562,97.7778,,,,120,,f43b1fb5efe1940807cb1d4cfa61ba90e4fc8cdc2323a6daf77ef3cc4ec00c32
@@ -228,33 +195,32 @@ Mighty Bomb Jack (Europe),ok,99.7277,index,,99.7277,99.7277,,,,,120,,8f83c71d30c
 "Adventures of Bayou Billy, The (USA)",ok,99.7314,index,,99.7314,99.6419,0.0,,,,120,,3ea11f1d4df0ed63aabec579c01b5e9cb12cfe7c3b40028cab317cbf23567ca5
 "Adventures of Bayou Billy, The (USA) (Virtual Console)",ok,99.7314,index,,99.7314,99.6419,0.0,,,,120,,4174612b9a01a65811cb081d530f3acff7529347595464dbfec18838d5fc92dc
 Mario & Yoshi (Europe),ok,99.7446,index,,99.7446,0.0,,,,,120,,eaa0f715696fe3767ceb7a18a6772af0a4a8883663c24f2108b66c67c20f800f
-Double Dragon II - The Revenge (Europe),ok,99.755,index,,99.755,99.1001,,,,,120,,e2b6c1cbd8d9fd0318c76cacbda1b47fce1e4cade38ab775df62810f1eeaa57f
+Double Dragon II - The Revenge (Europe),ok,99.745,index,,99.745,99.1001,,,,,120,,e2b6c1cbd8d9fd0318c76cacbda1b47fce1e4cade38ab775df62810f1eeaa57f
 Bakushou!! Jinsei Gekijou (Japan),ok,99.7828,index,,99.7828,0.0,82.2222,,,,120,,014e6e20385eae9479a3d3a5f35c1bc81a85a75b491bd0dc1563112743cd41bc
 Overlord (USA),ok,99.7964,index,,99.7964,100.0,98.8889,,,,120,,e531bb2f88870c328708decc2eb687ff064a44749208767bbf3bdab8363bccf9
 Super Mario Bros. (Europe),ok,99.7999,index,,99.7999,99.7908,,,,,120,,ff69421b584ce898b3d4b3ab57202900c079c45cdface84d654d0368ad796ffe
 Super Mario Bros. - 25th Anniversary (Australia) (Virtual Console),ok,99.7999,index,,99.7999,99.7908,,,,,120,,cac8c06d9058442c6a2183f742276635b7509606068a72979f0fba454d538709
-Star Trek - 25th Anniversary (USA),ok,99.8094,index,,99.8094,0.0,0.0,,,,120,,4732c71c4f264af2559e8bcc098689f208f5ca8de8578ab1c286f4e600bf6625
+Final Fantasy (USA),ok,99.8013,index,,99.8013,0.0,60.0,,,,120,,2f5d5ff2e22fb31c64d92dc783af443f94340b365595cd6b8d77e8c9b3a54820
 "Adventures of Bayou Billy, The (Europe)",ok,99.8105,index,,99.8105,99.7011,0.0,,,,120,,a3dadb1422e2a8fa242b977678287ac043fff7cd9c51eaab11725bec4f3db74a
-Shin Moero!! Pro Yakyuu (Japan),ok,99.8134,index,,99.8134,100.0,81.1111,,,,120,,85b517abb2c584555b6289df5b350d3877c3d2bd8e4b6410363873e4cb151f74
 Tecmo Bowl (Japan),ok,99.8178,index,,99.8178,100.0,96.6667,,,,120,,d6895fad0688fa33310495abe81a8f5676e1af7212b23913c812c0f22338e15f
 Tecmo Bowl (USA) (Rev 1),ok,99.8178,index,,99.8178,100.0,96.6667,,,,120,,b3ff470a057fa4b60bbc50a2f4d857da2f8701235c7283470a242c3ebcb56b9b
 "Tecmo Bowl (World) (Rev 1) (Virtual Console, Classic Mini, Switch Online)",ok,99.8178,index,,99.8178,100.0,96.6667,,,,120,,1e1b5cc05d48b9bc2dbf71ac3843ce473adebd47921d76a32de902bbaa6a36b1
 Predator (Australia),ok,99.8181,index,,99.8181,99.834,,,,,120,,9c600fb6819ce02deeb66151a3f7ae71e9f37586a404818469f484c0cec406f5
-Metroid (Europe),ok,99.8187,index,,99.8187,99.7759,,,,,120,,ae8018ea3b9a65adf8c6c504cffa2fbeb10e213da3e4100078e2fc6974f85076
-Metroid (Europe) (Virtual Console),ok,99.8187,index,,99.8187,99.7759,,,,,120,,b4783dbb2aeaefdb998f4ac232102b9d7f759f521a6e6c40e346e311403e0323
 KickMaster (USA),ok,99.8189,index,,99.8189,99.2415,11.1111,,,,120,,00ad4a0c6612319bb9f918ca36d6e93b4e5d996716c0570a3ec92bd60533881b
-Final Fantasy (USA),ok,99.8209,index,,99.8209,0.0,64.4444,,,,120,,2f5d5ff2e22fb31c64d92dc783af443f94340b365595cd6b8d77e8c9b3a54820
-Final Fantasy (USA) (Virtual Console),ok,99.8209,index,,99.8209,0.0,64.4444,,,,120,,d252340651ea0c3ef1917f01b18c8569dd77561c21c39b0b97856b52c4d98275
 Four Players' Tennis (Europe),ok,99.8247,index,,99.8247,99.7045,,,,,120,,7b14f69a6b52827de1007d1d36600d6734ac63f64dd1d7f6043c176effe4fdb0
-Star Trek - 25th Anniversary (Germany),ok,99.8282,index,,99.8282,0.0,,,,,120,,40982fdc0f15e138c08e9c927520f26edc28d004b72ec735d240e26c205ce588
+"Win, Lose or Draw (USA)",ok,99.8323,index,,99.8323,100.0,98.8889,,,,120,,58dc31354eac101359b5ddc5afc96d8c0fe89ca43488c599d40fcf28a6387ad9
 Wizards & Warriors III - Kuros...Visions of Power (Europe),ok,99.833,index,,99.833,99.7509,,,,,120,,334ab1caf213a3f2dc636ed6304dc2fc736b778c157e13fed4fc7d72221c03bb
+Star Trek - 25th Anniversary (Germany),ok,99.8371,index,,99.8371,99.8406,,,,,120,,40982fdc0f15e138c08e9c927520f26edc28d004b72ec735d240e26c205ce588
 Metal Gear (Europe),ok,99.8373,index,,99.8373,99.8373,,,,,120,,0f905e50e02351cbcfe70dd9335ea3e3507eba945055ed48eb238cc9e230ea08
+Star Trek - 25th Anniversary (USA),ok,99.8388,index,,99.8388,0.0,0.0,,,,120,,4732c71c4f264af2559e8bcc098689f208f5ca8de8578ab1c286f4e600bf6625
 Kaiketsu Yanchamaru 2 - Karakuri Land (Japan),ok,99.8448,index,,99.8448,0.0,0.0,,,,120,,19e5e8610b458979026d7e731de8597d02ab3036c927c9ea98504581a33aa452
 Soccer (Europe),ok,99.8539,index,,99.8539,99.8539,,,,,120,,284ad03d10deab52d3f20b05d1ebdeef9cfa0673b1125b9c546dd67a117e6061
 Rush'n Attack (Europe),ok,99.8569,index,,99.8569,0.0,,,,,120,,c342eb3224fdcac12ddff0e0dae51ee557022c543427e62e446712ec9cb2729f
 Conquest of the Crystal Palace (USA),ok,99.8594,index,,99.8594,99.8438,10.0,,,,120,,4b6d7e012e0e404c6220bd0afc28aeff08733b4a61be0c3498811d151779622e
 Battletoads (Europe),ok,99.8722,index,,99.8722,99.8722,,,,,120,,bb666fe1fe84ba353ed64fd2a516643d7fdaa73b7a86e53573746752992c7194
 Ikari Warriors (Europe),ok,99.8761,index,,99.8761,99.4488,,,,,120,,a8b93977854937040f0ed1f9b02abb4f7e98457269173a5136fc5aa1c8266597
+Obake no Q Tarou - Wanwan Panic (Japan),ok,99.8778,index,,99.8778,99.8307,38.8889,,,,120,,3622dade07869911238fbef2e1a7b1c15d7c58b9491605c0ba3f58c8eaadae44
+Obake no Q Tarou - Wanwan Panic (Japan) (En),ok,99.8778,index,,99.8778,99.8307,38.8889,,,,120,,3622dade07869911238fbef2e1a7b1c15d7c58b9491605c0ba3f58c8eaadae44
 Balloon Fight (Europe),ok,99.8921,index,,99.8921,99.8921,,,,,120,,064000e87f3a63ce9b4680e7ba1934a9e462aabc34a589997e639e1c0b3fb8a2
 Sword Master (Europe),ok,99.9004,index,,99.9004,99.9004,,,,,120,,76cd3b76fc040dff04b6d4f55cde48374b95ec2c70a17b4ea96f5a15974b65a1
 Trojan (Europe),ok,99.9019,index,,99.9019,99.9087,,,,,120,,f3cd2737dd3e3bfb30733b8af1e7478ce72173a47f5a096776c9debe64c243f4
@@ -263,34 +229,25 @@ Hissatsu Shigoto Nin (Japan),ok,99.9048,index,,99.9048,100.0,88.8889,,,,120,,fbd
 Excitebike (Europe),ok,99.907,index,,99.907,99.907,,,,,120,,8c66866bd7178f9f4c0e3523f339fe43b05f0adeb48b7a4896941d2d96f19500
 Excitebike (Europe) (Virtual Console),ok,99.907,index,,99.907,99.907,,,,,120,,7c3c75715f192c2970292dff6856f506b07942c0a5739a1fc375c851c859c0c6
 Galaga (Europe),ok,99.9085,index,,99.9085,99.9103,,,,,120,,26ec9cf545d5c349c29f25285aed666ede719962a2649f4eeed58eb0b312e25c
+SD Gundam Gaiden - Knight Gundam Monogatari (Japan) (Rev 1),ok,99.9112,index,,99.9112,99.9382,44.4444,,,,120,,4cad3c9b8b56597dd093094b08ee30a834d7392de50f4585e7f3d0da05bd01ff
 Battletoads-Double Dragon (USA),ok,99.912,index,,99.912,0.0,0.0,,,,120,,f45ca41c4636c982fa6d4b937efd4169024d8cb3f58d5740b0d13d865ad4a10c
 Tiger-Heli (Europe),ok,99.9136,index,,99.9136,99.8091,,,,,120,,c87e7059aadaa55dbc1f4bcf751c207470ff743c4c95d0ce05ad41103f39e54f
 Tiger-Heli (Europe) (Rev 1),ok,99.9136,index,,99.9136,99.8091,,,,,120,,11d27ae2287b7769fdb4a640737265a727bc44cf38475028f9ca3113b8c69d2c
 Cobra Triangle (Europe),ok,99.9166,index,,99.9166,99.9635,,,,,120,,807368350001ece1b1e96aaf62d83acb9de064aa863f66bbb850e74cd509c114
-Baltron (Japan),ok,99.9189,index,,99.9189,99.9398,36.6667,,,,120,,07fcff9ca56cf5477d068ffd8de98adb8e4c9019defcdbd432bbc2c94ca70ff7
-Baltron (Japan) (En),ok,99.9189,index,,99.9189,99.9398,36.6667,,,,120,,07fcff9ca56cf5477d068ffd8de98adb8e4c9019defcdbd432bbc2c94ca70ff7
-Metroid (USA),ok,99.92,index,,99.92,100.0,26.6667,,,,120,,88ad02b0b53012712f3c773a62073847551cec191aeda5d3ec19b22b594640eb
-Metroid (USA) (Virtual Console),ok,99.92,index,,99.92,100.0,26.6667,,,,120,,44fc300fd8ba55411f1f4daaac375ea74a8bb4f5e6ac1f8b2d69974b83374ec4
-Crayon Shin-chan - Ora to Poi Poi (Japan),ok,99.9203,index,,99.9203,100.0,75.5556,,,,120,,afd326344d99a398397747f94ddf47c2560ab8e0c6a0058bd187591d3e55b90a
 Devil World (Europe),ok,99.9203,index,,99.9203,99.9203,,,,,120,,0844bafaf3fd3ea8c05c9aa743ccbc1853bb23e3ead803c942f8872f688b2a9e
 Eliminator Boat Duel (World) (Evercade),ok,99.9239,index,,99.9239,100.0,95.5556,,,,120,,739afe6e6c9b1d67723d4b7aa542b37a60a6371a81a5edfb9454998cd1a81f08
 Super Mario Bros. 3 (Europe),ok,99.9269,index,,99.9269,99.6082,,,,,120,,6c950f9864db8621bebbcc5e61fc3a8ff92437478b262a303c3d0dbd68d897f1
 Super Mario Bros. 3 (Europe) (Virtual Console),ok,99.9269,index,,99.9269,99.6082,,,,,120,,4b9bc232399bc17085df87e5dfb8e6c6dfef3ef25c9c23f700cd479f08f88d50
 Battletoads-Double Dragon (Europe),ok,99.9272,index,,99.9272,99.9253,,,,,120,,9638ee26f31944aece885a025b455d119a50a54b375ccfd8e8c29af3b6b6f34c
-Kung-Fu Heroes (USA),ok,99.9284,index,,99.9284,99.9284,0.0,,,,120,,24aa6b4eb62f96288d961223c14d6c856dc2993b9b413ec751f7089e26856678
-Ghostbusters (USA),ok,99.9325,index,,99.9325,100.0,97.7778,,,,120,,6c553820bd9b56b60362564257336e09896bd9a76c62f6e1aed75500874ab58a
-Obake no Q Tarou - Wanwan Panic (Japan),ok,99.9334,index,,99.9334,100.0,74.4444,,,,120,,3622dade07869911238fbef2e1a7b1c15d7c58b9491605c0ba3f58c8eaadae44
-Obake no Q Tarou - Wanwan Panic (Japan) (En),ok,99.9334,index,,99.9334,100.0,74.4444,,,,120,,3622dade07869911238fbef2e1a7b1c15d7c58b9491605c0ba3f58c8eaadae44
+Baltron (Japan),ok,99.9317,index,,99.9317,0.0,24.4444,,,,120,,07fcff9ca56cf5477d068ffd8de98adb8e4c9019defcdbd432bbc2c94ca70ff7
+Baltron (Japan) (En),ok,99.9317,index,,99.9317,0.0,24.4444,,,,120,,07fcff9ca56cf5477d068ffd8de98adb8e4c9019defcdbd432bbc2c94ca70ff7
 Turbo Racing (Europe),ok,99.9342,index,,99.9342,99.9203,,,,,120,,afd1dcc0886ad166475c2e20bd4b88dbface5319b531c59ef86cff1a03b418a4
 Golf (Europe),ok,99.9386,index,,99.9386,99.9386,,,,,120,,be298e3a3c693dec7779087f14070dad5e5d7e90ed6bc1245f4353a6080ed995
 Golf (Europe) (Animal Crossing),ok,99.9386,index,,99.9386,99.9386,,,,,120,,295a507fe84ef03b58a4039fb71d532d906b5795985a99ee2a2e6a61b9554d65
 Golf (Europe) (GameCube Edition),ok,99.9386,index,,99.9386,99.9386,,,,,120,,295a507fe84ef03b58a4039fb71d532d906b5795985a99ee2a2e6a61b9554d65
-Ghostbusters (Japan),ok,99.944,index,,99.944,100.0,96.6667,,,,120,,23b5922f4482de4d73bc153f44e13000f6a45c4b455afcdb9f5a49b4edac3e21
 Snake's Revenge (Europe),ok,99.9469,index,,99.9469,99.9469,,,,,120,,d221b4c7d16d2f7943713b9f72876d239d37b22c0bd798e5ca4fee9c6c6e5015
 Skate or Die 2 - The Search for Double Trouble (USA),ok,99.9479,index,,99.9479,99.9479,0.0,,,,120,,8268cfc29f1be3fa7cf2ade7d9aedf04a6af7ba03019faf44a97305e285f32a8
-Super Chinese (Japan),ok,99.9495,index,,99.9495,99.9495,0.0,,,,120,,d621e639f24758b5a67cb262a409a2db25fd1ebdac0aa51ec4a896be7913174b
 Super Spike V'Ball (Europe),ok,99.9499,index,,99.9499,0.0,,,,,120,,7259828c1f14ebaf1116538886a6a675293945a9ae74722ccecb1a37ab0ba980
-Moero!! Pro Tennis (Japan),ok,99.9507,index,,99.9507,100.0,97.7778,,,,120,,7295ce40e8c1b917e38e142019dac3b77fbfa3b53ac39a4dad9f1c8a22c5cd17
 Mario Bros. (Europe) (PAL-MA-0),ok,99.9535,index,,99.9535,99.9535,,,,,120,,4d9cec13321c3a5325c1f88a541e0a7fa918ccab59adde14c343abc6d2f034ba
 "Mario Bros. (Europe) (PAL-MC-0, Classic Series)",ok,99.9535,index,,99.9535,99.9535,,,,,120,,971ddf336eebe1728513000ef7662efa45e8f50ff97a8ddccad37019d9021ee9
 "Pinball (Europe, Asia) (En)",ok,99.9535,index,,99.9535,99.9535,,,,,120,,187434a4e860862595e754e9057517c71b8bad8aa7ed05d275114b016b6adbf1
@@ -298,48 +255,49 @@ Tennis (Europe),ok,99.9535,index,,99.9535,99.9535,,,,,120,,4c81614b5b2e28ca4c924
 Tecmo World Wrestling (Europe),ok,99.9568,index,,99.9568,99.9568,,,,,120,,97529138ded0a91cc6def27d5126798cd7fd8eed06b0a0e24351d650332561eb
 Tecmo Bowl (USA),ok,99.9575,index,,99.9575,100.0,97.7778,,,,120,,9ca84d709f96fa50ceaa4b3bdc36ff63f7d711c31a596937c8c70797a8df729f
 Heracles no Eikou II - Titan no Metsubou (Japan),ok,99.958,index,,99.958,99.9561,0.0,,,,120,,ad3dbe9909bc5742388f89d78c1f9995c1813458151738beea1a0e6bfecc1d55
+Sangokushi (Japan),ok,99.9584,index,,99.9584,100.0,95.5556,,,,120,,e77a1bfb16aa86baafa3a068f51e24283b2fee3143b80f2f61d98e67b9237a3d
+Final Fantasy (USA) (Virtual Console),ok,99.96,index,,99.96,100.0,92.2222,,,,120,,d252340651ea0c3ef1917f01b18c8569dd77561c21c39b0b97856b52c4d98275
 Faxanadu (Europe),ok,99.9602,index,,99.9602,99.9602,,,,,120,,e0ea389edb0a38c9a33567a759ca0eee36c3caf3e0107ecc39d4012d838bdb4f
 Power Blade (Europe),ok,99.9602,index,,99.9602,99.9602,,,,,120,,f5981f98175bb053e0cb33c01ab04a72e24fcc1d461d6c2af654c02b876f75c2
 Parodius Da! (Japan),ok,99.9634,index,,99.9634,0.0,80.0,,,,120,,ef1dd05ad5b6095d1d8e9a9f81fcb549b5cf0248779d4e76eb7bd9b139de4c9a
 Dai-2-ji Super Robot Taisen (Japan),ok,99.9637,index,,99.9637,100.0,68.8889,,,,120,,f82518acfba7856e3772c5016e2a99e975f65cc2cfd452827445b8605d0c4893
+Crayon Shin-chan - Ora to Poi Poi (Japan),ok,99.9657,index,,99.9657,100.0,88.8889,,,,120,,afd326344d99a398397747f94ddf47c2560ab8e0c6a0058bd187591d3e55b90a
 Day Dreamin' Davey (USA),ok,99.9665,index,,99.9665,100.0,85.5556,,,,120,,6fafc65ce6c8c737938a4400eda0c33b8ae59a59153c83c07a61f011d226f275
+Guerrilla War (Europe),ok,99.9675,index,,99.9675,0.0,,,,,120,,1115082021e33c29369964202df879636624b43da14421ae615e2389b9587e0e
 Sansuu 4 Nen - Keisan Game (Japan),ok,99.9679,index,,99.9679,0.0,38.8889,,,,120,,6dd77fbd4023d3367d48650330733267458370a31fa193c8c72f5968653ab9ca
-Guerrilla War (Europe),ok,99.9686,index,,99.9686,100.0,,,,,120,,1115082021e33c29369964202df879636624b43da14421ae615e2389b9587e0e
 Dragon Quest III - Soshite Densetsu e... (Japan),ok,99.9703,index,,99.9703,100.0,95.5556,,,,120,,bd86168892c249ef5e58b59ba36714c49a056b023e416854a60f401ad3ca426e
-Tanigawa Kouji no Shougi Shinan II (Japan),ok,99.9725,index,,99.9725,100.0,94.4444,,,,120,,d9d6b0dee96454914373dcb5eb6dfb15569f06402b23f167d21c778d1c0e5374
 Jack Nicklaus' Greatest 18 Holes of Major Championship Golf (Europe),ok,99.9734,index,,99.9734,99.9734,,,,,120,,595d9eb6011df0c1a905f607f9ee26f2b8b707dbb46d6ff5931a5e1893708d45
 Jack Nicklaus' Greatest 18 Holes of Major Championship Golf (USA),ok,99.974,index,,99.974,99.974,0.0,,,,120,,3c574c6f5352c29c04394be1eaaef8fa7731b0402bd435e98462376cc39f318a
 World Grand-Prix - Pole to Finish (Japan),ok,99.9777,index,,99.9777,99.9609,2.2222,,,,120,,c70254c752a4b27f09656648583e4ba51c0080b81b81dcba1f832bd1f784783c
+Ghostbusters II (USA),ok,99.9786,index,,99.9786,100.0,77.7778,,,,120,,bea3e8e3843181a79e951cf83dd909ba1f819b2c8b2742743d2ce1eb4e978748
 My Life My Love - Boku no Yume - Watashi no Negai (Japan),ok,99.9789,index,,99.9789,99.8828,77.7778,,,,120,,b362bb4179c091e26d064b7285e632778642750f8fce9b2c59c95dc4b780ff8f
 Tiger-Heli (USA),ok,99.9813,index,,99.9813,100.0,98.8889,,,,120,,9d8f8976f71e9d2250192117a19da4f828d948be9306511776274808ae8d370b
 Tiger-Heli (USA) (Rev 1) (Possible Proto),ok,99.9813,index,,99.9813,100.0,98.8889,,,,120,,9a5bd5ab7f52ee569392b84689fcdcef88bc40cad74eef1fcab4f9b4b3acf1ed
-Sangokushi (Japan),ok,99.9816,index,,99.9816,100.0,97.7778,,,,120,,e77a1bfb16aa86baafa3a068f51e24283b2fee3143b80f2f61d98e67b9237a3d
-Sangokushi (Japan) (Rev 1),ok,99.9816,index,,99.9816,100.0,97.7778,,,,120,,aeb7aa3b2a80117278478007c8002ac65eecc606c4517fb13f99492820947936
 Bloody Warriors - Shan-Go no Gyakushuu (Japan),ok,99.9826,index,,99.9826,100.0,83.3333,,,,120,,71f9ab0bd73e747b4398b9d707673568f0a2643be2ff4c832423aa6da9840a85
 Tiger-Heli (Japan),ok,99.9827,index,,99.9827,100.0,98.8889,,,,120,,fa9c32b711ed8ae3b9393d8e301da8035b5dae7d26238bd72b224ebc8dee1591
 Ghost'n Goblins (Europe),ok,99.9843,index,,99.9843,99.917,,,,,120,,124bd02d60e60fb568ebb2560b2c1d876f65364b30ba9478d20bdd27bb07ec44
 Tetrastar - The Fighter (Japan),ok,99.9846,index,,99.9846,99.9886,0.0,,,,120,,5eefd3880e6dc4bb02f582761178ac4d2d28cd734b97bf8ef7f76f9be1c2b91b
 Taito Chase H.Q. (Japan),ok,99.9854,index,,99.9854,100.0,97.7778,,,,120,,c66b675d30d9f81f3678d1170898c0c7292ea5bcd693741568991649e3c07206
-SD Gundam Gaiden - Knight Gundam Monogatari (Japan),ok,99.9875,index,,99.9875,100.0,93.3333,,,,120,,7323fc708fb1b51754d6af110a5622a8c68a174dc9ebe0a70ea58815fb23d355
-SD Gundam Gaiden - Knight Gundam Monogatari (Japan) (Rev 1),ok,99.9875,index,,99.9875,100.0,93.3333,,,,120,,4cad3c9b8b56597dd093094b08ee30a834d7392de50f4585e7f3d0da05bd01ff
+SD Gundam Gaiden - Knight Gundam Monogatari (Japan),ok,99.9897,index,,99.9897,100.0,93.3333,,,,120,,7323fc708fb1b51754d6af110a5622a8c68a174dc9ebe0a70ea58815fb23d355
 100 Man Dollar Kid - Maboroshi no Teiou Hen (Japan),ok,99.9906,index,,99.9906,99.9984,58.8889,,,,120,,8a506e04eceea3e7cd36f925c6116b05454224dfc35d6f18a5f64fc536d1f789
+Terminator 2 (Japan),ok,99.9913,index,,99.9913,99.9512,90.0,,,,120,,d551c7134546b7818b61a4a567c823bff726f9d9c1ae87d4125473edf523e01e
 Bananan Ouji no Daibouken (Japan),ok,99.9915,index,,99.9915,99.9902,35.5556,,,,120,,72262fa2e5664069a00a7303efc5e1e732ee6ba19eaec692af2f38d1b1104544
 Blades of Steel (Europe),ok,99.9919,index,,99.9919,100.0,,,,,120,,93b539995c47d18174affa5525a93b2917527d63f536a33a63102b1832a4df23
 Blades of Steel (Europe) (Virtual Console),ok,99.9919,index,,99.9919,100.0,,,,,120,,dd7a0911674deb89c8b59549ec777035b8d061405916939b4a732bd5634f1c69
+Uchuusen Cosmo Carrier (Japan),ok,99.9928,index,,99.9928,99.9935,12.2222,,,,120,,6106f6a1cb640b0d4934dab33d5b3a6d6a5bd1155fc1aecfd49db071ea498827
 Ai Sensei no Oshiete - Watashi no Hoshi (Japan),ok,99.9929,index,,99.9929,100.0,87.7778,,,,120,,25272a77adf2ae52088f5642e47f8d28925fed66f4dc0fa4a7f37af2ce9c3569
-Uchuusen Cosmo Carrier (Japan),ok,99.9932,index,,99.9932,100.0,18.8889,,,,120,,6106f6a1cb640b0d4934dab33d5b3a6d6a5bd1155fc1aecfd49db071ea498827
+Terminator 2 - Judgment Day (USA),ok,99.9931,index,,99.9931,100.0,93.3333,,,,120,,a2f813d566ddfbb773a479703b6eebcb13a6e228f878fefedf7f85ea5e87ecec
 Super Mario Bros. 3 (Japan) (Rev 1),ok,99.9936,index,,99.9936,99.987,67.7778,,,,120,,408ed4586a8e5177e7597f265cf2e44dbbf78552338bc9ecda33f6ffedf70ec9
 Super Mario Bros. 3 (Japan) (Rev 1) (Virtual Console),ok,99.9936,index,,99.9936,99.987,67.7778,,,,120,,2075de1745e3864f3d54a1e0970ba8a2f7a333855806b51ea46064172e9dda2d
 Racer Mini Yonku - Japan Cup (Japan),ok,99.994,index,,99.994,99.9951,25.5556,,,,120,,21013722cab63145aadaf9dab913713f6f22a272e9a8c81cea9372cf0c9fff23
+Sangokushi (Japan) (Rev 1),ok,99.994,index,,99.994,100.0,98.8889,,,,120,,aeb7aa3b2a80117278478007c8002ac65eecc606c4517fb13f99492820947936
 Genpei Touma Den - Computer Boardgame (Japan),ok,99.9947,index,,99.9947,100.0,55.5556,,,,120,,f361a593f0cab08d365ae48c3884d97217b93c0b9f068fe277b32e54f2d66d61
 Super Mario Bros. 3 (Japan),ok,99.9948,index,,99.9948,99.987,72.2222,,,,120,,dba6e025f4e83f0ab055a758f0cb33baf5ac9d60fbaf97658967050c3556aede
 Dragon Buster II - Yami no Fuuin (Japan),ok,99.9952,index,,99.9952,99.987,63.3333,,,,120,,8704317c8a4595ebe5511fecb16371213252ed1490f74e95af75925cd90df34c
 Dragon Buster II - Yami no Fuuin (Japan) (En),ok,99.9952,index,,99.9952,99.987,63.3333,,,,120,,8704317c8a4595ebe5511fecb16371213252ed1490f74e95af75925cd90df34c
 "Dragon Buster II - Yami no Fuuin (USA, Europe) (Namco Museum Archives Vol 2)",ok,99.9952,index,,99.9952,99.987,63.3333,,,,120,,80e9b97ceda4862102cb7a70ecfba8fa1fd2a5f5a17b39625b583a0143d20306
-Dragon Warrior III (USA),ok,99.9952,index,,99.9952,100.0,85.5556,,,,120,,8334d342a780d8340848b6ec8ff488d7042a7163363e0f9f6211c45307118c63
 Family Trainer 6 - Manhattan Police (Japan),ok,99.9954,index,,99.9954,100.0,98.8889,,,,120,,6d9e17fbcfca5f04b55d99f7c07385aecc3d7ed449ec759ecc5aa292e7279b86
 Family Trainer 6 - Manhattan Police (Japan) (En),ok,99.9954,index,,99.9954,100.0,98.8889,,,,120,,6d9e17fbcfca5f04b55d99f7c07385aecc3d7ed449ec759ecc5aa292e7279b86
-Space Invaders (Japan),ok,99.9954,index,,99.9954,100.0,84.4444,,,,120,,8a85878dd6bd24627c052edaf236f0ac4ae830a485c4e6aca2e53debd173c1f6
 Super Mario Bros. 3 (USA),ok,99.9961,index,,99.9961,100.0,64.4444,,,,120,,c183811f6ce3a63ec59fc949a89b02141b779814276506de561fe1f8e85c94e4
 Super Mario Bros. 3 (USA) (Rev 1),ok,99.9961,index,,99.9961,100.0,64.4444,,,,120,,1ddc4b429490e298c05fa70389034107c0cb50f671c7c1baaa3f228224afc2e9
 Super Mario Bros. 3 (USA) (Rev 1) (Virtual Console),ok,99.9961,index,,99.9961,100.0,64.4444,,,,120,,b1dd81c6a5e217890d31815ffa81701e33cc34d3c732d5e2cf907bb436cecfde
@@ -363,7 +321,6 @@ Spartan X 2 (Japan),ok,99.9987,index,,99.9987,100.0,91.1111,,,,120,,50bb67330927
 Sukeban Deka III (Japan),ok,99.9987,index,,99.9987,100.0,88.8889,,,,120,,837e8cfec5d21117157575894f5a76c1bf12b1f3ce6b275954a37741f186e2b1
 Star Voyager (USA),ok,99.9988,index,,99.9988,99.9805,82.2222,,,,120,,6e9531f32b0a00a8f58aa6174982d1a658915f8831c2cbf27a52ba949498297f
 Batman - Return of the Joker (USA),ok,99.999,index,,99.999,100.0,94.4444,,,,120,,266bcbd902fb4a23ae4fa44099cb5de8cfdbc367b36a933fc2c88a7628dd7990
-Xenophobe (USA),ok,99.9991,index,,99.9991,100.0,88.8889,,,,120,,397cc33da1e4a55933fea97a06baea0e6caa6f52dab5af2a24d8ed20d0835302
 Zelda II - The Adventure of Link (USA),ok,99.9991,index,,99.9991,100.0,93.3333,,,,120,,9fca03064a5113e6a92f550d9f42bac9ac1ae248a84df1f653d7cd7f76a1803d
 Zelda II - The Adventure of Link (USA) (GameCube Edition),ok,99.9991,index,,99.9991,100.0,93.3333,,,,120,,ef1947352051cfff436984f6bad0220492ef9c9f34164348bb7fd121f797585b
 Zelda II - The Adventure of Link (USA) (Virtual Console),ok,99.9991,index,,99.9991,100.0,93.3333,,,,120,,eecdb71f03d36e80b7c2781c2a92206edaeaf70e3a23bcd06f6b0808d866ad5c
@@ -374,8 +331,6 @@ Dynamite Batman (Japan) (En),ok,99.9993,index,,99.9993,100.0,96.6667,,,,120,,cc4
 Mad City (Japan),ok,99.9993,index,,99.9993,100.0,71.1111,,,,120,,9cd1e3cf7955771637ff2e5040fbca6dd8646fcfb1814d7dcc2b1b8de845de71
 Mad City (Japan) (Virtual Console),ok,99.9993,index,,99.9993,100.0,71.1111,,,,120,,58ee60879788a036ec86ade744dd6766cf6091714e9a6de410f74d3b288a80d1
 Ganbare Goemon Gaiden - Kieta Ougon Kiseru (Japan) (Rev 1),ok,99.9995,index,,99.9995,100.0,93.3333,,,,120,core renders a blank frame (mapper not implemented or boot failure),7dfcb01a3cf7c1807464eb97a40113f7a56346c552fac14ed0155d28daa97912
-Contra (Japan),ok,99.9996,index,,99.9996,100.0,75.5556,,,,120,,b5ed8649d847c66fed706205e3c1a614d3e629ca42a8e6b3cb228a0531113d2f
-Contra (Japan) (Sample),ok,99.9996,index,,99.9996,100.0,75.5556,,,,120,,dc76b9ef8434454cc51d298b0de9a7b9a4dce3d2ac409c44856888c81f0d5f3d
 Contra (World) (Ja) (Contra Anniversary Collection),ok,99.9996,index,,99.9996,100.0,75.5556,,,,120,,efa37ba494fd0ac72a83441ba3dd7273ab00493b427a6bfdf9c2ab2517c6fe3d
 Ganbare Goemon Gaiden - Kieta Ougon Kiseru (Japan),ok,99.9996,index,,99.9996,100.0,95.5556,,,,120,,faf9bcd7dc774a630afe15ac193c0f6567aee39ab46d71324c175a611ccb68ea
 Sanrio Cup - Pon Pon Volley (Japan),ok,99.9996,index,,99.9996,100.0,98.8889,,,,120,,641f60ef0ffe1c47a614ac33622fa45ed5f94cb8a2df28bf7d634a377913891b

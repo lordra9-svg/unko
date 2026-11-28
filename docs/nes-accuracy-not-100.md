@@ -5,20 +5,20 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 **Metric:** newly re-run letters use the NES palette-index agreement over frames 30+ (`video_pct`); records not yet revisited keep their historical steady-geometry or final-frame value.
 
 - NES archives: **7101**
-- Measured: **7048**
-- Measured with the palette-index metric: **1368**
-- Below 100% by the relevant ares metric: **396**
-- Ignored tagged dumps below 100%: **1828**
+- Measured: **7047**
+- Measured with the palette-index metric: **1379**
+- Below 100% by the relevant ares metric: **351**
+- Ignored tagged dumps below 100%: **1824**
 - No measurement / oracle error: **39**
-- Ignored tagged dumps with errors: **27**
-- Total needing attention: **435**
+- Ignored tagged dumps with errors: **28**
+- Total needing attention: **390**
 
 | Band | Games |
 |---|---:|
-| 0-50% | 11 |
-| 50-90% | 12 |
-| 90-99% | 113 |
-| 99-100% | 260 |
+| 0-50% | 12 |
+| 50-90% | 6 |
+| 90-99% | 84 |
+| 99-100% | 249 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
@@ -26,8 +26,8 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
 | Accuracy | Metric | Game |
 |---:|---|---|
+| 0.00% | index | Doraemon (Japan) (Rev 1) |
 | 0.00% | index | Kid Dracula (World) (Castlevania Anniversary Collection) |
-| 0.00% | index | Minna no Taabou no Nakayoshi Daisakusen (Japan) |
 | 0.00% | index | Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - '91 Kaimaku Hen (Japan) |
 | 0.00% | index | Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - OB All Star Hen (Japan) |
 | 0.00% | index | Star Wars (USA) (Limited Run Games) |
@@ -35,25 +35,21 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 38.89% | index | Suikoden - Tenmei no Chikai (Japan) |
 | 41.49% | index | Super Pitfall (USA) |
 | 41.55% | index | Super Pitfall (Japan) |
+| 42.49% | index | Doraemon (Japan) |
 | 45.36% | index | Digital Devil Story - Megami Tensei II (Japan) |
 | 45.36% | index | Digital Devil Story - Megami Tensei II (Japan) (Rev 1) |
-| 69.57% | index | Bikkuriman World - Gekitou Sei Senshi (Japan) |
-| 73.10% | index | Treasure Master (USA) |
-| 75.51% | index | Terminator 2 - Judgment Day (Europe) |
-| 75.88% | index | Terminator 2 (Japan) |
-| 75.91% | index | Terminator 2 - Judgment Day (USA) |
-| 77.45% | index | Nintendo NTF2 System Cartridge (USA) (v1.1) (Test Program) |
+| 77.97% | index | Nintendo NTF2 System Cartridge (USA) (v1.1) (Test Program) |
 | 79.63% | index | Castelian (Europe) |
+| 83.09% | index | Bikkuriman World - Gekitou Sei Senshi (Japan) |
 | 84.08% | index | Super Turrican (Europe) |
-| 86.30% | index | Oeka Kids - Anpanman to Oekaki Shiyou!! (Japan) |
-| 87.22% | index | Mickey Mouse - Fushigi no Kuni no Daibouken (Japan) (En) |
-| 87.54% | index | Mickey Mousecapade (USA) |
-| 87.67% | index | Oeka Kids - Anpanman no Hiragana Daisuki (Japan) |
+| 87.26% | index | Oeka Kids - Anpanman to Oekaki Shiyou!! (Japan) |
+| 89.06% | index | Oeka Kids - Anpanman no Hiragana Daisuki (Japan) |
 | 90.29% | index | Battle Stadium - Senbatsu Pro Yakyuu (Japan) |
 | 90.30% | index | Hebereke (Japan) |
 | 90.30% | index | Hebereke (Japan) (Virtual Console) |
 | 90.42% | index | Flintstones, The - The Rescue of Dino & Hoppy (Japan) |
 | 90.67% | index | Ice Hockey (Europe) (Virtual Console) |
+| 91.98% | index | Xenophobe (USA) |
 | 92.59% | index | Super Mario Bros. + Duck Hunt (Europe, Asia) (En) |
 | 92.73% | index | Super Mario Bros. + Duck Hunt (USA) |
 | 93.11% | index | Elite (Europe) (En,Fr,De) |
@@ -69,13 +65,17 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 95.04% | index | Kyonshiizu 2 (Japan) |
 | 95.10% | index | Bakushou!! Jinsei Gekijou 2 (Japan) |
 | 95.27% | index | Back to the Future Part II & III (USA) |
-| 95.39% | index | Famicom Jump II - Saikyou no 7 Nin (Japan) |
-| 95.56% | index | Rodland (Europe) |
 | 95.70% | index | Yoshi no Tamago (Japan) (En) |
 | 95.81% | index | Yoshi (USA) |
 | 95.83% | index | America Daitouryou Senkyo (Japan) |
+| 96.54% | index | Famicom Jump II - Saikyou no 7 Nin (Japan) |
 | 96.55% | index | Daikoukai Jidai (Japan) |
 | 96.66% | index | Sangokushi II (Japan) |
+| 96.83% | index | Sangokushi II (Japan) (Rev 1) |
+| 96.86% | index | NES Open Tournament Golf (Europe) |
+| 97.00% | index | Uncharted Waters (USA) |
+| 97.35% | index | Bubble Bobble (Europe) |
+| 97.35% | index | Bubble Bobble (Europe) (Virtual Console) |
 
 ## No measurement / oracle errors
 
