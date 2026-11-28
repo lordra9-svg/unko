@@ -161,7 +161,8 @@ evidence and the decisions.
   (2026-11-28): the power-on default is now `RamClear::Random`,** a
   deterministic-per-ROM LCG fill. NESdev documents the power-on state as
   unreliable and recommends a random start state, so Unko no longer commits to
-  `$00`. Re-measured with the branch CLI: Terminator 2 USA/Japan/Europe
+  `$00`; a soft reset leaves work RAM byte-identical. Re-measured with the
+  branch CLI: Terminator 2 USA/Japan/Europe
   75.5-75.9 -> 99.99-100, Minna no Taabou 0.000 -> 100.000, Mickey Mousecapade
   and Fushigi no Kuni 87.2-87.5 -> 100.000, and 20 sampled 100.000 controls
   stayed at 100.000. See `compatibility/accuracy-ares.jsonl` for the rows.

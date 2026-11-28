@@ -6627,8 +6627,8 @@ fn advanced_tab(ui: &mut egui::Ui, settings: &mut Settings) {
     });
     ui.label(
         RichText::new(
-            "These apply at power-on and on the next Emulation -> Reset (or the reset hotkey), \
-             matching the MiSTer options.",
+            "These apply at power-on; a soft reset leaves work RAM unchanged, matching the \
+             hardware.",
         )
         .weak()
         .small(),

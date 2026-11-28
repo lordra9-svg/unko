@@ -442,7 +442,7 @@ pub struct Settings {
     pub overscan: Overscan,
     /// Display mask over the left/right software-mask columns.
     pub mask_edges: MaskEdges,
-    /// Work-RAM fill policy used at power-on and by the next soft reset.
+    /// Work-RAM fill policy used at power-on.
     pub ram_clear: RamClear,
     /// PPU register behaviour on a soft reset.
     pub ppu_reset: PpuResetBehavior,

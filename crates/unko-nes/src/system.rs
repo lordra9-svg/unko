@@ -979,7 +979,7 @@ impl System {
         self.apu = Apu::new();
         self.apu.set_channel_gains(self.channel_gains);
         self.resampler.reset();
-        self.apply_ram_clear();
+        // Internal RAM is unchanged by a reset on real hardware.
         if self.ppu_reset == PpuResetBehavior::Nes {
             self.ppu.soft_reset_registers();
         }
@@ -1262,7 +1262,10 @@ impl System {
         self.audio_source = source;
     }
 
-    /// Selects the work-RAM fill policy used at power-on and on a soft reset.
+    /// Selects the work-RAM fill policy applied at power-on and by
+    /// [`System::reload_work_ram`].
+    ///
+    /// A soft reset never rewrites work RAM; it is left byte-identical.
     pub fn set_ram_clear(&mut self, mode: RamClear) {
         self.ram_clear = mode;
     }
@@ -3180,7 +3183,7 @@ mod tests {
     }
 
     #[test]
-    fn soft_reset_applies_ram_clear_and_ppu_behavior() {
+    fn reload_applies_ram_clear_and_soft_reset_keeps_ppu_behavior() {
         let mut system = System::from_ines(&synthetic_nrom(0)).expect("load");
         system.ram[0x10] = 0xAB;
         system.ppu.ctrl = 0x90;
@@ -3194,21 +3197,36 @@ mod tests {
         assert_eq!(system.ppu.mask, 0x1E);
 
         system.set_ram_clear(RamClear::Zero);
-        system.reset();
+        system.reload_work_ram();
         assert_eq!(system.ram[0x10], 0);
 
         system.set_ram_clear(RamClear::Fill);
-        system.reset();
+        system.reload_work_ram();
         assert_eq!(system.ram[0x10], 0xFF);
 
         system.set_ram_clear(RamClear::Random);
-        system.reset();
+        system.reload_work_ram();
         assert!(system.ram.iter().any(|byte| *byte != 0));
 
         system.set_ppu_reset_behavior(PpuResetBehavior::Nes);
         system.reset();
         assert_eq!(system.ppu.ctrl, 0);
         assert_eq!(system.ppu.mask, 0);
+    }
+
+    #[test]
+    fn soft_reset_preserves_work_ram() {
+        for mode in [RamClear::Random, RamClear::Zero, RamClear::Fill] {
+            let mut system = System::from_ines(&synthetic_nrom(0)).expect("load");
+            system.set_ram_clear(mode);
+            system.reload_work_ram();
+            let before = system.ram;
+            system.reset();
+            assert_eq!(
+                system.ram, before,
+                "soft reset must leave work RAM unchanged for {mode:?}"
+            );
+        }
     }
 
     #[test]
@@ -3224,18 +3242,16 @@ mod tests {
     #[test]
     fn random_work_ram_is_deterministic_per_rom() {
         let rom = synthetic_nrom(0);
-        let mut first = System::from_ines(&rom).expect("load");
-        let mut second = System::from_ines(&rom).expect("load");
-        first.set_ram_clear(RamClear::Random);
-        second.set_ram_clear(RamClear::Random);
-        first.reset();
-        second.reset();
-        assert_eq!(first.ram, second.ram, "same ROM must replay the same fill");
+        let first = System::from_ines(&rom).expect("load");
+        let second = System::from_ines(&rom).expect("load");
+        assert_eq!(first.ram_clear, RamClear::Random);
+        assert_eq!(
+            first.ram, second.ram,
+            "same ROM must replay the same power-on fill"
+        );
         assert!(first.ram.iter().any(|byte| *byte != 0));
 
-        let mut other = System::from_ines(&synthetic_nrom(1)).expect("load");
-        other.set_ram_clear(RamClear::Random);
-        other.reset();
+        let other = System::from_ines(&synthetic_nrom(1)).expect("load");
         assert_ne!(
             first.ram, other.ram,
             "different ROMs must not share the same fill"
