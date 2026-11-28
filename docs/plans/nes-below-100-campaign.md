@@ -165,6 +165,18 @@ differing pixel on scanline 0, x<8, on 2–3 frames of 90. Static scenes hid it;
 palette fades exposed it. Verified by removing the latch: the regression test
 fails, and the five titles drop back to 99.999x.
 
+Follow-up metric fix (`42b2649`): the warm-up uniformity test ignored the PAL
+mask. It tested all 256x240 pixels and anchored the colour comparison at
+`x[0]`, which for PAL is a clipped border pixel. ares' 63-pixel border made a
+genuinely blank PAL boot frame look non-uniform, so 5 frames were scored
+instead of excluded. Zelda PAL 92.031 → 97.444 (the rest is a real PAL content
+difference — unko PAL renders the NTSC image, ares PAL does not). NTSC is
+unaffected (`mask is None` path unchanged).
+
+Also from the frame-latch fix: `Legend of Zelda, The (USA)` went 98.7952 →
+**100.000**. Its single frame-37 miss was the next-frame leakage, not a content
+bug — the earlier "real content boundary" reading was wrong.
+
 Not bugs, recorded so they are not re-chased:
 - `Minna no Taabou` needs `$FF` in work RAM; policy is `$00` (see the divergence ledger).
 - Mapper 268 (Rod Land ×2, Star Wars LRG, 8 Eyes) — **ares has no mapper 268**, so
