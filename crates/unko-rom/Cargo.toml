@@ -8,5 +8,5 @@ license.workspace = true
 
 [dependencies]
 zip = { version = "9.3", default-features = false, features = ["deflate"] }
-sevenz-rust2 = { version = "0.24", default-features = false, features = ["bzip2", "ppmd"] }
+sevenz-rust2 = { version = "0.25", default-features = false, features = ["bzip2", "ppmd"] }
 rars = { version = "0.12", default-features = false }
