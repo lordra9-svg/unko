@@ -556,6 +556,7 @@ fn frame_number(frame: Frame) -> u32 {
 mod tests {
     use super::*;
     use crate::relay::RelayServer;
+    use std::time::{Duration, Instant};
     use unko_core::{AudioBuffer, CoreError, FrameBuffer, FrameStats, LoadOptions, PixelFormat};
 
     #[derive(Default)]
@@ -770,10 +771,14 @@ mod tests {
         let mut a_frames = 0;
         let mut b_frames = 0;
         for _ in 0..8000 {
-            if a_frames < frames && host.step(&mut core_a, 0x01).unwrap_or(false) {
+            // Keep both peers polling every iteration, even after one has
+            // reached the target. Stopping a peer early leaves its last queued
+            // input unsent while the other is still catching up, so the two
+            // cores can apply different inputs for the same frame.
+            if host.step(&mut core_a, 0x01).unwrap_or(false) {
                 a_frames += 1;
             }
-            if b_frames < frames && join.step(&mut core_b, 0x02).unwrap_or(false) {
+            if join.step(&mut core_b, 0x02).unwrap_or(false) {
                 b_frames += 1;
             }
             if a_frames >= frames && b_frames >= frames {
@@ -785,7 +790,40 @@ mod tests {
             a_frames >= frames && b_frames >= frames,
             "both peers advanced"
         );
+
+        // Reaching the target frame only means each peer reported it locally. A
+        // final input packet may still be in flight, so pump both sessions until
+        // the states agree. Without this the returned states would depend on how
+        // promptly the transport delivered the last packets, which is flaky on
+        // loaded CI runners.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let state_a = core_a.state();
+            let state_b = core_b.state();
+            if state_a == state_b {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "lockstep peers did not settle after {frames} frames: \
+                 host reached frame {}, join reached frame {}, \
+                 host state {}, join state {}",
+                core_a.frame,
+                core_b.frame,
+                hex_state(&state_a),
+                hex_state(&state_b),
+            );
+            // Keep polling both peers; a stalled lockstep advance does not
+            // change the core state, so this is safe even past the target frame.
+            let _ = host.step(&mut core_a, 0x01).unwrap_or(false);
+            let _ = join.step(&mut core_b, 0x02).unwrap_or(false);
+            std::thread::sleep(Duration::from_millis(1));
+        }
         (core_a, core_b)
+    }
+
+    fn hex_state(state: &[u8]) -> String {
+        state.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 
     #[test]
