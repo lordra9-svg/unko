@@ -1,10 +1,8 @@
 title,status,accuracy_pct,metric,steady_geometry_pct,video_pct,final_video_pct,frame_seq_pct,palette_pct,best_geometry_pct,same_index_geometry_pct,frames,error,sha256
-Gegege no Kitarou 2 - Youkai Gundan no Chousen (Japan),ok,0.0,index,,0.0,0.0,0.0,,,,120,,058f78b87f2f9cf61968f51547f4ccb344f59e5be9f17ce79fbea73b70ffb2a2
 Kid Dracula (World) (Castlevania Anniversary Collection),ok,0.0,index,,0.0,0.0,0.0,,,,120,,da3981562721db98dbb306ccb9d22b49ce5f3be75f6a9be629298ef23f29df37
 Minna no Taabou no Nakayoshi Daisakusen (Japan),ok,0.0,index,,0.0,0.0,0.0,,,,120,,03a98632b67bf10c93bf1349d19c4ea7a4f3bb9348c4c7e4693258946615ceb4
 Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - '91 Kaimaku Hen (Japan),ok,0.0,index,,0.0,0.0,0.0,,,,120,,280ef7ef79eb30ce9c259e91c441c43244daf5f76d42d24669ac5c8937d67b91
 Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - OB All Star Hen (Japan),ok,0.0,index,,0.0,0.0,0.0,,,,120,,afbf83ba8d57dab24c47bbac639e70062b3d5ac391b7ceb812838b2f5d3a356b
-Pocket Zaurus - Juu Ouken no Nazo (Japan),ok,0.0,index,,0.0,0.0,0.0,,,,120,,784424ae2698e4481528a707b6875a203cffb60d55c2448e636ea5e455a32fcc
 Rod Land (World) (Retro-Bit) (256KiB),ok,0.0,index,,0.0,0.0,,,,,120,,ae440f1f5cee5714f00b34145a843fdc8c8c4af4d22a690ac14622487ad86b60
 Rod Land (World) (Retro-Bit) (512KiB),ok,0.0,index,,0.0,0.0,,,,,120,,6cac196c56e0cf15e1e458a8627762d929ac4cac8623de5ef15ed3cdd99a05c1
 Star Wars (USA) (Limited Run Games),ok,0.0,index,,0.0,0.0,0.0,,,,120,,7dcf778d2efd8ac9ecb4995d865d39051ed0091257b902a2120d73aedf89ddef
@@ -21,7 +19,6 @@ Swords and Serpents (Europe),ok,61.1111,index,,61.1111,100.0,,,,,120,,f01289d89f
 Swords and Serpents (France),ok,62.9213,index,,62.9213,0.0,,,,,120,,3edf7ea2f37d52152ba8dafda3243bf171b0b13242ffb84cb9078c68ec23e21f
 Bikkuriman World - Gekitou Sei Senshi (Japan),ok,69.5658,index,,69.5658,0.0,47.7778,,,,120,,abf562d0ce0b8445a57fd4f2b82c030ae790b8046babd6a600c113c25826c272
 "8 Eyes (USA, Europe) (Pixel Heart)",ok,71.2644,steady geometry,71.2644,,,,,76.9231,75.0,120,,40e0f9d259804661d56a8523c2b66e965dcf5e2d54952fa7f25374e8164aa434
-Arkanoid II (Japan) (En),ok,71.875,index,,71.875,71.875,0.0,,,,120,,1db1d607aacbc998e51939dcbe510d141bd7b64f6e5116f6ec964c5544f4fb92
 Treasure Master (USA),ok,73.1038,index,,73.1038,72.9622,0.0,,,,120,,68c39ee4f38ff3948c2c5a189edbae978b8e30336aa6cac9bc6e61ac09a04b16
 Terminator 2 - Judgment Day (Europe),ok,75.5103,index,,75.5103,0.0,,,,,120,,1e9998561e147def72147abb2bfb77a83c4c82d03f0ebd0feab49d20ace611a9
 Terminator 2 (Japan),ok,75.8835,index,,75.8835,77.3258,0.0,,,,120,,d551c7134546b7818b61a4a567c823bff726f9d9c1ae87d4125473edf523e01e
