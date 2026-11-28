@@ -51,7 +51,7 @@ eframe = { version = "0.31.1", default-features = false, features = [
     "wayland",
     "x11",
 ] }
-rfd = "0.17.2"
+rfd = "0.18.0"
 sdl3 = { version = "0.22.1", features = ["build-from-source-static"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
