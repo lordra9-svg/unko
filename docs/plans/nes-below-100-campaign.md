@@ -152,6 +152,29 @@ are the right targets:
 comparison (align on the first frame with content), not a wider blind window.
 That is a separate, testable change and must not be slipped in as a score fix.
 
+## Fixes landed (2026-11-28)
+
+| commit | fix | rows |
+|---|---|---|
+| `3722108` | VRC6b (m26) applied the A0/A1 swap to `$6000-$7FFF` PRG-RAM writes; only `$8000-$FFFF` registers are swapped | Esper Dream 2, Mouryou Senki Madara → 100 |
+| `ccb6ff4` | m152 bus-conflict byte now read via `prg_read(address)`, so `$C000-$FFFF` uses the fixed last bank instead of the switchable one | Gegege no Kitarou 2, Pocket Zaurus, Arkanoid II → 100 |
+| `0fb005b` | PPU presented the live buffer; the CPU instruction in flight stepped 5–8 dots into the next frame's scanline 0 and overwrote x=0..k. Now latches the completed frame at vblank (scanline 241) | Lolo 2/3, Asmik-kun Land, Parasol Henbee → 100 |
+
+The third was the first *class* fix: 5 of 9 sampled near-miss titles had **every**
+differing pixel on scanline 0, x<8, on 2–3 frames of 90. Static scenes hid it;
+palette fades exposed it. Verified by removing the latch: the regression test
+fails, and the five titles drop back to 99.999x.
+
+Not bugs, recorded so they are not re-chased:
+- `Minna no Taabou` needs `$FF` in work RAM; policy is `$00` (see the divergence ledger).
+- Mapper 268 (Rod Land ×2, Star Wars LRG, 8 Eyes) — **ares has no mapper 268**, so
+  those rows are oracle-unmeasurable, not failures.
+- `100 Man Dollar Kid` 58.89% was the retired geometry metric; it is 99.99% under the index metric.
+- Digital Devil Story II: the old "$F639/$F63B/$F63D operand bytes" note is **wrong**.
+  Those are normal sprite-loop instructions (`DEC $5C; BMI +3; JMP $F59E; RTS`).
+  The real symptom is that the game never writes the nametable at all (cleared once
+  at reset, never redrawn) while the CPU runs its main loop and NMI normally.
+
 ## Order of work
 
 Batch 0 (this branch): Zelda cluster. Highest rows-per-fix, final frame already identical,
