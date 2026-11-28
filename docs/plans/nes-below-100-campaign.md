@@ -160,6 +160,8 @@ That is a separate, testable change and must not be slipped in as a score fix.
 | `ccb6ff4` | m152 bus-conflict byte now read via `prg_read(address)`, so `$C000-$FFFF` uses the fixed last bank instead of the switchable one | Gegege no Kitarou 2, Pocket Zaurus, Arkanoid II → 100 |
 | `0fb005b` | PPU presented the live buffer; the CPU instruction in flight stepped 5–8 dots into the next frame's scanline 0 and overwrote x=0..k. Now latches the completed frame at vblank (scanline 241) | Lolo 2/3, Asmik-kun Land, Parasol Henbee → 100 |
 
+| `dd57116` | m154 (Namco 3453) shares `DxRom` with 76/88/95/206 but sets **CHR A16** on its four 1 KiB banks at `$1000-$1FFF`; the shared core read the lower 64 KiB | Devil Man 27.686 → 100 |
+
 The third was the first *class* fix: 5 of 9 sampled near-miss titles had **every**
 differing pixel on scanline 0, x<8, on 2–3 frames of 90. Static scenes hid it;
 palette fades exposed it. Verified by removing the latch: the regression test
