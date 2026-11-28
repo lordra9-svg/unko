@@ -267,6 +267,19 @@ pub struct Ppu {
     /// the PPU's actual output before the RGB palette lookup, so two cores can
     /// be compared without their differing palettes getting in the way.
     frame_indices: Vec<u16>,
+    /// RGBA frame latched when vblank starts, i.e. once the visible area is
+    /// complete. [`frame`] keeps being composed for the next frame while the
+    /// CPU finishes the instruction that crossed the frame boundary, so the
+    /// live buffer can already hold a few pixels of the next frame's first
+    /// scanline; this buffer is what a host samples at the frame boundary.
+    #[serde(skip)]
+    presented_frame: Vec<u8>,
+    /// Colour indices latched alongside [`presented_frame`].
+    #[serde(skip)]
+    presented_indices: Vec<u16>,
+    /// Whether [`presented_frame`]/[`presented_indices`] hold a frame.
+    #[serde(skip)]
+    presented_valid: bool,
     /// Whether to maintain [`frame_indices`]. Tracing enables it; normal
     /// emulation does not pay the per-pixel cost.
     record_indices: bool,
@@ -431,6 +444,9 @@ impl Ppu {
             custom_palette: Vec::new(),
             frame: vec![0; 256 * 240 * 4],
             frame_indices: vec![0; 256 * 240],
+            presented_frame: vec![0; 256 * 240 * 4],
+            presented_indices: vec![0; 256 * 240],
+            presented_valid: false,
             record_indices: false,
             bg_lo: 0,
             bg_hi: 0,
@@ -577,13 +593,9 @@ impl Ppu {
     /// Test-only framebuffer pixel hook.
     #[cfg(test)]
     pub(crate) fn debug_pixel(&self, x: usize, y: usize) -> [u8; 4] {
+        let frame = self.video();
         let i = (y * 256 + x) * 4;
-        [
-            self.frame[i],
-            self.frame[i + 1],
-            self.frame[i + 2],
-            self.frame[i + 3],
-        ]
+        [frame[i], frame[i + 1], frame[i + 2], frame[i + 3]]
     }
 
     /// Test-only expanded palette hook.
@@ -918,6 +930,13 @@ impl Ppu {
         // `$2002` and reject a line delayed past the flag (failure codes 3 and
         // 6 respectively). The pending edge is latched separately, so a later
         // `$2002` read does not lose it.
+        if self.scanline == 241 && self.dot == self.vblank_set_dot && !self.um6578 {
+            // The visible area of this frame is complete. Latch it before the
+            // CPU instruction in flight can step into the next frame's first
+            // scanline; a host reading `video()` after `run_frame` must not see
+            // pixels composed for the following frame.
+            self.latch_visible_frame();
+        }
         if self.scanline == 241 && self.dot == self.vblank_set_dot && !self.vblank_suppressed {
             self.status |= STATUS_VBLANK;
             if self.ctrl & 0x80 != 0 && !self.nmi_suppressed {
@@ -2477,6 +2496,27 @@ impl Ppu {
         self.v = (self.v & !0x7BE0) | (self.t & 0x7BE0);
     }
 
+    /// Latches the completed visible frame into the presented buffers.
+    ///
+    /// The live buffers are swapped rather than copied: rendering the next
+    /// frame overwrites every visible pixel of the old buffer, so the completed
+    /// frame stays intact in the presented buffers until the next vblank.
+    fn latch_visible_frame(&mut self) {
+        // The presented buffers are excluded from save states, so a restored
+        // PPU starts with empty vectors. Size them before the swap.
+        if self.presented_frame.len() != self.frame.len() {
+            self.presented_frame.resize(self.frame.len(), 0);
+        }
+        if self.record_indices && self.presented_indices.len() != self.frame_indices.len() {
+            self.presented_indices.resize(self.frame_indices.len(), 0);
+        }
+        std::mem::swap(&mut self.frame, &mut self.presented_frame);
+        if self.record_indices {
+            std::mem::swap(&mut self.frame_indices, &mut self.presented_indices);
+        }
+        self.presented_valid = true;
+    }
+
     /// Returns the accumulated RGBA frame.
     ///
     /// Visible scanlines are composed as they are reached so mid-frame scroll
@@ -2486,7 +2526,11 @@ impl Ppu {
         if self.um6578 {
             return self.render_um_frame();
         }
-        self.frame.clone()
+        if self.presented_valid {
+            self.presented_frame.clone()
+        } else {
+            self.frame.clone()
+        }
     }
 
     /// Renders any deferred video mode into the reusable frame buffer.
@@ -2500,14 +2544,22 @@ impl Ppu {
     /// The most recently presented RGBA8 frame.
     #[must_use]
     pub fn video(&self) -> &[u8] {
-        &self.frame
+        if self.presented_valid && !self.um6578 {
+            &self.presented_frame
+        } else {
+            &self.frame
+        }
     }
 
     /// The most recently presented frame as NES colour indices, one per pixel
     /// (`emphasis << 6 | colour`, 256x240).
     #[must_use]
     pub fn video_indices(&self) -> &[u16] {
-        &self.frame_indices
+        if self.presented_valid && !self.um6578 {
+            &self.presented_indices
+        } else {
+            &self.frame_indices
+        }
     }
 
     /// Enables or disables per-pixel NES colour-index recording.
@@ -3243,6 +3295,47 @@ mod tests {
         assert_eq!(steps_to_wrap(1, true), 2);
         // No skip when rendering is disabled, whatever the frame parity.
         assert_eq!(steps_to_wrap(1, false), 3);
+    }
+
+    #[test]
+    fn presented_frame_excludes_next_frame_pixels_after_the_boundary() {
+        let mut ppu = ppu();
+        ppu.end_warmup();
+        // Forced blank: every visible pixel is the backdrop, so a palette
+        // change is visible on every scanline without setting up tiles.
+        ppu.mask = 0;
+        ppu.scanline = 0;
+        ppu.dot = 0;
+        ppu.frames = 0;
+        ppu.palette[0] = 0x0F;
+        ppu.refresh_palette_rgb();
+        // Run through the visible area to the frame wrap. Vblank latches the
+        // completed frame; the live buffers then begin the next frame.
+        let start = ppu.frames;
+        while ppu.frames == start {
+            ppu.step_dot();
+        }
+        // The CPU instruction that crossed the frame boundary runs a few dots
+        // into the next frame's scanline 0. A palette change there used to
+        // bleed into the frame a host had just sampled at the boundary.
+        ppu.palette[0] = 0x30;
+        ppu.refresh_palette_rgb();
+        ppu.step_dots(12);
+        assert_eq!(
+            &ppu.frame[0..3],
+            &NES_PALETTE[0x30],
+            "the live buffer has advanced into the next frame"
+        );
+        assert_eq!(
+            &ppu.video()[0..3],
+            &NES_PALETTE[0x0F],
+            "the presented frame keeps the completed frame's scanline 0"
+        );
+        assert_eq!(
+            &ppu.render_frame()[0..3],
+            &NES_PALETTE[0x0F],
+            "render_frame reports the presented frame"
+        );
     }
 
     #[test]

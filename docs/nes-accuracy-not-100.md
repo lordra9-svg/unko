@@ -7,18 +7,18 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 - NES archives: **7101**
 - Measured: **7047**
 - Measured with the palette-index metric: **1316**
-- Below 100% by the relevant ares metric: **513**
+- Below 100% by the relevant ares metric: **508**
 - Ignored tagged dumps below 100%: **1847**
 - No measurement / oracle error: **37**
 - Ignored tagged dumps with errors: **26**
-- Total needing attention: **550**
+- Total needing attention: **545**
 
 | Band | Games |
 |---|---:|
 | 0-50% | 15 |
 | 50-90% | 15 |
 | 90-99% | 125 |
-| 99-100% | 358 |
+| 99-100% | 353 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
