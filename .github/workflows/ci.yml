@@ -118,6 +118,12 @@ jobs:
           tool: cargo-audit
       - name: Query RustSec
         run: cargo audit --deny unmaintained
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2
+        with:
+          tool: cargo-deny
+      - name: Query cargo-deny
+        run: cargo deny check
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
       - name: Query OSV.dev
         run: cargo run --release --locked -p xtask -- osv-audit
