@@ -7,18 +7,18 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 - NES archives: **7101**
 - Measured: **7048**
 - Measured with the palette-index metric: **1368**
-- Below 100% by the relevant ares metric: **400**
+- Below 100% by the relevant ares metric: **396**
 - Ignored tagged dumps below 100%: **1828**
 - No measurement / oracle error: **39**
 - Ignored tagged dumps with errors: **27**
-- Total needing attention: **439**
+- Total needing attention: **435**
 
 | Band | Games |
 |---|---:|
-| 0-50% | 12 |
+| 0-50% | 11 |
 | 50-90% | 12 |
-| 90-99% | 117 |
-| 99-100% | 259 |
+| 90-99% | 113 |
+| 99-100% | 260 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
@@ -31,7 +31,6 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 0.00% | index | Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - '91 Kaimaku Hen (Japan) |
 | 0.00% | index | Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - OB All Star Hen (Japan) |
 | 0.00% | index | Star Wars (USA) (Limited Run Games) |
-| 26.63% | index | Racer Mini Yonku - Japan Cup (Japan) |
 | 38.33% | index | Tokoro-san no Mamoru mo Semeru mo (Japan) |
 | 38.89% | index | Suikoden - Tenmei no Chikai (Japan) |
 | 41.49% | index | Super Pitfall (USA) |
@@ -76,6 +75,7 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 95.81% | index | Yoshi (USA) |
 | 95.83% | index | America Daitouryou Senkyo (Japan) |
 | 96.55% | index | Daikoukai Jidai (Japan) |
+| 96.66% | index | Sangokushi II (Japan) |
 
 ## No measurement / oracle errors
 
