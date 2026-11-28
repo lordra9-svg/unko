@@ -36633,13 +36633,11 @@ impl Mapper for Bus152 {
         if address < 0x8000 {
             return;
         }
-        let banks = (self.prg.len() / 0x4000).max(1);
-        let visible = self
-            .prg
-            .get((usize::from(self.prg_bank) % banks) * 0x4000 + usize::from(address & 0x3FFF))
-            .copied()
-            .unwrap_or(0xFF);
-        let value = value & visible;
+        // Bus conflict: the latch sees the ROM byte the CPU would read at this
+        // address. $8000-$BFFF is the switchable bank while $C000-$FFFF is the
+        // fixed last bank, so read it back through `prg_read` rather than always
+        // using `prg_bank`.
+        let value = value & self.prg_read(address);
         self.prg_bank = (value >> 4) & 0x07;
         self.chr_bank = value & 0x0F;
         self.mirroring = if value & 0x80 != 0 {
@@ -39080,6 +39078,25 @@ pub(crate) mod tests {
         assert_eq!(cart.cpu_read(0xC000), 14);
         assert_eq!(cart.ppu_read(0x0000), 0x90);
         assert_eq!(cart.mirroring(), Mirroring::SingleLower);
+    }
+
+    #[test]
+    fn bus152_c000_conflict_byte_uses_fixed_bank() {
+        // 128 KiB PRG: $8000 is the switchable bank, $C000 the fixed last bank.
+        let mut rom = synth_banked(152, 128, 32);
+        // Make the two candidate banks disagree at the offset the write hits.
+        rom[16] = 0x00; // switchable bank 0, offset 0
+        rom[16 + 7 * 0x4000] = 0x5A; // fixed last bank, offset 0
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        assert_eq!(
+            cart.cpu_read(0xC000),
+            0x5A,
+            "last bank at the write address"
+        );
+        cart.cpu_write(0xC000, 0xFF);
+        // 0xFF & 0x5A = 0x5A -> PRG bank 5; taking the byte from the switchable
+        // bank instead would latch 0 and leave bank 0 mapped in.
+        assert_eq!(cart.cpu_read(0x8000), 10, "16 KiB bank 5");
     }
 
     #[test]
