@@ -272,13 +272,10 @@ pub struct Ppu {
     /// CPU finishes the instruction that crossed the frame boundary, so the
     /// live buffer can already hold a few pixels of the next frame's first
     /// scanline; this buffer is what a host samples at the frame boundary.
-    #[serde(skip)]
     presented_frame: Vec<u8>,
     /// Colour indices latched alongside [`presented_frame`].
-    #[serde(skip)]
     presented_indices: Vec<u16>,
     /// Whether [`presented_frame`]/[`presented_indices`] hold a frame.
-    #[serde(skip)]
     presented_valid: bool,
     /// Whether to maintain [`frame_indices`]. Tracing enables it; normal
     /// emulation does not pay the per-pixel cost.
@@ -2502,8 +2499,9 @@ impl Ppu {
     /// frame overwrites every visible pixel of the old buffer, so the completed
     /// frame stays intact in the presented buffers until the next vblank.
     fn latch_visible_frame(&mut self) {
-        // The presented buffers are excluded from save states, so a restored
-        // PPU starts with empty vectors. Size them before the swap.
+        // Save states now carry the presented buffers, but a freshly built PPU
+        // (or a state written before they were serialized) starts empty. Size
+        // them before the swap.
         if self.presented_frame.len() != self.frame.len() {
             self.presented_frame.resize(self.frame.len(), 0);
         }

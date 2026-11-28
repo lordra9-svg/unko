@@ -114,7 +114,7 @@ Miracle Piano. `set_port_device` selects the device on a port.
 
 ## Save states and battery RAM
 
-`save_state()` returns an opaque `Vec<u8>` (`UNKOST21` format, including a ROM
+`save_state()` returns an opaque `Vec<u8>` (`UNKOST22` format, including a ROM
 fingerprint). `load_state(&bytes)` restores it and rejects a state from a
 different cartridge.
 

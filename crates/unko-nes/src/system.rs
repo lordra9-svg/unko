@@ -1460,7 +1460,7 @@ impl System {
     #[cfg(feature = "save-states")]
     pub fn save_state(&self) -> Result<Vec<u8>, String> {
         let mut out = Vec::new();
-        out.extend_from_slice(b"UNKOST21");
+        out.extend_from_slice(b"UNKOST22");
         out.extend_from_slice(&self.cart.fingerprint().to_le_bytes());
         let mut cart_state = Vec::new();
         self.cart.save_state(&mut cart_state)?;
@@ -1514,7 +1514,7 @@ impl System {
         if data.len() > MAX_STATE_BYTES {
             return Err("save state is larger than the 64 MiB limit".into());
         }
-        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST21" {
+        if data.len() < 8 + 8 + 4 || &data[..8] != b"UNKOST22" {
             return Err("not an Unko state (bad magic/version)".into());
         }
         let fingerprint = u64::from_le_bytes(
@@ -4119,7 +4119,7 @@ mod tests {
     fn state_magic_is_current() {
         let system = System::from_ines(&synthetic_nrom(0)).expect("load");
         let state = system.save_state().expect("state");
-        assert_eq!(&state[..8], b"UNKOST21");
+        assert_eq!(&state[..8], b"UNKOST22");
         let mut restored = System::from_ines(&synthetic_nrom(0)).expect("load");
         restored.load_state(&state).expect("restore");
     }
@@ -4692,6 +4692,48 @@ mod tests {
         assert!(system
             .load_state(&other.save_state().expect("other state"))
             .is_err());
+    }
+
+    #[cfg(feature = "save-states")]
+    #[test]
+    fn save_state_preserves_the_presented_frame() {
+        let rom = synthetic_nrom(0);
+        let mut system = System::from_ines(&rom).expect("load");
+        system.ppu.set_index_recording(true);
+        for _ in 0..30 {
+            system.run_frame();
+        }
+        let presented = system.video().to_vec();
+        let presented_indices = system.ppu.video_indices().to_vec();
+        assert_eq!(presented.len(), 256 * 240 * 4);
+        assert_eq!(presented_indices.len(), 256 * 240);
+
+        // Move the live buffer away from the latched frame the way a CPU
+        // instruction crossing the frame boundary does: write a new backdrop
+        // colour and compose a few pixels of the next frame. `video()` must
+        // still report the completed frame.
+        system.ppu.write_register(6, 0x3F);
+        system.ppu.write_register(6, 0x00);
+        system.ppu.write_register(7, 0x30);
+        // Re-writing PPUMASK refreshes the RGB palette cache, then the dots
+        // compose the new backdrop colour into the live buffer.
+        system.ppu.write_register(1, 0x00);
+        system.ppu.step_dots(20);
+
+        let saved = system.save_state().expect("save");
+        eprintln!("state size: {} bytes", saved.len());
+        let mut restored = System::from_ines(&rom).expect("fresh system");
+        restored.load_state(&saved).expect("restore");
+        assert_eq!(
+            restored.video(),
+            presented.as_slice(),
+            "restore returned the live frame instead of the presented one"
+        );
+        assert_eq!(
+            restored.ppu.video_indices(),
+            presented_indices.as_slice(),
+            "restore returned the live indices instead of the presented ones"
+        );
     }
 
     #[cfg(feature = "save-states")]
