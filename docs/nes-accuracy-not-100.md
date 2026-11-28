@@ -5,20 +5,20 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 **Metric:** newly re-run letters use the NES palette-index agreement over frames 30+ (`video_pct`); records not yet revisited keep their historical steady-geometry or final-frame value.
 
 - NES archives: **7101**
-- Measured: **7047**
-- Measured with the palette-index metric: **1316**
-- Below 100% by the relevant ares metric: **508**
-- Ignored tagged dumps below 100%: **1847**
+- Measured: **7048**
+- Measured with the palette-index metric: **1360**
+- Below 100% by the relevant ares metric: **414**
+- Ignored tagged dumps below 100%: **1829**
 - No measurement / oracle error: **37**
-- Ignored tagged dumps with errors: **26**
-- Total needing attention: **545**
+- Ignored tagged dumps with errors: **27**
+- Total needing attention: **451**
 
 | Band | Games |
 |---|---:|
 | 0-50% | 15 |
 | 50-90% | 15 |
 | 90-99% | 125 |
-| 99-100% | 353 |
+| 99-100% | 259 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
