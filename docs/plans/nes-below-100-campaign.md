@@ -162,6 +162,8 @@ That is a separate, testable change and must not be slipped in as a score fix.
 
 | `dd57116` | m154 (Namco 3453) shares `DxRom` with 76/88/95/206 but sets **CHR A16** on its four 1 KiB banks at `$1000-$1FFF`; the shared core read the lower 64 KiB | Devil Man 27.686 → 100 |
 
+| `3a019fd` | VRC4b (m25 sub 1) wires chip A0/A1 to CPU A1/A0, so registers are `$x000,$x002,$x001,$x003`; unko used the VRC4f order and swapped every CHR nibble pair. Also widened `$9000-$9003` to mirroring 0/1 and swap 2/3, matching ares | Racer 26.63 → 99.994, Gradius II 98.71 → 100, Bio Miracle 97.23 → 100 |
+
 The third was the first *class* fix: 5 of 9 sampled near-miss titles had **every**
 differing pixel on scanline 0, x<8, on 2–3 frames of 90. Static scenes hid it;
 palette fades exposed it. Verified by removing the latch: the regression test
