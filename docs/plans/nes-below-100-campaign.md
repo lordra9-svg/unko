@@ -212,6 +212,27 @@ Not bugs, recorded so they are not re-chased:
   The real symptom is that the game never writes the nametable at all (cleared once
   at reset, never redrawn) while the CPU runs its main loop and NMI normally.
 
+## Terminator 2 — resolved as power-on RAM (2026-11-28)
+
+`Terminator 2 - Judgment Day (USA/Europe)` and `Terminator 2 (Japan)` at 75.5–75.9% are the
+**power-on work-RAM fill**, not a mapper or MMC3 bug.
+
+600-frame capture, USA ROM: ares' first non-uniform frame is 24 and shows the scrolling
+`TERMINATOR 2 / JUDGMENT DAY` logo, then the legal screen, cycling past 600. unko's first
+non-uniform frame is 23 and jumps straight to the face/logo art, then "THE STORY" — the retail
+intro is skipped entirely, which the 120-frame metric window then scores against ares' logo.
+
+Controlled fills: `Zero` 75.92 (intro skipped); `Fill` ($FF) **99.9931** with 562/600 frames
+byte-identical; `Random` **identical to Fill** (same 38 differing frames). So the game depends on
+RAM being **nonzero**, not on any particular value. The trigger is a contiguous 82-byte region
+`$0696–$06E7`; setting any single byte there to `$FF` reproduces ares' intro. Boot code at `$FF8B`
+zeroes only `$78/$79` and the warm-up counters, never that region; the first divergent
+instruction is `$C749` (`BCC`) on the uninitialised pointer low byte in `$89/$8A`.
+
+Decision unchanged: `RamClear::Zero` stays. This is the **fourth** cluster in that class
+(Minna no Taabou, Super Pitfall ×2, Mickey Mouse ×2, Terminator 2 ×3) — about 8 campaign rows
+that are measured against an oracle convention rather than a hardware-defined value.
+
 ## Phase B attempt — rejected (2026-11-28)
 
 A builder proposed consuming a deferred NMI latch inside `Cpu::sample_cycle`
