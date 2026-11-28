@@ -3216,16 +3216,23 @@ mod tests {
 
     #[test]
     fn soft_reset_preserves_work_ram() {
+        // Sentinel bytes the fill would never produce, so a refill during the
+        // reset is detected even though the fill itself is deterministic.
+        let sentinels = [(0x000usize, 0x5A), (0x100, 0xC3), (0x7FF, 0x3C)];
         for mode in [RamClear::Random, RamClear::Zero, RamClear::Fill] {
             let mut system = System::from_ines(&synthetic_nrom(0)).expect("load");
             system.set_ram_clear(mode);
             system.reload_work_ram();
-            let before = system.ram;
+            for (index, value) in sentinels {
+                system.ram[index] = value;
+            }
             system.reset();
-            assert_eq!(
-                system.ram, before,
-                "soft reset must leave work RAM unchanged for {mode:?}"
-            );
+            for (index, value) in sentinels {
+                assert_eq!(
+                    system.ram[index], value,
+                    "soft reset rewrote work RAM at {index:#05X} for {mode:?}"
+                );
+            }
         }
     }
 
