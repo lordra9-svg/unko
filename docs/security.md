@@ -96,6 +96,11 @@ are bounded (datagram 2048 bytes, 256 queued per client, 64 rooms × 16 members)
 The UI warns to use trusted peers or a private relay; see `docs/netplay.md`.
 End-to-end pre-shared-key/AEAD authentication remains a recommended follow-up.
 
+The optional UPnP-IGD mapping is created with a 1-hour lease and deleted on
+netplay session end and app exit. Deletion is best-effort, so the lease is the
+backstop if a router ignores the SOAP delete; a mapping is no longer requested
+with an unlimited (`lease_seconds: 0`) lifetime.
+
 ### 8. `unsafe` surface
 
 Only `unko-app` is not `forbid(unsafe_code)`: `deny(unsafe_code)` with

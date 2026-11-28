@@ -63,8 +63,18 @@ pub struct MappingRequest {
     pub lease_seconds: u32,
 }
 
+/// Default lease for mappings created with [`MappingRequest::new`]: one hour.
+///
+/// The mapping is also deleted explicitly on teardown; the lease is the
+/// backstop for routers that ignore the delete.
+pub const DEFAULT_LEASE_SECONDS: u32 = 3600;
+
 impl MappingRequest {
-    /// Builds a request with a permanent lease.
+    /// Builds a request with a one-hour lease.
+    ///
+    /// The lease is bounded so a mapping cannot outlive the app if the router
+    /// ignores the explicit delete. Set [`Self::lease_seconds`] to `0` only if
+    /// a permanent mapping is really wanted.
     #[must_use]
     pub fn new(internal_client: &str, port: u16, protocol: Protocol) -> Self {
         Self {
@@ -73,7 +83,7 @@ impl MappingRequest {
             internal_client: internal_client.to_string(),
             protocol,
             description: "Unko NetPlay".into(),
-            lease_seconds: 0,
+            lease_seconds: DEFAULT_LEASE_SECONDS,
         }
     }
 }
@@ -253,6 +263,56 @@ pub fn delete_port_mapping(device: &IgdDevice, request: &MappingRequest) -> Resu
     );
     let response = soap_call(device, "DeletePortMapping", &body)?;
     check_fault(&response)
+}
+
+/// An owned port mapping that removes itself when dropped.
+///
+/// [`PortMapping::map`] only returns a handle after `AddPortMapping` succeeds,
+/// so a failed map cannot leave a delete for a mapping the router never
+/// accepted. Deletion is best-effort: [`Drop`] ignores errors, and the
+/// request's bounded lease is the backstop if the router ignores the delete.
+#[derive(Debug)]
+pub struct PortMapping {
+    device: IgdDevice,
+    request: MappingRequest,
+    active: bool,
+}
+
+impl PortMapping {
+    /// Adds the mapping and returns a handle that owns it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`add_port_mapping`].
+    pub fn map(device: IgdDevice, request: MappingRequest) -> Result<Self, UpnpError> {
+        add_port_mapping(&device, &request)?;
+        Ok(Self {
+            device,
+            request,
+            active: true,
+        })
+    }
+
+    /// Deletes the mapping now and consumes the handle.
+    ///
+    /// Errors are ignored (best effort); the later [`Drop`] is a no-op.
+    pub fn unmap(mut self) {
+        self.delete();
+    }
+
+    fn delete(&mut self) {
+        if !self.active {
+            return;
+        }
+        self.active = false;
+        let _ = delete_port_mapping(&self.device, &self.request);
+    }
+}
+
+impl Drop for PortMapping {
+    fn drop(&mut self) {
+        self.delete();
+    }
 }
 
 /// Reads the router's external IPv4 address.
@@ -461,6 +521,7 @@ mod tests {
     use super::*;
     use std::net::TcpListener;
     use std::thread;
+    use std::time::Instant;
 
     const DESCRIPTION: &str = r#"<?xml version="1.0"?>
 <root xmlns="urn:schemas-upnp-org:device-1-0">
@@ -616,6 +677,126 @@ mod tests {
         assert!(requests[1].contains("<NewProtocol>UDP</NewProtocol>"));
         assert!(requests[1].contains("<NewInternalClient>192.168.1.50</NewInternalClient>"));
         assert!(requests[2].contains("GetExternalIPAddress"));
+    }
+
+    /// Serves `expected` SOAP calls, recording each request.
+    ///
+    /// `add_fault` makes `AddPortMapping` return a SOAP fault. The deadline
+    /// keeps a test that is missing a request from hanging forever.
+    fn mock_igd_control(
+        expected: usize,
+        add_fault: bool,
+    ) -> (IgdDevice, thread::JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let port = listener.local_addr().expect("addr").port();
+        let handle = thread::spawn(move || {
+            let mut requests = Vec::new();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while requests.len() < expected && Instant::now() < deadline {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(accepted) => accepted,
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(_) => break,
+                };
+                let _ = stream.set_nonblocking(false);
+                let text = read_request(&mut stream);
+                let response = if text.contains("AddPortMapping") {
+                    if add_fault {
+                        "<s:Envelope><s:Body><s:Fault><detail><UPnPError>\
+                         <errorCode>718</errorCode>\
+                         <errorDescription>ConflictInMappingEntry</errorDescription>\
+                         </UPnPError></detail></s:Fault></s:Body></s:Envelope>"
+                            .to_string()
+                    } else {
+                        "<s:Envelope><s:Body><u:AddPortMappingResponse/></s:Body></s:Envelope>"
+                            .to_string()
+                    }
+                } else if text.contains("DeletePortMapping") {
+                    "<s:Envelope><s:Body><u:DeletePortMappingResponse/></s:Body></s:Envelope>"
+                        .to_string()
+                } else {
+                    "<s:Envelope><s:Body><s:Fault><detail><UPnPError>\
+                     <errorCode>401</errorCode>\
+                     <errorDescription>Invalid Action</errorDescription>\
+                     </UPnPError></detail></s:Fault></s:Body></s:Envelope>"
+                        .to_string()
+                };
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nContent-Length: {}\r\n\r\n{}",
+                            response.len(),
+                            response
+                        )
+                        .as_bytes(),
+                    )
+                    .expect("write");
+                requests.push(text);
+            }
+            requests
+        });
+        let device = IgdDevice {
+            control_url: format!("http://127.0.0.1:{port}/ctl/IPConn"),
+            service_type: WAN_SERVICES[0].to_string(),
+        };
+        (device, handle)
+    }
+
+    fn delete_count(requests: &[String]) -> usize {
+        requests
+            .iter()
+            .filter(|request| request.contains("DeletePortMapping"))
+            .count()
+    }
+
+    #[test]
+    fn netplay_mapping_lease_is_bounded() {
+        let request = MappingRequest::new("192.168.1.50", 7777, Protocol::Udp);
+        assert_eq!(request.lease_seconds, 3600);
+        assert_ne!(request.lease_seconds, 0);
+    }
+
+    #[test]
+    fn mapping_guard_deletes_on_drop() {
+        let (device, server) = mock_igd_control(2, false);
+        let request = MappingRequest::new("192.168.1.50", 7777, Protocol::Udp);
+        let mapping = PortMapping::map(device, request).expect("map");
+        drop(mapping);
+
+        let requests = server.join().expect("server");
+        assert_eq!(delete_count(&requests), 1, "requests: {requests:?}");
+    }
+
+    #[test]
+    fn explicit_unmap_deletes_once() {
+        let (device, server) = mock_igd_control(2, false);
+        let request = MappingRequest::new("192.168.1.50", 7778, Protocol::Udp);
+        let mapping = PortMapping::map(device, request).expect("map");
+        mapping.unmap();
+
+        let requests = server.join().expect("server");
+        assert_eq!(delete_count(&requests), 1, "requests: {requests:?}");
+    }
+
+    #[test]
+    fn map_failure_yields_no_guard() {
+        let (device, server) = mock_igd_control(1, true);
+        let request = MappingRequest::new("192.168.1.50", 7779, Protocol::Udp);
+        let result = PortMapping::map(device, request);
+
+        assert_eq!(
+            result.err(),
+            Some(UpnpError::Fault {
+                code: 718,
+                description: "ConflictInMappingEntry".into()
+            })
+        );
+        let requests = server.join().expect("server");
+        assert_eq!(delete_count(&requests), 0, "requests: {requests:?}");
     }
 
     #[test]

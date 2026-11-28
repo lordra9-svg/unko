@@ -33,9 +33,8 @@ use crate::settings::{Aspect, HotkeyAction, PortInput, Settings, ShaderPreset, T
 use crate::slots::{default_slot_name, size_label, SLOT_COUNT};
 use crate::vsconfig::VsConfig;
 use unko_netplay::{
-    add_port_mapping, discover, endpoint, external_ip, local_address_toward, stun_public_address,
-    HolePunchTransport, MappingProtocol, MappingRequest, PredictionMode, RelayTransport,
-    SessionConfig,
+    discover, endpoint, external_ip, local_address_toward, stun_public_address, HolePunchTransport,
+    MappingProtocol, MappingRequest, PortMapping, PredictionMode, RelayTransport, SessionConfig,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,6 +169,10 @@ fn controller_chord(pad: unko_core::InputState, previous: unko_core::InputState)
     both(pad) && !both(previous)
 }
 
+/// Payload from the NAT worker: public endpoint, status detail, and the
+/// optional UPnP mapping it owns (so the app can delete it on teardown).
+type NatDetectionResult = Result<(String, String, Option<PortMapping>), String>;
+
 /// Application state.
 pub struct App {
     settings: Settings,
@@ -249,7 +252,9 @@ pub struct App {
     netplay_pending_punch: Option<(HolePunchTransport, SessionConfig, u16)>,
     /// The game was running when the handshake started and should resume.
     netplay_resume_after_punch: bool,
-    netplay_upnp_rx: Option<std::sync::mpsc::Receiver<Result<(String, String), String>>>,
+    netplay_upnp_rx: Option<std::sync::mpsc::Receiver<NatDetectionResult>>,
+    /// Owns the UPnP mapping so it is deleted when the session or app ends.
+    netplay_port_mapping: Option<PortMapping>,
     controller_last: unko_core::InputState,
     controller_repeat: Instant,
     controller_menu_open: bool,
@@ -416,6 +421,7 @@ impl App {
             netplay_pending_punch: None,
             netplay_resume_after_punch: false,
             netplay_upnp_rx: None,
+            netplay_port_mapping: None,
             controller_last: unko_core::InputState::empty(),
             controller_repeat: Instant::now(),
             controller_menu_open: false,
@@ -3130,6 +3136,9 @@ impl App {
         if self.netplay_upnp_rx.is_some() {
             return;
         }
+        // A fresh discovery replaces any mapping from an earlier attempt; the
+        // old handle deletes its own mapping as it drops.
+        self.netplay_port_mapping = None;
         let peer = self
             .netplay_peer
             .split(',')
@@ -3143,15 +3152,15 @@ impl App {
         self.netplay_upnp_status = "Looking for a UPnP gateway, then STUN…".into();
         std::thread::spawn(move || {
             let local = local_address_toward(&peer);
-            let upnp = (|| -> Result<String, String> {
+            let upnp = (|| -> Result<(String, Option<PortMapping>), String> {
                 let device = discover(Duration::from_secs(2)).map_err(|err| err.to_string())?;
                 let ip = external_ip(&device).map_err(|err| err.to_string())?;
                 let request = MappingRequest::new(&local, port, MappingProtocol::Udp);
-                add_port_mapping(&device, &request).map_err(|err| err.to_string())?;
-                Ok(endpoint(&ip, port))
+                let mapping = PortMapping::map(device, request).map_err(|err| err.to_string())?;
+                Ok((endpoint(&ip, port), Some(mapping)))
             })();
             let result = match upnp {
-                Ok(public) => Ok((public, "UPnP mapping active".to_string())),
+                Ok((public, mapping)) => Ok((public, "UPnP mapping active".to_string(), mapping)),
                 Err(upnp_error) => {
                     if stun_server.is_empty() {
                         Err(format!("UPnP: {upnp_error}"))
@@ -3160,6 +3169,7 @@ impl App {
                             Ok(address) => Ok((
                                 format!("{}:{port}", address.ip()),
                                 "STUN external IP; forward this UDP port on the router".to_string(),
+                                None,
                             )),
                             Err(stun_error) => {
                                 Err(format!("UPnP: {upnp_error}; STUN: {stun_error}"))
@@ -3279,7 +3289,9 @@ impl App {
         if let Some(result) = outcome {
             self.netplay_upnp_rx = None;
             match result {
-                Ok((public, detail)) => {
+                Ok((public, detail, mapping)) => {
+                    // Replacing the old handle drops (and unmaps) it.
+                    self.netplay_port_mapping = mapping;
                     self.netplay_upnp_status = format!("{detail}. Public endpoint {public}");
                     self.netplay_public_endpoint = public;
                 }
@@ -3492,6 +3504,8 @@ impl App {
                         if let Some(player) = &mut self.player {
                             player.stop_netplay();
                         }
+                        // Best-effort unmap; the bounded lease is the backstop.
+                        self.netplay_port_mapping = None;
                         self.netplay_pending_punch = None;
                         self.netplay_punch_deadline = None;
                         if let Some(player) = &mut self.player {
@@ -4436,6 +4450,9 @@ impl eframe::App for App {
 impl App {
     /// Stops the audio stream and persists settings when the shell exits.
     fn shutdown(&mut self) {
+        // Drop the UPnP handle before the process exits so the router mapping
+        // is deleted on a closed window too.
+        self.netplay_port_mapping = None;
         self.flush_play_stats();
         self.persist_vs_config();
         if let Some(player) = &mut self.player {

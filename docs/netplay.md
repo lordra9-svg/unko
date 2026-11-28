@@ -70,6 +70,12 @@ DATA bodies are neither authenticated nor encrypted. Use netplay with trusted
 peers or a private relay. Optional pre-shared-key authentication/AEAD is a
 future transport layer, not part of the current session.
 
+When UPnP-IGD is enabled, the app asks the router for a UDP mapping with a
+1-hour lease and deletes it when the netplay session stops (Stop, punch
+teardown) or the app exits. Deletion is best-effort: if the router ignores the
+SOAP delete, the lease expires on its own, so the forwarded port is not left
+open indefinitely.
+
 ## Transports
 
 | Transport | Use |
@@ -78,7 +84,7 @@ future transport layer, not part of the current session.
 | `HolePunchTransport` + adapter | Hole-punched direct UDP; exchange `PUNCH`/`PONG` and start only after bidirectional traffic |
 | `RelayTransport` + adapter | Password-protected relay room (`unko-relay`), member ids = player slots |
 | `UdpMesh` | Legacy direct/mesh transport used by the legacy engine and tests |
-| UPnP-IGD | Ask the router to open the UDP port and report the public endpoint |
+| UPnP-IGD | Ask the router to open the UDP port with a 1-hour lease and report the public endpoint; the mapping is deleted when the session stops or the app exits (best-effort, so the lease expires if the router ignores the delete) |
 | STUN (RFC 5389) | Discover the external IP when UPnP is unavailable |
 | Manual endpoint | User-supplied public `ip:port` |
 
