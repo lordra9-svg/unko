@@ -181,6 +181,32 @@ Also from the frame-latch fix: `Legend of Zelda, The (USA)` went 98.7952 →
 **100.000**. Its single frame-37 miss was the next-frame leakage, not a content
 bug — the earlier "real content boundary" reading was wrong.
 
+## Digital Devil Story II — draw path found, gate not explained (2026-11-28)
+
+Both titles sit at 45.36%. The boot/draw pipeline is now mapped:
+
+- Reset clears the nametable at `$EFD1`/`$EED1` (8 KiB of `$2007`), then enters the
+  main loop `$F898 INC $FB / JMP $F898`. All game logic runs in NMI `$F8BC` through the
+  cooperative task scheduler `$FCEF`/`$FD69`, one task per NMI (`$FD57`).
+- The first script task `$C000` runs command `$14` at `$DC27`, which sets the sleep
+  counter `$030D = 0x80` (128) and yields. After the sleep expires, `$DC31` runs the RLE
+  nametable loader `$EECA` (ROM pointer `$DDCC`, bank 27) — the title screen.
+- Forcing `$030D → 0` makes unko execute `$DC31` and start the `$2006/$2007` RLE load, so
+  the script and the mapper path are fine; **the gate is the `$030D` sleep**.
+- Measured in unko: `$030D` goes 0x80 at frame 12 to ~0x33 at frame 129 — only ~77
+  decrements across 117 frames (≈0.66/frame), so the draw lands around frame 140, outside
+  the 30–119 window. ares draws at **frame 12**.
+- Ruled out: controller input, power-on RAM fill (Zero/Fill/Random all identical after the
+  frame-6 clear; `$0460` is set deterministically at `$F9C0`), mapper IRQ (never enabled),
+  N163 chip RAM (never read during boot), and the old "operand bytes" note.
+
+Unresolved: why ares reaches the same task ~10× sooner. Either ares ticks the scheduler
+more than once per frame, or the engines diverge in a boot branch/PPU timing before
+`$DC2B`, or unko is dropping NMIs early (which would also bear on the open `$2002` poll
+race). Deciding it needs ares-side RAM (`$030D`, `$030B`, `$030E`) per frame, which means a
+gated dump in the local ares build. The `0.66/frame` decrement rate is itself suspicious and
+is the most concrete lead.
+
 ## Mapper 2 submapper 2 cluster — resolved as non-bugs (2026-11-28)
 
 `Super Pitfall (USA/Japan)` at 41.5% is **CHR-RAM power-on fill**, not a mapper defect.
