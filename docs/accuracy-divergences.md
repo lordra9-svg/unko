@@ -1,8 +1,10 @@
 # Accuracy divergences — NES
 
-**Frozen as done for now (2026-11-16).** No new NES divergences are being
-tracked until the NES track is reopened; the ledger is kept for the historical
-record and for the deferred hardware-capture work.
+**Frozen on 2026-11-16; reopened on 2026-11-27** with the NMI-edge work
+(`b76593d`). New dated entries are being added again. The 2026-11-15
+AccuracyCoin snapshot below is the historical snapshot from before the freeze
+and is not a current claim; the ledger is kept for the record and for the
+deferred hardware-capture work.
 
 This ledger records every known place where `unko-nes` does not
 yet match the chosen reference (real hardware, then ares, then the public test
@@ -140,6 +142,47 @@ The PPU-A12 filter is now six CPU cycles (18 PPU dots), matching the
 documented/ares filter. `mmc3_test_2` passes 6/6; `mmc3_irq_tests` passes
 6/6 with the alternate revision selected for revision A. AccuracyCoin and
 the library audit are unaffected.
+
+## CNROM submapper 2 and power-on RAM (2026-11-28)
+
+Investigation of the six CNROM titles that score 0.000 on the ares index and of
+the two adjacent outliers. No source change was made; this section records the
+evidence and the decisions.
+
+- **Power-on work RAM is unspecified; Unko keeps `$00`.** NESdev *CPU power up
+  state* states that internal RAM has an unreliable state at power-up and that
+  emulators commonly fill it with `$00`, `$FF` or a pattern; there is no single
+  hardware truth to match. Unko defaults to `RamClear::Zero`
+  (`crates/unko-nes/src/system.rs`); ares fills `$FF`. The consequence is
+  visible on **`Minna no Taabou no Nakayoshi Daisakusen (Japan)`**: the game
+  scans work RAM for a `$FF` terminator, finds none under the `$00` fill, stays
+  in its PPU-stream loop, never enables rendering, and scores **0.000** at 120
+  frames. Its **`(Rev 1)`** release scores **100.000**. **Decision
+  (2026-11-28): keep `$00`; do not adopt ares' `$FF` constant.** This title
+  depends on uninitialised RAM being `$FF`; that is a game behaviour, not an
+  emulator defect, and no fix is claimed here.
+
+- **Mapper 3 submapper 2 is already correct — no divergence.** Per the NES 2.0
+  mapper 003 definition, submapper 1 has no bus conflicts and submapper 2 has
+  bus conflicts (the CHR-bank latch receives the write value ANDed with the ROM
+  byte visible at the write address). Unko performs that AND in
+  `CnRom::prg_write` and ares does the same; all six candidate rows are
+  submapper 2, so the 0.000 scores are not a submapper bug. *Known over-broad
+  detail:* `CnRom` applies the bus conflict to submapper 0 and 1 as well, which
+  is not correct for submapper 1, but it affects none of the measured rows.
+  This is a known, unfixed, low-priority item.
+
+- **`Fleet Commander (Japan)` is a capture-length limit, not a divergence.** At
+  120 frames both engines are uniform, which is why it is excluded/unmeasured
+  under the current metric; at 300 frames Unko renders normal content. It is a
+  measurement-window limitation, not a rendering difference.
+
+- **`Dynamite Bowl` — open, not fixed.** It scores **93.17%** / **94.51%** at a
+  single global frame shift, but **38 of 90 frames are byte-identical** when
+  each frame is allowed its own best shift, with the same pixel set changing
+  colour across frames. That signature is a startup/animation-phase difference
+  (reset or PPU-startup timing), not a mapper-3 issue. It remains open and
+  unrelated to the CNROM submapper-2 result above.
 
 ## Expansion-audio parity (2026-11-12)
 
