@@ -212,6 +212,18 @@ Not bugs, recorded so they are not re-chased:
   The real symptom is that the game never writes the nametable at all (cleared once
   at reset, never redrawn) while the CPU runs its main loop and NMI normally.
 
+## Phase B attempt — rejected (2026-11-28)
+
+A builder proposed consuming a deferred NMI latch inside `Cpu::sample_cycle`
+(`bus.take_nmi()` + `nmi_suppressed()`), on top of `$2002`/NMI tracing. It compiled,
+but **regressed `Tokoro-san` from 38.327 to 9.756**, and came with no test, no
+measurement and no written mechanism. Reverted; nothing merged.
+
+Phase B therefore remains open with the same acceptance: 12/12 blargg `vbl_nmi`
+ROMs **and** Tokoro-san ≥ 99.99. The next attempt must produce the first divergent
+event at dot resolution *before* changing CPU/NMI semantics, and must show the
+12-ROM suite passing alongside the measurement.
+
 ## Retracted hypothesis: "the runner never passes --region" (2026-11-28)
 
 I claimed `rerun_index.py` ran unko in NTSC against ares in PAL. **Wrong.** Verified:
