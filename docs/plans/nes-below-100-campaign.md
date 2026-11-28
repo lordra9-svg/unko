@@ -181,6 +181,33 @@ Also from the frame-latch fix: `Legend of Zelda, The (USA)` went 98.7952 →
 **100.000**. Its single frame-37 miss was the next-frame leakage, not a content
 bug — the earlier "real content boundary" reading was wrong.
 
+### Dot-257 open-bus quirk — implemented, measured, rejected (2026-11-28)
+
+Implemented the ares-faithful `$2000` dot-257 override (rendering on, dot 257, `t` nametable X
+from the CPU open bus) with synthetic test `ppu_ctrl_dot_257_reads_open_bus_nametable_x`
+(fails before with `left: 1024 right: 0`, passes after). Measured 120 frames:
+
+| title | baseline | with quirk |
+|---|---|---|
+| Terminator 2 (USA) | 99.9931 | **99.9772** |
+| Terminator 2 (Japan) | 99.9913 | **99.8924** |
+| Terminator 2 (Europe, PAL) | 100.0000 | 100.0000 |
+| Super Mario Bros. 3 (USA) | 99.9961 | 99.9961 |
+| Kirby's Adventure (USA) | 100.0000 | 100.0000 |
+| Battletoads (USA) | 100.0000 | 100.0000 |
+
+T2 got **worse**, controls held, so the change was reverted per the pre-agreed rule and nothing
+was committed. The likely reason is bus phase: ares' `openBus` at that instant is not the
+pre-write value unko supplied. Resolving it is a bus-ordering question, not a PPU one — do not
+re-attempt the quirk without settling what the CPU bus holds at a dot-257 write.
+
+### Dynamite Bowl is not the same defect
+
+Its residual is **broad bands**, not one scanline: frame 61 touches 75 rows (48–122), frames 64
+and 85 touch 104–105 rows (48–166), with per-row counts rising smoothly. That is a region
+rendered from the wrong tilemap/scroll, not a latch boundary, so it needs a different
+investigation from T2.
+
 ## Terminator 2 — one-scanline split narrowed to the dot-257 latch (2026-11-28)
 
 `Terminator 2 - Judgment Day (USA)` is 99.9931% and `(Japan)` 99.991%: 382 differing pixels
