@@ -181,6 +181,27 @@ Also from the frame-latch fix: `Legend of Zelda, The (USA)` went 98.7952 →
 **100.000**. Its single frame-37 miss was the next-frame leakage, not a content
 bug — the earlier "real content boundary" reading was wrong.
 
+## Mapper 2 submapper 2 cluster — resolved as non-bugs (2026-11-28)
+
+`Super Pitfall (USA/Japan)` at 41.5% is **CHR-RAM power-on fill**, not a mapper defect.
+The guest runs normally (title screen rendered by frame 119); the game clears the nametable
+to tile `$FF` and has not yet uploaded that tile. unko's CHR-RAM starts at `0x00`
+(`cart.rs:1045`, `vec![0; size]`), so tile `$FF` decodes to colour 0; ares' CHR-RAM reads
+`0xFF`, so the same tile decodes to palette entry 3. Frames 22–85 differ for that reason and
+the rest is the same content one frame later. A controlled `0x00 → 0xFF` experiment lifted both
+titles to 99.955/100.000 and changed nothing else in the cluster.
+
+CHR RAM is **undefined at power-on** just like palette RAM, so this stays `0x00` under the
+same policy as the boot-palette decision. Baking `0xFF` to match ares would touch every
+CHR-RAM title and encode an oracle convention as truth.
+
+`Castelian (Europe)` at 79.63% is the **PAL content question**, not mapper 2: `Castelian (USA)`
+is 100.000 on the same code path, the screen is stable in both engines from frame 9, and no
+integer shift aligns the castle region. ares' Europe capture shows garbled font/alphabet tiles
+where unko shows coherent art, and ares-Europe is only 75.5% similar to ares-USA while
+unko-Europe is 97.5% similar to unko-USA. Worth treating the PAL oracle as suspect before
+chasing these rows.
+
 Not bugs, recorded so they are not re-chased:
 - `Minna no Taabou` needs `$FF` in work RAM; policy is `$00` (see the divergence ledger).
 - Mapper 268 (Rod Land ×2, Star Wars LRG, 8 Eyes) — **ares has no mapper 268**, so
