@@ -187,6 +187,27 @@ Not bugs, recorded so they are not re-chased:
   The real symptom is that the game never writes the nametable at all (cleared once
   at reset, never redrawn) while the CPU runs its main loop and NMI normally.
 
+## Retracted hypothesis: "the runner never passes --region" (2026-11-28)
+
+I claimed `rerun_index.py` ran unko in NTSC against ares in PAL. **Wrong.** Verified:
+
+- `unko trace` has **no** `--region` option — `./target/release/unko trace … --region pal`
+  prints `unko: unknown option --region`. The `--region` flag exists only on the `text`
+  subcommand. Passing it from Python would break every run.
+- `System::header_timing` (`system.rs:772`) already selects PAL/DENDY from NES 2.0 byte 12
+  or iNES byte 9, which is the same rule as `rerun_index.detect_region`. So `unko trace`
+  already runs these ROMs as PAL; an explicit flag would select the identical timing.
+- A header-vs-ledger scan of all 496 PAL + 1 DENDY rows found **0 region mismatches**, and
+  re-measuring reproduces the recorded numbers exactly.
+
+So the PAL numbers are correct inputs, and the PAL divergence is a real emulator difference,
+not a harness one. Region *does* change output (patching Zelda's timing byte 1→0 changes
+59/60 frame hashes), so the lever exists — it is just already applied.
+
+Remaining PAL lead (unresolved): unko PAL output is near-identical to unko NTSC (only the
+animated waterfall sprites differ), while ares PAL differs from ares NTSC across the
+background. Something makes ares take a different path under PAL.
+
 ## Order of work
 
 Batch 0 (this branch): Zelda cluster. Highest rows-per-fix, final frame already identical,
