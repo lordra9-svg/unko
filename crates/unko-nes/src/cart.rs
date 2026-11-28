@@ -1369,7 +1369,7 @@ impl Cartridge {
             162 => Box::new(Fs304::new(prg_rom, chr, prg_ram, header)),
             163 => Box::new(Nanjing163::new(prg_rom, chr, header)),
             558 => Box::new(Fs558::new(prg_rom, chr, prg_ram, header)),
-            76 | 88 | 95 | 154 | 206 => Box::new(DxRom::new(prg_rom, chr, header)),
+            76 | 88 | 95 | 154 | 206 => Box::new(DxRom::new(prg_rom, chr, header, header.mapper)),
             66 => Box::new(GxRom::new(prg_rom, chr, header)),
             71 => Box::new(Camerica::new(prg_rom, chr, header)),
             7 => Box::new(AxRom::new(prg_rom, chr, header)),
@@ -25351,6 +25351,10 @@ impl Mapper for Nina79 {
 /// DxROM / Namco 118 / Tengen MIMIC-1 (mappers 206, 76, 88, 95, 154): a
 /// simplified MMC3 with no IRQ. `$C000`/`$E000` are always the last two 8 KiB
 /// banks and CHR always uses the left 2 KiB / right 1 KiB arrangement.
+///
+/// Mapper 154 is the Namco 3453 revision of the same chip: the four 1 KiB CHR
+/// banks at `$1000-$1FFF` live in the upper half of a 128 KiB CHR ROM (CHR
+/// A16 set), unlike the other revisions which read the lower half.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct DxRom {
     prg: Vec<u8>,
@@ -25359,10 +25363,11 @@ pub struct DxRom {
     select: u8,
     banks: [u8; 8],
     mirroring: Mirroring,
+    mapper: u16,
 }
 
 impl DxRom {
-    fn new(prg: Vec<u8>, chr: Vec<u8>, header: Header) -> Self {
+    fn new(prg: Vec<u8>, chr: Vec<u8>, header: Header, mapper: u16) -> Self {
         Self {
             prg,
             chr,
@@ -25370,6 +25375,7 @@ impl DxRom {
             select: 0,
             banks: [0; 8],
             mirroring: header.mirroring,
+            mapper,
         }
     }
 
@@ -25398,7 +25404,13 @@ impl DxRom {
             6 => usize::from(self.banks[4]),
             _ => usize::from(self.banks[5]),
         };
-        raw % banks
+        if self.mapper == 154 && slot >= 4 {
+            // CHR A16: the four 1 KiB banks read the upper 64 KiB of CHR.
+            let bytes = self.chr.len().max(1);
+            (raw * 0x400 + 0x10000) % bytes / 0x400
+        } else {
+            raw % banks
+        }
     }
 }
 
@@ -25460,7 +25472,7 @@ impl Mapper for DxRom {
     }
 
     fn number(&self) -> u16 {
-        206
+        self.mapper
     }
 
     fn prg_ram(&self) -> &[u8] {
@@ -42341,6 +42353,29 @@ pub(crate) mod tests {
         // CHR window 0: latch value 1 -> 2 KiB bank 1 -> 1 KiB bank 2.
         cart.cpu_write(0x8001, 0);
         assert_eq!(cart.ppu_read(0x0000), 0x82);
+    }
+
+    #[test]
+    fn dxrom_mapper154_chr_a16_banks() {
+        // Namco 3453 (mapper 154): the 2 KiB banks at $0000-$0FFF stay in the
+        // lower 64 KiB, but the four 1 KiB banks at $1000-$1FFF set CHR A16.
+        let rom = synth_banked(154, 128, 128);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        cart.cpu_write(0x8000, 2);
+        cart.cpu_write(0x8001, 2);
+        cart.cpu_write(0x8000, 3);
+        cart.cpu_write(0x8001, 3);
+        assert_eq!(cart.ppu_read(0x0000), 0x80);
+        assert_eq!(cart.ppu_read(0x0800), 0x80);
+        assert_eq!(cart.ppu_read(0x1000), 0xC2);
+        assert_eq!(cart.ppu_read(0x1400), 0xC3);
+
+        // Mapper 206 (Namco 118) keeps reading the lower 64 KiB.
+        let rom = synth_banked(206, 128, 128);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        cart.cpu_write(0x8000, 2);
+        cart.cpu_write(0x8001, 2);
+        assert_eq!(cart.ppu_read(0x1000), 0x82);
     }
 
     fn synthetic(mapper: u8, prg_banks: u8, chr_banks: u8) -> Vec<u8> {
