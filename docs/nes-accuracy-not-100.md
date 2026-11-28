@@ -6,18 +6,18 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 
 - NES archives: **7101**
 - Measured: **7048**
-- Measured with the palette-index metric: **1360**
-- Below 100% by the relevant ares metric: **414**
-- Ignored tagged dumps below 100%: **1829**
-- No measurement / oracle error: **37**
+- Measured with the palette-index metric: **1368**
+- Below 100% by the relevant ares metric: **401**
+- Ignored tagged dumps below 100%: **1828**
+- No measurement / oracle error: **39**
 - Ignored tagged dumps with errors: **27**
-- Total needing attention: **451**
+- Total needing attention: **440**
 
 | Band | Games |
 |---|---:|
-| 0-50% | 15 |
-| 50-90% | 15 |
-| 90-99% | 125 |
+| 0-50% | 13 |
+| 50-90% | 12 |
+| 90-99% | 117 |
 | 99-100% | 259 |
 
 Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
@@ -30,8 +30,6 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 0.00% | index | Minna no Taabou no Nakayoshi Daisakusen (Japan) |
 | 0.00% | index | Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - '91 Kaimaku Hen (Japan) |
 | 0.00% | index | Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - OB All Star Hen (Japan) |
-| 0.00% | index | Rod Land (World) (Retro-Bit) (256KiB) |
-| 0.00% | index | Rod Land (World) (Retro-Bit) (512KiB) |
 | 0.00% | index | Star Wars (USA) (Limited Run Games) |
 | 26.63% | index | Racer Mini Yonku - Japan Cup (Japan) |
 | 27.69% | index | Devil Man (Japan) |
@@ -41,8 +39,6 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 41.55% | index | Super Pitfall (Japan) |
 | 45.36% | index | Digital Devil Story - Megami Tensei II (Japan) |
 | 45.36% | index | Digital Devil Story - Megami Tensei II (Japan) (Rev 1) |
-| 61.11% | index | Swords and Serpents (Europe) |
-| 62.92% | index | Swords and Serpents (France) |
 | 69.57% | index | Bikkuriman World - Gekitou Sei Senshi (Japan) |
 | 73.10% | index | Treasure Master (USA) |
 | 75.51% | index | Terminator 2 - Judgment Day (Europe) |
@@ -55,15 +51,11 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 87.22% | index | Mickey Mouse - Fushigi no Kuni no Daibouken (Japan) (En) |
 | 87.54% | index | Mickey Mousecapade (USA) |
 | 87.67% | index | Oeka Kids - Anpanman no Hiragana Daisuki (Japan) |
-| 89.89% | index | Legend of Prince Valiant, The (Europe) |
 | 90.29% | index | Battle Stadium - Senbatsu Pro Yakyuu (Japan) |
 | 90.30% | index | Hebereke (Japan) |
 | 90.30% | index | Hebereke (Japan) (Virtual Console) |
 | 90.42% | index | Flintstones, The - The Rescue of Dino & Hoppy (Japan) |
 | 90.67% | index | Ice Hockey (Europe) (Virtual Console) |
-| 92.03% | index | Legend of Zelda, The (Europe) |
-| 92.03% | index | Legend of Zelda, The (Europe) (Rev 1) |
-| 92.03% | index | Legend of Zelda, The (Europe) (Rev 1) (Virtual Console) |
 | 92.59% | index | Super Mario Bros. + Duck Hunt (Europe, Asia) (En) |
 | 92.73% | index | Super Mario Bros. + Duck Hunt (USA) |
 | 93.11% | index | Elite (Europe) (En,Fr,De) |
@@ -73,9 +65,17 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 93.65% | index | Thexder (Japan) (En) |
 | 93.96% | index | Iron Tank - The Invasion of Normandy (USA) |
 | 94.15% | index | Nintendo NTF2 Test Cartridge (USA) (Test Program) |
-| 94.23% | index | Ghostbusters II (Europe) |
 | 94.51% | index | Dynamite Bowl (Japan) |
 | 94.51% | index | Dynamite Bowl (Japan) (En) |
+| 94.86% | index | Kyonshiizu 2 (Japan) (Sample) |
+| 95.04% | index | Kyonshiizu 2 (Japan) |
+| 95.10% | index | Bakushou!! Jinsei Gekijou 2 (Japan) |
+| 95.27% | index | Back to the Future Part II & III (USA) |
+| 95.39% | index | Famicom Jump II - Saikyou no 7 Nin (Japan) |
+| 95.56% | index | Rodland (Europe) |
+| 95.70% | index | Yoshi no Tamago (Japan) (En) |
+| 95.81% | index | Yoshi (USA) |
+| 95.83% | index | America Daitouryou Senkyo (Japan) |
 
 ## No measurement / oracle errors
 
@@ -109,6 +109,8 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | NHK Gakuen - Space School - Sansu 6 Nen (Jou) (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Nintendo Campus Challenge 1991 (USA) (Competition Cart) [b] | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Nintendo World Championships 1990 (USA) (Competition Cart) | ares capture is a uniform blank frame (board unsupported by the oracle) |
+| Rod Land (World) (Retro-Bit) (256KiB) | no scored frames (all frames excluded) |
+| Rod Land (World) (Retro-Bit) (512KiB) | no scored frames (all frames excluded) |
 | S.C.A.T. - Special Cybernetic Attack Team (USA) (Limited Run Games) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | SD Keiji - Blader (Japan) | ares capture is a uniform blank frame (board unsupported by the oracle) |
 | Shadow of the Ninja (USA) (Limited Run Games) | ares capture is a uniform blank frame (board unsupported by the oracle) |
