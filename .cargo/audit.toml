@@ -1,0 +1,28 @@
+# RustSec advisory exceptions for `cargo audit`.
+#
+# This list must shrink, never grow silently. Add an entry only for a known,
+# currently unfixable "unmaintained" notice and leave a comment explaining why
+# it cannot be fixed yet. A real vulnerability (anything other than an
+# "unmaintained" notice) must NEVER be added here; fix it or stop and report.
+#
+# The `Query RustSec` step of the `advisories` job in .github/workflows/ci.yml
+# fails on any unmaintained advisory that is not listed below.
+
+[advisories]
+ignore = [
+    # bincode is unmaintained (RUSTSEC-2025-0141). Unavoidable today:
+    # ggrs 0.13.0 (the newest release) depends on bincode 1.3, and our own
+    # crates (unko-nes, unko-netplay, unko-snes) use the same 1.3 line. Revisit
+    # when ggrs ships a release that no longer pulls bincode 1.x.
+    "RUSTSEC-2025-0141",
+    # instant is unmaintained (RUSTSEC-2024-0384). Unavoidable: only reachable
+    # through ggrs 0.13.0's dependency tree.
+    "RUSTSEC-2024-0384",
+    # paste is unmaintained (RUSTSEC-2024-0436). Only reachable through
+    # wgpu/metal on macOS; cannot be dropped until those crates move off it.
+    "RUSTSEC-2024-0436",
+    # ttf-parser is unmaintained (RUSTSEC-2026-0192). Reachable through
+    # egui 0.31.1 -> ab_glyph; it clears only with an egui/eframe upgrade,
+    # which is tracked separately.
+    "RUSTSEC-2026-0192",
+]
