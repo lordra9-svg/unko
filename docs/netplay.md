@@ -58,8 +58,12 @@ The legacy engine remains as a library fallback and for
 
 GGRS traffic is plaintext UDP. Relay rooms are password-protected: the first
 successful `JOIN` pins a room to a proof derived from the room name and
-password, and later joins with a different proof are rejected. This closes the
-old hole where anyone who knew the room name could join or inject datagrams.
+password, and later joins with a different proof are rejected. A join with the
+matching proof may also take over an existing member id from a different source
+address, which lets a client that crashed or changed its source port reclaim its
+slot. A room rejects only joins that would add a new id once it is full (16
+members). This closes the old hole where anyone who knew the room name could
+join or inject datagrams.
 It is **not** a defence against an on-path observer or an active network
 attacker: the proof crosses the wire in the clear and can be replayed, and the
 DATA bodies are neither authenticated nor encrypted. Use netplay with trusted

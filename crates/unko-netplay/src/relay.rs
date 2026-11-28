@@ -10,8 +10,11 @@
 //!
 //! A room is claimed by the first successful JOIN: that peer's proof (derived
 //! from the room name and a password) is stored, and every later JOIN with a
-//! different proof is rejected. This closes the old hole where anyone who knew
-//! or guessed the user-visible room name could join and inject datagrams.
+//! different proof is rejected. An authenticated JOIN may also take over an
+//! existing member id from a different source address, so a client that crashed
+//! or changed ports can rejoin its slot; a full room rejects only joins that
+//! would add a *new* id. This closes the old hole where anyone who knew or
+//! guessed the user-visible room name could join and inject datagrams.
 //!
 //! # Residual risk
 //!
@@ -290,14 +293,15 @@ fn handle_join(
         );
     }
     let members = &mut rooms.get_mut(&room).expect("room was just claimed").members;
-    match members.get(&member_id) {
+    match members.get(&member_id).copied() {
         // A retry from the same socket is idempotent.
-        Some(address) if *address == from => {}
-        // The id is taken by another peer: no free slot for this source.
+        Some(address) if address == from => {}
+        // The proof matched, so this caller knows the password: allow it to
+        // take over the id from a stale or crashed source address.
         Some(_) => {
-            send_rejected(socket, from, REJECT_ROOM_FULL);
-            return;
+            members.insert(member_id, from);
         }
+        // Only a *new* id needs a free slot; takeover never adds a member.
         None if members.len() >= MAX_MEMBERS => {
             send_rejected(socket, from, REJECT_ROOM_FULL);
             return;
@@ -734,20 +738,76 @@ mod tests {
     }
 
     #[test]
-    fn member_id_collision_is_rejected() {
+    fn crashed_member_is_replaced_by_rejoin_same_id() {
         let server = RelayServer::spawn("127.0.0.1:0").expect("server");
         let relay = server.local_addr().to_string();
-        let mut first =
-            RelayTransport::bind("127.0.0.1:0", &relay, "room", "secret", 3).expect("first");
-        wait_joined(&mut [&mut first]);
+        let mut peer =
+            RelayTransport::bind("127.0.0.1:0", &relay, "room", "secret", 0).expect("peer");
+        let mut crashed =
+            RelayTransport::bind("127.0.0.1:0", &relay, "room", "secret", 1).expect("crashed");
+        wait_joined(&mut [&mut peer, &mut crashed]);
 
-        let mut second =
-            RelayTransport::bind("127.0.0.1:0", &relay, "room", "secret", 3).expect("second");
-        for _ in 0..40 {
-            second.pump();
-            assert!(!second.joined(), "colliding member id must not join");
+        // Forget the transport so Drop never sends LEAVE: the relay keeps a
+        // stale (id 1 -> old address) entry, like a crashed client.
+        std::mem::forget(crashed);
+
+        let mut rejoin =
+            RelayTransport::bind("127.0.0.1:0", &relay, "room", "secret", 1).expect("rejoin");
+        wait_joined(&mut [&mut rejoin]);
+        assert!(
+            rejoin.joined(),
+            "authenticated rejoin must take the id back"
+        );
+
+        peer.send_to(1, b"to-one").expect("send to id 1");
+        let mut received = None;
+        for _ in 0..100 {
+            rejoin.pump();
+            if let Some(message) = rejoin.recv().expect("recv") {
+                received = Some(message);
+                break;
+            }
             thread::sleep(Duration::from_millis(5));
         }
+        assert_eq!(
+            received,
+            Some(b"to-one".to_vec()),
+            "DATA must reach the rejoined address"
+        );
+    }
+
+    #[test]
+    fn new_member_is_rejected_when_room_is_full() {
+        let server = RelayServer::spawn("127.0.0.1:0").expect("server");
+        let relay = server.local_addr().to_string();
+        for id in 0..MAX_MEMBERS as u16 {
+            let socket = raw_socket(&relay);
+            socket
+                .send(&join_message("full", "secret", id))
+                .expect("join");
+            let (kind, payload) = read_reply(&socket).expect("ack");
+            assert_eq!(kind, JOINED, "member {id}");
+            assert_eq!(payload, id.to_le_bytes().to_vec());
+        }
+
+        // A new id has no free slot.
+        let extra = raw_socket(&relay);
+        extra
+            .send(&join_message("full", "secret", MAX_MEMBERS as u16))
+            .expect("extra join");
+        let (kind, payload) = read_reply(&extra).expect("rejection");
+        assert_eq!(kind, REJECTED);
+        assert_eq!(payload, vec![REJECT_ROOM_FULL]);
+
+        // An existing id from a different address is a takeover, not a new
+        // member, so it is still acknowledged.
+        let takeover = raw_socket(&relay);
+        takeover
+            .send(&join_message("full", "secret", 3))
+            .expect("takeover join");
+        let (kind, payload) = read_reply(&takeover).expect("takeover ack");
+        assert_eq!(kind, JOINED);
+        assert_eq!(payload, 3u16.to_le_bytes().to_vec());
     }
 
     #[test]
