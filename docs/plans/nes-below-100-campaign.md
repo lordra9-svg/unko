@@ -116,6 +116,42 @@ conflict. ares maps mapper 2 to `HVC-UOROM` and `hvc-uxrom.cpp::writePRG` assign
 `$C000` to the last bank, which unko also does. All six ROMs are 128 KiB PRG / 8 KiB CHR RAM,
 vertical, no battery. So the 41–80% scores have a different cause.
 
+## Widened-shift probe — measured 2026-11-28, rejected
+
+A scratch copy of `rerun_index.py` (window −32..+32, writing only to
+`/tmp/opencode/shiftprobe/`) re-measured the 51 rows below 95%. It is **not** a
+licence to widen the metric.
+
+Why it is rejected as-is:
+
+- Agreement skips frames whose shifted partner falls outside 0..119. A +27 shift
+  compares only 63 of the 90 scored frames, so the denominator shrinks and a
+  static boot screen can score 100. `Battle Stadium` jumped to `100.000 steady`
+  with `0.000 final` and `70.00 seq` — a perfect score built from a subset.
+- Optima cluster hard on the window edges (`+32`, `−32`, `+27`, `−26`), which
+  means the true offset is outside the range or the match is degenerate. A score
+  that improves by relaxing the window is not evidence of accuracy.
+
+What it *is* useful for: separating boot-phase from content divergence. Titles
+whose score barely moves when the window is widened have a real content bug and
+are the right targets:
+
+| title | ±3 | wide | reading |
+|---|---|---|---|
+| Digital Devil Story II ×2 | 45.36 | 47.19 | real content divergence |
+| Terminator 2 (Japan) | 75.88 | 76.45 | real |
+| Castelian (Europe) | 79.63 | 79.63 | real |
+| Devil Man (Japan) | 27.69 | 27.72 | real |
+| Racer Mini Yonku | 26.63 | 26.63 | real |
+| Treasure Master | 73.10 | 74.10 | real |
+| Swords and Serpents (Europe) | 61.11 | 61.11 | real |
+| Battle Stadium / Mickey Mouse / Dynamite Bowl | 90–94 | 96–100 | boot-phase dominated |
+| Super Pitfall ×2 | 41.5 | 58.1 at +32 (edge) | inconclusive |
+
+**Decision:** keep the metric at ±3. These titles need a content-anchored
+comparison (align on the first frame with content), not a wider blind window.
+That is a separate, testable change and must not be slipped in as a score fix.
+
 ## Order of work
 
 Batch 0 (this branch): Zelda cluster. Highest rows-per-fix, final frame already identical,
