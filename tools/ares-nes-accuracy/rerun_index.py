@@ -66,9 +66,19 @@ def load_seq(path):
     return data
 
 
-def is_uniform(frame):
-    """True when every pixel in *frame* is the same palette index."""
-    return len(frame) > 0 and frame.count(frame[0]) == len(frame)
+def is_uniform(frame, mask=None):
+    """True when every included pixel in *frame* is the same palette index.
+
+    With *mask* None the whole frame is included, matching the original
+    behaviour. Otherwise only the masked pixels count, so a frame whose
+    renderable area is blank is uniform even when ares' clipped border is not.
+    """
+    if mask is None:
+        return len(frame) > 0 and frame.count(frame[0]) == len(frame)
+    if not mask:
+        return False
+    first = frame[mask[0]]
+    return all(frame[offset] == first for offset in mask)
 
 
 def agreement(ours, ref, shift, start=30, end=FRAMES, mask=None, exclude_uniform=True):
@@ -87,15 +97,18 @@ def agreement(ours, ref, shift, start=30, end=FRAMES, mask=None, exclude_uniform
         x = ours[index * PIXELS:(index + 1) * PIXELS]
         y = ref[other * PIXELS:(other + 1) * PIXELS]
         if in_prefix:
-            x_uniform, y_uniform = is_uniform(x), is_uniform(y)
+            x_uniform, y_uniform = is_uniform(x, mask), is_uniform(y, mask)
             if not (x_uniform and y_uniform):
                 in_prefix = False
-            elif x[0] != y[0]:
-                # Different uniform colours can only contribute zero matching
-                # pixels, so dropping them from numerator and denominator can
-                # only raise the score: the metric is monotonic.
-                excluded += 1
-                continue
+            else:
+                anchor = mask[0] if mask is not None else 0
+                if x[anchor] != y[anchor]:
+                    # Different uniform colours can only contribute zero
+                    # matching pixels, so dropping them from numerator and
+                    # denominator can only raise the score: the metric is
+                    # monotonic.
+                    excluded += 1
+                    continue
         scored += 1
         if mask is None:
             same += sum(map(eq, x, y))
