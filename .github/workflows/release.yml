@@ -60,7 +60,7 @@ jobs:
           cd dist
           sha256sum unko-linux-x86_64.tar.gz unko-*.AppImage > SHA256SUMS
 
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unko-linux-x86_64
           path: dist/
@@ -83,7 +83,7 @@ jobs:
       - name: Package
         run: cargo run --release --locked -p xtask -- package --platform windows --arch x86_64
 
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unko-windows-x86_64
           path: dist/
@@ -110,7 +110,7 @@ jobs:
       - name: Package
         run: cargo run --release --locked -p xtask -- package --platform macos --arch arm64
 
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unko-macos-arm64
           path: dist/
