@@ -7,15 +7,15 @@ Generated from `compatibility/accuracy-ares.jsonl` - **ares** primary, 120 frame
 - NES archives: **7101**
 - Measured: **7049**
 - Measured with the palette-index metric: **1309**
-- Below 100% by the relevant ares metric: **519**
+- Below 100% by the relevant ares metric: **517**
 - Ignored tagged dumps below 100%: **1851**
 - No measurement / oracle error: **36**
 - Ignored tagged dumps with errors: **25**
-- Total needing attention: **555**
+- Total needing attention: **553**
 
 | Band | Games |
 |---|---:|
-| 0-50% | 19 |
+| 0-50% | 17 |
 | 50-90% | 18 |
 | 90-99% | 125 |
 | 99-100% | 357 |
@@ -26,11 +26,9 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 
 | Accuracy | Metric | Game |
 |---:|---|---|
-| 0.00% | index | Esper Dream 2 - Aratanaru Tatakai (Japan) |
 | 0.00% | index | Gegege no Kitarou 2 - Youkai Gundan no Chousen (Japan) |
 | 0.00% | index | Kid Dracula (World) (Castlevania Anniversary Collection) |
 | 0.00% | index | Minna no Taabou no Nakayoshi Daisakusen (Japan) |
-| 0.00% | index | Mouryou Senki Madara (Japan) |
 | 0.00% | index | Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - '91 Kaimaku Hen (Japan) |
 | 0.00% | index | Nantettatte!! Baseball + Nantettatte!! Baseball - Ko-Game Cassette - OB All Star Hen (Japan) |
 | 0.00% | index | Pocket Zaurus - Juu Ouken no Nazo (Japan) |
@@ -76,6 +74,8 @@ Full list: [`nes-accuracy-not-100.csv`](nes-accuracy-not-100.csv)
 | 93.11% | index | Elite (Europe) (En,Fr,De) |
 | 93.17% | index | Dynamite Bowl (Japan) (En) (Rev 1) |
 | 93.17% | index | Dynamite Bowl (Japan) (Rev 1) |
+| 93.65% | index | Thexder (Japan) |
+| 93.65% | index | Thexder (Japan) (En) |
 
 ## No measurement / oracle errors
 

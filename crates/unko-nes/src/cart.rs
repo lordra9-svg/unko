@@ -34879,16 +34879,18 @@ impl Mapper for Vrc6 {
     }
 
     fn prg_write(&mut self, address: u16, value: u8) {
-        let address = if self.mapper == 26 {
-            (address & !0x03) | ((address & 0x01) << 1) | ((address & 0x02) >> 1)
-        } else {
-            address
-        };
         if (0x6000..=0x7FFF).contains(&address) {
             let index = usize::from(address - 0x6000) % self.prg_ram.len();
             self.prg_ram[index] = value;
             return;
         }
+        // Mapper 26 (VRC6b) swaps A0/A1 on writes to the mapper registers in
+        // $8000-$FFFF; PRG RAM at $6000-$7FFF is not part of that decode.
+        let address = if self.mapper == 26 {
+            (address & !0x03) | ((address & 0x01) << 1) | ((address & 0x02) >> 1)
+        } else {
+            address
+        };
         match address & 0xF003 {
             0x8000 => self.prg16 = value & 0x0F,
             0xB003 => {
@@ -38598,6 +38600,26 @@ pub(crate) mod tests {
         cart.clock_cpu();
         cart.clock_cpu();
         assert!(cart.irq_line());
+    }
+
+    #[test]
+    fn vrc6b_prg_ram_writes_are_not_address_swapped() {
+        let rom = synth_banked(26, 128, 32);
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        assert_eq!(cart.mapper(), 26);
+        // Mapper 26 swaps A0/A1 only on the mapper-register writes in
+        // $8000-$FFFF. PRG RAM at $6000-$7FFF keeps its address: a write to
+        // $7F7D must not land on $7F7E (Esper Dream 2 keeps a loop counter at
+        // $7F7D and hangs forever when the read and write disagree).
+        cart.cpu_write(0x7F7D, 0x5A);
+        assert_eq!(cart.cpu_read(0x7F7D), 0x5A);
+        assert_eq!(cart.cpu_read(0x7F7E), 0x00);
+        // Register writes still use the swapped decode: $D001 addresses the
+        // mapper's $D000+2 latch (CHR slot 2) and $D002 addresses slot 1.
+        cart.cpu_write(0xD001, 3);
+        cart.cpu_write(0xD002, 4);
+        assert_eq!(cart.ppu_read(0x0800), 0x83);
+        assert_eq!(cart.ppu_read(0x0400), 0x84);
     }
 
     #[test]
