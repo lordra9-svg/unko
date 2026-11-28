@@ -181,6 +181,30 @@ Also from the frame-latch fix: `Legend of Zelda, The (USA)` went 98.7952 →
 **100.000**. Its single frame-37 miss was the next-frame leakage, not a content
 bug — the earlier "real content boundary" reading was wrong.
 
+## Terminator 2 — one-scanline split narrowed to the dot-257 latch (2026-11-28)
+
+`Terminator 2 - Judgment Day (USA)` is 99.9931% and `(Japan)` 99.991%: 382 differing pixels
+over 6 frames, **one scanline per frame** (rows 74, 81, 93, 98, 99, 110), full width, pairs
+`(48,15)`, `(16,15)`, `(15,0)`, `(0,15)`. Not animation phase (per-frame local shifts still
+leave 25–98 px).
+
+Cause narrowed: the split is driven by a **mid-frame `$2000` write**, not `$2005/$2006`.
+`$2000 = 0x89` (nametable X = 1) at scanline L, then `0x88` ~20 lines later; the two values
+differ only in bit 0. MMC3 IRQ fires on the same scanline in both engines (`ly=108`), so the
+IRQ is **not** early or late.
+
+The differing row is always `L+1`. unko switches nametable at `L+1` when the write lands
+before PPU dot 257 and `L+2` after, matching the `t→v` copy at dot 257; ares is inverted on
+those frames. So the write lands within a few cycles of dot 257. ares carries the known
+quirk `if(io.lx==257 && rendering()) var.nametableX = cpu.io.openBus.bit(0)`; **unko has no
+open-bus handling in `ppu.rs` at all** (no `open_bus` references), so the quirk is not
+implemented.
+
+**Not landed.** The change is knife-edge (a few cycles around dot 257) and would move split
+behaviour for every title, so it needs a synthetic mid-frame `$2000` test plus split-heavy
+controls (SMB3, Kirby, Battletoads) before it can be trusted. The remaining ambiguity is
+whether the offset is the missing open-bus quirk or a 1–3 cycle CPU path difference.
+
 ## Digital Devil Story II — draw path found, gate not explained (2026-11-28)
 
 Both titles sit at 45.36%. The boot/draw pipeline is now mapped:
