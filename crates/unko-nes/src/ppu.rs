@@ -912,19 +912,18 @@ impl Ppu {
             }
         }
 
-        // Vblank starts at (241, 1) and ends at (261, 1). The status flag
-        // rises first; the NMI line follows two dots later, which matters to
-        // games that poll $2002 in a tight loop while NMI is enabled.
+        // Vblank starts at (241, 1) and ends at (261, 1). The status flag and
+        // the NMI line rise on the same dot: the blargg `vbl_nmi_timing`
+        // `nmi_disable` and `nmi_timing` ROMs measure the NMI edge against
+        // `$2002` and reject a line delayed past the flag (failure codes 3 and
+        // 6 respectively). The pending edge is latched separately, so a later
+        // `$2002` read does not lose it.
         if self.scanline == 241 && self.dot == self.vblank_set_dot && !self.vblank_suppressed {
             self.status |= STATUS_VBLANK;
-        }
-        if self.scanline == 241
-            && self.dot == self.vblank_set_dot + 2
-            && self.ctrl & 0x80 != 0
-            && !self.nmi_suppressed
-        {
-            self.nmi_line = true;
-            self.nmi_pending = true;
+            if self.ctrl & 0x80 != 0 && !self.nmi_suppressed {
+                self.nmi_line = true;
+                self.nmi_pending = true;
+            }
         }
         if self.scanline == self.pre_render_line() && self.dot == self.vblank_clear_dot {
             self.status &= !(STATUS_VBLANK | STATUS_SPRITE0 | STATUS_OVERFLOW);
@@ -3287,10 +3286,12 @@ mod tests {
         ppu.dot = 0;
         ppu.step_dot();
         assert_eq!(ppu.status & STATUS_VBLANK, 0);
+        assert!(!ppu.nmi_line);
         ppu.step_dot();
         assert_ne!(ppu.status & STATUS_VBLANK, 0);
-        // The NMI line follows the status flag by two dots.
-        ppu.step_dots(2);
+        // The NMI line rises on the same dot as the VBL flag. A line delayed
+        // past the flag fails the blargg `vbl_nmi_timing` `nmi_disable` and
+        // `nmi_timing` ROMs; keep them in step.
         assert!(ppu.nmi_line);
         let value = ppu.read_register(2);
         assert_ne!(value & STATUS_VBLANK, 0);
