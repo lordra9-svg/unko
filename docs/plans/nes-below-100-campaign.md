@@ -223,6 +223,29 @@ through to `$F970`, the draw path), zero in unko (branches to `$F9F3`, the scrip
 that ends up setting `$030D = 0x80`). That is the DDS II divergence at instruction level, and
 it explains why unko sleeps while ares draws.
 
+**`$03D7` write log (2026-11-28).** ares, 20 frames, frame/clock/PC/value:
+
+```
+f5  FD80  00
+f8  E2E5  0F
+f8  FA13  00
+f11 E2E5  0F
+f11 EE26  00
+```
+
+So ares only ever holds `0x0F` between the `E2E5` write and the following `FA13`/`EE26`
+clear, i.e. briefly. That matters: at the NMI *before* the `E2E5` write the flag is `00` and
+ares should take the same `$F9F3` branch as unko. The earlier "ares takes `$F917`" pairing
+therefore came from an NMI *after* an `E2E5` write, so the two traces were compared at
+slightly different points after all. The attribution to `$03D7` stands as the observable
+difference, but which NMI pairs with which is not yet settled.
+
+**unko-side hook failed and was reverted.** A log inserted in `impl CpuBus for System::write`
+(`system.rs:2559`) produced **zero** lines — not for `$03D7`, not even for `$030D`, which
+provably changes — so `unko trace` does not route CPU writes through that method in this
+build. Any further write-level comparison must first find the bus path the trace core actually
+uses; the worktree was restored clean.
+
 Not yet determined: **what sets `$03D7`**. The ROM has 38 `STA $03D7` sites plus 7 indexed
 writes, so the next step is logging writes to `$03D7` in both engines from the clear onward and
 finding the first one whose value differs. That is a targeted follow-up, not another hunt.
