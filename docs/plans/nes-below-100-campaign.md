@@ -181,6 +181,33 @@ Also from the frame-latch fix: `Legend of Zelda, The (USA)` went 98.7952 →
 **100.000**. Its single frame-37 miss was the next-frame leakage, not a content
 bug — the earlier "real content boundary" reading was wrong.
 
+### Cycle-level differential harness (2026-11-28)
+
+Built the observation tool the remaining clusters need, instead of more per-title guessing.
+
+- **unko side (already in repo):** `crates/unko-nes/examples/exectrace.rs` —
+  `cargo run -p unko-nes --features apu-trace --example exectrace -- <rom> <frame>`
+  runs `<frame>` frames, then prints `cycle pc` for the next frame.
+- **ares side (local build only, env-gated):** `ares/fc/ppu/ppu.cpp` defines
+  `u64 aresDbgFrame` and increments it in `PPU::frame()`; `ares/fc/cpu/cpu.cpp` writes
+  `frame pc` per instruction to `$ARES_PC_TRACE` when that variable is set. No effect on
+  normal runs. Rebuild with `ninja -j2` in `refs/ares/build_headless`.
+
+**First result on DDS II.** Run ares with `--frames 20` and `ARES_PC_TRACE=…`, unko with
+`exectrace <rom> 11`, then align on the nametable-clear sequence:
+
+- ares timeline: `F80C/F80F` spin (f0–f4), scheduler `FD7E` (f5), clear `EFEE/EFF1/EFF2` (f6),
+  main loop `F898/F89A` (f7), draw routines `EF65` (f9) and `EFB5` (f10).
+- unko timeline: `F80C/F80F` at f6, `F9A3/F9A5` at f9, main loop only by f31.
+- Aligned on `EFF7`/`F970`: **5,741 instructions identical**, then the traces split at a
+  frame boundary — unko takes the NMI at `F8BC`, ares is still in the `F898` main loop.
+- The `$EFEE` loop is `STA $2007; INY; BNE` inner / `DEX; BNE` outer (2 KiB clear), so aligning
+  on it mid-loop produces false divergences — this cost one wrong reading.
+
+**Limit found:** the ares trace has no cycle counter, so a true cycle-aligned diff needs
+`Thread::clock()` logged alongside the PC. Until then, comparisons are instruction-indexed and
+split at frame boundaries.
+
 ### Dot-257 open-bus quirk — implemented, measured, rejected (2026-11-28)
 
 Implemented the ares-faithful `$2000` dot-257 override (rendering on, dot 257, `t` nametable X
