@@ -140,7 +140,10 @@ See `docs/accuracy-status.md` for the measured log.
 - Dot-level `Ppu`: registers, VRAM, palette, OAM, vblank/NMI, suppression,
   odd-frame skip, CHR-RAM, background rendering.
 - [x] **12 / 12 `vbl_nmi` ROMs pass**, including `nmi_suppression` and
-      `nmi_timing`, after implementing penultimate-cycle NMI polling.
+      `nmi_timing`. The NMI line rises on the same dot as the `$2002` vblank
+      flag (hardware parity); the two-dot delay added for ares boot pacing
+      (`a20b8b9`) was removed because it failed the `nmi_disable`/`nmi_timing`
+      edge checks. See the 2026-11-27 entry in `docs/accuracy-divergences.md`.
 - [x] First sprite pass: OAM evaluation, sprite-zero hit, overflow flag,
       sprite rendering, OAM DMA.
 - [x] **19 / 19 `ppu_sprites` ROMs pass**, including all sprite-zero, overflow,

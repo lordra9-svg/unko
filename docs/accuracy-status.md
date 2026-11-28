@@ -1092,8 +1092,12 @@ implements the overflow byte-scan bug. OAM DMA (`$4014`) is handled with its
 513-cycle stall. 14/19 sprite ROMs pass; the remaining work is overflow timing,
 the obscure scan, and OAM corruption/decay.
 
-The NMI path now polls the 6502 penultimate-cycle latch, which fixed the last
-two `vbl_nmi` ROMs (`nmi_suppression`, `nmi_timing`).
+The NMI line is now asserted on the same dot as the `$2002` vblank flag,
+matching the `vbl_nmi` edge checks; the CPU still polls the 6502
+penultimate-cycle latch. `nmi_suppression` and `nmi_timing` pass. A two-dot
+PPU delay trialled for ares boot pacing (`a20b8b9`) was removed because it
+delayed the NMI edge past the flag; see the 2026-11-27 entry in
+`docs/accuracy-divergences.md` for the ares-index trade-off.
 
 ## Not yet covered
 

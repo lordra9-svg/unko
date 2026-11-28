@@ -148,7 +148,8 @@ The core is validated against independent references; the repository keeps the
 logs and provenance:
 
 - `nestest` golden log: 8,980/8,980 lines exact;
-- blargg CPU/PPU/APU suites, `ppu_vbl_nmi` 12/12, sprites 19/19, APU/DMC 13/13;
+- blargg CPU/PPU/APU suites, `ppu_vbl_nmi` 12/12 (NMI on the VBL flag dot),
+  sprites 19/19, APU/DMC 13/13;
 - mapper matrix 65/65 and AccuracyCoin 146/146 non-DRAW;
 - a licensed-library run over 7,101 images (see the root `README.md`).
 

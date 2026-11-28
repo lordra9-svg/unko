@@ -22,6 +22,35 @@ image. "ErrorCode N" below is the ROM's `value >> 2` index; the CLI reports
 
 None in AccuracyCoin. All non-DRAW rows pass.
 
+### NMI edge and the `$2002` poll race (2026-11-27)
+
+- **VBL/NMI edge moved to the VBL flag dot.** `Ppu::step_dot` now raises
+  `nmi_line` on the same dot as `STATUS_VBLANK` at `(241, vblank_set_dot)`.
+  The blargg `vbl_nmi` ROMs are the reference here: `vbl_nmi_disable` and
+  `vbl_nmi_timing` measure the NMI edge against a `$2002` read and reject a
+  line delayed past the flag, so the suite reaches 12/12 only with the edge on
+  the flag dot. Regression test: `ppu::tests::vblank_sets_and_clears` (fails
+  if the `+2`-dot delay is restored).
+- **The previous `+2`-dot delay (`a20b8b9`) was an ares boot-pacing hack.** It
+  matched ares' NMI timing so that tight `$2002` polling loops with NMI
+  enabled no longer lost the race every frame. Removing it costs ares-scored
+  boot pacing on one title but is the hardware-correct choice; accuracy
+  outranks matching ares.
+- **Ares-index score impact (re-measured 2026-11-27).** `Tokoro-san no Mamoru
+  mo Semeru mo (Japan)` 99.9997% → 35.772% (`final_video_pct` 0.0 → 100.0,
+  `index_shift` +1 → -3; `-3` is the true optimum, not a search boundary).
+  `Dragon Quest III - Soshite Densetsu e... (Japan)` 100.0% → 99.9703%
+  (final 100.0%). The other titles the `+2` delay was credited with
+  (Cybernoid, Karate Kid, Garry Kitchen's Battletank, Ninja Jajamaru-kun,
+  Gegege no Kitarou, Mystery Quest, Ninja Kid) stay at 100.0%; their earlier
+  perfect scores came from the CNROM bus-conflict fix in the same commit, not
+  from the delay.
+- **Phase B (open).** The underlying race — a tight `$2002` poll with NMI
+  enabled losing the frame — is not root-caused; the two-dot delay masked it.
+  Real hardware raises the flag and NMI on the same dot, which makes the race
+  visible in Tokoro's boot pacing. Investigate the CPU/PPU latch interaction
+  next; do not restore the delay.
+
 ### FDS (2026-11-14)
 
 - **`$4030.D1` DRAM-refresh watchdog IRQ** — **resolved**. Instrumenting the
