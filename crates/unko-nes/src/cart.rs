@@ -23772,6 +23772,16 @@ impl VrcVariant {
     }
 }
 
+/// Decodes the two-bit nametable selector shared by VRC2/VRC4.
+fn vrc_mirroring(value: u8) -> Mirroring {
+    match value & 3 {
+        0 => Mirroring::Vertical,
+        1 => Mirroring::Horizontal,
+        2 => Mirroring::SingleLower,
+        _ => Mirroring::SingleUpper,
+    }
+}
+
 /// VRC2/VRC4 (mappers 21/22/23/25): 8 KiB PRG and 1 KiB CHR banking.
 ///
 /// `$8000`/`$A000` are switchable 8 KiB PRG banks; `$C000` is fixed to the
@@ -23868,14 +23878,16 @@ impl Vrc {
     /// Sub-register index selected by the board's address-line wiring.
     fn register_index(&self, address: u16) -> usize {
         match self.variant {
-            VrcVariant::Vrc2a | VrcVariant::Vrc2c => {
+            VrcVariant::Vrc2a | VrcVariant::Vrc2c | VrcVariant::Vrc4b => {
+                // Chip A0/A1 are wired to CPU A1/A0 on these boards, so the
+                // low address bit selects chip register bit 1 and vice versa.
                 usize::from((address & 1) << 1 | ((address >> 1) & 1))
             }
             VrcVariant::Vrc4a => usize::from((address >> 1) & 3),
             VrcVariant::Vrc4c => usize::from((address >> 6) & 3),
             VrcVariant::Vrc4d => usize::from(((address >> 3) & 1) | (((address >> 2) & 1) << 1)),
             VrcVariant::Vrc4e => usize::from(((address >> 2) & 1) | (((address >> 3) & 1) << 1)),
-            VrcVariant::Vrc2b | VrcVariant::Vrc4b | VrcVariant::Vrc4f => usize::from(address & 3),
+            VrcVariant::Vrc2b | VrcVariant::Vrc4f => usize::from(address & 3),
         }
     }
 }
@@ -23973,21 +23985,22 @@ impl Mapper for Vrc {
             0x8 => {
                 self.prg_banks[0] = usize::from(value & 0x1F);
             }
-            0x9 => match (self.variant.is_vrc4(), reg) {
-                (true, 0) | (false, _) => {
-                    self.mirroring = match value & 3 {
-                        0 => Mirroring::Vertical,
-                        1 => Mirroring::Horizontal,
-                        2 => Mirroring::SingleLower,
-                        _ => Mirroring::SingleUpper,
-                    };
+            0x9 => {
+                if !self.variant.is_vrc4() {
+                    self.mirroring = vrc_mirroring(value);
+                } else {
+                    match reg {
+                        // Chip registers 0/1 are the nametable register.
+                        0 | 1 => self.mirroring = vrc_mirroring(value),
+                        // Chip registers 2/3 are PRG swap mode / WRAM control.
+                        2 | 3 => {
+                            self.wram_enable = value & 1 != 0;
+                            self.swap_mode = value & 2 != 0;
+                        }
+                        _ => {}
+                    }
                 }
-                (true, 2) => {
-                    self.wram_enable = value & 1 != 0;
-                    self.swap_mode = value & 2 != 0;
-                }
-                _ => {}
-            },
+            }
             0xA => {
                 self.prg_banks[1] = usize::from(value & 0x1F);
             }
@@ -43427,6 +43440,51 @@ pub(crate) mod tests {
         cart.cpu_write(0xB000, 3);
         cart.cpu_write(0xB001, 1);
         assert_eq!(cart.ppu_read(0x0000), 0x80 | 0x13);
+    }
+
+    #[test]
+    fn vrc4b_decodes_swapped_address_lines() {
+        // VRC4b (iNES mapper 25, NES 2.0 submapper 1) wires the chip's A0/A1
+        // pins to CPU A1/A0, so the register order within each page is
+        // $x000, $x002, $x001, $x003.
+        let mut rom = synth_banked(25, 128, 128);
+        rom[7] |= 0x08; // NES 2.0 header so the submapper is meaningful.
+        rom[8] = 0x10; // submapper 1.
+        let mut cart = Cartridge::from_ines(&rom).expect("cart");
+        assert_eq!(cart.mapper(), 25);
+
+        // $x000/$x002 carry the low/high nibble of the first 1 KiB bank in a
+        // group; $x001/$x003 the second. A swapped decode lands 0x1DC/0x1FE
+        // in slots 4/6 instead of 0x7C/0x7E.
+        cart.cpu_write(0xD000, 0x7C);
+        cart.cpu_write(0xD002, 0x07);
+        cart.cpu_write(0xD001, 0x7D);
+        cart.cpu_write(0xD003, 0x07);
+        assert_eq!(cart.ppu_read(0x1000), 0x80 | 0x7C);
+        assert_eq!(cart.ppu_read(0x1400), 0x80 | 0x7D);
+
+        cart.cpu_write(0xE000, 0x7E);
+        cart.cpu_write(0xE002, 0x07);
+        cart.cpu_write(0xE001, 0x7F);
+        cart.cpu_write(0xE003, 0x07);
+        assert_eq!(cart.ppu_read(0x1800), 0x80 | 0x7E);
+        assert_eq!(cart.ppu_read(0x1C00), 0x80 | 0x7F);
+
+        // Nametable arrangement is chip register 0/1: both $9000 and $9002
+        // reach it on this board.
+        cart.cpu_write(0x9002, 0);
+        assert_eq!(cart.mirroring(), Mirroring::Vertical);
+        cart.cpu_write(0x9000, 1);
+        assert_eq!(cart.mirroring(), Mirroring::Horizontal);
+
+        // PRG swap mode is chip register 2/3: both $9001 and $9003 reach it.
+        cart.cpu_write(0x8000, 2);
+        assert_eq!(cart.cpu_read(0xC000), 14);
+        cart.cpu_write(0x9001, 2);
+        assert_eq!(cart.cpu_read(0x8000), 14);
+        assert_eq!(cart.cpu_read(0xC000), 2);
+        cart.cpu_write(0x9003, 0);
+        assert_eq!(cart.cpu_read(0x8000), 2);
     }
 
     #[test]
