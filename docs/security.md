@@ -75,10 +75,13 @@ actual), 7z (streamed `take`) and RAR (reader output caps).
 ### 6. DAT downloader (bounded, user-initiated)
 
 `fetch_dat` accepts a user-supplied URL over `reqwest` with rustls native
-roots, a 120 s timeout and a 256 MiB body cap. The body must parse as non-empty
-Logiqx XML before it atomically replaces the destination (`write .part`, then
-`rename`). This is a local CLI action; there is no remote trigger and no
-credential handling.
+roots, a 120 s timeout and a 256 MiB body cap. Non-loopback URLs must use
+`https`; plain `http` is allowed only for `localhost`, `127.0.0.0/8` and `::1`,
+and the final URL after redirects is checked against the same rule. The body
+must parse as non-empty Logiqx XML before it atomically replaces the destination
+(`write .part`, then `rename`). An optional `--dat-sha256` pin is verified
+against the validated bytes before the rename. This is a local CLI action; there
+is no remote trigger and no credential handling.
 
 ### 7. Netplay / relay trust boundary (accepted, documented)
 

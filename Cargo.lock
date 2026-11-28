@@ -3870,6 +3870,7 @@ dependencies = [
  "reqwest",
  "sevenz-rust2",
  "sha1",
+ "sha2",
  "zip",
 ]
 

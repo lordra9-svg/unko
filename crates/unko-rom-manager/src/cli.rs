@@ -4,15 +4,40 @@
 //! unko-rom-manager --dat DAT --input ROMS [--1g1r] [--fixdat FIX.xml]
 //!                  [--csv REPORT.csv] [--copy OUT] [--zip|--torrentzip]
 //!                  [--cache FILE] [--dat-url URL] [--dat-out FILE]
-//!                  [--regions USA,Europe] [--languages En] [--all]
+//!                  [--dat-sha256 HEX] [--regions USA,Europe] [--languages En] [--all]
 //! ```
 
 use std::path::PathBuf;
 
+use crate::hash::{hex, parse_digest};
 use crate::{
     audit, fetch_dat, rebuild, summary_line, write_csv, write_fixdat, OneGameOneRom, OutputFormat,
     RebuildOptions, ScanOptions, ScanProgress, VerifyOptions, VerifyReport,
 };
+
+/// Parses a 64-character hexadecimal SHA-256 digest.
+fn parse_sha256(value: &str) -> Result<[u8; 32], String> {
+    parse_digest::<32>(value)
+        .ok_or_else(|| "--dat-sha256 needs 64 hexadecimal characters (no separators)".into())
+}
+
+/// Computes the SHA-256 digest of a downloaded file for display.
+fn sha256_file(path: &std::path::Path) -> Result<[u8; 32], String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read as _;
+
+    let mut file = std::fs::File::open(path).map_err(|err| err.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|err| err.to_string())?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher.finalize().into())
+}
 
 /// Runs the headless ROM manager with command-line arguments.
 ///
@@ -23,6 +48,7 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut dat = None;
     let mut dat_url = None;
     let mut dat_out = None;
+    let mut dat_sha256 = None;
     let mut input = None;
     let mut fixdat = None;
     let mut csv = None;
@@ -52,6 +78,10 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
             "--dat" => dat = args.next().map(PathBuf::from),
             "--dat-url" => dat_url = args.next(),
             "--dat-out" => dat_out = args.next().map(PathBuf::from),
+            "--dat-sha256" => {
+                let value = args.next().ok_or("--dat-sha256 needs 64 hex characters")?;
+                dat_sha256 = Some(parse_sha256(&value)?);
+            }
             "--input" => input = args.next().map(PathBuf::from),
             "--fixdat" => fixdat = args.next().map(PathBuf::from),
             "--csv" => csv = args.next().map(PathBuf::from),
@@ -94,7 +124,7 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
                      \n\
                      options: --1g1r --fixdat FILE --csv FILE --copy DIR\n\
                      \x20        --zip | --torrentzip | --7z | --move --cache FILE\n\
-                     \x20        --dat-url URL [--dat-out FILE]\n\
+                     \x20        --dat-url URL [--dat-out FILE] [--dat-sha256 HEX]\n\
                      \x20        --regions USA,Europe,World,Japan --languages En --all\n\
                      \x20        --max-list N\n\
                      \n\
@@ -113,10 +143,17 @@ pub fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
     if dat.is_some() && dat_url.is_some() {
         return Err("use either --dat or --dat-url".into());
     }
+    if dat_sha256.is_some() && dat_url.is_none() {
+        return Err("--dat-sha256 requires --dat-url".into());
+    }
     if let Some(url) = dat_url {
         let destination = dat_out.unwrap_or_else(|| PathBuf::from("downloaded.dat"));
-        fetch_dat(&url, &destination).map_err(|err| err.to_string())?;
+        fetch_dat(&url, &destination, dat_sha256.as_ref()).map_err(|err| err.to_string())?;
         println!("dat: downloaded {} -> {}", url, destination.display());
+        if dat_sha256.is_none() {
+            let digest = sha256_file(&destination)?;
+            println!("dat: sha256 {}", hex(&digest));
+        }
         dat = Some(destination);
     }
     if verify_mode && (copy.is_some() || zip_sets || torrentzip || sevenz || move_files) {
@@ -304,5 +341,19 @@ mod tests {
         assert!(err.contains("read-only"), "{err}");
         assert!(!output.exists(), "verify must not create the output");
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sha256_argument_parsing() {
+        let valid = "0123456789AbCdEf".repeat(4);
+        assert_eq!(valid.len(), 64);
+        assert!(parse_sha256(&valid).is_ok());
+        assert!(parse_sha256(&"a".repeat(63)).is_err());
+        assert!(parse_sha256(&"z".repeat(64)).is_err());
+        // Correct length and hex digits but with a separator.
+        let separated = format!("{}:{}", "a".repeat(32), "b".repeat(31));
+        assert_eq!(separated.len(), 64);
+        assert!(parse_sha256(&separated).is_err());
+        assert!(parse_sha256(&"a".repeat(65)).is_err());
     }
 }
