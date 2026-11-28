@@ -39,6 +39,29 @@ truncated dumps; 6,503 images render by 120 frames. Details in
 "Reference parity" is stronger than "runs the library": a game that looks right
 but has the wrong cycle count is a failure.
 
+### Commercial accuracy metric (ares palette index, 2026-11-28)
+
+Commercial titles are scored by `tools/ares-nes-accuracy/rerun_index.py` on the
+PPU's native 9-bit palette indices over frames 30..119, with the best `-3..3`
+frame alignment (`video_pct`).
+
+Palette RAM has no hardware-defined power-on contents (NESdev, *PPU power up
+state*). ares' boot palette byte is an implementation convention, not hardware
+truth, so a blank warm-up frame where the engines disagree has no answer to
+score. The leading contiguous run of aligned frames starting at frame 30 in
+which both frames are uniform is the warm-up prefix. Within that prefix, a frame
+is excluded from numerator and denominator only when the Unko and ares uniform
+colours differ. The prefix stops at the first frame where either side is
+non-uniform; later frames are always scored, including differing uniform frames.
+An equal-uniform frame is scored normally (100). Since an excluded frame could
+only have contributed zero matching pixels, the rule is monotonic - it cannot
+lower a score. It runs per aligned frame inside the shift search, so best-shift
+selection uses it too. If only one engine is uniform, the frame is scored and
+contributes 0 when the pixels disagree, keeping real divergences visible.
+`excluded_frames` records the count; a range with no scored frames reports
+`video_pct: null` rather than 100. `final_video_pct` remains a raw last-frame
+diagnostic with no exclusion.
+
 ## 2. Oracle hierarchy
 
 When references disagree, decide in this order:

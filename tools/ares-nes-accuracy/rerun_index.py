@@ -12,8 +12,10 @@ Usage:
     rerun_index.py --titles "Akuma-kun" "Bayou Billy"
 
 The primary score is the mean per-pixel index agreement over frames 30..119,
-using the best +/-3 frame alignment. The final frame and the fraction of
-frames with byte-identical index hashes are kept as diagnostics.
+using the best +/-3 frame alignment. In the leading warm-up run, uniform frames
+whose colours differ between engines are excluded from the score (see
+agreement). The final frame and the fraction of frames with byte-identical
+index hashes are kept as diagnostics.
 """
 
 import csv
@@ -64,36 +66,68 @@ def load_seq(path):
     return data
 
 
-def agreement(ours, ref, shift, start=30, end=FRAMES, mask=None):
-    same = total = 0
+def is_uniform(frame):
+    """True when every pixel in *frame* is the same palette index."""
+    return len(frame) > 0 and frame.count(frame[0]) == len(frame)
+
+
+def agreement(ours, ref, shift, start=30, end=FRAMES, mask=None, exclude_uniform=True):
+    same = total = excluded = scored = 0
     available = len(ref) // PIXELS
+    # Only the leading warm-up run can be excluded. Palette RAM is unspecified
+    # at power-on, so a blank frame whose colour *differs* between engines has
+    # no hardware-defined answer. Frames where both engines agree on the
+    # uniform colour already score 100 and must stay in the denominator, and
+    # once either engine renders content every later frame is real output.
+    in_prefix = exclude_uniform
     for index in range(start, end):
         other = index + shift
         if not 0 <= other < available:
             continue
         x = ours[index * PIXELS:(index + 1) * PIXELS]
         y = ref[other * PIXELS:(other + 1) * PIXELS]
+        if in_prefix:
+            x_uniform, y_uniform = is_uniform(x), is_uniform(y)
+            if not (x_uniform and y_uniform):
+                in_prefix = False
+            elif x[0] != y[0]:
+                # Different uniform colours can only contribute zero matching
+                # pixels, so dropping them from numerator and denominator can
+                # only raise the score: the metric is monotonic.
+                excluded += 1
+                continue
+        scored += 1
         if mask is None:
             same += sum(map(eq, x, y))
             total += PIXELS
         else:
             same += sum(1 for offset in mask if x[offset] == y[offset])
             total += len(mask)
-    return same, total
+    return same, total, excluded, scored
 
 
-def index_metrics(ours, ref, mask=None):
+def index_metrics(ours, ref, mask=None, start=30, end=None):
+    if end is None:
+        end = FRAMES
     best_rate, best_shift = -1.0, 0
     for shift in range(-3, 4):
-        same, total = agreement(ours, ref, shift, mask=mask)
+        same, total, _, _ = agreement(ours, ref, shift, start, end, mask)
         if total and same / total > best_rate:
             best_rate, best_shift = same / total, shift
-    same, total = agreement(ours, ref, best_shift, mask=mask)
-    final_same, final_total = agreement(ours, ref, best_shift, FRAMES - 1, FRAMES, mask=mask)
+    same, total, excluded, scored = agreement(ours, ref, best_shift, start, end, mask)
+    # Keep the final-frame diagnostic raw (no uniform-frame exclusion) so it
+    # retains its historical meaning. If the chosen shift has no aligned final
+    # frame, keep the old 0.0 result rather than turning it into n/a.
+    final_same, final_total, _, _ = agreement(
+        ours, ref, best_shift, end - 1, end, mask, exclude_uniform=False)
     return {
-        'video_pct': round(same / max(1, total) * 100, 4),
-        'final_video_pct': round(final_same / max(1, final_total) * 100, 4),
+        # None means every frame in the scoring range was excluded; reporting
+        # 100 here (or dividing by zero) would invent a result.
+        'video_pct': round(same / total * 100, 4) if total else None,
+        'final_video_pct': round(final_same / final_total * 100, 4) if final_total else 0.0,
         'index_shift': best_shift,
+        'excluded_frames': excluded,
+        'scored_frames': scored,
     }
 
 
@@ -180,7 +214,7 @@ def process(title, rom, sha, region, tmp):
             ours_trace, os.path.join(ref_dir, 'trace.txt'), metrics['index_shift']
         )
     metrics.setdefault('status', 'ok')
-    metrics.update({'tested': '2026-11-27', 'metric': 'nes-index'})
+    metrics.update({'tested': '2026-11-28', 'metric': 'nes-index'})
     if region != 'NTSC':
         metrics['region'] = region
     return metrics
@@ -276,10 +310,14 @@ def main():
                             'steady_geometry_pct', 'palette_pct'):
                     record.pop(key, None)
                 record.update(metrics)
-            print(f"{metrics['video_pct']:8.3f} steady "
-                  f"{metrics['final_video_pct']:8.3f} final "
+            steady = ('    n/a' if metrics['video_pct'] is None
+                      else f"{metrics['video_pct']:8.3f}")
+            final = ('    n/a' if metrics['final_video_pct'] is None
+                     else f"{metrics['final_video_pct']:8.3f}")
+            print(f"{steady} steady {final} final "
                   f"{metrics.get('frame_seq_pct', 0):7.2f} seq "
-                  f"shift {metrics['index_shift']:+d}  {title}", flush=True)
+                  f"shift {metrics['index_shift']:+d} "
+                  f"skip {metrics['excluded_frames']:3d}  {title}", flush=True)
         except Exception as error:  # noqa: BLE001 - report and continue the batch
             print('ERROR', title, str(error)[:200], flush=True)
         with open(LEDGER, 'w') as handle:

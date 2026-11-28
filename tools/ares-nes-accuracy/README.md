@@ -37,6 +37,33 @@ records:
   alignment (the primary score)
 - `final_video_pct` - last-frame agreement
 - `frame_seq_pct` - fraction of frames whose index hashes are byte-identical
+- `excluded_frames` - frames removed from the score because both engines
+  rendered a uniform frame (see below)
+- `scored_frames` - frames that contributed to `video_pct`
+
+### Warm-up uniform-frame exclusion (2026-11-28)
+
+Palette RAM has no hardware-defined power-on contents (NESdev, *PPU power up
+state*); ares' boot palette byte is an implementation convention, not hardware
+truth. Scoring a blank warm-up frame where the two engines disagree therefore
+measures an unknowable value.
+
+Find the leading contiguous run of aligned frames starting at frame 30 in which
+both frames are uniform (every pixel the same palette index). Within that run,
+exclude a frame only when the Unko and ares uniform colours differ. Stop the run
+at the first frame where either side is non-uniform; every frame at or after
+that is always scored. An equal-uniform frame is scored normally (100), and a
+differing uniform frame after the run is scored (a miss), not excluded. Because
+an excluded frame can only have contributed zero matching pixels, removing it
+from the numerator and denominator can only raise the score: the metric is
+monotonic. The rule is applied per aligned frame inside the `-3..3` shift search,
+so best-shift selection uses it too. If only one engine is uniform the frame is
+scored normally and contributes 0 when the pixels disagree, so a real divergence
+cannot be hidden. A title whose whole scoring range is excluded reports
+`video_pct: null` (printed as `n/a`), never a fake 100.
+
+`final_video_pct` stays raw: the last-frame diagnostic is computed without
+uniform-frame exclusion.
 
 `build_shortfall.py` regenerates `docs/nes-accuracy-not-100.{md,csv}`.
 

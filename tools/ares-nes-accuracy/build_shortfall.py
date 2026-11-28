@@ -28,7 +28,17 @@ def score(record):
 def main():
     rows = [json.loads(line) for line in open(LEDGER)]
     measured = [row for row in rows if row.get('status') == 'ok']
-    errors = [row for row in rows if row.get('status') != 'ok']
+    # A status-ok record without a score (e.g. every frame was excluded) is not
+    # below 100 and not an oracle error, but it must not silently leave the
+    # backlog either. Surface it as an unmeasured row.
+    unscored = []
+    for row in measured:
+        if score(row) is None:
+            record = dict(row)
+            record['status'] = 'unmeasured'
+            record['error'] = record.get('error') or 'no scored frames (all frames excluded)'
+            unscored.append(record)
+    errors = [row for row in rows if row.get('status') != 'ok'] + unscored
     below_all = [row for row in measured if score(row) is not None and score(row) < 100]
     below = [row for row in below_all if not IGNORED.search(row['title'])]
     ignored = [row for row in below_all if IGNORED.search(row['title'])]
